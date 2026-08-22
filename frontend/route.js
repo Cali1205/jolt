@@ -295,13 +295,21 @@ window.joltRoute = (function () {
       // Der Ausweichstandort ist der Grund, warum man vor einer belegten Säule
       // nicht neu suchen muss - er gehört sichtbar an den Stopp, nicht in ein
       // Untermenü. Fehlt er, ist auch das eine Aussage.
+      //
+      // Wie dringend sie ist, hängt am Stopp selbst: Ein Ladepark mit zwölf
+      // Punkten braucht kaum einen Rückfallplan, ein einzelner Lader schon.
+      // Deshalb ist die fehlende Ausweichmöglichkeit nur dort rot, wo sie
+      // wirklich weh tut - sonst wäre die Warnung an jedem Stopp zu lesen und
+      // damit an keinem.
+      const knapp = (s.anzahl_punkte || 1) < 4;
       const ausweich = s.ausweich
         ? `<div class="unter">Ausweich: ${entschaerfen(s.ausweich.name
             || s.ausweich.betreiber || "Ladepunkt")} bei km
             ${K.zahl(s.ausweich.km_auf_route)} – Ankunft mit
             ${K.zahl(s.ausweich.ankunft_soc)} %</div>`
-        : '<div class="unter" style="color:#e2596a">Kein Ausweichstandort ohne '
-          + 'Nachladen erreichbar</div>';
+        : `<div class="unter"${knapp ? ' style="color:#e2596a"' : ""}>Kein
+            Ausweichstandort ohne Nachladen erreichbar${knapp
+              ? " – und hier stehen nur wenige Ladepunkte" : ""}</div>`;
 
       eintrag.innerHTML = `
         <div class="haupt">

@@ -24,7 +24,10 @@ window.joltKarte = (function () {
     saeule: "#e6ebf0", saeuleBelegt: "#e2596a", auto: "#ffffff",
     // Geplante Stopps heben sich von den übrigen Ladepunkten ab: Auf der
     // Karte ist die Frage nicht "wo gibt es Säulen", sondern "wo halte ich".
-    stopp: "#57c98a",
+    // Eigener Farbton, nicht das Grün des Starts - sonst ist auf einer
+    // herausgezoomten Strecke nicht zu sehen, wo die Fahrt beginnt und wo
+    // der erste Halt liegt.
+    stopp: "#b48ef0",
   };
 
   let leinwand = null, stift = null;
