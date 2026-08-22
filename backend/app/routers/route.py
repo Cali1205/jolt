@@ -1,8 +1,12 @@
-"""Route rechnen: Strecke, Höhenprofil, Wetter, Energiebedarf.
+"""Route rechnen: Strecke, Höhenprofil, Wetter, Energiebedarf, Ladestopps.
 
-Der Endpunkt, der alles zusammenführt. Was er noch nicht tut, ist die
-Ladestopps zu setzen - das ist Stufe 2. Was er bereits liefert, ist die
-Antwort auf die Frage davor: Wie weit komme ich, bevor die Reserve greift?
+Der Endpunkt, der alles zusammenführt: die Strecke aus dem Routing, den
+Energiebedarf aus dem Verbrauchsmodell und - über `/ladeplan` - die zeitoptimale
+Folge von Ladestopps aus dem Optimierer.
+
+Der Ladeplan hängt bewusst an einer bereits gerechneten Fahrt und nicht an der
+Routenanfrage: Radius, Mindestleistung und Steckertyp will man durchprobieren,
+ohne jedes Mal das Routing-Kontingent zu belasten.
 """
 import logging
 
@@ -13,6 +17,8 @@ from sqlalchemy.orm import Session
 from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
+from ..laden import kurven, optimierer, verfuegbarkeit
+from ..routing import korridor
 from ..routing.provider import RoutingFehler
 
 log = logging.getLogger("uvicorn.error")
@@ -119,6 +125,62 @@ def fahrt_lesen(fahrt_id: int, db: Session = Depends(get_db)):
             "geometrie": fahrt.geometrie or [],
             "profil": _profil_ausduennen(profil),
             "soc_am_ziel": profil[-1]["soc"] if profil else None}
+
+
+@router.post("/fahrten/{fahrt_id}/ladeplan")
+def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
+                     min_kw: float = Query(50.0, ge=0),
+                     steckertyp: str = "",
+                     umweg_grenze_min: float = Query(
+                         optimierer.UMWEG_GRENZE_MIN, gt=0, le=60),
+                     db: Session = Depends(get_db)):
+    """Die zeitoptimale Folge von Ladestopps für eine gerechnete Fahrt.
+
+    Gerechnet wird auf dem gespeicherten Energieprofil - der Bedarf einer
+    Etappe hängt nicht vom Ladestand ab, deshalb genügt der eine Durchlauf des
+    Verbrauchsmodells aus `/route`. Ein zweiter Aufruf mit anderem Radius
+    kostet damit weder Routing- noch Wetterabfragen.
+    """
+    fahrt = db.get(models.Fahrt, fahrt_id)
+    if not fahrt:
+        raise HTTPException(404, "Fahrt nicht gefunden.")
+    if not fahrt.energieprofil or len(fahrt.energieprofil) < 2:
+        raise HTTPException(409, "Zu dieser Fahrt liegt kein Energieprofil vor.")
+
+    fahrzeug = fahrt.fahrzeug
+    typ = steckertyp or fahrzeug.steckertyp
+    kandidaten = korridor.suchen(db, fahrt.geometrie or [], radius_km=radius_km,
+                                 min_kw=min_kw, steckertyp=typ)
+
+    optionen = []
+    for kandidat in kandidaten:
+        lp = kandidat.ladepunkt
+        zustand = verfuegbarkeit.MELDUNGEN.zustand(lp)
+        optionen.append(optimierer.Ladeoption(
+            id=lp.id, km_auf_route=kandidat.km_auf_route,
+            umweg_minuten=kandidat.umweg_minuten, max_kw=lp.max_kw or 0.0,
+            anzahl_punkte=lp.anzahl_punkte or 1, name=lp.name or "",
+            betreiber=lp.betreiber or "", ort=lp.ort or "",
+            lat=lp.lat, lon=lp.lon,
+            gesperrt=zustand.quelle == "meldung"))
+
+    plan = optimierer.planen(
+        optimierer.Streckenprofil.aus_dicts(fahrt.energieprofil),
+        optionen, modell.Fahrzeugwerte.aus_modell(fahrzeug),
+        kurven.als_paare(fahrzeug.ladekurve), start_soc=fahrt.start_soc,
+        ziel_soc=fahrzeug.ziel_soc,
+        max_fahrzeug_kw=fahrzeug.max_ladeleistung_kw,
+        # Die Batterietemperatur wird nicht gemessen; die Aussentemperatur der
+        # Fahrt ist die beste verfügbare Näherung. Sie unterschätzt die Kälte
+        # der Batterie nach einer Nacht im Freien - die Ladezeit im Winter ist
+        # also eher zu kurz gerechnet als zu lang.
+        temperatur_faktor=kurven.temperatur_faktor(
+            fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
+        umweg_grenze_min=umweg_grenze_min)
+
+    return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
+            "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,
+            **plan.als_dict()}
 
 
 @router.get("/fahrten")

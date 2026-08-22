@@ -4,6 +4,11 @@ window.joltRoute = (function () {
 
   const K = window.jolt;
   const gewaehlt = { start: null, ziel: null };
+  // Was gerade auf der Karte liegt. Säulenliste und Ladeplan werden getrennt
+  // geladen, zeichnen aber in dieselbe Karte - ohne diesen gemeinsamen Stand
+  // löscht der eine die Marker des anderen.
+  let letzteSaeulen = [];
+  let letzterPlan = null;
 
   /* ---------- Ortssuche ---------- */
 
@@ -78,6 +83,7 @@ window.joltRoute = (function () {
       K.zustand.fahrt = antwort;
       anzeigen(antwort);
       await saeulenLaden();
+      await ladeplanLaden();
     } catch (fehler) {
       K.melden("Route: " + fehler.message, "fehler");
     } finally {
@@ -107,20 +113,22 @@ window.joltRoute = (function () {
     if (!fahrt.reicht) {
       K.melden(`Die Strecke ist ohne Nachladen nicht zu schaffen: Die Reserve `
         + `von ${K.zahl(fahrt.fahrzeug.reserve_soc)} % wird nach `
-        + `${K.zahl(fahrt.reserve_bei_km)} km erreicht. Die Ladestopp-Planung `
-        + `folgt in Stufe 2 – bis dahin zeigt die Karte, wo es eng wird.`,
-        "warnung");
+        + `${K.zahl(fahrt.reserve_bei_km)} km erreicht. Der Ladeplan steht `
+        + `unten.`, "warnung");
     }
 
     profilZeichnen(fahrt);
 
     window.joltKarte.routeSetzen(fahrt.geometrie);
-    markerSetzen(fahrt, []);
+    letzteSaeulen = [];
+    letzterPlan = null;
+    markerSetzen();
     window.joltKarte.aufRoutePassen();
   }
 
-  function markerSetzen(fahrt, saeulen) {
-    const punkte = fahrt.geometrie || [];
+  function markerSetzen() {
+    const fahrt = K.zustand.fahrt;
+    const punkte = (fahrt && fahrt.geometrie) || [];
     if (punkte.length < 2) return;
     const liste = [
       { lat: punkte[0][1], lon: punkte[0][0], typ: "start", text: "Start" },
@@ -132,10 +140,20 @@ window.joltRoute = (function () {
                    typ: "reserve",
                    text: "Reserve " + K.zahl(fahrt.reserve_punkt.km) + " km" });
     }
-    for (const s of saeulen) {
+
+    // Geplante Stopps zuletzt und beschriftet: Sie sollen die übrigen
+    // Ladepunkte überdecken, nicht umgekehrt.
+    const geplant = new Set((letzterPlan && letzterPlan.stopps || [])
+      .map((s) => s.id));
+    for (const s of letzteSaeulen) {
+      if (geplant.has(s.id)) continue;
       liste.push({ lat: s.lat, lon: s.lon,
                    typ: s.belegt_gemeldet ? "saeuleBelegt" : "saeule" });
     }
+    (letzterPlan && letzterPlan.stopps || []).forEach((s, i) => {
+      liste.push({ lat: s.lat, lon: s.lon, typ: "stopp",
+                   text: `${i + 1}. ${K.dauer(s.ladezeit_minuten)}` });
+    });
     window.joltKarte.markerSetzen(liste);
   }
 
@@ -217,11 +235,96 @@ window.joltRoute = (function () {
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`);
       zeichneSaeulen(antwort, liste);
-      markerSetzen(fahrt, antwort.kandidaten);
+      letzteSaeulen = antwort.kandidaten || [];
+      markerSetzen();
     } catch (fehler) {
       liste.innerHTML = "";
       K.melden("Ladepunkte: " + fehler.message, "fehler");
     }
+  }
+
+  /* ---------- Ladeplan ---------- */
+
+  async function ladeplanLaden() {
+    const fahrt = K.zustand.fahrt;
+    const liste = document.getElementById("ladeplan");
+    const werte = document.getElementById("ladeplan-werte");
+    if (!fahrt || !liste || !werte) return;
+
+    liste.innerHTML = '<li class="leer">plant …</li>';
+    werte.innerHTML = "";
+    try {
+      const plan = await K.api(`/api/fahrten/${fahrt.fahrt_id}/ladeplan`
+        + `?min_kw=${document.getElementById("min-kw").value}`
+        + `&radius_km=${document.getElementById("radius").value}`,
+        { method: "POST" });
+      letzterPlan = plan;
+      zeichnePlan(plan, liste, werte);
+      markerSetzen();
+    } catch (fehler) {
+      liste.innerHTML = "";
+      letzterPlan = null;
+      K.melden("Ladeplan: " + fehler.message, "fehler");
+    }
+  }
+
+  function zeichnePlan(plan, liste, werte) {
+    if (!plan.machbar) {
+      liste.innerHTML = `<li class="leer">${entschaerfen(plan.grund)}</li>`;
+      return;
+    }
+
+    werte.innerHTML = [
+      K.wertKachel("Gesamt", K.dauer(plan.gesamt_minuten)),
+      K.wertKachel("davon Laden", K.dauer(plan.ladezeit_minuten)),
+      K.wertKachel("davon Umwege", K.dauer(plan.umwegzeit_minuten)),
+      K.wertKachel("Stopps", String(plan.anzahl_stopps)),
+      K.wertKachel("Am Ziel", K.zahl(plan.soc_am_ziel) + " %",
+                   plan.soc_am_ziel >= 15 ? "gut" : ""),
+    ].join("");
+
+    if (!plan.anzahl_stopps) {
+      liste.innerHTML = '<li class="leer">Kein Ladestopp nötig – die Strecke '
+        + 'reicht mit dem Ladestand beim Start.</li>';
+      return;
+    }
+
+    liste.innerHTML = "";
+    plan.stopps.forEach((s, i) => {
+      const eintrag = document.createElement("li");
+      // Der Ausweichstandort ist der Grund, warum man vor einer belegten Säule
+      // nicht neu suchen muss - er gehört sichtbar an den Stopp, nicht in ein
+      // Untermenü. Fehlt er, ist auch das eine Aussage.
+      //
+      // Wie dringend sie ist, hängt am Stopp selbst: Ein Ladepark mit zwölf
+      // Punkten braucht kaum einen Rückfallplan, ein einzelner Lader schon.
+      // Deshalb ist die fehlende Ausweichmöglichkeit nur dort rot, wo sie
+      // wirklich weh tut - sonst wäre die Warnung an jedem Stopp zu lesen und
+      // damit an keinem.
+      const knapp = (s.anzahl_punkte || 1) < 4;
+      const ausweich = s.ausweich
+        ? `<div class="unter">Ausweich: ${entschaerfen(s.ausweich.name
+            || s.ausweich.betreiber || "Ladepunkt")} bei km
+            ${K.zahl(s.ausweich.km_auf_route)} – Ankunft mit
+            ${K.zahl(s.ausweich.ankunft_soc)} %</div>`
+        : `<div class="unter"${knapp ? ' style="color:#e2596a"' : ""}>Kein
+            Ausweichstandort ohne Nachladen erreichbar${knapp
+              ? " – und hier stehen nur wenige Ladepunkte" : ""}</div>`;
+
+      eintrag.innerHTML = `
+        <div class="haupt">
+          <div class="titel">${i + 1}. ${entschaerfen(s.name || s.betreiber
+            || "Ladepunkt")}</div>
+          <div class="unter">km ${K.zahl(s.km_auf_route)} · nach
+            ${K.dauer(s.ankunft_minute)} · ${K.zahl(s.ankunft_soc)} %
+            → ${K.zahl(s.abfahrt_soc)} % · ${K.zahl(s.kwh_geladen, 1)} kWh
+            · Umweg ${K.zahl(s.umweg_minuten, 1)} min
+            · ${s.anzahl_punkte} Ladepunkte</div>
+          ${ausweich}
+        </div>
+        <div class="kw">${K.dauer(s.ladezeit_minuten)}</div>`;
+      liste.appendChild(eintrag);
+    });
   }
 
   function zeichneSaeulen(antwort, liste) {
@@ -258,6 +361,10 @@ window.joltRoute = (function () {
           await K.api(`/api/saeulen/${k.id}/belegt`,
                       { method: k.belegt_gemeldet ? "DELETE" : "POST" });
           await saeulenLaden();
+          // "Hier ist alles voll" ist die einzige Verfügbarkeitsinformation,
+          // die wirklich stimmt - sie muss den Plan ändern, nicht nur die
+          // Liste einfärben.
+          await ladeplanLaden();
         } catch (fehler) { K.melden(fehler.message, "fehler"); }
       });
       eintrag.appendChild(knopf);
@@ -281,7 +388,16 @@ window.joltRoute = (function () {
     K.reglerKoppeln("tempo", "tempo-wert");
 
     let warten = null;
-    const neuLaden = () => { clearTimeout(warten); warten = setTimeout(saeulenLaden, 350); };
+    const neuLaden = () => {
+      clearTimeout(warten);
+      // Beide Regler wirken auf denselben Kandidatensatz - der Ladeplan muss
+      // mitziehen, sonst zeigt die Karte Stopps, die es nach der neuen
+      // Filterung gar nicht mehr gibt.
+      warten = setTimeout(async () => {
+        await saeulenLaden();
+        await ladeplanLaden();
+      }, 350);
+    };
     K.reglerKoppeln("min-kw", "min-kw-wert", neuLaden);
     K.reglerKoppeln("radius", "radius-wert", neuLaden);
 
@@ -291,5 +407,5 @@ window.joltRoute = (function () {
     });
   }
 
-  return { einrichten, anzeigen, saeulenLaden };
+  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden };
 })();

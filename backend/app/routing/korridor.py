@@ -45,24 +45,35 @@ class Kandidat:
                 "umweg_minuten": round(self.umweg_minuten, 1)}
 
 
-def _anker(punkte: list, abstand_km: float) -> list[tuple[float, float, float]]:
-    """Route auf Ankerpunkte ausdünnen: (lat, lon, km_auf_route)."""
+def _kilometrierung(punkte: list) -> list[float]:
+    """Kumulierte Kilometer je Stützpunkt der Route."""
+    km = [0.0]
+    for i in range(len(punkte) - 1):
+        km.append(km[-1] + haversine_m(punkte[i][1], punkte[i][0],
+                                       punkte[i + 1][1], punkte[i + 1][0]) / 1000.0)
+    return km
+
+
+def _anker(punkte: list, km_liste: list[float],
+           abstand_km: float) -> list[tuple[float, float, float, int]]:
+    """Route auf Ankerpunkte ausdünnen: (lat, lon, km_auf_route, index).
+
+    Die Anker dienen nur der Vorauswahl - dem Rechteck für die Datenbank und
+    der Frage, *wo ungefähr* ein Ladepunkt an der Route liegt. Gemessen wird
+    anschliessend an den echten Stützpunkten; siehe `suchen`.
+    """
     if not punkte:
         return []
-    anker = [(punkte[0][1], punkte[0][0], 0.0)]
-    km_kum = 0.0
+    anker = [(punkte[0][1], punkte[0][0], 0.0, 0)]
     km_seit_anker = 0.0
     for i in range(len(punkte) - 1):
-        d = haversine_m(punkte[i][1], punkte[i][0],
-                        punkte[i + 1][1], punkte[i + 1][0]) / 1000.0
-        km_kum += d
-        km_seit_anker += d
+        km_seit_anker += km_liste[i + 1] - km_liste[i]
         if km_seit_anker >= abstand_km:
-            anker.append((punkte[i + 1][1], punkte[i + 1][0], km_kum))
+            anker.append((punkte[i + 1][1], punkte[i + 1][0],
+                          km_liste[i + 1], i + 1))
             km_seit_anker = 0.0
-    letzter = punkte[-1]
-    if anker[-1][2] < km_kum:
-        anker.append((letzter[1], letzter[0], km_kum))
+    if anker[-1][3] < len(punkte) - 1:
+        anker.append((punkte[-1][1], punkte[-1][0], km_liste[-1], len(punkte) - 1))
     return anker
 
 
@@ -77,11 +88,12 @@ def suchen(db, punkte: list, radius_km: float = 8.0, min_kw: float = 50.0,
     if not punkte:
         return []
 
-    anker = _anker(punkte, max(3.0, radius_km * 0.75))
+    km_liste = _kilometrierung(punkte)
+    anker = _anker(punkte, km_liste, max(3.0, radius_km * 0.75))
     d_lat = radius_km / KM_JE_GRAD_LAT
 
     rechtecke = []
-    for lat, lon, _ in anker:
+    for lat, lon, _, _ in anker:
         d_lon = radius_km / (KM_JE_GRAD_LAT * max(0.1, math.cos(math.radians(lat))))
         rechtecke.append(and_(models.Ladepunkt.lat.between(lat - d_lat, lat + d_lat),
                               models.Ladepunkt.lon.between(lon - d_lon, lon + d_lon)))
@@ -94,14 +106,31 @@ def suchen(db, punkte: list, radius_km: float = 8.0, min_kw: float = 50.0,
 
     kandidaten: list[Kandidat] = []
     for lp in abfrage.limit(hoechstens * 5).all():
-        # Genau nachmessen: das Rechteck ist grosszügiger als der Kreis, und
-        # an den Ecken liegt der Ladepunkt bis zu 41 % weiter weg als erlaubt.
-        naechster = min(anker, key=lambda a: haversine_m(lp.lat, lp.lon, a[0], a[1]))
-        abstand = haversine_m(lp.lat, lp.lon, naechster[0], naechster[1])
+        # Genau nachmessen, und zwar an den echten Stützpunkten - nicht am
+        # nächsten Anker. Die Anker stehen bei 25 km Radius rund 19 km
+        # auseinander; eine Säule unmittelbar an der Strasse wäre von einem
+        # Anker aus bis zu 9 km entfernt und bekäme daraus 25 Minuten Umweg
+        # angerechnet. Damit fiele sie aus jeder Planung, obwohl sie direkt am
+        # Weg liegt. Der Anker sagt also nur, *welches Stück* der Route zu
+        # prüfen ist; gemessen wird im Fenster bis zu den Nachbarankern.
+        naechster = min(range(len(anker)),
+                        key=lambda i: haversine_m(lp.lat, lp.lon,
+                                                  anker[i][0], anker[i][1]))
+        von = anker[naechster - 1][3] if naechster > 0 else 0
+        bis = (anker[naechster + 1][3] if naechster + 1 < len(anker)
+               else len(punkte) - 1)
+
+        abstand = float("inf")
+        km_auf_route = anker[naechster][2]
+        for i in range(von, bis + 1):
+            d = haversine_m(lp.lat, lp.lon, punkte[i][1], punkte[i][0])
+            if d < abstand:
+                abstand, km_auf_route = d, km_liste[i]
+
         if abstand > radius_km * 1000:
             continue
         umweg = FIXE_MINUTEN + (2 * abstand / 1000.0) / ZUFAHRT_KMH * 60.0
-        kandidaten.append(Kandidat(lp, naechster[2], abstand, umweg))
+        kandidaten.append(Kandidat(lp, km_auf_route, abstand, umweg))
 
     kandidaten.sort(key=lambda k: k.km_auf_route)
     return kandidaten[:hoechstens]

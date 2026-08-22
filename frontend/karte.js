@@ -22,6 +22,12 @@ window.joltKarte = (function () {
     route: "#ffc93c", routeRand: "#00000066",
     start: "#57c98a", ziel: "#7c9cc4", reserve: "#e2596a",
     saeule: "#e6ebf0", saeuleBelegt: "#e2596a", auto: "#ffffff",
+    // Geplante Stopps heben sich von den übrigen Ladepunkten ab: Auf der
+    // Karte ist die Frage nicht "wo gibt es Säulen", sondern "wo halte ich".
+    // Eigener Farbton, nicht das Grün des Starts - sonst ist auf einer
+    // herausgezoomten Strecke nicht zu sehen, wo die Fahrt beginnt und wo
+    // der erste Halt liegt.
+    stopp: "#b48ef0",
   };
 
   let leinwand = null, stift = null;
@@ -131,7 +137,7 @@ window.joltKarte = (function () {
     for (const m of marker) {
       const p = nachSchirm(m.lat, m.lon);
       const gross = m.typ === "start" || m.typ === "ziel" || m.typ === "reserve"
-        || m.typ === "auto";
+        || m.typ === "auto" || m.typ === "stopp";
       const r = gross ? 8 : 5;
       stift.beginPath();
       stift.arc(p.x, p.y, r, 0, Math.PI * 2);

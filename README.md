@@ -30,16 +30,21 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   die vor der Abfahrt zählt.
 - **Ladepunkte im Korridor** mit Umwegzeit in Minuten, sortiert nach
   Fortschritt entlang der Route.
+- **Ladestopps planen** — die zeitoptimale Folge von Stopps und Lademengen:
+  Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`, anschliessend wandern die
+  Ladehübe auf feinem Raster in den steilen Teil der Ladekurve. Zu jedem Stopp
+  steht der Ausweichstandort dabei, der ohne Nachladen noch erreichbar ist.
+  Eine Etappe gilt nur als fahrbar, wenn der Ladestand *unterwegs* über der
+  Reserve bleibt — über einen Pass sieht die Bilanz am Ende sonst harmlos aus.
 - **Live-Nachführung** — Messpunkte herein, Ist gegen Soll, laufender
   Verbrauchsfaktor, und die Reserve-Marke wandert mit. Ein Simulator spielt
   die Fahrt mit einstellbarem Mehrverbrauch ab, damit sich das ohne Auto
   prüfen lässt.
 
-**Noch nicht da** (im Konzept vollständig beschrieben): der Ladestopp-Optimierer
-selbst — Kandidatengraph, Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`,
-Nachoptimierung in den steilen Teil der Ladekurve. Ebenso die automatische
+**Noch nicht da** (im Konzept vollständig beschrieben): die automatische
 Umplanung während der Fahrt und echte Verfügbarkeitsdaten. Was jolt *erkennt*,
-ist bereits vollständig: dass neu geplant werden müsste, und warum.
+ist bereits vollständig: dass neu geplant werden müsste, und warum — nur den
+neuen Plan zieht unterwegs noch niemand von selbst.
 
 ---
 
@@ -111,13 +116,21 @@ Beide Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 
 ```bash
 ./tools/check_modell.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
-./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Live
+./tools/check_optimierer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
+./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
 ```
 
 `check_modell.py` prüft nicht auf feste Zahlen, sondern auf die Verhältnisse,
 die gelten müssen — etwa dass 130 km/h mehr als 10 % über 110 km/h liegen, aber
 unter dem reinen v²-Faktor, oder dass ein Pass mehr kostet als die Ebene, obwohl
 man wieder auf Ausgangshöhe ankommt.
+
+`check_optimierer.py` glaubt dem Planer nichts: Ein zweiter, unabhängiger
+Nachrechner fährt jeden fertigen Plan Kilometer für Kilometer ab und sieht nach,
+ob der Ladestand irgendwo unter die Reserve fällt. Geprüft wird ausserdem gegen
+die beiden Fälle, an denen ein gieriger Planer scheitert — eine lange Lücke ohne
+Schnelllader und die Wahl zwischen einer nahen schwachen und einer weiteren
+starken Säule.
 
 `check_backend.py` fährt eine simulierte Strecke mit 25 % Mehrverbrauch und
 prüft, dass die Reserve-Marke nach vorn rückt. Das ist der Prüfstein der
@@ -132,12 +145,26 @@ konzept-routenplaner.md   Das Konzept mit der Begründung jeder Entscheidung
 backend/app/
   routing/    provider.py (Interface) · ors.py · demo.py · korridor.py
   energie/    modell.py · wetter.py · kalibrierung.py
-  laden/      kurven.py · saeulen_import.py · verfuegbarkeit.py
+  laden/      kurven.py · optimierer.py · saeulen_import.py · verfuegbarkeit.py
   live/       sitzung.py · kanal.py (WebSocket) · simulator.py
-  routers/    auth · fahrzeuge · route · saeulen · live
+  routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live
 frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
-tools/        import_bnetza.py · import_ocm.py · check_modell.py · check_backend.py
+tools/        import_bnetza.py · import_ocm.py · check_modell.py
+              check_optimierer.py · check_backend.py
 ```
+
+**Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
+gerechnetes Streckenprofil und eine Liste von Ladeoptionen — mehr braucht er
+nicht. Das ist der Grund, warum `check_optimierer.py` ohne beides auskommt und
+ein hypothetischer Standort („was wäre, wenn hier ein 300-kW-Lader stünde?")
+eine Zeile Code ist statt eines Datenbankeintrags.
+
+Möglich wird das durch eine Eigenschaft des Verbrauchsmodells: Der
+Energiebedarf einer Etappe hängt **nicht** vom Ladestand ab — ein E-Auto wird
+beim Laden nicht schwerer. Ein einziger Durchlauf des Modells genügt also für
+alle Varianten; der Optimierer liest den Bedarf jeder Etappe als Differenz
+zweier kumulierter Werte ab. Deshalb kostet ein zweiter Ladeplan mit anderem
+Radius weder eine Routing- noch eine Wetterabfrage.
 
 **Kein PostGIS.** Der einzige Geo-Query ist „alle Ladepunkte im Korridor um eine
 Polyline". Das löst ein Index auf `(lat, lon)` mit Bounding-Box-Vorfilter und
@@ -156,10 +183,11 @@ weil sie verlangt ist.
 
 ## Nächste Schritte
 
-1. **Der Optimierer** — Abschnitt 4 des Konzepts in Code.
-2. **Automatische Umplanung** während der Fahrt, mit Push aufs Telefon.
-3. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
+1. **Automatische Umplanung** während der Fahrt, mit Push aufs Telefon.
+   Die Auslöser stehen im Konzept (2.3), das Erkennen läuft bereits — was
+   fehlt, ist der Weg vom erkannten Abweichen zum neuen Plan.
+2. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
    (`LiveSitzung` / `LivePunkt`) ist bereits darauf ausgelegt: Es ändert sich
    nichts am Schema, nur die Quelle der Messpunkte.
-4. **Kalibrierung aus echten Fahrten** — das Gerüst steht in
+3. **Kalibrierung aus echten Fahrten** — das Gerüst steht in
    `energie/kalibrierung.py`.

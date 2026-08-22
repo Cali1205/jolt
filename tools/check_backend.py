@@ -188,6 +188,61 @@ def main() -> int:
     gemeldet = [k for k in nachher["kandidaten"] if k["id"] == erster["id"]]
     pruefe(gemeldet and gemeldet[0]["belegt_gemeldet"] is True,
            "eine Belegt-Meldung schlägt in der Korridor-Antwort durch")
+    client.delete(f"/api/saeulen/{erster['id']}/belegt")
+
+    print("\nLadeplan")
+    # Die Demo-Route ist die Luftlinie, die Ladepunkte der Probe stehen an der
+    # A7. Dadurch liegen sie weiter neben der Strecke, als sie es neben einer
+    # echten Strasse täten - deshalb hier eine grosszügigere Umweg-Grenze als
+    # die zehn Minuten, mit denen der Optimierer sonst arbeitet.
+    LADEPLAN = {"min_kw": 100, "radius_km": 25, "umweg_grenze_min": 15}
+    plan = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                       params=LADEPLAN).json()
+    pruefe(plan["machbar"] is True,
+           "für die Strecke, die ohne Nachladen nicht reicht, entsteht ein Plan",
+           plan.get("grund", ""))
+    pruefe(plan["anzahl_stopps"] >= 1, "mit mindestens einem Ladestopp",
+           f"{plan['anzahl_stopps']}")
+    pruefe(plan["soc_am_ziel"] >= fahrzeuge[0]["ziel_soc"] - 0.5,
+           "und der Ziel-Ladestand wird erreicht",
+           f"{plan['soc_am_ziel']} % statt {fahrzeuge[0]['ziel_soc']} %")
+    pruefe(plan["gesamt_minuten"] > plan["fahrzeit_minuten"],
+           "die Gesamtzeit liegt über der reinen Fahrzeit - Laden kostet Zeit")
+    km_stopps = [s["km_auf_route"] for s in plan["stopps"]]
+    pruefe(km_stopps == sorted(km_stopps),
+           "die Stopps stehen in Fahrtreihenfolge", str(km_stopps))
+    pruefe(all(s["ankunft_soc"] >= fahrzeuge[0]["reserve_soc"] - 0.5
+               for s in plan["stopps"]),
+           "an keinem Stopp wird unter der Reserve angekommen",
+           str([s["ankunft_soc"] for s in plan["stopps"]]))
+    pruefe(all(s["abfahrt_soc"] > s["ankunft_soc"] for s in plan["stopps"]),
+           "und an jedem Stopp wird tatsächlich geladen")
+    pruefe(all(s["lat"] and s["lon"] for s in plan["stopps"]),
+           "jeder Stopp hat eine Koordinate für die Karte")
+
+    # Die Belegt-Meldung ist die einzige Verfügbarkeitsinformation, die stimmt -
+    # sie muss den Plan verändern, nicht nur die Liste einfärben.
+    if plan["stopps"]:
+        geplant = plan["stopps"][0]["id"]
+        client.post(f"/api/saeulen/{geplant}/belegt")
+        danach = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                             params=LADEPLAN).json()
+        pruefe(geplant not in [s["id"] for s in danach["stopps"]],
+               "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
+        client.delete(f"/api/saeulen/{geplant}/belegt")
+
+    eng = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                      params={**LADEPLAN, "umweg_grenze_min": 0.5}).json()
+    pruefe(eng["machbar"] is False,
+           "mit einer Umweg-Grenze unter jedem Kandidaten bleibt nichts übrig")
+    pruefe(bool(eng["grund"]),
+           "und die Antwort sagt, warum - nicht nur, dass es nicht geht",
+           eng["grund"])
+
+    ohne_profil = client.post("/api/fahrten/999999/ladeplan")
+    pruefe(ohne_profil.status_code == 404,
+           "eine unbekannte Fahrt wird sauber abgelehnt",
+           f"HTTP {ohne_profil.status_code}")
 
     print("\nLive-Nachführung")
     sitzung = client.post(f"/api/live/start/{fahrt_id}").json()
