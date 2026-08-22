@@ -38,13 +38,25 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Reserve bleibt — über einen Pass sieht die Bilanz am Ende sonst harmlos aus.
 - **Live-Nachführung** — Messpunkte herein, Ist gegen Soll, laufender
   Verbrauchsfaktor, und die Reserve-Marke wandert mit. Ein Simulator spielt
-  die Fahrt mit einstellbarem Mehrverbrauch ab, damit sich das ohne Auto
-  prüfen lässt.
+  die Fahrt mit einstellbarem Mehrverbrauch *und* einstellbarer Fahrzeit ab,
+  damit sich das ohne Auto prüfen lässt.
+- **Umplanen während der Fahrt** — das eigentliche Ziel des Projekts. Greift
+  einer der Auslöser, wird die Reststrecke ab der aktuellen Position neu
+  geplant: mit dem gemessenen Verbrauch, der gemessenen Fahrzeit und dem
+  Ladestand, der wirklich da ist. Ändert sich dabei etwas, sagt jolt es in
+  einem Satz — und sonst schweigt es.
 
-**Noch nicht da** (im Konzept vollständig beschrieben): die automatische
-Umplanung während der Fahrt und echte Verfügbarkeitsdaten. Was jolt *erkennt*,
-ist bereits vollständig: dass neu geplant werden müsste, und warum — nur den
-neuen Plan zieht unterwegs noch niemand von selbst.
+| Auslöser | Schwelle |
+|---|---|
+| Nächster Ladepunkt als belegt gemeldet | sofort |
+| Reserve wird vor dem Ziel erreicht | sofort |
+| Mehr als 500 m neben der Route | ab 1 Minute |
+| Ankunfts-Ladestand am nächsten Stopp weicht ab | > 5 Prozentpunkte |
+| Ankunftszeit verschiebt sich (Stau) | > 10 Minuten |
+
+**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten) und Web Push, damit
+eine Planänderung auch ein Telefon mit dunklem Bildschirm erreicht. Solange die
+Ansicht offen ist — der Normalfall am Armaturenbrett — meldet sich jolt bereits.
 
 ---
 
@@ -117,6 +129,7 @@ Beide Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 ```bash
 ./tools/check_modell.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
 ./tools/check_optimierer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
+./tools/check_umplanung.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
 ./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
 ```
 
@@ -132,6 +145,12 @@ die beiden Fälle, an denen ein gieriger Planer scheitert — eine lange Lücke 
 Schnelllader und die Wahl zwischen einer nahen schwachen und einer weiteren
 starken Säule.
 
+`check_umplanung.py` prüft jeden Auslöser einzeln — über seiner Schwelle muss
+er greifen, darunter schweigen; ein Auslöser, der immer feuert, ist so nutzlos
+wie einer, der es nie tut. Danach die ganze Kette: Fahrt rechnen, Ladepunkte
+anlegen, mit Mehrverbrauch und mit Stau abspielen und nachsehen, ob der Plan
+sich ändert, gültig bleibt und sich *nicht* bei jeder Messung ändert.
+
 `check_backend.py` fährt eine simulierte Strecke mit 25 % Mehrverbrauch und
 prüft, dass die Reserve-Marke nach vorn rückt. Das ist der Prüfstein der
 Live-Funktion.
@@ -146,11 +165,11 @@ backend/app/
   routing/    provider.py (Interface) · ors.py · demo.py · korridor.py
   energie/    modell.py · wetter.py · kalibrierung.py
   laden/      kurven.py · optimierer.py · saeulen_import.py · verfuegbarkeit.py
-  live/       sitzung.py · kanal.py (WebSocket) · simulator.py
+  live/       sitzung.py · umplanung.py · kanal.py (WebSocket) · simulator.py
   routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live
 frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
 tools/        import_bnetza.py · import_ocm.py · check_modell.py
-              check_optimierer.py · check_backend.py
+              check_optimierer.py · check_umplanung.py · check_backend.py
 ```
 
 **Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
@@ -183,9 +202,9 @@ weil sie verlangt ist.
 
 ## Nächste Schritte
 
-1. **Automatische Umplanung** während der Fahrt, mit Push aufs Telefon.
-   Die Auslöser stehen im Konzept (2.3), das Erkennen läuft bereits — was
-   fehlt, ist der Weg vom erkannten Abweichen zum neuen Plan.
+1. **Echtes Web Push** (VAPID), damit eine Planänderung auch ein Telefon
+   erreicht, dessen Bildschirm aus ist. Der Service Worker steht, die
+   Änderung wird bereits erkannt und benannt — es fehlt die Zustellung.
 2. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
    (`LiveSitzung` / `LivePunkt`) ist bereits darauf ausgelegt: Es ändert sich
    nichts am Schema, nur die Quelle der Messpunkte.

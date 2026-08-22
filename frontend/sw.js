@@ -10,7 +10,7 @@
  */
 // Bei jeder Änderung am Gerüst hochzählen: Der Name ist der einzige Hebel,
 // mit dem ein alter Cache verworfen wird (siehe "activate").
-const CACHE = "jolt-v2";
+const CACHE = "jolt-v3";
 const GERUEST = [
   "/", "/static/core.js", "/static/karte.js", "/static/route.js",
   "/static/live.js", "/static/fahrzeug.js", "/static/app.js",

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from .. import deps, models
 from ..database import SessionLocal, get_db
-from ..live import kanal, simulator
+from ..live import kanal, simulator, umplanung
 from ..live import sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -39,7 +39,11 @@ def _sitzung_holen(db: Session, sitzung_id: int) -> models.LiveSitzung:
 
 
 @router.post("/start/{fahrt_id}", dependencies=[Depends(deps.aktuelle_sitzung)])
-def starten(fahrt_id: int, db: Session = Depends(get_db)):
+def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
+            min_kw: float = Query(50.0, ge=0), steckertyp: str = "",
+            umweg_grenze_min: float = Query(umplanung.VORGABEN["umweg_grenze_min"],
+                                            gt=0, le=60),
+            db: Session = Depends(get_db)):
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
         raise HTTPException(404, "Fahrt nicht gefunden.")
@@ -52,9 +56,26 @@ def starten(fahrt_id: int, db: Session = Depends(get_db)):
         alt.laeuft = False
 
     sitzung = models.LiveSitzung(fahrt_id=fahrt_id)
+
+    # Der Plan beim Losfahren. Er ist der Bezugspunkt für alles Weitere: Ohne
+    # ihn liesse sich unterwegs nicht sagen, *dass* sich etwas geändert hat -
+    # nur, dass etwas anders ist als das Energieprofil erwartet hat. Und die
+    # Suchparameter bleiben für die ganze Fahrt dieselben.
+    parameter = {"radius_km": radius_km, "min_kw": min_kw,
+                 "steckertyp": steckertyp, "umweg_grenze_min": umweg_grenze_min}
+    if fahrt.energieprofil:
+        try:
+            sitzung.plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc,
+                                            parameter)
+        except Exception as fehler:      # noqa: BLE001
+            # Ohne Startplan läuft die Fahrt trotzdem - die Nachführung
+            # arbeitet dann gegen das Energieprofil, wie in Stufe 1.
+            log.warning("Startplan fehlgeschlagen: %s", fehler)
+
     db.add(sitzung)
     db.commit()
-    return {"sitzung_id": sitzung.id, "fahrt_id": fahrt_id}
+    return {"sitzung_id": sitzung.id, "fahrt_id": fahrt_id,
+            "plan": sitzung.plan}
 
 
 @router.post("/{sitzung_id}/punkt")
@@ -88,6 +109,10 @@ def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
     return {"sitzung_id": sitzung.id, "fahrt_id": sitzung.fahrt_id,
             "laeuft": sitzung.laeuft, "hinweis": sitzung.hinweis,
             "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
+            "zeitfaktor": round(sitzung.zeitfaktor, 3),
+            # Der aktuell gültige Plan, damit ein Gerät, das sich neu
+            # verbindet, nicht auf den nächsten Messpunkt warten muss.
+            "plan": sitzung.plan,
             "zuschauer": kanal.zuschauer(sitzung_id),
             "punkte": len(sitzung.punkte),
             "letzter": None if not letzter else {
@@ -110,12 +135,17 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
 async def simulieren(sitzung_id: int,
                      mehrverbrauch: float = Query(1.0, ge=0.5, le=2.0),
                      takt_s: float = Query(0.5, ge=0.05, le=10.0),
+                     zeitfaktor: float = Query(1.0, ge=0.5, le=3.0),
                      db: Session = Depends(get_db)):
     """Die geplante Fahrt abspielen, mit einstellbarem Mehrverbrauch.
 
     Mit 1.0 folgt die Simulation dem Plan exakt, mit 1.2 verbraucht sie
     zwanzig Prozent mehr - dann muss die Nachführung anschlagen und die
     Reserve vorziehen. Das ist der Prüfstein der Live-Funktion.
+
+    `zeitfaktor` simuliert Stau: 1.4 heisst "vierzig Prozent länger unterwegs".
+    Der Verbrauch merkt das kaum, die Ankunftszeit sehr wohl - und damit
+    lässt sich der Auslöser prüfen, den der Verbrauch allein nie auslöst.
     """
     sitzung = _sitzung_holen(db, sitzung_id)
     if not sitzung.laeuft:
@@ -123,9 +153,11 @@ async def simulieren(sitzung_id: int,
     if not (sitzung.fahrt.energieprofil or []):
         raise HTTPException(409, "Zur Fahrt gibt es kein Energieprofil.")
 
-    asyncio.create_task(simulator.abspielen(SessionLocal, sitzung_id,
-                                            mehrverbrauch, takt_s))
-    return {"gestartet": True, "mehrverbrauch": mehrverbrauch, "takt_s": takt_s}
+    asyncio.create_task(simulator.abspielen(
+        SessionLocal, sitzung_id, mehrverbrauch, takt_s,
+        zeitfaktor=zeitfaktor))
+    return {"gestartet": True, "mehrverbrauch": mehrverbrauch,
+            "takt_s": takt_s, "zeitfaktor": zeitfaktor}
 
 
 @router.websocket("/{sitzung_id}/ws")

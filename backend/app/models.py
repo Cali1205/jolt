@@ -195,7 +195,22 @@ class LiveSitzung(Base):
     # Laufender Verbrauchsfaktor: Ist geteilt durch Soll über die letzten
     # Kilometer. > 1 heisst "verbraucht mehr als gerechnet".
     verbrauchsfaktor = Column(Float, default=1.0, nullable=False)
+    # Dasselbe für die Zeit. Der Verbrauchsfaktor allein sieht einen Stau
+    # nicht: Wer im Stau steht, verbraucht je Kilometer sogar mehr, aber die
+    # Ankunftszeit verschiebt sich um ein Vielfaches davon. Für den Auslöser
+    # "Ankunftszeit verschiebt sich" braucht es deshalb eine eigene Zahl.
+    zeitfaktor = Column(Float, default=1.0, nullable=False)
     hinweis = Column(Text, default="")
+
+    # Der aktuell gültige Ladeplan. Beim Start der Fahrt gerechnet und
+    # unterwegs ersetzt, sobald ein Auslöser greift. Er liegt hier und nicht
+    # an der Fahrt, weil er zur *laufenden* Fahrt gehört: Dieselbe geplante
+    # Strecke ein zweites Mal gefahren ergibt einen anderen Plan.
+    plan = Column(JSON)
+    # Seit wann das Fahrzeug neben der Route ist. Die Schwelle ist "mehr als
+    # 500 m für mehr als eine Minute" - ohne diesen Zeitstempel wäre jede
+    # ungenaue GPS-Messung an einer Brücke eine Neuplanung.
+    abweg_seit = Column(DateTime)
 
     fahrt = relationship("Fahrt")
     punkte = relationship("LivePunkt", back_populates="sitzung",

@@ -8,9 +8,16 @@ Der Simulator läuft die geplante Route ab und meldet Ladestände, die um
 `mehrverbrauch` vom Plan abweichen. Mit 1.0 folgt er dem Plan exakt, mit 1.2
 verbraucht er zwanzig Prozent mehr - und genau dann muss die Nachführung
 anschlagen und die Reserve vorziehen. Das ist der Prüfstein.
+
+`zeitfaktor` macht dasselbe mit der Uhr: 1.4 heisst "vierzig Prozent länger
+unterwegs als geplant", also Stau. Dafür trägt jeder Messpunkt eine
+**simulierte** Zeit. Ohne die wäre der Zeitfaktor hier nicht zu prüfen - der
+Simulator spielt Stunden in Sekunden ab, und gegen die echte Uhr gemessen
+wäre jede Fahrt absurd schnell.
 """
 import asyncio
 import logging
+from datetime import datetime, timedelta
 
 from .. import models
 from . import kanal, sitzung as live_sitzung
@@ -21,7 +28,8 @@ SCHRITT_KM = 5.0
 
 
 def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
-             schritt_km: float = SCHRITT_KM) -> list[dict]:
+             schritt_km: float = SCHRITT_KM,
+             zeitfaktor: float = 1.0) -> list[dict]:
     """Die Messpunkte einer simulierten Fahrt.
 
     Reine Funktion ohne Datenbank und ohne Warten - damit sie sich in einem
@@ -43,7 +51,9 @@ def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
             "soc": round(max(0.0, soc), 2),
             "tempo_kmh": eintrag.get("tempo_kmh"),
             "aussentemp_c": fahrt.aussentemp_c,
-            "km": round(km, 1)})
+            "km": round(km, 1),
+            # Minuten seit Abfahrt, wie sie *im Auto* vergangen wären.
+            "minuten": round((eintrag.get("minuten") or 0.0) * zeitfaktor, 3)})
         # Bei null ist Schluss. Ein simuliertes Auto, das mit leerem Akku
         # weiterfährt und dabei brav 0 % meldet, würde genau den Fall
         # verschleiern, den die Simulation sichtbar machen soll: dass es
@@ -65,7 +75,8 @@ def _profil_bei(profil: list, km: float) -> dict:
 
 
 async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
-                    takt_s: float = 1.0, schritt_km: float = SCHRITT_KM) -> None:
+                    takt_s: float = 1.0, schritt_km: float = SCHRITT_KM,
+                    zeitfaktor: float = 1.0) -> None:
     """Die Simulation als Hintergrundaufgabe.
 
     Jeder Schritt bekommt eine eigene Datenbanksitzung: Die Aufgabe läuft
@@ -77,9 +88,14 @@ async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
         sitzung = db.get(models.LiveSitzung, sitzung_id)
         if not sitzung:
             return
-        punkte = schritte(sitzung.fahrt, mehrverbrauch, schritt_km)
+        punkte = schritte(sitzung.fahrt, mehrverbrauch, schritt_km, zeitfaktor)
     finally:
         db.close()
+
+    # Der Nullpunkt der simulierten Uhr. Die Messpunkte tragen ihre Zeit
+    # relativ dazu, damit die Nachführung eine plausible Fahrt sieht und
+    # nicht sechshundert Kilometer in vier Sekunden.
+    beginn = datetime.utcnow()
 
     for messpunkt in punkte:
         db = db_factory()
@@ -89,7 +105,8 @@ async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
                 return
             zustand = live_sitzung.messpunkt_aufnehmen(
                 db, sitzung, messpunkt["lat"], messpunkt["lon"], messpunkt["soc"],
-                messpunkt.get("tempo_kmh"), messpunkt.get("aussentemp_c"))
+                messpunkt.get("tempo_kmh"), messpunkt.get("aussentemp_c"),
+                zeit=beginn + timedelta(minutes=messpunkt.get("minuten") or 0.0))
         except Exception as fehler:      # noqa: BLE001
             log.warning("Simulation abgebrochen: %s", fehler)
             return
