@@ -7,3 +7,4 @@ alembic==1.*
 requests==2.*
 websockets==13.*
 tzdata==2025.*
+httpx==0.27.*
