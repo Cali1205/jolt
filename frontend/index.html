@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<title>jolt</title>
+<link rel="manifest" href="/manifest.json">
+<style>
+:root {
+  --grund: #101418; --flaeche: #191f26; --rand: #2a333d;
+  --text: #e6ebf0; --gedaempft: #8a97a5;
+  --akzent: #ffc93c; --gut: #57c98a; --warnung: #e8804f; --schlecht: #e2596a;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--grund); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px calc(12px) 16px; padding-top: calc(12px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--rand); position: sticky; top: 0;
+  background: var(--grund); z-index: 5;
+}
+header .marke { font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
+header .marke b { color: var(--akzent); }
+.plakette {
+  font-size: 11px; padding: 3px 8px; border-radius: 99px;
+  background: #3a2d12; color: var(--akzent); border: 1px solid #56421a;
+}
+nav { display: flex; gap: 4px; padding: 10px 12px; overflow-x: auto; }
+nav button {
+  flex: 0 0 auto; background: var(--flaeche); color: var(--gedaempft);
+  border: 1px solid var(--rand); border-radius: 99px; padding: 8px 16px;
+  font: inherit; font-size: 14px; cursor: pointer;
+}
+nav button[aria-selected="true"] { background: var(--akzent); color: #17130a;
+  border-color: var(--akzent); font-weight: 600; }
+main { padding: 0 12px 40px; max-width: 780px; margin: 0 auto; }
+section[hidden] { display: none; }
+h2 { font-size: 16px; margin: 20px 0 10px; }
+.karte-block {
+  background: var(--flaeche); border: 1px solid var(--rand);
+  border-radius: 14px; padding: 14px; margin-bottom: 12px;
+}
+label { display: block; font-size: 13px; color: var(--gedaempft); margin: 10px 0 4px; }
+input, select, button.tat {
+  width: 100%; background: #0c1116; color: var(--text);
+  border: 1px solid var(--rand); border-radius: 10px; padding: 10px 12px;
+  font: inherit;
+}
+input[type="range"] { padding: 0; }
+button.tat {
+  background: var(--akzent); color: #17130a; font-weight: 600;
+  border: none; cursor: pointer; margin-top: 14px;
+}
+button.tat.neben { background: var(--flaeche); color: var(--text);
+  border: 1px solid var(--rand); }
+button.tat:disabled { opacity: .55; cursor: default; }
+.reihe { display: flex; gap: 10px; }
+.reihe > * { flex: 1; min-width: 0; }
+.werte { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.wert { background: #0c1116; border: 1px solid var(--rand); border-radius: 10px; padding: 10px 12px; }
+.wert .zahl { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
+.wert .name { font-size: 11px; color: var(--gedaempft); text-transform: uppercase;
+  letter-spacing: .05em; margin-top: 2px; }
+.wert.gut .zahl { color: var(--gut); }
+.wert.warnung .zahl { color: var(--warnung); }
+.wert.schlecht .zahl { color: var(--schlecht); }
+#karte { width: 100%; height: 340px; border-radius: 12px; border: 1px solid var(--rand);
+  display: block; touch-action: none; background: #0c1116; cursor: grab; }
+#karte:active { cursor: grabbing; }
+.karte-fuss { font-size: 11px; color: var(--gedaempft); margin-top: 6px;
+  display: flex; justify-content: space-between; gap: 8px; }
+#profil { width: 100%; height: 140px; display: block; margin-top: 10px;
+  border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
+.liste { list-style: none; padding: 0; margin: 0; }
+.liste li { border-top: 1px solid var(--rand); padding: 10px 2px;
+  display: flex; gap: 10px; align-items: baseline; }
+.liste li:first-child { border-top: none; }
+.liste .haupt { flex: 1; min-width: 0; }
+.liste .titel { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.liste .unter { font-size: 12px; color: var(--gedaempft); }
+.liste .kw { font-variant-numeric: tabular-nums; color: var(--akzent); font-weight: 600; }
+.meldung { padding: 10px 12px; border-radius: 10px; font-size: 13px; margin: 10px 0; }
+.meldung.fehler { background: #33161b; border: 1px solid #5d2731; color: #ffbfc8; }
+.meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
+.meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
+.leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+.treffer { list-style: none; padding: 0; margin: 6px 0 0; }
+.treffer li button { width: 100%; text-align: left; background: #0c1116;
+  border: 1px solid var(--rand); border-radius: 8px; padding: 8px 10px;
+  color: var(--text); font: inherit; font-size: 13px; margin-bottom: 4px;
+  cursor: pointer; }
+.balken { height: 8px; background: #0c1116; border-radius: 99px; overflow: hidden;
+  border: 1px solid var(--rand); margin-top: 6px; }
+.balken > i { display: block; height: 100%; background: var(--gut); }
+table.kurve { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.kurve th, table.kurve td { padding: 4px; text-align: left; }
+table.kurve input { padding: 6px 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="marke"><b>jolt</b></span>
+  <span id="demo-plakette" class="plakette" hidden>Demo-Routen</span>
+</header>
+
+<nav>
+  <button data-ansicht="planen" aria-selected="true">Planen</button>
+  <button data-ansicht="live" aria-selected="false">Live</button>
+  <button data-ansicht="fahrzeug" aria-selected="false">Fahrzeug</button>
+</nav>
+
+<main>
+  <div id="meldungen"></div>
+
+  <!-- ------------------------------- Planen -->
+  <section id="ansicht-planen">
+    <div class="karte-block">
+      <div class="reihe">
+        <div>
+          <label for="start">Start</label>
+          <input id="start" placeholder="Hamburg" autocomplete="off">
+          <ul class="treffer" id="start-treffer"></ul>
+        </div>
+        <div>
+          <label for="ziel">Ziel</label>
+          <input id="ziel" placeholder="München" autocomplete="off">
+          <ul class="treffer" id="ziel-treffer"></ul>
+        </div>
+      </div>
+
+      <div class="reihe">
+        <div>
+          <label for="fahrzeug-wahl">Fahrzeug</label>
+          <select id="fahrzeug-wahl"></select>
+        </div>
+        <div>
+          <label for="start-soc">Ladestand beim Start: <span id="start-soc-wert">80</span> %</label>
+          <input type="range" id="start-soc" min="5" max="100" step="1" value="80">
+        </div>
+      </div>
+
+      <label for="tempo">Tempo gegenüber der Routing-Annahme:
+        <span id="tempo-wert">100</span> %</label>
+      <input type="range" id="tempo" min="70" max="130" step="5" value="100">
+
+      <button class="tat" id="rechnen">Route rechnen</button>
+    </div>
+
+    <div id="ergebnis" hidden>
+      <div class="karte-block">
+        <div class="werte" id="kennzahlen"></div>
+        <canvas id="profil"></canvas>
+        <div class="karte-fuss">
+          <span>Ladestand über der Strecke</span>
+          <span id="profil-legende"></span>
+        </div>
+      </div>
+
+      <!-- Die Karte wandert beim Wechsel der Ansicht in den jeweils
+           sichtbaren Halter - siehe app.js. -->
+      <div id="karte-halter-planen"></div>
+
+      <div class="karte-block">
+        <h2 style="margin-top:0">Ladepunkte entlang der Route</h2>
+        <div class="reihe">
+          <div>
+            <label for="min-kw">Mindestens <span id="min-kw-wert">100</span> kW</label>
+            <input type="range" id="min-kw" min="0" max="300" step="10" value="100">
+          </div>
+          <div>
+            <label for="radius">Umkreis <span id="radius-wert">10</span> km</label>
+            <input type="range" id="radius" min="2" max="30" step="1" value="10">
+          </div>
+        </div>
+        <ul class="liste" id="saeulen"></ul>
+        <button class="tat neben" id="live-starten">Live-Fahrt starten</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------- Live -->
+  <section id="ansicht-live" hidden>
+    <div class="karte-block" id="live-leer">
+      <p class="leer">Noch keine Live-Fahrt. Erst eine Route rechnen, dann unten
+        auf „Live-Fahrt starten“.</p>
+    </div>
+
+    <div id="live-inhalt" hidden>
+      <div class="karte-block">
+        <div class="werte" id="live-werte"></div>
+        <div class="balken"><i id="live-balken" style="width:0%"></i></div>
+        <div class="karte-fuss">
+          <span id="live-hinweis">–</span>
+          <span id="live-verbindung">getrennt</span>
+        </div>
+      </div>
+
+      <div id="karte-halter-live"></div>
+
+      <div class="karte-block">
+        <h2 style="margin-top:0">Ladestand melden</h2>
+        <p class="leer" style="padding-top:0">Solange das Auto seinen Ladestand
+          nicht selbst liefert, kommt er von Hand. Die Position holt das
+          Telefon per GPS.</p>
+        <div class="reihe">
+          <div>
+            <label for="ist-soc">Aktueller Ladestand in %</label>
+            <input type="number" id="ist-soc" min="0" max="100" step="1" value="60">
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button class="tat neben" id="soc-melden"
+                    style="margin-top:0">Melden</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="karte-block">
+        <h2 style="margin-top:0">Ohne Auto prüfen</h2>
+        <p class="leer" style="padding-top:0">Spielt die geplante Fahrt ab. Mit
+          Mehrverbrauch über 100 % muss die Nachführung anschlagen und die
+          Reserve nach vorn rücken – das ist der Prüfstein.</p>
+        <label for="mehrverbrauch">Mehrverbrauch
+          <span id="mehrverbrauch-wert">120</span> %</label>
+        <input type="range" id="mehrverbrauch" min="70" max="180" step="5" value="120">
+        <button class="tat neben" id="simulieren">Simulation starten</button>
+        <button class="tat neben" id="live-beenden">Fahrt beenden</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------- Fahrzeug -->
+  <section id="ansicht-fahrzeug" hidden>
+    <div class="karte-block">
+      <label for="fahrzeug-liste">Fahrzeug</label>
+      <select id="fahrzeug-liste"></select>
+      <label for="vorlage">Aus Vorlage befüllen</label>
+      <select id="vorlage"></select>
+      <div id="fahrzeug-formular"></div>
+      <h2>Ladekurve</h2>
+      <p class="leer" style="padding-top:0">Leistung bei welchem Ladestand.
+        Dazwischen wird interpoliert.</p>
+      <table class="kurve"><tbody id="kurve-zeilen"></tbody></table>
+      <button class="tat neben" id="kurve-zeile-neu">Stützstelle hinzufügen</button>
+      <button class="tat" id="fahrzeug-speichern">Speichern</button>
+    </div>
+  </section>
+
+  <!-- Genau eine Karte für die ganze App. Zwei Canvas-Elemente hiessen zwei
+       Kachel-Caches und zwei Zustände, die auseinanderlaufen können. -->
+  <div id="karte-block" class="karte-block">
+    <canvas id="karte"></canvas>
+    <div class="karte-fuss">
+      <span>Ziehen zum Verschieben, Rad oder Kneifen zum Zoomen</span>
+      <span>© OpenStreetMap-Mitwirkende</span>
+    </div>
+  </div>
+</main>
+
+<script src="/static/core.js"></script>
+<script src="/static/karte.js"></script>
+<script src="/static/route.js"></script>
+<script src="/static/live.js"></script>
+<script src="/static/fahrzeug.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

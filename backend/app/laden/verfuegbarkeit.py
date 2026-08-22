@@ -1,0 +1,102 @@
+"""Ist die Säule frei? - und der ehrliche Umgang damit, dass wir es nicht wissen.
+
+Echte Belegungsdaten öffentlicher Ladesäulen sind in Deutschland nicht frei
+verfügbar. Wer sie hat, hat sie über OCPI-Verträge mit Betreibern oder über
+kommerzielle Aggregatoren. Für ein Privatprojekt ist das vorerst zu.
+
+Statt Verfügbarkeit vorzutäuschen, macht jolt drei Dinge:
+
+1. Dieses Interface steht, damit eine OCPI-Anbindung später ein Adapter ist
+   und kein Umbau.
+2. Solange keine Daten da sind, zählt **Redundanz**: Ein Standort mit acht
+   Ladepunkten ist einem mit zwei vorzuziehen, auch wenn er zwei Minuten
+   Umweg kostet. Das ist die beste verfügbare Näherung an "da ist
+   wahrscheinlich was frei".
+3. Der Nutzer kann melden, dass ein Standort belegt ist. Das gilt für die
+   laufende Fahrt - und ist die einzige Information, die wirklich stimmt.
+"""
+import time
+from dataclasses import dataclass
+from typing import Protocol
+
+# Wie lange eine Meldung "belegt" gilt. Eine halbe Stunde ist die Zeit, die
+# ein Schnellladevorgang typischerweise dauert - danach ist die Aussage
+# wertlos und würde nur einen brauchbaren Standort dauerhaft ausschliessen.
+MELDUNG_GUELTIG_S = 30 * 60
+
+
+@dataclass
+class Zustand:
+    frei: int | None          # None = unbekannt
+    gesamt: int
+    quelle: str               # "unbekannt" | "meldung" | "ocpi"
+    stand_s: float = 0.0
+
+
+class VerfuegbarkeitsQuelle(Protocol):
+    def zustand(self, ladepunkt) -> Zustand:
+        ...
+
+
+class Unbekannt:
+    """Die Vorgabe: keine Daten, nur die Anzahl der Ladepunkte."""
+
+    def zustand(self, ladepunkt) -> Zustand:
+        return Zustand(frei=None, gesamt=ladepunkt.anzahl_punkte or 1,
+                       quelle="unbekannt")
+
+
+class Meldungen:
+    """Meldungen der Nutzer, im Speicher gehalten.
+
+    Bewusst nicht in der Datenbank: Die Aussage ist nach dreissig Minuten
+    wertlos, und etwas, das schneller verfällt als ein Neustart dauert,
+    gehört nicht dauerhaft gespeichert.
+    """
+
+    def __init__(self, weiter: VerfuegbarkeitsQuelle | None = None):
+        self._belegt: dict[int, float] = {}
+        self._weiter = weiter or Unbekannt()
+
+    def melden(self, ladepunkt_id: int) -> None:
+        self._belegt[ladepunkt_id] = time.time()
+
+    def freigeben(self, ladepunkt_id: int) -> None:
+        self._belegt.pop(ladepunkt_id, None)
+
+    def ist_gemeldet(self, ladepunkt_id: int) -> bool:
+        seit = self._belegt.get(ladepunkt_id)
+        if seit is None:
+            return False
+        if time.time() - seit > MELDUNG_GUELTIG_S:
+            del self._belegt[ladepunkt_id]
+            return False
+        return True
+
+    def zustand(self, ladepunkt) -> Zustand:
+        if self.ist_gemeldet(ladepunkt.id):
+            return Zustand(frei=0, gesamt=ladepunkt.anzahl_punkte or 1,
+                           quelle="meldung",
+                           stand_s=time.time() - self._belegt[ladepunkt.id])
+        return self._weiter.zustand(ladepunkt)
+
+
+def redundanz_bonus(anzahl_punkte: int) -> float:
+    """Zeitgutschrift in Minuten für einen Standort mit vielen Ladepunkten.
+
+    Solange niemand weiss, was frei ist, ist die Anzahl der Ladepunkte die
+    einzige belastbare Aussage über das Risiko, vor einer belegten Säule zu
+    stehen. Ein Standort mit acht Punkten bekommt gut vier Minuten
+    gutgeschrieben - genug, um einen kleinen Umweg dorthin zu rechtfertigen,
+    zu wenig, um einen grossen zu erzwingen.
+
+    Der Logarithmus, weil der Sprung von 2 auf 4 Ladepunkten viel mehr
+    bedeutet als der von 20 auf 22.
+    """
+    import math
+    return round(min(6.0, 2.2 * math.log(max(1, anzahl_punkte))), 2)
+
+
+# Eine Instanz für den Prozess. Der Zustand ist bewusst prozesslokal - jolt
+# läuft als ein Container für einen Haushalt.
+MELDUNGEN = Meldungen()

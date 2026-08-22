@@ -1,0 +1,12 @@
+.git
+.github
+__pycache__
+*.py[cod]
+.venv
+venv
+.env
+*.db
+*.sqlite3
+daten/
+konzept-routenplaner.md
+tools/

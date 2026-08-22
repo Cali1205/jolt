@@ -1,0 +1,20 @@
+{
+  "name": "jolt – Routenplaner für Elektroautos",
+  "short_name": "jolt",
+  "description": "Plant Ladestopps und zieht den Plan während der Fahrt nach.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
