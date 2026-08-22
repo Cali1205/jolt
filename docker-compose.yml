@@ -1,0 +1,44 @@
+services:
+  jolt-db:
+    image: postgres:16-alpine
+    container_name: jolt-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jolt
+      POSTGRES_USER: jolt
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Bitte DB_PASSWORD in .env setzen}
+    volumes:
+      - /opt/docker/jolt/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jolt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  jolt-app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: jolt-app
+    restart: unless-stopped
+    depends_on:
+      jolt-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://jolt:${DB_PASSWORD}@jolt-db:5432/jolt
+      # Zugang: leer lassen heisst "kein Login" - nur fuer den Betrieb in einem
+      # Netz, in das ohnehin niemand sonst hineinkommt.
+      APP_PASSWORT: ${APP_PASSWORT:-}
+      # Routing: ohne Schluessel laesst sich keine Route rechnen.
+      # Kostenloser Schluessel: https://openrouteservice.org/dev/#/signup
+      ORS_API_KEY: ${ORS_API_KEY:?Bitte ORS_API_KEY in .env setzen}
+      # Open Charge Map nur fuer den Import ausserhalb Deutschlands noetig.
+      OCM_API_KEY: ${OCM_API_KEY:-}
+      # Haertung fuer einen exponierten Host
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
+      LOGIN_LIMIT_PER_15MIN: ${LOGIN_LIMIT_PER_15MIN:-10}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
+    ports:
+      - "8322:8000"
+    # Hinter einem Reverse Proxy: jolt.<domain> -> host-ip:8322
