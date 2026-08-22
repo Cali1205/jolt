@@ -178,7 +178,8 @@ jolt geht deshalb ehrlich damit um, statt Verfügbarkeit vorzutäuschen:
 
 ## 4. Die Ladestopp-Planung
 
-*(Ausgearbeitet, aber bewusst noch nicht implementiert — siehe Abschnitt 6.)*
+*(Implementiert in `backend/app/laden/optimierer.py`, geprüft von
+`tools/check_optimierer.py`.)*
 
 Die Aufgabe: Finde die Folge von Ladestopps und Lademengen, die die
 **Gesamtreisezeit** minimiert, unter der Nebenbedingung, dass der SoC nie unter
@@ -268,10 +269,26 @@ Option, sobald Isochronen dazukommen.
 - Live-Gerüst: Messpunkt-Endpunkt, WebSocket, Fahrt-Simulator, Ist gegen Soll
   in der PWA
 
-**Stufe 2 — der Optimierer**
+**Stufe 2 — der Optimierer** *(steht)*
 
 Abschnitt 4 in Code: Kandidatengraph, Pareto-Dijkstra, Nachoptimierung,
-Ausweichstandorte.
+Ausweichstandorte. Als `POST /api/fahrten/{id}/ladeplan` und als Ladeplan in
+der PWA.
+
+Zwei Dinge sind dabei anders gekommen als geplant:
+
+- Die Etappenprüfung schaut nicht auf die Bilanz am Etappenende, sondern auf
+  den **grössten kumulierten Bedarf innerhalb der Etappe**. Über einen Pass
+  sieht die Bilanz am Ende harmlos aus, weil die Rekuperation auf der Abfahrt
+  einen Teil zurückholt — oben wäre der Akku trotzdem leer. Ohne diese
+  Unterscheidung plant der Optimierer Etappen, die in der Mitte nicht machbar
+  sind.
+- Der Ausweichstandort darf **in die Reserve hineingehen**, bis zur Hälfte.
+  Der Plan selbst rührt sie nie an; er kommt überall mit mindestens
+  `reserve_soc` an. Ein Ausweichstandort, der die volle Reserve stehen lassen
+  muss, wäre deshalb fast nie erreichbar — und die Reserve ist genau für
+  diesen Fall da. Gibt es keinen, sagt der Plan das, statt die Lücke zu
+  verschweigen.
 
 **Stufe 3 — die Live-Neuplanung**
 

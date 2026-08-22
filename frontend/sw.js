@@ -8,7 +8,9 @@
  * Der Nutzen ist trotzdem real: Bei einem Balken Empfang lädt die Oberfläche
  * sofort, statt auf ein Gerüst zu warten, das sich ohnehin nicht geändert hat.
  */
-const CACHE = "jolt-v1";
+// Bei jeder Änderung am Gerüst hochzählen: Der Name ist der einzige Hebel,
+// mit dem ein alter Cache verworfen wird (siehe "activate").
+const CACHE = "jolt-v2";
 const GERUEST = [
   "/", "/static/core.js", "/static/karte.js", "/static/route.js",
   "/static/live.js", "/static/fahrzeug.js", "/static/app.js",
