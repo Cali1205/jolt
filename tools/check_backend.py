@@ -100,6 +100,20 @@ def main() -> int:
     pruefe(fehler.status_code == 400, "netto über brutto wird abgelehnt",
            f"HTTP {fehler.status_code}")
 
+    # Regression: ein doppelter Ladestand in der Kurve verletzt die
+    # Unique-Constraint (fahrzeug_id, soc_prozent) - das darf als
+    # verständliche 400 ankommen, nicht als nackter 500er beim Commit.
+    doppelt = client.post("/api/fahrzeuge", json={
+        "name": "Doppelte Kurve", "akku_brutto_kwh": 82.0, "akku_netto_kwh": 77.0,
+        "ladekurve": [[0, 180], [20, 180], [80, 80], [90, 90], [90, 60],
+                     [100, 45]]})
+    pruefe(doppelt.status_code == 400,
+           "ein doppelter Ladestand in der Kurve wird sauber abgelehnt",
+           f"HTTP {doppelt.status_code}: {doppelt.text[:120]}")
+    pruefe("90" in doppelt.json().get("detail", ""),
+           "und die Meldung nennt den betroffenen Ladestand",
+           doppelt.json())
+
     print("\nLadesäulen-Import (Format der Bundesnetzagentur)")
     db = SessionLocal()
     try:
