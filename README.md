@@ -54,9 +54,11 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
 | Ankunfts-Ladestand am nächsten Stopp weicht ab | > 5 Prozentpunkte |
 | Ankunftszeit verschiebt sich (Stau) | > 10 Minuten |
 
-**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten) und Web Push, damit
-eine Planänderung auch ein Telefon mit dunklem Bildschirm erreicht. Solange die
-Ansicht offen ist — der Normalfall am Armaturenbrett — meldet sich jolt bereits.
+- **Benachrichtigung aufs Telefon**, wenn sich der Plan ändert — auch bei
+  dunklem Bildschirm, über Web Push. Und nur dann: Eine Meldung, die bei jeder
+  Messung kommt, schaltet man nach zehn Minuten ab.
+
+**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten).
 
 ---
 
@@ -106,6 +108,23 @@ OCM_API_KEY=… ./tools/import_ocm.py AT,CH 5000 50   # optional, fürs Ausland
 Ohne diesen Schritt bleibt die Liste „Ladepunkte entlang der Route" leer — die
 Tabelle ist bei einer frischen Installation schlicht noch nicht gefüllt.
 
+### Benachrichtigungen aufs Telefon
+
+```bash
+./tools/push_schluessel.py      # erzeugt ein VAPID-Schlüsselpaar
+```
+
+Die drei ausgegebenen Zeilen in die `.env` übernehmen und jolt neu starten.
+Danach fragt die App beim Start einer Live-Fahrt einmal nach der Erlaubnis.
+Ob es funktioniert, sagt `POST /api/push/probe` — die Nachricht muss auf dem
+Gerät ankommen, auch bei dunklem Bildschirm.
+
+Zwei Dinge, an denen es sonst scheitert: Der Browser gibt Benachrichtigungen
+nur über **HTTPS** frei (`localhost` ausgenommen), und die App muss auf iOS
+zum Home-Bildschirm hinzugefügt sein. Der **private** Schlüssel bleibt auf dem
+Server; wer ihn hat, kann im Namen dieser Installation an die angemeldeten
+Geräte senden.
+
 ---
 
 ## Konfiguration
@@ -116,6 +135,9 @@ Tabelle ist bei einer frischen Installation schlicht noch nicht gefüllt.
 | `APP_PASSWORT` | Zugang zur App. **Leer heisst: kein Login.** Steht beim Start als Warnung im Log. |
 | `ORS_API_KEY` | openrouteservice. Fehlt er, greift das Demo-Routing. |
 | `OCM_API_KEY` | Nur für den Open-Charge-Map-Import. |
+| `VAPID_PRIVATE_KEY` | Web Push. Fehlt er, sind Benachrichtigungen aus. |
+| `VAPID_PUBLIC_KEY` | Derselbe Schlüssel, öffentliche Hälfte — der Browser braucht ihn. |
+| `VAPID_SUBJECT` | `mailto:` oder `https:` — wen der Push-Dienst erreicht. |
 | `TRUSTED_PROXIES` | IPs des Reverse Proxy, die `X-Forwarded-For` setzen dürfen. |
 | `RATE_LIMIT_PER_MIN` | Anfragen je Minute und IP (Standard 120). |
 | `ENABLE_API_DOCS` | `1` schaltet `/api/docs` frei. Standard: aus. |
@@ -130,6 +152,7 @@ Beide Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 ./tools/check_modell.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
 ./tools/check_optimierer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
 ./tools/check_umplanung.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
+./tools/check_push.py       # Web Push: Schlüssel, Verschlüsselung, Abos, Aufräumen
 ./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
 ```
 
@@ -151,6 +174,13 @@ wie einer, der es nie tut. Danach die ganze Kette: Fahrt rechnen, Ladepunkte
 anlegen, mit Mehrverbrauch und mit Stau abspielen und nachsehen, ob der Plan
 sich ändert, gültig bleibt und sich *nicht* bei jeder Messung ändert.
 
+`check_push.py` prüft alles vor dem Netzsprung — und der Rundlauf durch die
+Verschlüsselung ist der Kern: Die Nutzlast wird für ein nachgebautes
+Browser-Abo verschlüsselt und mit dessen privatem Schlüssel wieder
+entschlüsselt. Kommt der Klartext zurück, stimmt der Pfad nach RFC 8291. Was
+das Skript **nicht** prüft, ist der Sprung zum Push-Dienst selbst; dafür gibt
+es `POST /api/push/probe` mit einem echten Gerät.
+
 `check_backend.py` fährt eine simulierte Strecke mit 25 % Mehrverbrauch und
 prüft, dass die Reserve-Marke nach vorn rückt. Das ist der Prüfstein der
 Live-Funktion.
@@ -166,10 +196,13 @@ backend/app/
   energie/    modell.py · wetter.py · kalibrierung.py
   laden/      kurven.py · optimierer.py · saeulen_import.py · verfuegbarkeit.py
   live/       sitzung.py · umplanung.py · kanal.py (WebSocket) · simulator.py
-  routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live
+  push.py     Web Push: Schlüssel, Abos, Versand
+  routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
 frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
-tools/        import_bnetza.py · import_ocm.py · check_modell.py
-              check_optimierer.py · check_umplanung.py · check_backend.py
+              sw.js (Offline-Gerüst und Push-Empfang)
+tools/        import_bnetza.py · import_ocm.py · push_schluessel.py
+              check_modell.py · check_optimierer.py · check_umplanung.py
+              check_push.py · check_backend.py
 ```
 
 **Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
@@ -202,11 +235,8 @@ weil sie verlangt ist.
 
 ## Nächste Schritte
 
-1. **Echtes Web Push** (VAPID), damit eine Planänderung auch ein Telefon
-   erreicht, dessen Bildschirm aus ist. Der Service Worker steht, die
-   Änderung wird bereits erkannt und benannt — es fehlt die Zustellung.
-2. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
+1. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
    (`LiveSitzung` / `LivePunkt`) ist bereits darauf ausgelegt: Es ändert sich
    nichts am Schema, nur die Quelle der Messpunkte.
-3. **Kalibrierung aus echten Fahrten** — das Gerüst steht in
+2. **Kalibrierung aus echten Fahrten** — das Gerüst steht in
    `energie/kalibrierung.py`.

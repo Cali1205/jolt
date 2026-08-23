@@ -40,7 +40,7 @@ window.joltLive = (function () {
       window.joltApp.ansichtZeigen("live");
       // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
       // beim ersten geänderten Plan, wo sie im Weg steht.
-      erlaubnisFragen();
+      benachrichtigungenEinrichten();
       K.melden("Live-Fahrt läuft. Über „Simulation starten“ lässt sie sich "
         + "ohne Auto durchspielen.", "hinweis");
     } catch (fehler) {
@@ -214,13 +214,65 @@ window.joltLive = (function () {
     } catch (e) { /* je nach Browser und Kontext nicht erlaubt - dann eben nicht */ }
   }
 
-  async function erlaubnisFragen() {
+  /* ---------- Benachrichtigungen aufs Telefon ---------- */
+
+  /* Beim Start der Fahrt einmal fragen und das Gerät anmelden.
+   *
+   * Der Weg über den Push-Dienst ist der einzige, der ein Telefon mit dunklem
+   * Bildschirm erreicht: Die WebSocket-Verbindung schläft dann mit. Deshalb
+   * hier ein echtes Abo und nicht nur die Erlaubnis für die Notification-API.
+   *
+   * Scheitert irgendein Schritt, läuft die Fahrt trotzdem - dann eben nur mit
+   * der Meldung in der offenen Ansicht. */
+  async function benachrichtigungenEinrichten() {
     try {
-      if (!("Notification" in window) || Notification.permission !== "default") {
-        return;
+      if (!("Notification" in window) || !("PushManager" in window)) return;
+
+      const schluessel = await K.api("/api/push/schluessel");
+      if (!schluessel.eingerichtet) return;   // kein VAPID-Schlüssel am Server
+
+      if (Notification.permission === "default") {
+        await Notification.requestPermission();
       }
-      await Notification.requestPermission();
-    } catch (e) { /* kein Grund, die Fahrt daran scheitern zu lassen */ }
+      if (Notification.permission !== "granted") return;
+
+      const registrierung = K.zustand.serviceWorker
+        || (navigator.serviceWorker && await navigator.serviceWorker.ready);
+      if (!registrierung || !registrierung.pushManager) return;
+
+      // Ein bestehendes Abo weiterverwenden. Ein neues anzulegen gäbe
+      // denselben Endpunkt zurück, kostet aber einen Umweg.
+      let abo = await registrierung.pushManager.getSubscription();
+      if (!abo) {
+        abo = await registrierung.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: schluesselAlsBytes(schluessel.schluessel),
+        });
+      }
+
+      const daten = abo.toJSON();
+      await K.api("/api/push/abo", { method: "POST", body: {
+        endpoint: daten.endpoint,
+        p256dh: daten.keys.p256dh,
+        auth: daten.keys.auth,
+        geraet: navigator.userAgent.slice(0, 120),
+      }});
+    } catch (fehler) {
+      // Bewusst nur ins Log: Wer gerade losfährt, will keine Fehlermeldung
+      // über eine Nebenfunktion lesen.
+      if (window.console) console.warn("Benachrichtigungen:", fehler.message);
+    }
+  }
+
+  /* Der öffentliche Schlüssel kommt als base64url und muss als Uint8Array
+   * übergeben werden - der Browser nimmt die Zeichenkette nicht an. */
+  function schluesselAlsBytes(text) {
+    const gefuellt = (text + "=".repeat((4 - text.length % 4) % 4))
+      .replace(/-/g, "+").replace(/_/g, "/");
+    const roh = atob(gefuellt);
+    const bytes = new Uint8Array(roh.length);
+    for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+    return bytes;
   }
 
   /* Die Namen kommen aus fremden Datenquellen und landen in innerHTML. */

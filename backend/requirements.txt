@@ -8,3 +8,5 @@ requests==2.*
 websockets==13.*
 tzdata==2025.*
 httpx==0.27.*
+# Web Push: VAPID-Signatur und Nutzlast-Verschluesselung (RFC 8291).
+pywebpush==2.*

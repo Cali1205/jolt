@@ -39,6 +39,11 @@ services:
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
       LOGIN_LIMIT_PER_15MIN: ${LOGIN_LIMIT_PER_15MIN:-10}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
+      # Benachrichtigungen aufs Telefon: ohne diese drei bleibt die Funktion
+      # aus, siehe tools/push_schluessel.py.
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     ports:
       - "8322:8000"
     # Hinter einem Reverse Proxy: jolt.<domain> -> host-ip:8322

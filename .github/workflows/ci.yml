@@ -23,6 +23,7 @@ jobs:
       - run: ./tools/check_modell.py
       - run: ./tools/check_optimierer.py
       - run: ./tools/check_umplanung.py
+      - run: ./tools/check_push.py
       - run: ./tools/check_backend.py
 
       # Die Revisionen sind die einzige Quelle des Schemas - ein create_all
