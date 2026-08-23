@@ -165,6 +165,18 @@ window.joltFahrzeug = (function () {
     const daten = formularLesen();
     if (!daten.name) { K.melden("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
 
+    // Jeder Ladestand darf nur einmal vorkommen - die Datenbank erzwingt das,
+    // aber erst nach einem fehlgeschlagenen Speichern zu erfahren, welcher
+    // Ladestand doppelt war, ist unnötig umständlich.
+    const gesehen = new Set();
+    for (const [soc] of daten.ladekurve) {
+      if (gesehen.has(soc)) {
+        K.melden(`Ladestand ${soc} % kommt in der Ladekurve mehrfach vor.`, "fehler");
+        return;
+      }
+      gesehen.add(soc);
+    }
+
     try {
       if (wahl === "neu") {
         await K.api("/api/fahrzeuge", { method: "POST", body: daten });

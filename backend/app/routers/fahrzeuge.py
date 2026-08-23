@@ -48,11 +48,36 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "ladekurve": [[p.soc_prozent, p.kw] for p in fahrzeug.ladekurve]}
 
 
+def _kurve_pruefen(paare: list[list[float]]) -> None:
+    """Jeder Ladestand darf nur einmal vorkommen - die Tabelle hat dafür eine
+    Unique-Constraint (fahrzeug_id, soc_prozent). Ohne diese Prüfung landet ein
+    doppelter Ladestand nicht als verständliche Fehlermeldung beim Nutzer,
+    sondern als nackter Datenbankfehler und HTTP 500.
+    """
+    gesehen: set[float] = set()
+    for eintrag in paare:
+        if len(eintrag) < 2:
+            continue
+        soc = float(eintrag[0])
+        if soc in gesehen:
+            raise HTTPException(
+                400, f"Ladestand {soc:g} % kommt in der Ladekurve mehrfach vor - "
+                     "jeder Ladestand darf nur eine Ladeleistung haben.")
+        gesehen.add(soc)
+
+
 def _kurve_setzen(db: Session, fahrzeug: models.Fahrzeug,
                   paare: list[list[float]]) -> None:
     for alt in list(fahrzeug.ladekurve):
         db.delete(alt)
     fahrzeug.ladekurve.clear()
+    # Ohne dieses Flush schreibt SQLAlchemy im selben Flush zuerst die neuen
+    # Zeilen und erst danach die DELETEs der alten - beim Bearbeiten eines
+    # Fahrzeugs, das dieselben Ladestände behält (der Normalfall: nur die
+    # kW-Werte ändern sich), verletzt das dann dieselbe Unique-Constraint wie
+    # ein echtes Duplikat, nur unsichtbar für _kurve_pruefen(). Das Flush
+    # zwingt die Löschungen zuerst in die Datenbank.
+    db.flush()
     for eintrag in paare:
         if len(eintrag) < 2:
             continue
@@ -81,6 +106,7 @@ def liste(db: Session = Depends(get_db)):
 def anlegen(eingabe: FahrzeugEingabe, db: Session = Depends(get_db)):
     if eingabe.akku_netto_kwh > eingabe.akku_brutto_kwh:
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
+    _kurve_pruefen(eingabe.ladekurve)
     felder = eingabe.model_dump(exclude={"ladekurve"})
     fahrzeug = models.Fahrzeug(**felder)
     db.add(fahrzeug)
@@ -99,6 +125,8 @@ def aendern(fahrzeug_id: int, eingabe: FahrzeugEingabe,
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
     if eingabe.akku_netto_kwh > eingabe.akku_brutto_kwh:
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
+    if eingabe.ladekurve:
+        _kurve_pruefen(eingabe.ladekurve)
     for schluessel, wert in eingabe.model_dump(exclude={"ladekurve"}).items():
         setattr(fahrzeug, schluessel, wert)
     if eingabe.ladekurve:
