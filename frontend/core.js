@@ -11,6 +11,7 @@ window.jolt = (function () {
     fahrt: null,        // Antwort von POST /api/route
     fahrzeuge: [],
     sitzungId: null,    // laufende Live-Sitzung
+    serviceWorker: null, // Registrierung, für das Push-Abo gebraucht
   };
 
   const TOKEN_SCHLUESSEL = "jolt-token";

@@ -19,7 +19,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
-from .. import models
+from .. import models, push
 from . import kanal, sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -115,6 +115,11 @@ async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
 
         await kanal.senden(sitzung_id, {"typ": "zustand", "simuliert": True,
                                         **live_sitzung.zustand_als_dict(zustand)})
+        # Auch die Simulation benachrichtigt - sonst liesse sich die Kette bis
+        # aufs Telefon nie durchspielen, ohne wirklich zu fahren.
+        if zustand.plan_geaendert:
+            push.senden_hintergrund(db_factory, "jolt – Ladeplan geändert",
+                                    zustand.aenderung)
         await asyncio.sleep(takt_s)
 
     db = db_factory()

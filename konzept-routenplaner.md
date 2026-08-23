@@ -315,10 +315,18 @@ Drei Dinge sind dabei dazugekommen, die im Konzept so nicht standen:
   simulierten Zeitstempeln lässt sich stattdessen ein Stau durchspielen — und
   damit genau der Auslöser prüfen, den der Verbrauch nie auslöst.
 
-**Noch offen:** echtes Web Push (VAPID), damit eine Planänderung auch ein
-Telefon erreicht, dessen Bildschirm aus ist. Solange die Ansicht offen ist —
-der Normalfall am Armaturenbrett — meldet sich jolt bereits über die
-Benachrichtigungen des Browsers.
+Dazu **Web Push** (`push.py`): Eine Planänderung erreicht das Telefon auch mit
+dunklem Bildschirm, weil der Service Worker sie entgegennimmt, wenn die Seite
+längst geschlossen ist. Ohne VAPID-Schlüssel ist die Funktion aus — dieselbe
+Haltung wie bei `ORS_API_KEY` und `APP_PASSWORT`: Was nicht eingerichtet ist,
+wird nicht vorgetäuscht.
+
+Eine Entscheidung, die dabei zählt: **Ein totes Abo wird gelöscht, ein
+gestörtes nicht.** Ein Browser, der die Erlaubnis entzogen hat, antwortet mit
+404 oder 410; das Abo ist dann endgültig wertlos. Eine 500 des Push-Dienstes
+sagt dagegen nichts über das Abo aus — wer es dabei wegwirft, schaltet die
+Benachrichtigungen bei der ersten Störung dauerhaft ab, und niemand merkt,
+warum sie nicht mehr kommen.
 
 **Stufe 4 — echte Fahrzeugdaten**
 

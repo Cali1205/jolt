@@ -61,7 +61,16 @@ window.joltApp = (function () {
     await window.joltFahrzeug.laden();
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      // Die Registrierung wird festgehalten, weil das Abo für die
+      // Benachrichtigungen daran hängt (siehe live.js). Ohne sie gäbe es
+      // keinen Weg, den Push-Empfänger anzumelden.
+      try {
+        K.zustand.serviceWorker = await navigator.serviceWorker.register("/sw.js");
+      } catch (fehler) {
+        // Ohne Service Worker läuft alles weiter, nur eben ohne Offline-Gerüst
+        // und ohne Benachrichtigungen bei dunklem Bildschirm.
+        K.zustand.serviceWorker = null;
+      }
     }
   }
 

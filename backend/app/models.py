@@ -25,6 +25,33 @@ class Sitzung(Base):
     zuletzt_gesehen = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PushAbo(Base):
+    """Ein Gerät, das Benachrichtigungen bekommen will.
+
+    Der `endpoint` ist die vom Browser vergebene Adresse beim Push-Dienst und
+    zugleich der Schlüssel: Derselbe Browser liefert ihn erneut, solange die
+    Erlaubnis besteht. Deshalb ist er eindeutig - ein zweites Abo desselben
+    Geräts hiesse, dass dasselbe Telefon jede Meldung doppelt bekommt.
+
+    Die beiden Schlüssel gehören dem Gerät, nicht dem Server: Mit ihnen wird
+    die Nutzlast so verschlüsselt, dass der Push-Dienst sie weiterreicht, ohne
+    sie lesen zu können.
+    """
+    __tablename__ = "push_abos"
+
+    id = Column(Integer, primary_key=True)
+    endpoint = Column(String(500), unique=True, nullable=False, index=True)
+    p256dh = Column(String(200), nullable=False)
+    auth = Column(String(100), nullable=False)
+    geraet = Column(String(120), default="")
+
+    # Aufeinanderfolgende Fehlversuche. Ein totes Abo wird sofort gelöscht
+    # (404/410); dieser Zähler zeigt nur, dass ein Gerät dauerhaft nicht
+    # erreichbar ist, ohne sich abgemeldet zu haben.
+    fehler = Column(Integer, default=0, nullable=False)
+    angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class Fahrzeug(Base):
     """Alles, was das Verbrauchsmodell über das Auto wissen muss.
 

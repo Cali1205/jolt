@@ -13,7 +13,7 @@ from fastapi import (APIRouter, Depends, HTTPException, Query, WebSocket,
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from .. import deps, models
+from .. import deps, models, push
 from ..database import SessionLocal, get_db
 from ..live import kanal, simulator, umplanung
 from ..live import sitzung as live_sitzung
@@ -99,6 +99,13 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
     nachricht = {"typ": "zustand", "simuliert": False,
                  **live_sitzung.zustand_als_dict(zustand)}
     await kanal.senden(sitzung_id, nachricht)
+    # Eine geänderte Planung ist der einzige Anlass, jemanden am Steuer zu
+    # stören - und der einzige, der auch ein dunkles Telefon erreichen muss.
+    # Im Hintergrund, weil die Antwort an ein fahrendes Auto nicht auf einen
+    # Push-Dienst warten darf.
+    if zustand.plan_geaendert:
+        push.senden_hintergrund(SessionLocal, "jolt – Ladeplan geändert",
+                                zustand.aenderung)
     return nachricht
 
 

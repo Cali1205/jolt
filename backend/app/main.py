@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import deps, routing
+from . import deps, push, routing
 from .database import migrate, seed_vorlagen
 from .routers import ALLE_ROUTER
 from .security import SecurityMiddleware
@@ -39,6 +39,7 @@ for router in ALLE_ROUTER:
 @app.on_event("startup")
 def _beim_start():
     deps.beim_start_warnen()
+    push.beim_start_warnen()
     if routing.ist_demo():
         log.warning("jolt läuft mit Demo-Routing - die Routen sind erfunden.")
 
