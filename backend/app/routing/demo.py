@@ -67,7 +67,7 @@ class DemoRouting:
         return Route(punkte=punkte, tempo_ms=tempo, strecke_m=strecke,
                      fahrzeit_s=fahrzeit)
 
-    def suchen(self, text: str, land: str = "DE") -> list[Ort]:
+    def suchen(self, text: str, land: str = "") -> list[Ort]:
         schluessel = (text or "").strip().lower()
         for name, (lat, lon) in ORTE.items():
             if schluessel and schluessel in name:

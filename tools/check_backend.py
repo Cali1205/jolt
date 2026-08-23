@@ -135,6 +135,41 @@ def main() -> int:
     pruefe(abs(harz.lat - 51.9) < 1e-6, "Koordinate mit Komma korrekt gelesen",
            f"ist {harz.lat}")
 
+    print("\nOrtssuche ohne Länderfilter")
+    # Regression: `land` stand früher fest auf "DE" und /api/orte fragte damit
+    # nie explizit - jedes Ziel jenseits der Grenze verschwand über
+    # ORS' boundary.country-Filter. Das Demo-Routing kennt keinen echten
+    # HTTP-Aufruf, deshalb wird hier der ORS-Adapter direkt geprüft: welche
+    # Parameter tatsächlich an openrouteservice gingen.
+    from app.routing.ors import ORS
+    import app.routing.ors as ors_modul
+
+    angefragt: dict = {}
+
+    class _GefaelschteAntwort:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"features": []}
+
+    def _gefaelschtes_get(url, timeout=None, params=None):
+        angefragt.clear()
+        angefragt.update(params or {})
+        return _GefaelschteAntwort()
+
+    ors_get_original = ors_modul.requests.get
+    ors_modul.requests.get = _gefaelschtes_get
+    try:
+        ORS(api_key="test").suchen("Paris")
+        pruefe("boundary.country" not in angefragt,
+               "ohne Land wird nicht mehr fest auf DE eingeschränkt",
+               str(angefragt))
+        ORS(api_key="test").suchen("Paris", land="FR")
+        pruefe(angefragt.get("boundary.country") == "FR",
+               "ein explizit gesetztes Land wird weiterhin übergeben",
+               str(angefragt))
+    finally:
+        ors_modul.requests.get = ors_get_original
+
     print("\nRoute Hamburg - München")
     antwort = client.post("/api/route", json={
         "fahrzeug_id": fahrzeuge[0]["id"],

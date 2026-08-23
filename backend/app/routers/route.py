@@ -69,7 +69,7 @@ class Routenanfrage(BaseModel):
 
 
 @router.get("/orte")
-def orte_suchen(text: str = Query(min_length=2), land: str = "DE"):
+def orte_suchen(text: str = Query(min_length=2), land: str = ""):
     try:
         treffer = routing.provider().suchen(text, land)
     except RoutingFehler as fehler:
