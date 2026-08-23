@@ -211,7 +211,9 @@ def fahrt_vorbereiten(client) -> dict:
         "fahrzeug_id": fahrzeuge[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
         "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
-        "start_soc": 80.0}).json()
+        # Der Demo-Adapter kennt keine drei unterschiedlichen Vorgaben - hier
+        # reicht deshalb die erste (einzige) Variante.
+        "start_soc": 80.0}).json()["varianten"][0]
 
     geo = route["geometrie"]
     db = SessionLocal()

@@ -9,6 +9,10 @@ window.joltRoute = (function () {
   // löscht der eine die Marker des anderen.
   let letzteSaeulen = [];
   let letzterPlan = null;
+  // Die Varianten der letzten Berechnung (schnellste/kürzeste/empfohlene,
+  // ggf. zusammengelegt) - für die Wechsel-Karten und um beim Tippen auf eine
+  // Karte zu wissen, welcher fahrt_id sie entspricht.
+  let letzteVarianten = [];
 
   /* ---------- Ortssuche ---------- */
 
@@ -80,15 +84,58 @@ window.joltRoute = (function () {
         start_soc: Number(document.getElementById("start-soc").value),
         tempo_faktor: Number(document.getElementById("tempo").value) / 100,
       }});
-      K.zustand.fahrt = antwort;
-      anzeigen(antwort);
-      await saeulenLaden();
-      await ladeplanLaden();
+      letzteVarianten = antwort.varianten || [];
+      variantenZeichnen();
+      // Die sparsamste Variante ist jolts Grundhaltung - sie wird
+      // vorausgewählt, ein Tippen auf eine andere Karte wechselt.
+      const vorschlag = letzteVarianten.find((v) => v.etiketten.includes("sparsamste"))
+        || letzteVarianten[0];
+      if (vorschlag) await varianteWaehlen(vorschlag);
     } catch (fehler) {
       K.melden("Route: " + fehler.message, "fehler");
     } finally {
       knopf.disabled = false;
       knopf.textContent = "Route rechnen";
+    }
+  }
+
+  async function varianteWaehlen(variante) {
+    K.zustand.fahrt = variante;
+    anzeigen(variante);
+    variantenZeichnen();
+    await saeulenLaden();
+    await ladeplanLaden();
+  }
+
+  /* ---------- Varianten-Karten ---------- */
+
+  function variantenZeichnen() {
+    const block = document.getElementById("varianten-block");
+    const liste = document.getElementById("varianten");
+    if (!block || !liste) return;
+    block.hidden = letzteVarianten.length < 2;
+    if (letzteVarianten.length < 2) { liste.innerHTML = ""; return; }
+
+    const aktiveId = K.zustand.fahrt && K.zustand.fahrt.fahrt_id;
+    liste.innerHTML = "";
+    for (const v of letzteVarianten) {
+      const knopf = document.createElement("button");
+      knopf.className = "variante";
+      knopf.type = "button";
+      knopf.setAttribute("aria-pressed", String(v.fahrt_id === aktiveId));
+      const etiketten = v.etiketten.map((e) =>
+        `<span class="etikett ${e === "sparsamste" ? "sparsamste" : ""}">${e}</span>`
+      ).join("");
+      knopf.innerHTML = `
+        <span class="etiketten">${etiketten}</span>
+        <span class="kennwerte">${K.zahl(v.strecke_km)} km ·
+          ${K.dauer(v.fahrzeit_minuten)} · ${K.zahl(v.kwh_gesamt, 1)} kWh</span>`;
+      knopf.addEventListener("click", () => {
+        if (v.fahrt_id !== (K.zustand.fahrt && K.zustand.fahrt.fahrt_id)) {
+          varianteWaehlen(v);
+        }
+      });
+      liste.appendChild(knopf);
     }
   }
 
@@ -407,5 +454,5 @@ window.joltRoute = (function () {
     });
   }
 
-  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden };
+  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden, varianteWaehlen };
 })();

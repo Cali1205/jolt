@@ -40,7 +40,13 @@ PUNKTABSTAND_KM = 1.0
 class DemoRouting:
     ist_demo = True
 
-    def route(self, start, ziel, zwischenstopps=None) -> Route:
+    def route(self, start, ziel, zwischenstopps=None,
+             praeferenz: str = "recommended") -> Route:
+        # Es gibt kein echtes Strassennetz, aus dem sich schnellste, kürzeste
+        # und empfohlene Route unterscheiden liessen - alle drei ergäben die
+        # exakt gleiche Luftlinie. `praeferenz` wird deshalb entgegengenommen
+        # und ignoriert; /api/route erkennt die identischen Ergebnisse selbst
+        # und zeigt sie zusammengefasst als eine Variante mit drei Etiketten.
         stationen = [start] + list(zwischenstopps or []) + [ziel]
         punkte: list[list[float]] = []
         tempo: list[float] = []

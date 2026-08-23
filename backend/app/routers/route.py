@@ -4,6 +4,17 @@ Der Endpunkt, der alles zusammenführt: die Strecke aus dem Routing, den
 Energiebedarf aus dem Verbrauchsmodell und - über `/ladeplan` - die zeitoptimale
 Folge von Ladestopps aus dem Optimierer.
 
+`/route` rechnet dabei nicht eine, sondern bis zu drei Varianten - schnellste,
+kürzeste, und die, die openrouteservice ohne weitere Vorgabe empfiehlt. Für
+"verbrauchsoptimal" gibt es keine vierte Anfrage: openrouteservice kennt
+Energie nicht als Kantengewicht, das könnte nur ein eigener Routing-Layer
+(siehe konzept-routenplaner.md). Stattdessen rechnet jolts eigenes
+Verbrauchsmodell - mit dem echten Höhenprofil - für jede der drei Varianten
+den tatsächlichen Energiebedarf, und die günstigste bekommt zusätzlich das
+Etikett "sparsamste". Das kann mit einer der anderen beiden zusammenfallen -
+und genau das ist dann die ehrliche Antwort auf "welche Route spart am
+meisten", nicht eine erfundene vierte Strecke.
+
 Der Ladeplan hängt bewusst an einer bereits gerechneten Fahrt und nicht an der
 Routenanfrage: Radius, Mindestleistung und Steckertyp will man durchprobieren,
 ohne jedes Mal das Routing-Kontingent zu belasten.
@@ -19,7 +30,19 @@ from ..database import get_db
 from ..energie import modell, wetter
 from ..laden import kurven, optimierer, verfuegbarkeit
 from ..routing import korridor
-from ..routing.provider import RoutingFehler
+from ..routing.provider import PRAEFERENZEN, RoutingFehler
+
+# Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
+# liest. "empfohlen" statt "recommended", weil das Wort sonst niemand
+# verwendet, der nicht selbst openrouteservice-Kunde ist.
+ETIKETT = {"fastest": "schnellste", "shortest": "kürzeste",
+          "recommended": "empfohlene"}
+# Wie nah zwei Varianten in Strecke und Fahrzeit beieinanderliegen müssen, um
+# als "dieselbe Route" zu gelten. Ein Kilometer und eine Minute Toleranz
+# fangen Rundungsunterschiede zwischen den ORS-Antworten ab, ohne zwei
+# tatsächlich verschiedene Strecken fälschlich zusammenzulegen.
+GLEICH_KM = 1.0
+GLEICH_MIN = 1.0
 
 log = logging.getLogger("uvicorn.error")
 
@@ -63,46 +86,105 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
     anbieter = routing.provider()
-    try:
-        strecke = anbieter.route((anfrage.start.lat, anfrage.start.lon),
-                                 (anfrage.ziel.lat, anfrage.ziel.lon))
-    except RoutingFehler as fehler:
-        raise HTTPException(502, str(fehler)) from fehler
+    werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
 
-    if len(strecke.punkte) < 2:
+    # Schritt 1: alle drei Vorgaben abfragen und anhand der reinen Routing-
+    # Antwort (Strecke, Fahrzeit) zusammenlegen, was dieselbe Strasse ist.
+    # Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und
+    # im Demo-Modus wie oft auch in echt (kürzere Strecken haben meist nur
+    # einen sinnvollen Weg) landen zwei oder drei Vorgaben ohnehin auf
+    # derselben Route.
+    gruppen: list[dict] = []
+    letzter_fehler: RoutingFehler | None = None
+    for praeferenz in PRAEFERENZEN:
+        try:
+            strecke = anbieter.route((anfrage.start.lat, anfrage.start.lon),
+                                     (anfrage.ziel.lat, anfrage.ziel.lon),
+                                     praeferenz=praeferenz)
+        except RoutingFehler as fehler:
+            # Eine Vorgabe, die scheitert, darf die anderen nicht mitreissen -
+            # nur wenn am Ende keine einzige übrig ist, ist die Anfrage
+            # gescheitert.
+            letzter_fehler = fehler
+            continue
+        if len(strecke.punkte) < 2:
+            continue
+
+        passend = next((g for g in gruppen
+                        if abs(g["strecke"].strecke_m - strecke.strecke_m)
+                        <= GLEICH_KM * 1000
+                        and abs(g["strecke"].fahrzeit_s - strecke.fahrzeit_s)
+                        <= GLEICH_MIN * 60), None)
+        if passend:
+            passend["etiketten"].append(ETIKETT[praeferenz])
+            continue
+        gruppen.append({"etiketten": [ETIKETT[praeferenz]], "strecke": strecke})
+
+    if not gruppen:
+        if letzter_fehler:
+            raise HTTPException(502, str(letzter_fehler)) from letzter_fehler
         raise HTTPException(502, "Route enthält zu wenige Punkte.")
 
-    # Auf rund einen Punkt je 250 m ausdünnen. Auf einer Langstrecke liefert
-    # das Routing fünfstellig viele Stützpunkte - für Karte und Prognose ist
-    # das Rechenzeit ohne Erkenntnis. Höhensprünge bleiben dabei erhalten.
-    punkte, tempo = modell.ausduennen(strecke.punkte, strecke.tempo_ms)
+    # Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
+    # die - Wetter und Verbrauchsmodell rechnen.
+    kandidaten: list[dict] = []
+    for gruppe in gruppen:
+        strecke = gruppe["strecke"]
+        # Auf rund einen Punkt je 250 m ausdünnen. Auf einer Langstrecke
+        # liefert das Routing fünfstellig viele Stützpunkte - für Karte und
+        # Prognose ist das Rechenzeit ohne Erkenntnis. Höhensprünge bleiben
+        # dabei erhalten.
+        punkte, tempo = modell.ausduennen(strecke.punkte, strecke.tempo_ms)
 
-    if anfrage.wetter_beruecksichtigen:
-        umgebung_fuer = wetter.entlang_route(punkte)
-        mittel = wetter.mittelwert(punkte)
-    else:
-        umgebung_fuer = None
-        mittel = modell.Umgebung()
+        if anfrage.wetter_beruecksichtigen:
+            umgebung_fuer = wetter.entlang_route(punkte)
+            mittel = wetter.mittelwert(punkte)
+        else:
+            umgebung_fuer = None
+            mittel = modell.Umgebung()
 
-    werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
-    profil = modell.profil_rechnen(werte, punkte, tempo, anfrage.start_soc,
-                                   umgebung_fuer, anfrage.tempo_faktor)
+        profil = modell.profil_rechnen(werte, punkte, tempo, anfrage.start_soc,
+                                       umgebung_fuer, anfrage.tempo_faktor)
+        kandidaten.append({
+            "etiketten": gruppe["etiketten"],
+            "strecke_km": strecke.strecke_m / 1000.0 if strecke.strecke_m
+                else profil.strecke_km,
+            "fahrzeit_min": strecke.fahrzeit_s / 60.0 if strecke.fahrzeit_s
+                else profil.minuten,
+            "punkte": punkte, "profil": profil, "mittel": mittel})
 
-    fahrt = models.Fahrt(
-        fahrzeug_id=fahrzeug.id,
-        start_text=anfrage.start.text, start_lat=anfrage.start.lat,
-        start_lon=anfrage.start.lon, ziel_text=anfrage.ziel.text,
-        ziel_lat=anfrage.ziel.lat, ziel_lon=anfrage.ziel.lon,
-        start_soc=anfrage.start_soc, tempo_faktor=anfrage.tempo_faktor,
-        aussentemp_c=mittel.temp_c,
-        strecke_m=strecke.strecke_m or profil.strecke_km * 1000,
-        fahrzeit_s=strecke.fahrzeit_s or profil.minuten * 60,
-        geometrie=punkte,
-        energieprofil=[p.als_dict() for p in profil.punkte])
-    db.add(fahrt)
+    # Die günstigste Variante bekommt zusätzlich "sparsamste" - das ist keine
+    # vierte Anfrage, sondern jolts eigenes Verbrauchsmodell, angewandt auf
+    # die schon vorliegenden Kandidaten. Bei nur einem Kandidaten (Demo-Modus,
+    # oder wenn zwei Vorgaben dieselbe Strecke ergeben) landet das Etikett
+    # zwangsläufig dort, wo die anderen auch schon stehen.
+    guenstigste = min(kandidaten, key=lambda k: k["profil"].kwh_gesamt)
+    guenstigste["etiketten"].append("sparsamste")
+
+    varianten = []
+    for kandidat in kandidaten:
+        fahrt = models.Fahrt(
+            fahrzeug_id=fahrzeug.id,
+            start_text=anfrage.start.text, start_lat=anfrage.start.lat,
+            start_lon=anfrage.start.lon, ziel_text=anfrage.ziel.text,
+            ziel_lat=anfrage.ziel.lat, ziel_lon=anfrage.ziel.lon,
+            start_soc=anfrage.start_soc, tempo_faktor=anfrage.tempo_faktor,
+            aussentemp_c=kandidat["mittel"].temp_c,
+            strecke_m=kandidat["strecke_km"] * 1000,
+            fahrzeit_s=kandidat["fahrzeit_min"] * 60,
+            geometrie=kandidat["punkte"],
+            energieprofil=[p.als_dict() for p in kandidat["profil"].punkte])
+        db.add(fahrt)
+        db.flush()      # braucht fahrt.id, ohne schon endgültig zu committen
+        varianten.append({"fahrt_id": fahrt.id, "etiketten": kandidat["etiketten"],
+                          **_antwort(fahrt, kandidat["profil"], kandidat["mittel"],
+                                    fahrzeug)})
     db.commit()
 
-    return {"fahrt_id": fahrt.id, **_antwort(fahrt, profil, mittel, fahrzeug)}
+    # Reihenfolge fürs Auge: die günstigste zuerst, sie ist meist die Antwort
+    # auf die Frage, die jolt beantworten soll.
+    varianten.sort(key=lambda v: "sparsamste" not in v["etiketten"])
+    return {"varianten": varianten}
 
 
 @router.get("/fahrten/{fahrt_id}")

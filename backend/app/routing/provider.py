@@ -37,10 +37,25 @@ class Ort:
     lon: float
 
 
+# Die drei Vorgaben, die openrouteservice als "preference" kennt und die
+# /api/route parallel abfragt: Zeit, Distanz, und das, was ORS ohne weitere
+# Angabe für die beste Abwägung hält. Verbrauchsoptimal ist bewusst keine
+# eigene Anfrage - das kann ORS nicht als Kantengewicht, siehe unten.
+PRAEFERENZEN = ("fastest", "shortest", "recommended")
+
+
 class RoutingProvider(Protocol):
     def route(self, start: tuple[float, float], ziel: tuple[float, float],
-              zwischenstopps: list[tuple[float, float]] | None = None) -> Route:
-        """Route von Start nach Ziel. Koordinaten als (lat, lon)."""
+              zwischenstopps: list[tuple[float, float]] | None = None,
+              praeferenz: str = "recommended") -> Route:
+        """Route von Start nach Ziel. Koordinaten als (lat, lon).
+
+        `praeferenz` ist eine der drei Werte aus PRAEFERENZEN. Ein Adapter, der
+        keine echte Unterscheidung treffen kann (siehe demo.py), darf den
+        Parameter ignorieren und immer dieselbe Route liefern - /api/route
+        erkennt gleiche Ergebnisse und zeigt sie nur einmal, mit mehreren
+        Kennzeichnungen.
+        """
         ...
 
     def suchen(self, text: str, land: str = "DE") -> list[Ort]:

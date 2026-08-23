@@ -66,7 +66,8 @@ class ORS:
     # ---------- öffentlich ----------
 
     def route(self, start: tuple[float, float], ziel: tuple[float, float],
-              zwischenstopps: list[tuple[float, float]] | None = None) -> Route:
+              zwischenstopps: list[tuple[float, float]] | None = None,
+              praeferenz: str = "recommended") -> Route:
         koordinaten = [[start[1], start[0]]]
         for stopp in (zwischenstopps or []):
             koordinaten.append([stopp[1], stopp[0]])
@@ -77,7 +78,8 @@ class ORS:
                 f"{BASIS}/v2/directions/driving-car/geojson",
                 headers=self._kopf(), timeout=TIMEOUT,
                 json={"coordinates": koordinaten, "elevation": True,
-                      "instructions": True, "units": "m"})
+                      "instructions": True, "units": "m",
+                      "preference": praeferenz})
         except requests.RequestException as fehler:
             raise RoutingFehler(f"Routing nicht erreichbar: {fehler}") from fehler
 
