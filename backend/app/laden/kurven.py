@@ -140,6 +140,16 @@ VORLAGEN: list[dict] = [
      "ladekurve": [(0, 180), (10, 230), (45, 220), (55, 150),
                    (70, 100), (80, 60), (90, 35), (100, 10)]},
 
+    {"name": "VW ID.Buzz Pro (82 kWh)",
+     "akku_brutto_kwh": 82.0, "akku_netto_kwh": 77.0,
+     "leermasse_kg": 2550.0, "zuladung_kg": 150.0,
+     "c_w": 0.29, "stirnflaeche_m2": 2.90, "c_rr": 0.011,
+     "eta_antrieb": 0.87, "eta_rekup": 0.68, "p_neben_w": 450.0,
+     "waermepumpe": True, "reserve_soc": 10.0, "ziel_soc": 20.0,
+     "max_ladeleistung_kw": 170.0, "steckertyp": "CCS",
+     "ladekurve": [(0, 140), (10, 170), (30, 165), (50, 120),
+                   (65, 90), (80, 55), (90, 30), (100, 8)]},
+
     {"name": "Kleinwagen (52 kWh, nur AC-nah)",
      "akku_brutto_kwh": 55.0, "akku_netto_kwh": 52.0,
      "leermasse_kg": 1580.0, "zuladung_kg": 120.0,
