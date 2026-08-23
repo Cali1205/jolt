@@ -143,8 +143,18 @@ def main() -> int:
         "start_soc": 80.0})
     pruefe(antwort.status_code == 200, "Route wird gerechnet",
            f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-    route = antwort.json()
+    varianten = antwort.json()["varianten"]
+    # Der Demo-Adapter kennt keinen Unterschied zwischen den drei ORS-Vorgaben
+    # und liefert für alle dieselbe Luftlinie - /api/route erkennt das und legt
+    # sie zu einer einzigen Variante mit allen Etiketten zusammen.
+    pruefe(len(varianten) == 1,
+           "die drei Vorgaben ergeben im Demo-Modus dieselbe Route",
+           f"{len(varianten)} Varianten")
+    route = varianten[0]
     fahrt_id = route["fahrt_id"]
+    pruefe(set(route["etiketten"]) == {"schnellste", "kürzeste", "empfohlene",
+                                       "sparsamste"},
+           "und trägt alle vier Etiketten", str(route["etiketten"]))
     pruefe(route["demo"] is True, "und ist als Demo gekennzeichnet")
     pruefe(500 < route["strecke_km"] < 900, "Strecke plausibel",
            f"{route['strecke_km']} km")
@@ -161,7 +171,7 @@ def main() -> int:
         "fahrzeug_id": fahrzeuge[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
         "ziel": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
-        "start_soc": 80.0}).json()
+        "start_soc": 80.0}).json()["varianten"][0]
     pruefe(kurz["reicht"] is True, "Hamburg-Bremen reicht dagegen locker",
            f"SoC am Ziel {kurz['soc_am_ziel']} %")
 

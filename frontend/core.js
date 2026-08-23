@@ -8,7 +8,7 @@ window.jolt = (function () {
   "use strict";
 
   const zustand = {
-    fahrt: null,        // Antwort von POST /api/route
+    fahrt: null,        // eine gewählte Variante aus POST /api/route
     fahrzeuge: [],
     sitzungId: null,    // laufende Live-Sitzung
   };

@@ -69,6 +69,20 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .wert.gut .zahl { color: var(--gut); }
 .wert.warnung .zahl { color: var(--warnung); }
 .wert.schlecht .zahl { color: var(--schlecht); }
+.varianten { display: flex; flex-direction: column; gap: 8px; }
+.variante {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  width: 100%; text-align: left; font: inherit; color: var(--text); cursor: pointer;
+  background: #0c1116; border: 1px solid var(--rand); border-radius: 10px;
+  padding: 10px 12px;
+}
+.variante[aria-pressed="true"] { border-color: var(--akzent); background: #1a1710; }
+.variante .etiketten { display: flex; gap: 6px; flex-wrap: wrap; }
+.variante .etikett { font-size: 11px; padding: 2px 8px; border-radius: 99px;
+  background: var(--flaeche); border: 1px solid var(--rand); color: var(--gedaempft); }
+.variante .etikett.sparsamste { background: #163021; border-color: #235c3c; color: var(--gut); }
+.variante .kennwerte { font-size: 12px; color: var(--gedaempft); text-align: right;
+  white-space: nowrap; }
 #karte { width: 100%; height: 340px; border-radius: 12px; border: 1px solid var(--rand);
   display: block; touch-action: none; background: #0c1116; cursor: grab; }
 #karte:active { cursor: grabbing; }
@@ -171,6 +185,11 @@ table.kurve input { padding: 6px 8px; }
     </div>
 
     <div id="ergebnis" hidden>
+      <div class="karte-block" id="varianten-block" hidden>
+        <h2 style="margin-top:0">Routenvarianten</h2>
+        <div class="varianten" id="varianten"></div>
+      </div>
+
       <div class="karte-block">
         <div class="werte" id="kennzahlen"></div>
         <canvas id="profil"></canvas>
