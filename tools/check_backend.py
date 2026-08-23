@@ -300,12 +300,14 @@ def main() -> int:
     pruefe(zustand2["neuplanung_noetig"] is True,
            "die Neuplanung wird angefordert", zustand2["grund"])
 
-    # Abseits der Route
+    # Abseits der Route. Geprüft wird hier nur die Messung - dass daraus erst
+    # nach einer Minute eine Neuplanung wird, hängt an Zeitstempeln und steht
+    # deshalb in check_umplanung.py, wo sie sich setzen lassen.
     abseits = client.post(f"/api/live/{sitzung2}/punkt", json={
         "lat": 54.9, "lon": 8.31, "soc": 40.0}).json()
-    pruefe(abseits["abstand_zur_route_m"] > 500 and abseits["neuplanung_noetig"],
-           "ein Sprung weg von der Route wird erkannt",
-           abseits["grund"])
+    pruefe(abseits["abstand_zur_route_m"] > 500,
+           "ein Sprung weg von der Route wird als Abstand erkannt",
+           f"{abseits['abstand_zur_route_m']} m")
 
     beendet = client.post(f"/api/live/{sitzung2}/ende").json()
     pruefe(beendet["ok"] is True, "die Sitzung lässt sich beenden")

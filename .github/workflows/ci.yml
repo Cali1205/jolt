@@ -22,4 +22,18 @@ jobs:
 
       - run: ./tools/check_modell.py
       - run: ./tools/check_optimierer.py
+      - run: ./tools/check_umplanung.py
       - run: ./tools/check_backend.py
+
+      # Die Revisionen sind die einzige Quelle des Schemas - ein create_all
+      # als Notnagel gibt es nicht. Also muss der Weg von null bis head und
+      # wieder zurück laufen, sonst kommt eine bestehende Installation beim
+      # Aktualisieren nicht mit.
+      - name: Alembic hoch und runter
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite:///./ci-migration.db
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade base
+          python -m alembic upgrade head

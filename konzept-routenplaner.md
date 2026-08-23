@@ -290,10 +290,35 @@ Zwei Dinge sind dabei anders gekommen als geplant:
   diesen Fall da. Gibt es keinen, sagt der Plan das, statt die Lücke zu
   verschweigen.
 
-**Stufe 3 — die Live-Neuplanung**
+**Stufe 3 — die Live-Neuplanung** *(steht)*
 
-Die Auslöser aus 2.3, laufende Nachführung des Verbrauchsfaktors, Push auf das
-Telefon, wenn sich ein Stopp ändert.
+Die Auslöser aus 2.3 vollständig, in `live/sitzung.py`; die Umplanung selbst in
+`live/umplanung.py`. Neu geplant wird die **Reststrecke** ab der aktuellen
+Position mit dem aktuellen Ladestand — für den Optimierer aus Stufe 2 ist das
+dieselbe Aufgabe wie vor der Abfahrt, nur mit besseren Zahlen.
+
+Drei Dinge sind dabei dazugekommen, die im Konzept so nicht standen:
+
+- Ein zweiter Faktor für die **Zeit**. Der Verbrauchsfaktor sieht einen Stau
+  nicht: Wer steht, verbraucht je Kilometer sogar etwas mehr, aber die
+  Ankunftszeit verschiebt sich um ein Vielfaches davon. Ohne eigene Zahl wäre
+  der Auslöser „Ankunftszeit verschiebt sich" nicht zu haben — und jede
+  Ankunftszeit im umgeplanten Ladeplan wäre die aus dem alten Plan.
+- Eine **Sperre** gegen zu häufiges Umplanen. Die Schwellen aus 2.3 sagen,
+  *wann* etwas nicht mehr stimmt — sie sagen nicht, wann es wieder stimmt. Eine
+  Abweichung von acht Prozentpunkten besteht bei der nächsten Messung immer
+  noch, und bei der übernächsten auch. Ohne Sperre rechnete deshalb jede
+  einzelne Messung neu. Dringende Gründe (Säule belegt, Reserve reicht nicht)
+  gehen immer durch, alles andere erst wieder nach zehn Kilometern.
+- Der Simulator bekam eine **simulierte Uhr**. Er spielt Stunden in Sekunden
+  ab; gegen die echte Uhr gemessen wäre jeder Zeitfaktor Unsinn. Mit
+  simulierten Zeitstempeln lässt sich stattdessen ein Stau durchspielen — und
+  damit genau der Auslöser prüfen, den der Verbrauch nie auslöst.
+
+**Noch offen:** echtes Web Push (VAPID), damit eine Planänderung auch ein
+Telefon erreicht, dessen Bildschirm aus ist. Solange die Ansicht offen ist —
+der Normalfall am Armaturenbrett — meldet sich jolt bereits über die
+Benachrichtigungen des Browsers.
 
 **Stufe 4 — echte Fahrzeugdaten**
 

@@ -125,6 +125,18 @@ def plan_pruefen(plan, profil, fz, start_soc, ziel_soc, name: str) -> dict:
              + plan.umwegzeit_minuten)
     pruefe(abs(summe - plan.gesamt_minuten) < 0.5,
            f"{name}: Fahrzeit, Ladezeit und Umwege ergeben die Gesamtzeit")
+
+    # Kein Stopp, der sich nicht lohnt. Ein Halt kostet allein an Fixkosten
+    # rund vier Minuten; wer dafür zwei Prozentpunkte lädt, hätte dieselbe
+    # Energie am nächsten Stopp in weniger Zeit bekommen. Solche Stopps
+    # entstanden, als die Nachoptimierung die Ladehübe auf das gerade noch
+    # Nötige herunterschliff - der Suche waren sie verboten, dem
+    # Nachoptimierer nicht.
+    huebe = [s.abfahrt_soc - s.ankunft_soc for s in plan.stopps]
+    pruefe(all(h >= optimierer.MIN_LADEHUB - 0.5 for h in huebe),
+           f"{name}: an keinem Stopp wird weniger als der Mindesthub geladen",
+           f"Ladehübe {[round(h, 1) for h in huebe]}, "
+           f"Mindesthub {optimierer.MIN_LADEHUB}")
     return fakten
 
 
@@ -332,6 +344,37 @@ def fall_ausweich():
            "jeder Ausweichstandort liegt voraus und ist ohne Nachladen erreichbar")
 
 
+def fall_dichte_saeulen():
+    abschnitt("Dichte Säulen und hoher Verbrauch - keine Alibi-Stopps")
+    # Der Fall, in dem der Mindestladehub gebraucht wird: viele erreichbare
+    # Säulen, hoher Verbrauch, und darunter grosse Ladeparks mit kräftigem
+    # Redundanzbonus. Solange der Bonus Umweg *und* Ladezeit aufwiegen durfte
+    # und die Nachoptimierung den Mindesthub nicht kannte, entstand hier ein
+    # Halt über fünf Prozentpunkte in anderthalb Minuten - rechnerisch billig,
+    # in Wirklichkeit ein Umweg für nichts.
+    fz = Fahrzeugwerte(akku_netto_kwh=60.0, reserve_soc=10.0)
+    profil = profil_bauen(577, kwh_je_km=0.257)
+    muster = [(150, 4), (300, 8), (350, 12), (150, 6)]
+    optionen = []
+    for i, km in enumerate(range(35, 577, 35)):
+        kw, punkte = muster[i % len(muster)]
+        optionen.append(optimierer.Ladeoption(
+            id=i + 1, km_auf_route=float(km), umweg_minuten=5.1,
+            max_kw=float(kw), anzahl_punkte=punkte, name=f"Rasthof km {km}"))
+
+    plan = optimierer.planen(profil, optionen, fz, KURVE, start_soc=65.0,
+                             ziel_soc=20.0, max_fahrzeug_kw=350.0)
+    pruefe(plan.machbar, "machbar", plan.grund)
+    pruefe(len(plan.stopps) >= 6, "die Strecke braucht viele Stopps",
+           f"{len(plan.stopps)}")
+    plan_pruefen(plan, profil, fz, 65.0, 20.0, "Dichte Säulen")
+
+    kurz = [s for s in plan.stopps if s.ladezeit_minuten < 2.0]
+    pruefe(not kurz,
+           "kein Stopp dauert unter zwei Minuten - dafür lohnt kein Abstecher",
+           str([(s.option.name, s.ladezeit_minuten) for s in kurz]))
+
+
 def fall_laufzeit():
     abschnitt("Laufzeit")
     fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
@@ -363,6 +406,7 @@ def main() -> int:
     fall_redundanz()
     fall_ausschluesse()
     fall_ausweich()
+    fall_dichte_saeulen()
     fall_laufzeit()
 
     print()

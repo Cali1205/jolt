@@ -50,9 +50,18 @@ SOC_RASTER = 5.0
 # feststeht und nur noch die Lademengen gesucht werden.
 SOC_RASTER_FEIN = 1.0
 
-# Unter zwei Prozentpunkten Ladehub lohnt kein Halt. Ohne diese Schranke
-# entstünden Stopps, die nur aus Umwegzeit bestehen.
-MIN_LADEHUB = 2.0
+# Wie viel an einem Halt mindestens geladen werden muss, damit er sich lohnt.
+#
+# Acht Prozentpunkte klingen willkürlich, sind aber gerechnet: Ein Stopp
+# kostet allein an Fixkosten rund vier Minuten (abfahren, einparken, Kabel
+# holen, wieder auffädeln). In derselben Zeit lädt ein Schnelllader rund zehn
+# Prozentpunkte. Wer weniger lädt, hat den Halt nicht wieder hereingeholt -
+# er hätte dieselbe Energie am nächsten Stopp in weniger Zeit bekommen.
+#
+# Mit der vorherigen Schranke von zwei Prozentpunkten entstanden Stopps von
+# einer Minute Ladezeit, die nur deshalb billig aussahen, weil der
+# Redundanzbonus ihren Umweg aufwog.
+MIN_LADEHUB = 8.0
 
 # Ausdünnung der Kandidaten: je Streckenabschnitt die besten N. Ohne das
 # stünden an einem Autobahnkreuz zwanzig gleichwertige Standorte im Graphen
@@ -545,10 +554,14 @@ class _Graph:
                 ladezeit = tabelle.zeit(soc, ladeziel)
                 if ladezeit == math.inf:
                     break
-                # Der Bonus darf den Halt nie billiger als kostenlos machen -
-                # sonst hätte der Graph negative Kanten und Dijkstra verlöre
-                # seine Grundlage.
-                bonus = min(bonus_roh, umweg + ladezeit)
+                # Der Bonus wiegt den *Umweg* auf, nie die Ladezeit. Er sagt
+                # "hierhin zu fahren lohnt sich, weil hier eher etwas frei
+                # ist" - nicht "hier zu laden kostet keine Zeit". Ohne diese
+                # Grenze wird ein Halt an einem grossen Ladepark rechnerisch
+                # gratis, und es entstehen Stopps, die niemand fährt.
+                # Nebenbei bleiben so alle Kanten positiv, was Dijkstra
+                # ohnehin braucht.
+                bonus = min(bonus_roh, umweg)
                 abfahrten.append((ladeziel, umweg + ladezeit - bonus))
             if not abfahrten:
                 return
@@ -660,7 +673,13 @@ class _Graph:
         for ankunft, zeit_vor, herkunft in eingaenge:
             if ankunft + _EPS < self.reserve:
                 continue
-            untergrenze = max(ankunft, min_ziel)
+            # Der Mindestladehub gilt auch hier. Ohne ihn schleift die
+            # Nachoptimierung die Ladehübe auf das gerade noch Nötige herunter
+            # und erzeugt Stopps von einer Minute - der Dijkstra hatte sie
+            # verboten, das DP führte sie wieder ein. Zulässig bleibt es: Der
+            # Weg aus Schritt 3 erfüllt die Schranke bereits, es gibt hier
+            # also immer eine Lösung.
+            untergrenze = max(ankunft + MIN_LADEHUB, min_ziel)
             for d in raster:
                 if d + _EPS < untergrenze:
                     continue

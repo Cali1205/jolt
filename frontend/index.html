@@ -211,6 +211,15 @@ table.kurve input { padding: 6px 8px; }
       <div id="karte-halter-live"></div>
 
       <div class="karte-block">
+        <div class="karte-fuss" style="margin-bottom:10px">
+          <h2 style="margin:0">Ladeplan unterwegs</h2>
+          <span id="live-plan-stand"></span>
+        </div>
+        <div id="live-aenderung" class="meldung warnung" hidden></div>
+        <ol class="liste" id="live-plan"></ol>
+      </div>
+
+      <div class="karte-block">
         <h2 style="margin-top:0">Ladestand melden</h2>
         <p class="leer" style="padding-top:0">Solange das Auto seinen Ladestand
           nicht selbst liefert, kommt er von Hand. Die Position holt das
@@ -233,9 +242,22 @@ table.kurve input { padding: 6px 8px; }
         <p class="leer" style="padding-top:0">Spielt die geplante Fahrt ab. Mit
           Mehrverbrauch über 100 % muss die Nachführung anschlagen und die
           Reserve nach vorn rücken – das ist der Prüfstein.</p>
-        <label for="mehrverbrauch">Mehrverbrauch
-          <span id="mehrverbrauch-wert">120</span> %</label>
-        <input type="range" id="mehrverbrauch" min="70" max="180" step="5" value="120">
+        <div class="reihe">
+          <div>
+            <label for="mehrverbrauch">Mehrverbrauch
+              <span id="mehrverbrauch-wert">120</span> %</label>
+            <input type="range" id="mehrverbrauch" min="70" max="180" step="5"
+                   value="120">
+          </div>
+          <div>
+            <!-- Stau getrennt vom Verbrauch: Wer steht, verbraucht je
+                 Kilometer kaum mehr, kommt aber viel später an. Nur so lässt
+                 sich der Auslöser prüfen, den der Verbrauch nie auslöst. -->
+            <label for="stau">Fahrzeit
+              <span id="stau-wert">100</span> %</label>
+            <input type="range" id="stau" min="100" max="200" step="10" value="100">
+          </div>
+        </div>
         <button class="tat neben" id="simulieren">Simulation starten</button>
         <button class="tat neben" id="live-beenden">Fahrt beenden</button>
       </div>
