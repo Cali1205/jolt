@@ -58,6 +58,11 @@ class RoutingProvider(Protocol):
         """
         ...
 
-    def suchen(self, text: str, land: str = "DE") -> list[Ort]:
-        """Ortsnamen zu Koordinaten auflösen."""
+    def suchen(self, text: str, land: str = "") -> list[Ort]:
+        """Ortsnamen zu Koordinaten auflösen.
+
+        `land` (ISO-3166-Alpha-2, z.B. "DE") schränkt die Suche auf ein Land
+        ein. Leer gelassen sucht sie weltweit - jolt ist kein
+        Deutschland-Planer, ein Ziel darf jenseits der Grenze liegen.
+        """
         ...

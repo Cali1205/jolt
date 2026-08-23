@@ -110,11 +110,17 @@ class ORS:
                      strecke_m=float(zusammenfassung.get("distance") or 0.0),
                      fahrzeit_s=float(zusammenfassung.get("duration") or 0.0))
 
-    def suchen(self, text: str, land: str = "DE") -> list[Ort]:
+    def suchen(self, text: str, land: str = "") -> list[Ort]:
+        # Ohne Länderfilter sucht ORS weltweit - genau das will ein Reiseziel
+        # jenseits der Grenze. Nur wenn `land` explizit gesetzt ist (z.B. um
+        # eine Eingabe wie "Hamburg" von gleichnamigen Orten anderswo zu
+        # unterscheiden), wird eingeschränkt.
+        params = {"api_key": self.api_key, "text": text, "size": 6}
+        if land:
+            params["boundary.country"] = land
         try:
             antwort = requests.get(f"{BASIS}/geocode/search", timeout=TIMEOUT,
-                                   params={"api_key": self.api_key, "text": text,
-                                           "boundary.country": land, "size": 6})
+                                   params=params)
             antwort.raise_for_status()
         except requests.RequestException as fehler:
             raise RoutingFehler(f"Ortssuche nicht erreichbar: {fehler}") from fehler
