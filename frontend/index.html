@@ -119,6 +119,23 @@ table.kurve input { padding: 6px 8px; }
 <main>
   <div id="meldungen"></div>
 
+  <!-- ------------------------------- Anmelden -->
+  <!-- Nur sichtbar, wenn APP_PASSWORT gesetzt ist und kein gültiges Token
+       vorliegt - siehe app.js. Verdeckt bis dahin nav und alle anderen
+       Ansichten, damit niemand eine Oberfläche sieht, die nur 401 liefert. -->
+  <section id="ansicht-login" hidden>
+    <div class="karte-block">
+      <h2 style="margin-top:0">Anmelden</h2>
+      <form id="login-formular">
+        <label for="login-passwort">Passwort</label>
+        <input type="password" id="login-passwort" autocomplete="current-password"
+               autofocus>
+        <div id="login-fehler" class="meldung fehler" hidden></div>
+        <button class="tat" type="submit">Anmelden</button>
+      </form>
+    </div>
+  </section>
+
   <!-- ------------------------------- Planen -->
   <section id="ansicht-planen">
     <div class="karte-block">
