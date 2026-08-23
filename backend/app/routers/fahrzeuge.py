@@ -71,6 +71,13 @@ def _kurve_setzen(db: Session, fahrzeug: models.Fahrzeug,
     for alt in list(fahrzeug.ladekurve):
         db.delete(alt)
     fahrzeug.ladekurve.clear()
+    # Ohne dieses Flush schreibt SQLAlchemy im selben Flush zuerst die neuen
+    # Zeilen und erst danach die DELETEs der alten - beim Bearbeiten eines
+    # Fahrzeugs, das dieselben Ladestände behält (der Normalfall: nur die
+    # kW-Werte ändern sich), verletzt das dann dieselbe Unique-Constraint wie
+    # ein echtes Duplikat, nur unsichtbar für _kurve_pruefen(). Das Flush
+    # zwingt die Löschungen zuerst in die Datenbank.
+    db.flush()
     for eintrag in paare:
         if len(eintrag) < 2:
             continue

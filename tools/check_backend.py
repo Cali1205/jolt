@@ -114,6 +114,20 @@ def main() -> int:
            "und die Meldung nennt den betroffenen Ladestand",
            doppelt.json())
 
+    # Regression: Ein Fahrzeug ändern und dabei dieselben Ladestände wie
+    # zuvor behalten (nur die kW-Werte ändern - der Normalfall beim
+    # Bearbeiten) darf nicht crashen. SQLAlchemy schreibt im selben Flush
+    # sonst die neuen Zeilen vor dem Löschen der alten und verletzt die
+    # Unique-Constraint, obwohl die neue Kurve für sich genommen keine
+    # Duplikate hat.
+    geaendert = client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
+        "name": fahrzeuge[0]["name"], "akku_brutto_kwh": fahrzeuge[0]["akku_brutto_kwh"],
+        "akku_netto_kwh": fahrzeuge[0]["akku_netto_kwh"],
+        "ladekurve": [[soc, kw + 5] for soc, kw in fahrzeuge[0]["ladekurve"]]})
+    pruefe(geaendert.status_code == 200,
+           "dieselben Ladestände beim Ändern zu behalten funktioniert",
+           f"HTTP {geaendert.status_code}: {geaendert.text[:150]}")
+
     print("\nLadesäulen-Import (Format der Bundesnetzagentur)")
     db = SessionLocal()
     try:
