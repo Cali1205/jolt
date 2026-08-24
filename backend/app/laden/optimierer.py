@@ -36,7 +36,7 @@ from bisect import bisect_left
 from dataclasses import dataclass, field
 
 from .kurven import leistung_bei
-from .verfuegbarkeit import redundanz_bonus
+from .verfuegbarkeit import betreiber_bonus, redundanz_bonus
 
 # Kandidaten mit mehr Umweg fallen raus: Sie gewinnen die Zeit an der Säule
 # fast nie zurück. Zehn Minuten Umweg sind zehn Minuten Ladezeit, und die
@@ -280,12 +280,15 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
            kurve: list[tuple[float, float]], start_soc: float,
            ziel_soc: float = 20.0, max_fahrzeug_kw: float = 1e9,
            temperatur_faktor: float = 1.0,
-           umweg_grenze_min: float = UMWEG_GRENZE_MIN) -> Ladeplan:
+           umweg_grenze_min: float = UMWEG_GRENZE_MIN,
+           bevorzugte_betreiber: list[str] | None = None) -> Ladeplan:
     """Die zeitoptimale Folge von Ladestopps.
 
     `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
     `reserve_soc` werden gebraucht). `kurve` sind die Stützstellen der
-    Ladekurve als `(SoC, kW)`.
+    Ladekurve als `(SoC, kW)`. `bevorzugte_betreiber` begünstigt passende
+    Standorte bei der Stoppwahl, schliesst andere aber nicht aus - siehe
+    verfuegbarkeit.betreiber_bonus().
     """
     plan = Ladeplan()
     if not profil.km or len(profil.km) < 2 or fz.akku_netto_kwh <= 0:
@@ -299,7 +302,7 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
     plan.gepruefte_kandidaten = len(gefiltert)
 
     graph = _Graph(profil, gefiltert, fz, kurve, max_fahrzeug_kw,
-                   temperatur_faktor)
+                   temperatur_faktor, bevorzugte_betreiber)
 
     # Schritt 3: Pareto-Dijkstra.
     weg = graph.suchen(start_soc, ziel_soc)
@@ -375,13 +378,15 @@ class _Graph:
     """
 
     def __init__(self, profil: Streckenprofil, optionen: list[Ladeoption], fz,
-                 kurve, max_fahrzeug_kw: float, temperatur_faktor: float):
+                 kurve, max_fahrzeug_kw: float, temperatur_faktor: float,
+                 bevorzugte_betreiber: list[str] | None = None):
         self.profil = profil
         self.optionen = optionen
         self.fz = fz
         self.kurve = kurve
         self.max_fahrzeug_kw = max_fahrzeug_kw
         self.temperatur_faktor = temperatur_faktor
+        self.bevorzugte_betreiber = bevorzugte_betreiber or []
         self.reserve = fz.reserve_soc
         # Umrechnung kWh -> Prozentpunkte. Ab hier rechnet der Optimierer
         # ausschliesslich in SoC; das spart in der inneren Schleife eine
@@ -539,7 +544,9 @@ class _Graph:
             option = self.optionen[knoten - 1]
             umweg = option.umweg_minuten
             tabelle = self.tabelle(knoten)
-            bonus_roh = redundanz_bonus(option.anzahl_punkte or 1)
+            bonus_roh = (redundanz_bonus(option.anzahl_punkte or 1)
+                        + betreiber_bonus(option.betreiber,
+                                          self.bevorzugte_betreiber))
 
             untergrenze = soc + MIN_LADEHUB
             # Das Raster **und** die exakt nötigen Ladestände der Etappen: Der

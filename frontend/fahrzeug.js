@@ -33,6 +33,10 @@ window.joltFahrzeug = (function () {
     { name: "max_ladeleistung_kw", titel: "Max. Ladeleistung (kW)", schritt: 1 },
     { name: "steckertyp", titel: "Steckertyp", typ: "auswahl",
       werte: ["CCS", "Typ2", "CHAdeMO"] },
+    { name: "bevorzugte_betreiber", titel: "Bevorzugte Ladeanbieter", typ: "liste",
+      hinweis: "Namen oder Namensteile, durch Komma getrennt - z.B. "
+        + "\"EnBW, Ionity\". Kein Ausschluss anderer Anbieter, nur ein "
+        + "Vorteil bei der Stoppwahl." },
   ];
 
   function formularBauen() {
@@ -46,7 +50,7 @@ window.joltFahrzeug = (function () {
         eingabe = `<select id="${id}">`
           + feld.werte.map((w) => `<option value="${w}">${w}</option>`).join("")
           + `</select>`;
-      } else if (feld.typ === "text") {
+      } else if (feld.typ === "text" || feld.typ === "liste") {
         eingabe = `<input type="text" id="${id}">`;
       } else {
         eingabe = `<input type="number" id="${id}" step="${feld.schritt}">`;
@@ -62,6 +66,7 @@ window.joltFahrzeug = (function () {
       const el = document.getElementById("fz-" + feld.name);
       if (!el) continue;
       if (feld.typ === "checkbox") el.checked = !!fahrzeug[feld.name];
+      else if (feld.typ === "liste") el.value = (fahrzeug[feld.name] || []).join(", ");
       else el.value = fahrzeug[feld.name] !== undefined ? fahrzeug[feld.name] : "";
     }
     kurveFuellen(fahrzeug.ladekurve || []);
@@ -73,7 +78,9 @@ window.joltFahrzeug = (function () {
       const el = document.getElementById("fz-" + feld.name);
       if (!el) continue;
       if (feld.typ === "checkbox") daten[feld.name] = el.checked;
-      else if (feld.typ === "text" || feld.typ === "auswahl") daten[feld.name] = el.value;
+      else if (feld.typ === "liste") {
+        daten[feld.name] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (feld.typ === "text" || feld.typ === "auswahl") daten[feld.name] = el.value;
       else daten[feld.name] = Number(el.value);
     }
     daten.ladekurve = kurveLesen();

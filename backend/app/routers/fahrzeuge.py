@@ -27,6 +27,8 @@ class FahrzeugEingabe(BaseModel):
     ziel_soc: float = Field(default=20.0, ge=0, le=100)
     max_ladeleistung_kw: float = 150.0
     steckertyp: str = "CCS"
+    # Namen oder Namensteile, die der Ladeplan bevorzugt - kein harter Filter.
+    bevorzugte_betreiber: list[str] = []
     # [[soc, kw], ...] - leer heisst "Kurve unverändert lassen"
     ladekurve: list[list[float]] = []
 
@@ -44,6 +46,7 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "reserve_soc": fahrzeug.reserve_soc, "ziel_soc": fahrzeug.ziel_soc,
             "max_ladeleistung_kw": fahrzeug.max_ladeleistung_kw,
             "steckertyp": fahrzeug.steckertyp,
+            "bevorzugte_betreiber": fahrzeug.bevorzugte_betreiber or [],
             "korrekturfaktor": fahrzeug.korrekturfaktor,
             "ladekurve": [[p.soc_prozent, p.kw] for p in fahrzeug.ladekurve]}
 
