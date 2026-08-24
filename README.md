@@ -108,6 +108,20 @@ OCM_API_KEY=… ./tools/import_ocm.py AT,CH 5000 50   # optional, fürs Ausland
 Ohne diesen Schritt bleibt die Liste „Ladepunkte entlang der Route" leer — die
 Tabelle ist bei einer frischen Installation schlicht noch nicht gefüllt.
 
+`import_ocm.py` fragt Open Charge Map länderweise ab. Bei einem grossen Land
+(z.B. Frankreich) blättert OCMs `offset`-Pagination bei sehr vielen Treffern
+nicht zuverlässig weiter — ein Teil der Ladepunkte bleibt dann unerreichbar,
+egal wie hoch das Limit steht. Für gezielt eine Strecke gibt es die
+Alternative `import_ocm_route.py`, die stattdessen mehrere kleinere Umkreise
+entlang der tatsächlichen Routen-Geometrie abfragt:
+
+```bash
+OCM_API_KEY=… ./tools/import_ocm_route.py <fahrt_id> 30 50   # Umkreis 30 km, ab 50 kW
+```
+
+Die `fahrt_id` steht in der Antwort von `GET /api/fahrten`, nachdem die
+Strecke einmal in der App berechnet wurde.
+
 ### Benachrichtigungen aufs Telefon
 
 ```bash
@@ -200,7 +214,8 @@ backend/app/
   routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
 frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
               sw.js (Offline-Gerüst und Push-Empfang)
-tools/        import_bnetza.py · import_ocm.py · push_schluessel.py
+tools/        import_bnetza.py · import_ocm.py · import_ocm_route.py
+              push_schluessel.py
               check_modell.py · check_optimierer.py · check_umplanung.py
               check_push.py · check_backend.py
 ```

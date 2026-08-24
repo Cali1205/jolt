@@ -248,6 +248,49 @@ def main() -> int:
         saeulen_import_modul.requests.get = ocm_get_original
         db.close()
 
+    print("\nOpen-Charge-Map-Import entlang einer Strecke")
+    # Regression: aus_ocm()s offset-Pagination blättert bei einem sehr grossen
+    # Land nicht zuverlässig durch (siehe oben) - aus_ocm_route() fragt
+    # stattdessen mehrere Umkreise entlang der Streckengeometrie ab. Geprüft
+    # wird: mehrere Anker bei einer längeren Strecke, und ein Standort, den
+    # zwei überlappende Umkreise beide sehen, wird nur einmal gezählt.
+    strecke = [[16.37 + 0.01 * i, 48.21] for i in range(151)]  # ~150 km Ost-West
+
+    angefragte_anker: list = []
+
+    class _GefaelschteRoutenAntwort:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return [{
+                "ID": 888001,
+                "AddressInfo": {"Latitude": 48.21, "Longitude": 16.5,
+                                "Country": {"ISOCode": "AT"}},
+                "OperatorInfo": {"Title": "IONITY"},
+                "Connections": [{"ConnectionType": {"Title": "CCS"},
+                                 "PowerKW": 350.0, "Quantity": 4}],
+            }]
+
+    def _gefaelschter_routen_get(url, timeout=None, params=None):
+        angefragte_anker.append((params.get("latitude"), params.get("longitude")))
+        return _GefaelschteRoutenAntwort()
+
+    ocm_get_original = saeulen_import_modul.requests.get
+    saeulen_import_modul.requests.get = _gefaelschter_routen_get
+    db = SessionLocal()
+    try:
+        zaehler = saeulen_import_modul.aus_ocm_route(
+            db, "test-schluessel", strecke, radius_km=30.0)
+        pruefe(len(angefragte_anker) >= 2,
+               "eine längere Strecke fragt mehrere Umkreise ab",
+               f"{len(angefragte_anker)} Anker")
+        pruefe(zaehler["neu"] == 1,
+               "ein Standort, den mehrere überlappende Umkreise sehen, "
+               "wird nur einmal gezählt", str(zaehler))
+    finally:
+        saeulen_import_modul.requests.get = ocm_get_original
+        db.close()
+
     print("\nOrtssuche ohne Länderfilter")
     # Regression: `land` stand früher fest auf "DE" und /api/orte fragte damit
     # nie explizit - jedes Ziel jenseits der Grenze verschwand über
