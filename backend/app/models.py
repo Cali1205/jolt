@@ -95,6 +95,12 @@ class Fahrzeug(Base):
     max_ladeleistung_kw = Column(Float, nullable=False, default=150.0)
     steckertyp = Column(String(20), nullable=False, default="CCS")
 
+    # Namen (oder Teile davon, z.B. "EnBW"), die der Optimierer bei der
+    # Stoppwahl bevorzugt - siehe laden/verfuegbarkeit.py:betreiber_bonus().
+    # Kein harter Filter: ein nicht bevorzugter Anbieter bleibt wählbar, wird
+    # nur nicht zusätzlich begünstigt.
+    bevorzugte_betreiber = Column(JSON, nullable=False, default=list)
+
     # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
     korrekturfaktor = Column(Float, nullable=False, default=1.0)
 

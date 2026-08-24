@@ -97,6 +97,33 @@ def redundanz_bonus(anzahl_punkte: int) -> float:
     return round(min(6.0, 2.2 * math.log(max(1, anzahl_punkte))), 2)
 
 
+# Zeitgutschrift für einen bevorzugten Anbieter - in derselben Grössenordnung
+# wie der Redundanz-Bonus, damit keiner der beiden Effekte den anderen
+# systematisch überstimmt.
+BETREIBER_BONUS_MIN = 4.0
+
+
+def betreiber_bonus(betreiber: str, bevorzugte: list[str] | None) -> float:
+    """Zeitgutschrift in Minuten, wenn der Betreiber auf der bevorzugten Liste steht.
+
+    Kein harter Filter, sondern wie der Redundanz-Bonus nur ein Gewicht in der
+    Stoppwahl: Ein bevorzugter Anbieter macht einen Halt attraktiver, nie
+    kostenlos - der Bonus wiegt beim Aufruf ausschliesslich den Umweg auf, nie
+    die Ladezeit (siehe optimierer.py).
+
+    Der Vergleich ist eine Teilzeichenkette, klein geschrieben: "EnBW" in der
+    Liste trifft "EnBW mobility+" im Datensatz, ohne dass der genaue
+    Anbieter-Wortlaut bekannt sein muss.
+    """
+    if not bevorzugte or not betreiber:
+        return 0.0
+    betreiber_klein = betreiber.strip().lower()
+    for eintrag in bevorzugte:
+        if eintrag and eintrag.strip().lower() in betreiber_klein:
+            return BETREIBER_BONUS_MIN
+    return 0.0
+
+
 # Eine Instanz für den Prozess. Der Zustand ist bewusst prozesslokal - jolt
 # läuft als ein Container für einen Haushalt.
 MELDUNGEN = Meldungen()

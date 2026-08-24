@@ -258,7 +258,8 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
         # also eher zu kurz gerechnet als zu lang.
         temperatur_faktor=kurven.temperatur_faktor(
             fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
-        umweg_grenze_min=umweg_grenze_min)
+        umweg_grenze_min=umweg_grenze_min,
+        bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
             "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,

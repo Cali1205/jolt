@@ -277,6 +277,50 @@ def fall_redundanz():
            f"gewählt: {gewaehlt}")
 
 
+def fall_bevorzugter_betreiber():
+    abschnitt("Bevorzugter Anbieter - kein Ausschluss, nur ein Vorteil")
+    fz = Fahrzeugwerte(akku_netto_kwh=60.0, reserve_soc=10.0)
+    profil = profil_bauen(450)
+    # Zwei Standorte an derselben Stelle der Route (z.B. zwei Ladeparks an
+    # derselben Abfahrt), der bevorzugte mit drei Minuten mehr Umweg - weniger
+    # als der Bonus von vier Minuten, aber genug, um ohne Vorgabe zu verlieren.
+    optionen = [
+        optimierer.Ladeoption(id=1, km_auf_route=220.0, umweg_minuten=4.0,
+                              max_kw=150.0, anzahl_punkte=1, name="fremd",
+                              betreiber="Fremdanbieter GmbH"),
+        optimierer.Ladeoption(id=2, km_auf_route=220.0, umweg_minuten=7.0,
+                              max_kw=150.0, anzahl_punkte=1, name="bevorzugt",
+                              betreiber="EnBW mobility+"),
+    ]
+    ohne = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                             ziel_soc=20.0, max_fahrzeug_kw=150.0)
+    pruefe([s.option.id for s in ohne.stopps] == [1],
+           "ohne Vorgabe gewinnt der Standort mit dem kleineren Umweg",
+           f"gewählt: {[s.option.id for s in ohne.stopps]}")
+
+    mit = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                            ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                            bevorzugte_betreiber=["EnBW"])
+    pruefe([s.option.id for s in mit.stopps] == [2],
+           "mit Vorgabe gleicht der Bonus den grösseren Umweg aus",
+           f"gewählt: {[s.option.id for s in mit.stopps]}")
+
+    # Ein Standort mit 30 Minuten Umweg ist auch als bevorzugter Anbieter kein
+    # Schnäppchen - der Bonus wiegt den Umweg auf, macht ihn aber nie gratis.
+    weit = [optimierer.Ladeoption(id=3, km_auf_route=210.0, umweg_minuten=30.0,
+                                  max_kw=300.0, anzahl_punkte=8,
+                                  name="weit, aber bevorzugt",
+                                  betreiber="EnBW mobility+"),
+            optimierer.Ladeoption(id=4, km_auf_route=215.0, umweg_minuten=6.0,
+                                  max_kw=150.0, anzahl_punkte=4, name="nah")]
+    plan_weit = optimierer.planen(profil, weit, fz, KURVE, start_soc=90.0,
+                                  ziel_soc=20.0, max_fahrzeug_kw=300.0,
+                                  bevorzugte_betreiber=["EnBW"])
+    pruefe([s.option.id for s in plan_weit.stopps] == [4],
+           "ein 30-Minuten-Umweg bleibt draussen, auch beim bevorzugten Anbieter",
+           f"gewählt: {[s.option.id for s in plan_weit.stopps]}")
+
+
 def fall_ausschluesse():
     abschnitt("Was nicht in den Plan darf")
     fz = Fahrzeugwerte(akku_netto_kwh=60.0, reserve_soc=10.0)
@@ -404,6 +448,7 @@ def main() -> int:
     fall_luecke_vorher_fuellen()
     fall_pass()
     fall_redundanz()
+    fall_bevorzugter_betreiber()
     fall_ausschluesse()
     fall_ausweich()
     fall_dichte_saeulen()

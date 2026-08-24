@@ -136,7 +136,8 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
         max_fahrzeug_kw=fahrzeug.max_ladeleistung_kw,
         temperatur_faktor=kurven.temperatur_faktor(
             fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
-        umweg_grenze_min=parameter["umweg_grenze_min"])
+        umweg_grenze_min=parameter["umweg_grenze_min"],
+        bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     ergebnis = plan.als_dict()
     for stopp in ergebnis["stopps"]:
