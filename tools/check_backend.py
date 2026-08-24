@@ -163,6 +163,34 @@ def main() -> int:
     pruefe(abs(harz.lat - 51.9) < 1e-6, "Koordinate mit Komma korrekt gelesen",
            f"ist {harz.lat}")
 
+    print("\nDoppelter fremd_id innerhalb eines Imports")
+    # Regression: eine Mehrländer-Abfrage bei Open Charge Map kann einen
+    # Standort nahe der Grenze zweimal liefern. Ohne Flush zwischen zwei
+    # _speichern()-Aufrufen für dieselbe fremd_id sieht die zweite Suche den
+    # ersten, noch nicht committeten INSERT nicht - der zweite INSERT
+    # verletzt dann die Unique-Constraint (quelle, fremd_id) und die ganze
+    # Charge scheitert mit HTTP 500 (bzw. hier: einer nackten IntegrityError).
+    from app.laden.saeulen_import import _speichern
+
+    db = SessionLocal()
+    try:
+        erst = _speichern(db, "ocm", "pruef-doppelt", {
+            "name": "Erststand", "betreiber": "", "lat": 50.0, "lon": 10.0,
+            "adresse": "", "plz": "", "ort": "", "land": "DE",
+            "anschluesse": [], "max_kw": 50.0, "anzahl_punkte": 1,
+            "steckertypen": "CCS", "stand": ""})
+        zweit = _speichern(db, "ocm", "pruef-doppelt", {
+            "name": "Zweitstand", "betreiber": "", "lat": 50.0, "lon": 10.0,
+            "adresse": "", "plz": "", "ort": "", "land": "DE",
+            "anschluesse": [], "max_kw": 60.0, "anzahl_punkte": 1,
+            "steckertypen": "CCS", "stand": ""})
+        db.commit()
+        pruefe(erst == "neu" and zweit == "aktualisiert",
+               "der zweite Aufruf für dieselbe fremd_id aktualisiert, statt "
+               "ein Duplikat anzulegen", f"{erst}, {zweit}")
+    finally:
+        db.close()
+
     print("\nOrtssuche ohne Länderfilter")
     # Regression: `land` stand früher fest auf "DE" und /api/orte fragte damit
     # nie explizit - jedes Ziel jenseits der Grenze verschwand über
