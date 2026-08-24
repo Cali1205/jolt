@@ -39,9 +39,15 @@ from .kurven import leistung_bei
 from .verfuegbarkeit import betreiber_bonus, redundanz_bonus
 
 # Kandidaten mit mehr Umweg fallen raus: Sie gewinnen die Zeit an der Säule
-# fast nie zurück. Zehn Minuten Umweg sind zehn Minuten Ladezeit, und die
-# bekommt man an einem 150-kW-Lader für rund 20 kWh.
-UMWEG_GRENZE_MIN = 10.0
+# fast nie zurück. Fünfzehn Minuten Umweg sind fünfzehn Minuten Ladezeit, und
+# die bekommt man an einem 150-kW-Lader für rund 30 kWh.
+#
+# War zuvor 10.0. Auf langen Strecken mit dünnerer Korridor-Abdeckung (z.B.
+# Besançon-Dijon-Chalon-Brive auf dem Weg nach Südwestfrankreich) lag jeder
+# erreichbare Kandidat 11-23 Minuten abseits der Route und fiel komplett aus
+# der Planung, obwohl die Etappe mit einem einzigen zusätzlichen Umweg von
+# gut zehn Minuten fahrbar gewesen wäre.
+UMWEG_GRENZE_MIN = 15.0
 
 # Raster der Ladeziele in der Suche. Fünf Prozentpunkte halten den Graphen
 # klein; die Quantisierung holt Schritt 4 anschliessend wieder herein.
