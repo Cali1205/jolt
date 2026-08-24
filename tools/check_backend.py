@@ -191,6 +191,55 @@ def main() -> int:
     finally:
         db.close()
 
+    print("\nOpen-Charge-Map-Import ohne compact=true")
+    # Regression: compact=true lässt OCM AddressInfo.Country und OperatorInfo
+    # als blosse IDs statt als Objekte liefern - "land" und "betreiber" kamen
+    # dadurch für jeden importierten Punkt leer an. Geprüft wird direkt gegen
+    # eine gefälschte, aber realistische (verbose) OCM-Antwort: der Parameter
+    # darf nicht gesendet werden, und die verschachtelten Felder müssen
+    # ankommen.
+    from app.laden import saeulen_import as saeulen_import_modul
+
+    gesendete_params: dict = {}
+
+    class _GefaelschteOcmAntwort:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return [{
+                "ID": 999001,
+                "AddressInfo": {"Latitude": 48.2, "Longitude": 16.4,
+                                "AddressLine1": "Teststrasse 1", "Postcode": "1010",
+                                "Town": "Wien", "Country": {"ISOCode": "AT"}},
+                "OperatorInfo": {"Title": "EnBW mobility+"},
+                "Connections": [{"ConnectionType": {"Title": "CCS"},
+                                 "PowerKW": 150.0, "Quantity": 2}],
+                "NumberOfPoints": 2, "DateLastStatusUpdate": "2026-08-24T00:00:00Z",
+            }]
+
+    def _gefaelschtes_ocm_get(url, timeout=None, params=None):
+        gesendete_params.clear()
+        gesendete_params.update(params or {})
+        return _GefaelschteOcmAntwort()
+
+    ocm_get_original = saeulen_import_modul.requests.get
+    saeulen_import_modul.requests.get = _gefaelschtes_ocm_get
+    db = SessionLocal()
+    try:
+        saeulen_import_modul.aus_ocm(db, "test-schluessel", laender=["AT"],
+                                     max_ergebnisse=1)
+        pruefe("compact" not in gesendete_params,
+               "compact=true wird nicht mehr gesendet", str(gesendete_params))
+        eintrag = (db.query(models.Ladepunkt)
+                   .filter_by(quelle="ocm", fremd_id="999001").one())
+        pruefe(eintrag.land == "AT", "das Land wird aus der Antwort übernommen",
+               f"ist {eintrag.land!r}")
+        pruefe(eintrag.betreiber == "EnBW mobility+",
+               "und der Betreiber ebenso", f"ist {eintrag.betreiber!r}")
+    finally:
+        saeulen_import_modul.requests.get = ocm_get_original
+        db.close()
+
     print("\nOrtssuche ohne Länderfilter")
     # Regression: `land` stand früher fest auf "DE" und /api/orte fragte damit
     # nie explizit - jedes Ziel jenseits der Grenze verschwand über
