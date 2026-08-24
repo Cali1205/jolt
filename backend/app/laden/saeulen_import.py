@@ -82,6 +82,14 @@ def _speichern(db, quelle: str, fremd_id: str, felder: dict) -> str:
             setattr(vorhanden, schluessel, wert)
         return "aktualisiert"
     db.add(models.Ladepunkt(quelle=quelle, fremd_id=fremd_id, **felder))
+    # Ohne dieses Flush sieht die obige Suche einen soeben in derselben, noch
+    # nicht committeten Charge hinzugefügten Datensatz nicht (Session läuft
+    # mit autoflush=False). Kommt derselbe fremd_id innerhalb eines Imports
+    # zweimal vor - z.B. wenn eine Mehrländer-Abfrage bei Open Charge Map
+    # einen Standort nahe der Grenze doppelt liefert -, hält die zweite Suche
+    # ihn fälschlich für neu, und der zweite INSERT verletzt die
+    # Unique-Constraint (quelle, fremd_id).
+    db.flush()
     return "neu"
 
 
