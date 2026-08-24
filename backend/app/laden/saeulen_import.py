@@ -260,7 +260,11 @@ def aus_ocm(db, api_key: str, laender: list[str] | None = None,
 
     while geholt < max_ergebnisse:
         antwort = requests.get(OCM_API, timeout=TIMEOUT, params={
-            "output": "json", "key": api_key, "compact": "true", "verbose": "false",
+            # Kein compact=true: Das lässt OCM AddressInfo.Country und
+            # OperatorInfo als blosse IDs statt als Objekte liefern - genau
+            # die Felder, die unten für "land" und "betreiber" gebraucht
+            # werden. Ohne diesen Parameter kommen die vollen Objekte.
+            "output": "json", "key": api_key, "verbose": "false",
             "countrycode": ",".join(laender or ["DE"]),
             "maxresults": min(block, max_ergebnisse - geholt),
             "offset": geholt})
