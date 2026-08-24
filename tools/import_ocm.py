@@ -6,7 +6,7 @@ Grenze. Braucht einen kostenlosen Schlüssel in OCM_API_KEY:
 https://openchargemap.org/site/profile/applications
 
     ./tools/import_ocm.py                 # Deutschland, 2000 Einträge
-    ./tools/import_ocm.py AT,CH 5000 50   # Länder, Anzahl, Mindestleistung kW
+    ./tools/import_ocm.py AT,CH 5000 50   # Länder, Anzahl je Land, Mindestleistung kW
 """
 import os
 import sys

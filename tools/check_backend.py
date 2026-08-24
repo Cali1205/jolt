@@ -192,15 +192,19 @@ def main() -> int:
         db.close()
 
     print("\nOpen-Charge-Map-Import ohne compact=true")
-    # Regression: compact=true lässt OCM AddressInfo.Country und OperatorInfo
-    # als blosse IDs statt als Objekte liefern - "land" und "betreiber" kamen
-    # dadurch für jeden importierten Punkt leer an. Geprüft wird direkt gegen
-    # eine gefälschte, aber realistische (verbose) OCM-Antwort: der Parameter
-    # darf nicht gesendet werden, und die verschachtelten Felder müssen
-    # ankommen.
+    # Regression 1: compact=true lässt OCM AddressInfo.Country und
+    # OperatorInfo als blosse IDs statt als Objekte liefern - "land" und
+    # "betreiber" kamen dadurch für jeden importierten Punkt leer an.
+    # Regression 2: eine Anfrage mit kommagetrennten Ländercodes
+    # (countrycode=AT,CH,...) wird von OCM nicht zuverlässig eingehalten - in
+    # der Praxis kamen Standorte aus der ganzen Welt zurück, nicht nur aus den
+    # angefragten Ländern. Beides wird direkt gegen eine gefälschte, aber
+    # realistische (verbose) OCM-Antwort geprüft: kein compact-Parameter, und
+    # ein Aufruf je Land statt einer kommagetrennten Liste.
     from app.laden import saeulen_import as saeulen_import_modul
 
-    gesendete_params: dict = {}
+    gesendete_countrycodes: list = []
+    letzte_params: dict = {}
 
     class _GefaelschteOcmAntwort:
         status_code = 200
@@ -218,18 +222,22 @@ def main() -> int:
             }]
 
     def _gefaelschtes_ocm_get(url, timeout=None, params=None):
-        gesendete_params.clear()
-        gesendete_params.update(params or {})
+        letzte_params.clear()
+        letzte_params.update(params or {})
+        gesendete_countrycodes.append((params or {}).get("countrycode"))
         return _GefaelschteOcmAntwort()
 
     ocm_get_original = saeulen_import_modul.requests.get
     saeulen_import_modul.requests.get = _gefaelschtes_ocm_get
     db = SessionLocal()
     try:
-        saeulen_import_modul.aus_ocm(db, "test-schluessel", laender=["AT"],
+        saeulen_import_modul.aus_ocm(db, "test-schluessel", laender=["AT", "CH"],
                                      max_ergebnisse=1)
-        pruefe("compact" not in gesendete_params,
-               "compact=true wird nicht mehr gesendet", str(gesendete_params))
+        pruefe("compact" not in letzte_params,
+               "compact=true wird nicht mehr gesendet", str(letzte_params))
+        pruefe(gesendete_countrycodes == ["AT", "CH"],
+               "jedes Land wird einzeln angefragt, nicht als kommagetrennte Liste",
+               str(gesendete_countrycodes))
         eintrag = (db.query(models.Ladepunkt)
                    .filter_by(quelle="ocm", fremd_id="999001").one())
         pruefe(eintrag.land == "AT", "das Land wird aus der Antwort übernommen",

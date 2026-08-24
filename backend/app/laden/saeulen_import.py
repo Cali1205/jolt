@@ -248,72 +248,82 @@ def aus_ocm(db, api_key: str, laender: list[str] | None = None,
             max_ergebnisse: int = 5000, min_kw: float = 0.0) -> dict:
     """Ladepunkte von Open Charge Map holen.
 
-    Blockweise über `maxresults`/`offset`, weil eine Anfrage über ein ganzes
-    Land sonst in ein Zeitlimit läuft.
+    Ein Aufruf je Land, blockweise über `maxresults`/`offset` - eine Anfrage
+    über ein ganzes Land liefe sonst in ein Zeitlimit. `max_ergebnisse` gilt
+    pro Land, nicht für die Summe aller.
+
+    Bewusst kein einziger Aufruf mit kommagetrennten Ländercodes: OCM nimmt
+    `countrycode=AT,CH,FR` zwar entgegen, ignoriert die Einschränkung dabei
+    aber offenbar - die Antwort landet querbeet über die ganze Welt verstreut,
+    nicht auf die angefragten Länder begrenzt (beobachtet in der Praxis: eine
+    Anfrage für AT,CH,FR,IT,NL,BE lieferte auch Standorte in Brasilien, Japan
+    und Kenia). Je Land einzeln zu fragen ist die einzige Einschränkung, die
+    die API zuverlässig einhält.
     """
     if not api_key:
         raise ValueError("Kein OCM_API_KEY gesetzt.")
 
     zaehler = {"neu": 0, "aktualisiert": 0, "uebersprungen": 0}
     block = 500
-    geholt = 0
 
-    while geholt < max_ergebnisse:
-        antwort = requests.get(OCM_API, timeout=TIMEOUT, params={
-            # Kein compact=true: Das lässt OCM AddressInfo.Country und
-            # OperatorInfo als blosse IDs statt als Objekte liefern - genau
-            # die Felder, die unten für "land" und "betreiber" gebraucht
-            # werden. Ohne diesen Parameter kommen die vollen Objekte.
-            "output": "json", "key": api_key, "verbose": "false",
-            "countrycode": ",".join(laender or ["DE"]),
-            "maxresults": min(block, max_ergebnisse - geholt),
-            "offset": geholt})
-        antwort.raise_for_status()
-        eintraege = antwort.json()
-        if not eintraege:
-            break
+    for land in (laender or ["DE"]):
+        geholt = 0
+        while geholt < max_ergebnisse:
+            antwort = requests.get(OCM_API, timeout=TIMEOUT, params={
+                # Kein compact=true: Das lässt OCM AddressInfo.Country und
+                # OperatorInfo als blosse IDs statt als Objekte liefern - genau
+                # die Felder, die unten für "land" und "betreiber" gebraucht
+                # werden. Ohne diesen Parameter kommen die vollen Objekte.
+                "output": "json", "key": api_key, "verbose": "false",
+                "countrycode": land,
+                "maxresults": min(block, max_ergebnisse - geholt),
+                "offset": geholt})
+            antwort.raise_for_status()
+            eintraege = antwort.json()
+            if not eintraege:
+                break
 
-        for eintrag in eintraege:
-            adresse = eintrag.get("AddressInfo") or {}
-            lat, lon = adresse.get("Latitude"), adresse.get("Longitude")
-            if lat is None or lon is None:
-                zaehler["uebersprungen"] += 1
-                continue
+            for eintrag in eintraege:
+                adresse = eintrag.get("AddressInfo") or {}
+                lat, lon = adresse.get("Latitude"), adresse.get("Longitude")
+                if lat is None or lon is None:
+                    zaehler["uebersprungen"] += 1
+                    continue
 
-            anschluesse, typen = [], []
-            for verbindung in (eintrag.get("Connections") or []):
-                typ_text = ((verbindung.get("ConnectionType") or {}).get("Title")
-                            or str(verbindung.get("ConnectionTypeID") or ""))
-                erkannt = _typ_vereinheitlichen(typ_text)
-                typen.extend(erkannt)
-                anschluesse.append({"typ": ", ".join(erkannt) or typ_text,
-                                    "kw": float(verbindung.get("PowerKW") or 0.0),
-                                    "anzahl": verbindung.get("Quantity") or 1,
-                                    "roh": typ_text})
+                anschluesse, typen = [], []
+                for verbindung in (eintrag.get("Connections") or []):
+                    typ_text = ((verbindung.get("ConnectionType") or {}).get("Title")
+                                or str(verbindung.get("ConnectionTypeID") or ""))
+                    erkannt = _typ_vereinheitlichen(typ_text)
+                    typen.extend(erkannt)
+                    anschluesse.append({"typ": ", ".join(erkannt) or typ_text,
+                                        "kw": float(verbindung.get("PowerKW") or 0.0),
+                                        "anzahl": verbindung.get("Quantity") or 1,
+                                        "roh": typ_text})
 
-            max_kw = max([a["kw"] for a in anschluesse] + [0.0])
-            if max_kw < min_kw:
-                zaehler["uebersprungen"] += 1
-                continue
+                max_kw = max([a["kw"] for a in anschluesse] + [0.0])
+                if max_kw < min_kw:
+                    zaehler["uebersprungen"] += 1
+                    continue
 
-            ergebnis = _speichern(db, "ocm", str(eintrag.get("ID")), {
-                "name": adresse.get("Title") or "",
-                "betreiber": (eintrag.get("OperatorInfo") or {}).get("Title") or "",
-                "lat": float(lat), "lon": float(lon),
-                "adresse": adresse.get("AddressLine1") or "",
-                "plz": adresse.get("Postcode") or "",
-                "ort": adresse.get("Town") or "",
-                "land": ((adresse.get("Country") or {}).get("ISOCode") or "")[:2],
-                "anschluesse": anschluesse, "max_kw": max_kw,
-                "anzahl_punkte": eintrag.get("NumberOfPoints") or len(anschluesse) or 1,
-                "steckertypen": ",".join(sorted(set(typen))),
-                "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10]})
-            zaehler[ergebnis] += 1
+                ergebnis = _speichern(db, "ocm", str(eintrag.get("ID")), {
+                    "name": adresse.get("Title") or "",
+                    "betreiber": (eintrag.get("OperatorInfo") or {}).get("Title") or "",
+                    "lat": float(lat), "lon": float(lon),
+                    "adresse": adresse.get("AddressLine1") or "",
+                    "plz": adresse.get("Postcode") or "",
+                    "ort": adresse.get("Town") or "",
+                    "land": ((adresse.get("Country") or {}).get("ISOCode") or "")[:2],
+                    "anschluesse": anschluesse, "max_kw": max_kw,
+                    "anzahl_punkte": eintrag.get("NumberOfPoints") or len(anschluesse) or 1,
+                    "steckertypen": ",".join(sorted(set(typen))),
+                    "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10]})
+                zaehler[ergebnis] += 1
 
-        geholt += len(eintraege)
-        db.commit()
-        if len(eintraege) < block:
-            break
+            geholt += len(eintraege)
+            db.commit()
+            if len(eintraege) < block:
+                break
 
     log.info("Open-Charge-Map-Import: %s", zaehler)
     return zaehler
