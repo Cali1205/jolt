@@ -9,4 +9,3 @@ venv
 *.sqlite3
 daten/
 konzept-routenplaner.md
-tools/
