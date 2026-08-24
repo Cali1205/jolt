@@ -8,4 +8,7 @@ COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./alembic.ini
 COPY frontend ./frontend
+# Für die Betriebsskripte per `docker exec` (Ladepunkte importieren,
+# VAPID-Schlüssel erzeugen) - siehe tools/*.py.
+COPY tools ./tools
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

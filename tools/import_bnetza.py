@@ -18,8 +18,14 @@ Im laufenden Container:
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "backend"))
+HIER = os.path.dirname(os.path.abspath(__file__))
+# Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
+# per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
+# Layouts müssen funktionieren.
+for _kandidat in (os.path.join(HIER, "..", "backend"), os.path.join(HIER, "..")):
+    if os.path.isdir(os.path.join(_kandidat, "app")):
+        sys.path.insert(0, _kandidat)
+        break
 
 from app.database import SessionLocal, migrate  # noqa: E402
 from app.laden.saeulen_import import aus_bnetza_csv  # noqa: E402
