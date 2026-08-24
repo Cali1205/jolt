@@ -298,7 +298,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
     gesamt_km = profil.gesamt_km
     ziel_soc = max(0.0, min(100.0, ziel_soc))
 
-    gefiltert = _kandidaten_ausduennen(optionen, gesamt_km, umweg_grenze_min)
+    gefiltert = _kandidaten_ausduennen(optionen, gesamt_km, umweg_grenze_min,
+                                       bevorzugte_betreiber)
     plan.gepruefte_kandidaten = len(gefiltert)
 
     graph = _Graph(profil, gefiltert, fz, kurve, max_fahrzeug_kw,
@@ -321,7 +322,9 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
 
 
 def _kandidaten_ausduennen(optionen: list[Ladeoption], gesamt_km: float,
-                           umweg_grenze_min: float) -> list[Ladeoption]:
+                           umweg_grenze_min: float,
+                           bevorzugte_betreiber: list[str] | None = None
+                           ) -> list[Ladeoption]:
     """Schritt 1: filtern und je Streckenabschnitt die besten behalten.
 
     Gefiltert wird über die Umwegzeit, nicht über die Luftlinie: Acht Kilometer
@@ -349,7 +352,22 @@ def _kandidaten_ausduennen(optionen: list[Ladeoption], gesamt_km: float,
         # Risiko, vor einer belegten Säule zu stehen), dann der Umweg.
         gruppe.sort(key=lambda o: (-o.max_kw, -(o.anzahl_punkte or 1),
                                    o.umweg_minuten))
-        behalten.extend(gruppe[:KANDIDATEN_JE_ABSCHNITT])
+        auswahl = gruppe[:KANDIDATEN_JE_ABSCHNITT]
+        # Ein bevorzugter Anbieter darf nicht allein an dieser Sortierung
+        # scheitern - sonst bekommt der Betreiber-Bonus aus _nachfolger() ihn
+        # in einem dicht besetzten Abschnitt nie zu Gesicht, egal wie klar die
+        # Vorgabe war. Ersetzt wird der schwächste Platz, nicht angehängt: die
+        # Obergrenze je Abschnitt bleibt bestehen.
+        if bevorzugte_betreiber and not any(
+                betreiber_bonus(o.betreiber, bevorzugte_betreiber) > 0
+                for o in auswahl):
+            bevorzugt = next(
+                (o for o in gruppe[KANDIDATEN_JE_ABSCHNITT:]
+                 if betreiber_bonus(o.betreiber, bevorzugte_betreiber) > 0),
+                None)
+            if bevorzugt:
+                auswahl = auswahl[:-1] + [bevorzugt]
+        behalten.extend(auswahl)
 
     behalten.sort(key=lambda o: o.km_auf_route)
     return behalten[:HOECHSTENS_KANDIDATEN]

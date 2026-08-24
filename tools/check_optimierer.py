@@ -321,6 +321,38 @@ def fall_bevorzugter_betreiber():
            f"gewählt: {[s.option.id for s in plan_weit.stopps]}")
 
 
+def fall_praeferenz_uebersteht_ausduennung():
+    abschnitt("Bevorzugter Anbieter übersteht die Ausdünnung eines dichten Abschnitts")
+    # Vier Standorte im selben Streckenabschnitt (bei 450 km Gesamtstrecke ist
+    # die Abschnittsbreite hier 22,5 km, alle vier liegen darin). Sortiert
+    # nach Leistung landet der bevorzugte Standort auf Platz vier - und wäre
+    # ohne Sonderbehandlung aus dem Abschnitt geflogen, bevor der
+    # Betreiber-Bonus in _nachfolger() je zum Zug käme.
+    optionen = [
+        optimierer.Ladeoption(id=1, km_auf_route=205.0, umweg_minuten=5.0,
+                              max_kw=300.0, name="stark 1"),
+        optimierer.Ladeoption(id=2, km_auf_route=208.0, umweg_minuten=5.0,
+                              max_kw=250.0, name="stark 2"),
+        optimierer.Ladeoption(id=3, km_auf_route=211.0, umweg_minuten=5.0,
+                              max_kw=200.0, name="stark 3"),
+        optimierer.Ladeoption(id=4, km_auf_route=214.0, umweg_minuten=5.0,
+                              max_kw=100.0, name="schwach, bevorzugt",
+                              betreiber="Ionity"),
+    ]
+    ohne = optimierer._kandidaten_ausduennen(optionen, 450.0,
+                                             optimierer.UMWEG_GRENZE_MIN)
+    pruefe([o.id for o in ohne] == [1, 2, 3],
+           "ohne Vorgabe fällt der schwächste Standort aus dem Abschnitt",
+           f"behalten: {[o.id for o in ohne]}")
+
+    mit = optimierer._kandidaten_ausduennen(
+        optionen, 450.0, optimierer.UMWEG_GRENZE_MIN,
+        bevorzugte_betreiber=["Ionity"])
+    pruefe([o.id for o in mit] == [1, 2, 4],
+           "mit Vorgabe verdrängt der bevorzugte Standort den schwächsten der Gruppe",
+           f"behalten: {[o.id for o in mit]}")
+
+
 def fall_ausschluesse():
     abschnitt("Was nicht in den Plan darf")
     fz = Fahrzeugwerte(akku_netto_kwh=60.0, reserve_soc=10.0)
@@ -449,6 +481,7 @@ def main() -> int:
     fall_pass()
     fall_redundanz()
     fall_bevorzugter_betreiber()
+    fall_praeferenz_uebersteht_ausduennung()
     fall_ausschluesse()
     fall_ausweich()
     fall_dichte_saeulen()
