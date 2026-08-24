@@ -155,7 +155,11 @@ class Ladepunkt(Base):
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
     adresse = Column(String(250), default="")
-    plz = Column(String(20), default="")
+    # OCM liefert bei Standorten, die mehrere Postleitzahlen abdecken (grosse
+    # Einkaufszentren etwa), eine Semikolon-Liste statt einer einzelnen PLZ -
+    # "33000;33100;33200;33300;33800" ist 29 Zeichen lang und hat den
+    # OCM-Import an einem realen Datensatz ("Auchan Bordeaux Lac") abgebrochen.
+    plz = Column(String(40), default="")
     ort = Column(String(120), default="")
     land = Column(String(2), default="DE")
 
