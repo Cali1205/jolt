@@ -244,9 +244,58 @@ def aus_bnetza_csv(db, inhalt: bytes | str, land: str = "DE") -> dict:
 # Open Charge Map
 # ---------------------------------------------------------------------------
 
+def _ocm_kopf(api_key: str) -> dict:
+    return {
+        # Kein compact=true: Das lässt OCM AddressInfo.Country und
+        # OperatorInfo als blosse IDs statt als Objekte liefern - genau die
+        # Felder, die unten für "land" und "betreiber" gebraucht werden. Ohne
+        # diesen Parameter kommen die vollen Objekte.
+        "output": "json", "key": api_key, "verbose": "false"}
+
+
+def _ocm_eintrag_verarbeiten(db, eintrag: dict, min_kw: float) -> str:
+    """Ein einzelner OCM-Datensatz: parsen, filtern, speichern.
+
+    Gemeinsam für den Länder- und den Strecken-Import, damit beide dieselbe
+    Feldzuordnung verwenden und nicht auseinanderlaufen können.
+    """
+    adresse = eintrag.get("AddressInfo") or {}
+    lat, lon = adresse.get("Latitude"), adresse.get("Longitude")
+    if lat is None or lon is None:
+        return "uebersprungen"
+
+    anschluesse, typen = [], []
+    for verbindung in (eintrag.get("Connections") or []):
+        typ_text = ((verbindung.get("ConnectionType") or {}).get("Title")
+                    or str(verbindung.get("ConnectionTypeID") or ""))
+        erkannt = _typ_vereinheitlichen(typ_text)
+        typen.extend(erkannt)
+        anschluesse.append({"typ": ", ".join(erkannt) or typ_text,
+                            "kw": float(verbindung.get("PowerKW") or 0.0),
+                            "anzahl": verbindung.get("Quantity") or 1,
+                            "roh": typ_text})
+
+    max_kw = max([a["kw"] for a in anschluesse] + [0.0])
+    if max_kw < min_kw:
+        return "uebersprungen"
+
+    return _speichern(db, "ocm", str(eintrag.get("ID")), {
+        "name": adresse.get("Title") or "",
+        "betreiber": (eintrag.get("OperatorInfo") or {}).get("Title") or "",
+        "lat": float(lat), "lon": float(lon),
+        "adresse": adresse.get("AddressLine1") or "",
+        "plz": adresse.get("Postcode") or "",
+        "ort": adresse.get("Town") or "",
+        "land": ((adresse.get("Country") or {}).get("ISOCode") or "")[:2],
+        "anschluesse": anschluesse, "max_kw": max_kw,
+        "anzahl_punkte": eintrag.get("NumberOfPoints") or len(anschluesse) or 1,
+        "steckertypen": ",".join(sorted(set(typen))),
+        "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10]})
+
+
 def aus_ocm(db, api_key: str, laender: list[str] | None = None,
             max_ergebnisse: int = 5000, min_kw: float = 0.0) -> dict:
-    """Ladepunkte von Open Charge Map holen.
+    """Ladepunkte von Open Charge Map holen, ländergebunden.
 
     Ein Aufruf je Land, blockweise über `maxresults`/`offset` - eine Anfrage
     über ein ganzes Land liefe sonst in ein Zeitlimit. `max_ergebnisse` gilt
@@ -259,6 +308,15 @@ def aus_ocm(db, api_key: str, laender: list[str] | None = None,
     Anfrage für AT,CH,FR,IT,NL,BE lieferte auch Standorte in Brasilien, Japan
     und Kenia). Je Land einzeln zu fragen ist die einzige Einschränkung, die
     die API zuverlässig einhält.
+
+    Einschränkung dieser Funktion: `offset` blättert bei einer sehr grossen
+    Trefferzahl (beobachtet ab ca. 5000 Treffern für ein Land) nicht
+    zuverlässig weiter - spätere Seiten liefern dieselben Datensätze erneut
+    statt neuer. Für ein grosses Land wie Frankreich bleibt so ein Teil der
+    Ladepunkte unerreichbar, egal wie hoch `max_ergebnisse` steht. Wer gezielt
+    Ladepunkte entlang einer Strecke will (und nicht ein ganzes Land), ist mit
+    `aus_ocm_route()` unten besser bedient - kleinere Umkreis-Anfragen, die
+    OCM zuverlässiger beantwortet.
     """
     if not api_key:
         raise ValueError("Kein OCM_API_KEY gesetzt.")
@@ -270,12 +328,7 @@ def aus_ocm(db, api_key: str, laender: list[str] | None = None,
         geholt = 0
         while geholt < max_ergebnisse:
             antwort = requests.get(OCM_API, timeout=TIMEOUT, params={
-                # Kein compact=true: Das lässt OCM AddressInfo.Country und
-                # OperatorInfo als blosse IDs statt als Objekte liefern - genau
-                # die Felder, die unten für "land" und "betreiber" gebraucht
-                # werden. Ohne diesen Parameter kommen die vollen Objekte.
-                "output": "json", "key": api_key, "verbose": "false",
-                "countrycode": land,
+                **_ocm_kopf(api_key), "countrycode": land,
                 "maxresults": min(block, max_ergebnisse - geholt),
                 "offset": geholt})
             antwort.raise_for_status()
@@ -284,46 +337,74 @@ def aus_ocm(db, api_key: str, laender: list[str] | None = None,
                 break
 
             for eintrag in eintraege:
-                adresse = eintrag.get("AddressInfo") or {}
-                lat, lon = adresse.get("Latitude"), adresse.get("Longitude")
-                if lat is None or lon is None:
-                    zaehler["uebersprungen"] += 1
-                    continue
-
-                anschluesse, typen = [], []
-                for verbindung in (eintrag.get("Connections") or []):
-                    typ_text = ((verbindung.get("ConnectionType") or {}).get("Title")
-                                or str(verbindung.get("ConnectionTypeID") or ""))
-                    erkannt = _typ_vereinheitlichen(typ_text)
-                    typen.extend(erkannt)
-                    anschluesse.append({"typ": ", ".join(erkannt) or typ_text,
-                                        "kw": float(verbindung.get("PowerKW") or 0.0),
-                                        "anzahl": verbindung.get("Quantity") or 1,
-                                        "roh": typ_text})
-
-                max_kw = max([a["kw"] for a in anschluesse] + [0.0])
-                if max_kw < min_kw:
-                    zaehler["uebersprungen"] += 1
-                    continue
-
-                ergebnis = _speichern(db, "ocm", str(eintrag.get("ID")), {
-                    "name": adresse.get("Title") or "",
-                    "betreiber": (eintrag.get("OperatorInfo") or {}).get("Title") or "",
-                    "lat": float(lat), "lon": float(lon),
-                    "adresse": adresse.get("AddressLine1") or "",
-                    "plz": adresse.get("Postcode") or "",
-                    "ort": adresse.get("Town") or "",
-                    "land": ((adresse.get("Country") or {}).get("ISOCode") or "")[:2],
-                    "anschluesse": anschluesse, "max_kw": max_kw,
-                    "anzahl_punkte": eintrag.get("NumberOfPoints") or len(anschluesse) or 1,
-                    "steckertypen": ",".join(sorted(set(typen))),
-                    "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10]})
-                zaehler[ergebnis] += 1
+                zaehler[_ocm_eintrag_verarbeiten(db, eintrag, min_kw)] += 1
 
             geholt += len(eintraege)
             db.commit()
             if len(eintraege) < block:
                 break
+
+    log.info("Open-Charge-Map-Import: %s", zaehler)
+    return zaehler
+
+
+# Wie weit zwei Anker entlang der Route auseinanderliegen dürfen, als
+# Vielfaches des Umkreis-Radius. 1,6 statt 2,0, damit sich benachbarte Kreise
+# spürbar überlappen - sonst blieben an den Nahtstellen Lücken, weil ein Kreis
+# schmaler ist als der Abstand zwischen zwei Punkten auf der Route suggeriert.
+_ANKER_FAKTOR = 1.6
+
+
+def aus_ocm_route(db, api_key: str, punkte: list[tuple[float, float]],
+                  radius_km: float = 30.0, min_kw: float = 0.0) -> dict:
+    """Ladepunkte von Open Charge Map entlang einer Strecke holen.
+
+    Statt eines Länderfilters mit `offset`-Pagination (siehe `aus_ocm()`,
+    dort unzuverlässig bei grossen Treffermengen) eine Umkreissuche an mehreren
+    Punkten entlang der Route - dieselbe Art Anfrage, mit der ein Nutzer in der
+    OCM-Karte selbst sucht, und die die API zuverlässig auf den angefragten
+    Umkreis begrenzt.
+
+    `punkte` ist die Routen-Geometrie in Fahrtreihenfolge, im selben Format
+    wie `Fahrt.geometrie`: `[[lon, lat, höhe_m], ...]` - GeoJSON-Konvention,
+    lon vor lat. `_kilometrierung()`/`_anker()` aus `routing.korridor`
+    erwarten genau dieses Format, ohne Umrechnung durch den Aufrufer.
+    """
+    if not api_key:
+        raise ValueError("Kein OCM_API_KEY gesetzt.")
+    if len(punkte) < 2:
+        raise ValueError("Zu wenige Streckenpunkte für eine Umkreissuche.")
+
+    from ..routing.korridor import _anker, _kilometrierung
+
+    km_liste = _kilometrierung(punkte)
+    anker = _anker(punkte, km_liste, radius_km * _ANKER_FAKTOR)
+
+    zaehler = {"neu": 0, "aktualisiert": 0, "uebersprungen": 0}
+    gesehen: set[str] = set()
+
+    for lat, lon, _km, _idx in anker:
+        antwort = requests.get(OCM_API, timeout=TIMEOUT, params={
+            **_ocm_kopf(api_key), "latitude": lat, "longitude": lon,
+            "distance": radius_km, "distanceunit": "KM", "maxresults": 500})
+        antwort.raise_for_status()
+        eintraege = antwort.json()
+
+        for eintrag in eintraege:
+            # Überlappende Kreise sehen denselben Standort mehrfach - hier
+            # gezählt statt db.commit() je Anker, damit ein Standort in der
+            # Statistik nicht als "mehrfach neu" auftaucht.
+            fremd_id = str(eintrag.get("ID"))
+            if fremd_id in gesehen:
+                continue
+            gesehen.add(fremd_id)
+            zaehler[_ocm_eintrag_verarbeiten(db, eintrag, min_kw)] += 1
+
+        db.commit()
+
+    log.info("Open-Charge-Map-Streckenimport: %s Anker, %s",
+             len(anker), zaehler)
+    return zaehler
 
     log.info("Open-Charge-Map-Import: %s", zaehler)
     return zaehler
