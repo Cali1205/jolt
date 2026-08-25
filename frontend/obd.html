@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="de">
+<!-- Diagnoseseite für den OBD2-Dongle. Bewusst eine eigene Seite und nicht
+     ein Reiter in jolt: Sie funktioniert nur in einem Browser mit Web
+     Bluetooth (auf iOS heisst der Bluefy), und ein Bedienelement, das in
+     Safari stumm bleibt, hat in der Hauptoberfläche nichts verloren.
+
+     Zweck ist nicht der Dauerbetrieb, sondern eine einzige Frage: Antwortet
+     der ID.Buzz auf die UDS-Abfrage, mit der man seinen Ladestand liest?
+     Solange die offen ist, wäre jede native App ein Blindflug. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>jolt – OBD2-Erprobung</title>
+<link rel="stylesheet" href="/static/obd.css">
+
+<h1>OBD2-Erprobung</h1>
+<p class="hinweis">Braucht einen Browser mit Web Bluetooth. Auf iOS gibt es
+  den nicht von Apple – dort funktioniert <strong>Bluefy</strong> aus dem App
+  Store. Safari und Chrome auf dem iPhone können es nicht und werden es
+  melden.</p>
+
+<div id="untauglich" class="kasten fehler" hidden>
+  Dieser Browser kennt kein <code>navigator.bluetooth</code>. Auf dem iPhone
+  diese Seite in <strong>Bluefy</strong> öffnen, auf Android in Chrome.
+</div>
+
+<div class="kasten">
+  <h2>1. Verbinden</h2>
+  <p class="hinweis">Der Dongle muss im Auto stecken und die Zündung an sein.
+    Er heisst meist <code>IOS-Vlink</code>, <code>VEEPEAK</code> oder
+    ähnlich.</p>
+  <button id="verbinden" class="tat">Dongle suchen</button>
+  <div id="verbindung" class="stand">nicht verbunden</div>
+</div>
+
+<div class="kasten">
+  <h2>2. ELM327 vorbereiten</h2>
+  <p class="hinweis">Setzt Echo aus, wählt das CAN-Protokoll und richtet die
+    Adresse des Batteriemanagements ein. Was der Dongle antwortet, steht
+    darunter – auch wenn es nicht das Erwartete ist.</p>
+  <button id="init" class="tat" disabled>Handshake ausführen</button>
+</div>
+
+<div class="kasten">
+  <h2>3. Ladestand lesen</h2>
+  <p class="hinweis">Beim MEB sitzt das Batteriemanagement auf Header
+    <code>7E5</code>, der Ladestand hinter UDS-Dienst <code>22</code>,
+    Datenkennung <code>028C</code>. Der Rohwert wird durch 2,5 geteilt.
+    <strong>Ob das für den ID.Buzz stimmt, ist genau die Frage.</strong></p>
+  <button id="soc" class="tat" disabled>SoC abfragen</button>
+  <div id="soc-wert" class="gross">–</div>
+</div>
+
+<div class="kasten">
+  <h2>4. Selbst probieren</h2>
+  <p class="hinweis">Ein Befehl je Zeile, wird der Reihe nach gesendet.
+    Damit lassen sich andere Datenkennungen durchprobieren, ohne dass
+    jemand die Seite neu baut – die PID-Liste für MEB steht bei
+    <code>github.com/spot2000/Volkswagen-MEB-EV-CAN-parameters</code>.</p>
+  <textarea id="frei" rows="3" spellcheck="false"
+            placeholder="ATSH7E5&#10;221E3B">ATSH7E5
+22028C</textarea>
+  <button id="senden" class="tat" disabled>Senden</button>
+</div>
+
+<div class="kasten">
+  <h2>5. An jolt melden</h2>
+  <p class="hinweis">Schliesst die Kette: Der gelesene Ladestand geht zusammen
+    mit der Position an <code>/api/live/melden</code>. Das Token steht in der
+    Fahrzeug-Ansicht unter „Logger im Auto“. Ohne laufende Fahrt antwortet
+    jolt mit <code>aufgenommen: false</code> – das ist kein Fehler.</p>
+  <input type="text" id="token" placeholder="Logger-Token" autocomplete="off"
+         spellcheck="false">
+  <button id="melden" class="tat" disabled>Einmal melden</button>
+</div>
+
+<h2>Protokoll</h2>
+<pre id="log"></pre>
+<button id="log-leeren" class="tat neben">Protokoll leeren</button>
+
+<script src="/static/obd.js"></script>
