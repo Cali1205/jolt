@@ -50,6 +50,11 @@ FENSTER_KM = 25.0
 # Vorher ist die SoC-Anzeige (meist 1 % Auflösung) zu grob für eine Aussage.
 MINDESTSTRECKE_KM = 5.0
 
+# Ab welchem Anstieg des Ladestands zwischen zwei Messpunkten geladen wurde -
+# und nicht nur rekuperiert oder gerundet. Die Anzeige löst je nach Fahrzeug
+# in halben oder ganzen Prozentpunkten auf; darunter ist alles Rauschen.
+LADEN_SOC_PP = 0.5
+
 
 @dataclass
 class Zustand:
@@ -123,6 +128,43 @@ def _fenster(punkte: list) -> list:
     return fenster if len(fenster) >= 2 else brauchbar[-2:]
 
 
+def _ladepausen_minuten(punkte: list, energieprofil: list) -> float:
+    """Wie viel der verstrichenen Zeit auf Ladepausen entfiel.
+
+    Nötig, weil das Energieprofil ausschliesslich **Fahrzeit** führt: Die
+    Ladezeit steht im Plan, nie im Profil. Wer die Wanduhr ungefiltert gegen
+    das Profil hält, sieht deshalb nach dem ersten Ladestopp eine Verspätung
+    in Höhe der Ladedauer - und zwar dauerhaft, denn sie wird nie wieder
+    aufgeholt. Damit stünde der Auslöser "Ankunft verschiebt sich" für den
+    Rest der Fahrt über seiner Schwelle und meldete alle zehn Kilometer
+    dieselbe Verspätung. Eine Meldung, die immer kommt, schaltet man ab.
+
+    Erkannt wird die Pause am steigenden Ladestand: Beim Fahren fällt er,
+    beim Laden steigt er. Gezählt wird aber nicht die ganze Zeitspanne,
+    sondern nur der Teil, der über der Fahrzeit für die dabei zurückgelegte
+    Strecke liegt. Das erledigt zwei Fälle auf einmal - Rekuperation auf
+    langer Talfahrt hebt den Ladestand zwar auch, kostet aber keine
+    zusätzliche Zeit; und es ist gleichgültig, ob der Logger während des
+    Ladens weitergesendet hat oder erst hinterher wieder aufgewacht ist.
+
+    Nicht abgezogen wird eine Pause ohne Ladung - Mittagessen, Stau, Stau vor
+    der Baustelle. Die verschiebt die Ankunft wirklich, und genau das soll
+    der Auslöser sehen.
+    """
+    gesamt = 0.0
+    for vorher, nachher in zip(punkte, punkte[1:]):
+        if (nachher.soc - vorher.soc) < LADEN_SOC_PP:
+            continue
+        if not vorher.zeit or not nachher.zeit:
+            continue
+        verstrichen = (nachher.zeit - vorher.zeit).total_seconds() / 60.0
+        von = soll_minuten_bei(energieprofil, vorher.km_auf_route or 0.0)
+        bis = soll_minuten_bei(energieprofil, nachher.km_auf_route or 0.0)
+        gefahren = 0.0 if von is None or bis is None else max(0.0, bis - von)
+        gesamt += max(0.0, verstrichen - gefahren)
+    return gesamt
+
+
 def _verbrauchsfaktor(punkte: list) -> float | None:
     """Ist-Verbrauch geteilt durch Soll-Verbrauch über das gleitende Fenster.
 
@@ -170,7 +212,13 @@ def _zeitfaktor(punkte: list, energieprofil: list) -> float | None:
     if not erster.zeit or not letzter.zeit:
         return None
 
-    ist_minuten = (letzter.zeit - erster.zeit).total_seconds() / 60.0
+    # Die Ladezeit gehört nicht in den Zeitfaktor: Wer eine halbe Stunde an
+    # der Säule stand, hat keinen Stau. Ohne den Abzug wäre der Faktor nach
+    # jedem Ladestopp so gross, dass ihn die Schranke unten verwirft - und
+    # damit für die nächsten FENSTER_KM eingefroren, also genau auf der
+    # Strecke blind, auf der er wieder gebraucht wird.
+    ist_minuten = ((letzter.zeit - erster.zeit).total_seconds() / 60.0
+                   - _ladepausen_minuten(fenster, energieprofil))
     soll_ende = soll_minuten_bei(energieprofil, letzter.km_auf_route)
     soll_start = soll_minuten_bei(energieprofil, erster.km_auf_route)
     if soll_ende is None or soll_start is None:
@@ -180,9 +228,8 @@ def _zeitfaktor(punkte: list, energieprofil: list) -> float | None:
         return None
 
     faktor = ist_minuten / soll_minuten
-    # Dieselbe Ausreisserschranke wie beim Verbrauch. Wer eine Stunde an der
-    # Säule stand, hat keinen Stau - er hat geladen, und das gehört nicht in
-    # den Faktor.
+    # Dieselbe Ausreisserschranke wie beim Verbrauch - jetzt nur noch gegen
+    # das, was der Ladepausen-Abzug nicht erklärt.
     if not 0.4 <= faktor <= 3.0:
         return None
     return round(faktor, 3)
@@ -349,6 +396,9 @@ def _ankunft_verschiebung(sitzung, profil: list, punkt, gesamt_km: float):
     Zwei Anteile: was bereits verloren ist, und was der Zeitfaktor auf der
     Reststrecke noch kosten wird. Nur zusammen ergeben sie die Zahl, die
     interessiert.
+
+    Die bereits verbrachte Ladezeit zählt nicht als Verspätung - sie stand so
+    im Plan. Siehe `_ladepausen_minuten`.
     """
     punkte = [p for p in sitzung.punkte if p.km_auf_route is not None]
     if len(punkte) < 2 or not profil:
@@ -364,7 +414,8 @@ def _ankunft_verschiebung(sitzung, profil: list, punkt, gesamt_km: float):
     if soll_jetzt is None or soll_start is None or soll_ziel is None:
         return None
 
-    bisher = ist_minuten - (soll_jetzt - soll_start)
+    bisher = (ist_minuten - (soll_jetzt - soll_start)
+              - _ladepausen_minuten(punkte, profil))
     rest = max(0.0, soll_ziel - soll_jetzt) * (sitzung.zeitfaktor - 1.0)
     return round(bisher + rest, 1)
 

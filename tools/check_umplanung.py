@@ -130,6 +130,67 @@ def teil_ausloeser():
            grund)
 
 
+class Punktstub:
+    """Ein Messpunkt, so viel davon wie `_ladepausen_minuten` anfasst."""
+
+    NULL = datetime(2026, 1, 1, 8, 0)
+
+    def __init__(self, km: float, soc: float, minuten: float):
+        self.km_auf_route = km
+        self.soc = soc
+        self.zeit = self.NULL + timedelta(minutes=minuten)
+
+
+def teil_ladepausen():
+    """Was von der verstrichenen Zeit eine Ladepause war - und was nicht.
+
+    Das Energieprofil führt ausschliesslich Fahrzeit; die Ladezeit steht im
+    Plan. Wer die Wanduhr ungefiltert dagegen hält, hat nach dem ersten
+    Ladestopp eine Verspätung in Höhe der Ladedauer - dauerhaft, denn
+    aufgeholt wird sie nie.
+    """
+    print("\nLadepause von Verspätung unterscheiden")
+
+    # 100 km/h, 0,1 Prozentpunkte je Kilometer.
+    profil = [{"km": k, "minuten": k * 0.6, "soc": 80 - k * 0.1}
+              for k in range(0, 401, 10)]
+
+    # Der Logger sendet während des Ladens weiter: dreissig Minuten am selben
+    # Ort, der Ladestand steigt.
+    laden = [Punktstub(150.0, 30.0, 90.0), Punktstub(150.0, 45.0, 100.0),
+             Punktstub(150.0, 60.0, 110.0), Punktstub(150.0, 70.0, 120.0),
+             Punktstub(160.0, 68.0, 126.0)]
+    gemessen = live_sitzung._ladepausen_minuten(laden, profil)
+    pruefe(abs(gemessen - 30.0) < 0.1,
+           "dreissig Minuten an der Säule werden als Ladepause erkannt",
+           f"{gemessen:.1f} min")
+
+    # Derselbe Ladestopp, aber der Logger hat geschlafen und meldet sich erst
+    # zwanzig Kilometer später wieder. Auch dann darf nur die Standzeit
+    # zählen, nicht die Fahrzeit für die zwanzig Kilometer.
+    geschlafen = [Punktstub(150.0, 30.0, 90.0), Punktstub(170.0, 65.0, 132.0)]
+    gemessen = live_sitzung._ladepausen_minuten(geschlafen, profil)
+    pruefe(abs(gemessen - 30.0) < 0.1,
+           "auch wenn der Logger die Pause verschlafen hat",
+           f"{gemessen:.1f} min")
+
+    # Rekuperation auf langer Talfahrt hebt den Ladestand ebenfalls - kostet
+    # aber keine zusätzliche Zeit, also auch keine Gutschrift.
+    bergab = [Punktstub(150.0, 30.0, 90.0), Punktstub(160.0, 31.0, 96.0)]
+    gemessen = live_sitzung._ladepausen_minuten(bergab, profil)
+    pruefe(gemessen < 0.5,
+           "Rekuperation bergab ist keine Ladepause - das Auto fährt ja",
+           f"{gemessen:.1f} min")
+
+    # Mittagessen: eine Dreiviertelstunde Stillstand ohne Ladung. Die
+    # verschiebt die Ankunft wirklich und muss stehen bleiben.
+    pause = [Punktstub(150.0, 30.0, 90.0), Punktstub(150.0, 29.8, 135.0)]
+    gemessen = live_sitzung._ladepausen_minuten(pause, profil)
+    pruefe(gemessen < 0.5,
+           "eine Pause ohne Ladung bleibt Verspätung - Mittagessen verschiebt "
+           "die Ankunft wirklich", f"{gemessen:.1f} min")
+
+
 # ---------------------------------------------------------------------------
 # Teil 2: Rest-Strecke
 # ---------------------------------------------------------------------------
@@ -360,6 +421,96 @@ def teil_kette():
     client.post(f"/api/live/{sitzung4}/ende")
 
 
+def teil_kette_mit_ladestopp():
+    """Die ganze Kette, aber diesmal wird unterwegs wirklich geladen.
+
+    Der Simulator lädt nie - sein Ladestand fällt monoton bis null. Damit
+    bleibt der Normalfall jeder echten Langstrecke ungeprüft: anhalten,
+    laden, weiterfahren. Genau dort lag der Fehler, den dieser Teil festhält.
+    """
+    client = TestClient(app)
+    route = fahrt_vorbereiten(client)
+    fahrt_id = route["fahrt_id"]
+
+    print("\nEin Ladestopp ist keine Verspätung")
+    start = client.post(f"/api/live/start/{fahrt_id}",
+                        params={"min_kw": 100, "radius_km": 10}).json()
+    sitzung_id = start["sitzung_id"]
+
+    LADEDAUER_MIN = 30.0
+    LADEHUB_PP = 45.0
+
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        profil = sitzung.fahrt.energieprofil or []
+        gesamt_km = profil[-1]["km"] if profil else 0.0
+        beginn = datetime(2026, 1, 1, 8, 0)
+
+        def melden(km, soc, minuten):
+            eintrag = _profil_bei(profil, km)
+            zustand = live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, eintrag["lat"], eintrag["lon"], round(soc, 2),
+                zeit=beginn + timedelta(minutes=minuten))
+            return live_sitzung.zustand_als_dict(zustand)
+
+        # Erster Abschnitt: exakt nach Plan, damit keine andere Abweichung die
+        # Aussage verwässert. Der Ladestand ist der des Profils, die Uhr die
+        # des Profils.
+        pause_km = min(150.0, gesamt_km / 3)
+        letzter = None
+        km = 0.0
+        while km <= pause_km:
+            eintrag = _profil_bei(profil, km)
+            letzter = melden(km, eintrag["soc"], eintrag.get("minuten") or 0.0)
+            km += 10.0
+
+        vor_pause = letzter["ankunft_verschiebung_min"]
+        pruefe(vor_pause is not None and abs(vor_pause) < 5.0,
+               "vor der Pause liegt die Fahrt in der Zeit", f"{vor_pause} min")
+
+        # Der Ladestopp: dreissig Minuten am selben Ort, der Ladestand steigt
+        # um 45 Prozentpunkte.
+        eintrag = _profil_bei(profil, pause_km)
+        soc_ankunft = eintrag["soc"]
+        uhr = eintrag.get("minuten") or 0.0
+        for i in range(1, 4):
+            letzter = melden(pause_km, soc_ankunft + LADEHUB_PP * i / 3,
+                             uhr + LADEDAUER_MIN * i / 3)
+
+        nach_pause = letzter["ankunft_verschiebung_min"]
+        pruefe(nach_pause is not None
+               and abs(nach_pause) < live_sitzung.SCHWELLE_ANKUNFT_MIN,
+               "und direkt nach dem Laden immer noch - die Ladezeit stand so "
+               "im Plan und ist keine Verspätung",
+               f"{nach_pause} min (ohne Abzug wären es rund "
+               f"{LADEDAUER_MIN:.0f})")
+
+        # Weiterfahren. Der Ladestand liegt jetzt um den Ladehub über dem
+        # Profil, die Uhr um die Ladedauer dahinter - beides muss die
+        # Nachführung auseinanderhalten können.
+        km = pause_km + 10.0
+        weit = min(gesamt_km, pause_km + 150.0)
+        while km <= weit:
+            eintrag = _profil_bei(profil, km)
+            letzter = melden(km, min(100.0, eintrag["soc"] + LADEHUB_PP),
+                             (eintrag.get("minuten") or 0.0) + LADEDAUER_MIN)
+            km += 10.0
+
+        spaeter = letzter["ankunft_verschiebung_min"]
+        pruefe(spaeter is not None
+               and abs(spaeter) < live_sitzung.SCHWELLE_ANKUNFT_MIN,
+               "auch 150 km danach wird die Ladezeit nicht als Verspätung "
+               "nachgetragen", f"{spaeter} min")
+        pruefe(abs(letzter["zeitfaktor"] - 1.0) < 0.15,
+               "und der Zeitfaktor bleibt bei rund 1 - gefahren wurde ja "
+               "nach Plan", f"×{letzter['zeitfaktor']}")
+    finally:
+        db.close()
+
+    client.post(f"/api/live/{sitzung_id}/ende")
+
+
 def _profil_bei(profil, km):
     for vorher, nachher in zip(profil, profil[1:]):
         if (vorher.get("km") or 0) <= km <= (nachher.get("km") or 0):
@@ -433,9 +584,11 @@ def _plan_pruefen(plan, route, name):
 
 def main() -> int:
     teil_ausloeser()
+    teil_ladepausen()
     teil_reststrecke()
     teil_planvergleich()
     teil_kette()
+    teil_kette_mit_ladestopp()
 
     print()
     if FEHLER:
