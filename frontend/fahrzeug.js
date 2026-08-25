@@ -156,6 +156,71 @@ window.joltFahrzeug = (function () {
     }
     const fahrzeug = K.zustand.fahrzeuge.find((f) => String(f.id) === String(wahl));
     if (fahrzeug) formularFuellen(fahrzeug);
+    loggerZeigen(fahrzeug);
+  }
+
+  /* ---------- Logger im Auto ---------- */
+
+  /* Das Token steht nur in der Antwort, die es erzeugt - danach kennt es die
+   * Oberfläche nicht mehr. Angezeigt wird sonst also nur, *ob* eines gilt. */
+  function loggerZeigen(fahrzeug) {
+    const stand = document.getElementById("logger-stand");
+    const kasten = document.getElementById("logger-token");
+    if (!stand || !kasten) return;
+    kasten.hidden = true;
+    kasten.textContent = "";
+    if (!fahrzeug) {
+      stand.textContent = "Erst speichern, dann lässt sich ein Logger einrichten.";
+      return;
+    }
+    stand.textContent = fahrzeug.logger_aktiv
+      ? "Ein Logger ist eingerichtet. Ein neues Token entwertet das alte."
+      : "Kein Logger eingerichtet.";
+  }
+
+  function gewaehltesFahrzeug() {
+    const wahl = document.getElementById("fahrzeug-liste").value;
+    if (wahl === "neu") return null;
+    return K.zustand.fahrzeuge.find((f) => String(f.id) === String(wahl)) || null;
+  }
+
+  async function loggerNeu() {
+    const fahrzeug = gewaehltesFahrzeug();
+    if (!fahrzeug) {
+      K.melden("Erst das Fahrzeug speichern.", "fehler");
+      return;
+    }
+    let antwort;
+    try {
+      antwort = await K.api(`/api/fahrzeuge/${fahrzeug.id}/logger-token`,
+                            { method: "POST" });
+    } catch (fehler) {
+      K.melden("Logger-Token: " + fehler.message, "fehler");
+      return;
+    }
+    await laden();
+    const kasten = document.getElementById("logger-token");
+    // textContent und nicht innerHTML: Das Token ist zwar selbst erzeugt und
+    // urlsafe, aber ein Geheimnis gehört grundsätzlich nicht durch einen
+    // HTML-Parser.
+    kasten.textContent = antwort.logger_token;
+    kasten.hidden = false;
+    K.melden("Token erzeugt – jetzt notieren, es wird nur einmal gezeigt.",
+             "hinweis");
+  }
+
+  async function loggerWeg() {
+    const fahrzeug = gewaehltesFahrzeug();
+    if (!fahrzeug || !fahrzeug.logger_aktiv) return;
+    try {
+      await K.api(`/api/fahrzeuge/${fahrzeug.id}/logger-token`,
+                  { method: "DELETE" });
+    } catch (fehler) {
+      K.melden("Logger abmelden: " + fehler.message, "fehler");
+      return;
+    }
+    await laden();
+    K.melden("Logger abgemeldet.", "hinweis");
   }
 
   async function vorlagenLaden() {
@@ -210,6 +275,8 @@ window.joltFahrzeug = (function () {
       document.getElementById("kurve-zeilen").appendChild(kurveZeile(50, 100));
     });
     K.an("fahrzeug-speichern", "click", speichern);
+    K.an("logger-neu", "click", loggerNeu);
+    K.an("logger-weg", "click", loggerWeg);
   }
 
   return { einrichten, laden, vorlagenLaden };

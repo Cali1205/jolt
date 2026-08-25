@@ -104,6 +104,15 @@ class Fahrzeug(Base):
     # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
     korrekturfaktor = Column(Float, nullable=False, default=1.0)
 
+    # Langlebiges Geheimnis für einen Logger im Auto - OBD2-Dongle, Kurzbefehl,
+    # was auch immer. Er kann die ID der laufenden Live-Sitzung nicht kennen:
+    # Die entsteht erst beim Losfahren in der App und wechselt mit jeder Fahrt.
+    # Ein Gerät, das im Auto verbaut ist und beim Anschalten einfach zu senden
+    # beginnt, braucht deshalb einen Schlüssel, der bleibt - das Backend sucht
+    # sich die laufende Sitzung dieses Fahrzeugs dann selbst.
+    # NULL heisst "kein Logger eingerichtet".
+    logger_token = Column(String(64), unique=True, index=True)
+
     angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     ladekurve = relationship("Ladekurvenpunkt", back_populates="fahrzeug",
@@ -273,7 +282,12 @@ class LivePunkt(Base):
     zeit = Column(DateTime, default=datetime.utcnow, nullable=False)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
-    soc = Column(Float, nullable=False)
+    # NULL heisst "Position gemeldet, Ladestand nicht bekannt". Die beiden
+    # Grössen haben verschiedene Taktraten: Das Telefon liefert die Position
+    # im Sekundentakt und umsonst, den Ladestand tippt jemand ein, wenn er
+    # ohnehin an der Säule steht. Was dazwischen gilt, rechnet
+    # `live/sitzung.py` aus dem Energieprofil hoch.
+    soc = Column(Float)
     tempo_kmh = Column(Float)
     aussentemp_c = Column(Float)
 

@@ -26,17 +26,27 @@ def _auswaehlen(punkte: list, anzahl: int) -> list:
     return [punkte[round(i * schritt)] for i in range(anzahl)]
 
 
-def entlang_route(punkte: list, anzahl: int = STUETZPUNKTE):
+def entlang_route(punkte: list, anzahl: int = STUETZPUNKTE,
+                  vorgabe: Umgebung | None = None):
     """Gibt eine Funktion (lat, lon) -> Umgebung zurück.
 
-    Fällt die Abfrage aus, wird nicht abgebrochen, sondern mit 15 °C und
-    Windstille weitergerechnet: Eine Route ohne Wetter ist deutlich besser
-    als gar keine Route, und die Live-Nachführung korrigiert den Fehler
-    ohnehin innerhalb der ersten Kilometer.
+    Fällt die Abfrage aus, wird nicht abgebrochen, sondern mit `vorgabe`
+    weitergerechnet: Eine Route ohne Wetter ist deutlich besser als gar keine
+    Route, und die Live-Nachführung korrigiert den Fehler ohnehin innerhalb
+    der ersten Kilometer.
+
+    `vorgabe` ist beim Planen sinnvollerweise leer - dann gelten 15 °C und
+    Windstille. **Unterwegs** ist genau das die falsche Annahme: Wer eine im
+    Winter bei -5 °C gerechnete Fahrt neu plant und dabei auf 15 °C
+    zurückfällt, verliert die Heizlast - den grössten Einzelposten der Kälte -
+    und rechnet die Reststrecke zu optimistisch. Deshalb reicht die Umplanung
+    dort die Temperatur der Fahrt herein statt sich auf die Vorgabe zu
+    verlassen.
     """
+    ersatz = vorgabe or Umgebung()
     proben = _auswaehlen(punkte, anzahl)
     if not proben:
-        return lambda lat, lon: Umgebung()
+        return lambda lat, lon: ersatz
 
     lats = ",".join(f"{p[1]:.4f}" for p in proben)
     lons = ",".join(f"{p[0]:.4f}" for p in proben)
@@ -48,8 +58,9 @@ def entlang_route(punkte: list, anzahl: int = STUETZPUNKTE):
         antwort.raise_for_status()
         roh = antwort.json()
     except (requests.RequestException, ValueError) as fehler:
-        log.warning("Wetterabfrage fehlgeschlagen (%s) - rechne mit 15 °C.", fehler)
-        return lambda lat, lon: Umgebung()
+        log.warning("Wetterabfrage fehlgeschlagen (%s) - rechne mit %.0f °C.",
+                    fehler, ersatz.temp_c)
+        return lambda lat, lon: ersatz
 
     # Bei einer einzelnen Koordinate liefert Open-Meteo ein Objekt, bei
     # mehreren eine Liste. Beides auf dieselbe Form bringen.
@@ -64,7 +75,7 @@ def entlang_route(punkte: list, anzahl: int = STUETZPUNKTE):
             windrichtung_grad=float(jetzt.get("wind_direction_10m", 0.0)))))
 
     if not messungen:
-        return lambda lat, lon: Umgebung()
+        return lambda lat, lon: ersatz
 
     def nachschlagen(lat: float, lon: float) -> Umgebung:
         beste = min(messungen, key=lambda m: haversine_m(lat, lon, m[0], m[1]))

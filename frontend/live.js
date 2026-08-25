@@ -12,6 +12,14 @@ window.joltLive = (function () {
   const K = window.jolt;
   let steckdose = null;       // WebSocket
   let plan = null;            // der aktuell gültige Ladeplan
+  let wache = null;           // watchPosition-Kennung
+  let letzteMeldung = 0;      // Zeitpunkt der letzten Positionsmeldung
+
+  // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
+  // und braucht mindestens 5 km, bevor sie überhaupt etwas sagt - alle
+  // dreissig Sekunden ist bei Landstrassentempo rund ein halber Kilometer und
+  // damit dicht genug. Häufiger kostet Akku und Mobilfunk, ohne etwas zu sagen.
+  const MELDEABSTAND_MS = 30000;
 
   function verbindungAnzeigen(text, farbe) {
     const el = document.getElementById("live-verbindung");
@@ -36,7 +44,11 @@ window.joltLive = (function () {
       document.getElementById("live-inhalt").hidden = false;
       plan = antwort.plan || null;
       planZeichnen();
+      // Beim Losfahren ist der Startladestand der beste bekannte Wert - besser
+      // jedenfalls als eine feste Zahl, die mit diesem Auto nichts zu tun hat.
+      socFeldVorbelegen(fahrt.start_soc);
       verbinden(antwort.sitzung_id);
+      positionVerfolgen();
       window.joltApp.ansichtZeigen("live");
       // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
       // beim ersten geänderten Plan, wo sie im Weg steht.
@@ -80,6 +92,11 @@ window.joltLive = (function () {
       if (z.plan_geaendert) aenderungMelden(z.aenderung);
     }
 
+    // Der zuletzt bekannte Ladestand als Vorschlag fürs nächste Melden: Am
+    // Ladepunkt ist der neue Wert höher, unterwegs niedriger - in beiden
+    // Fällen ist der letzte Wert der kürzere Weg als eine feste Zahl.
+    socFeldVorbelegen(z.ist_soc);
+
     const abweichungArt = z.abweichung_pp === null ? ""
       : (z.abweichung_pp <= -5 ? "schlecht"
         : (z.abweichung_pp <= -2 ? "warnung" : "gut"));
@@ -88,7 +105,12 @@ window.joltLive = (function () {
         : (z.prognose_soc_am_ziel < reserve + 10 ? "warnung" : "gut"));
 
     document.getElementById("live-werte").innerHTML = [
-      K.wertKachel("Ladestand", K.zahl(z.ist_soc) + " %"),
+      // Ein gerechneter Ladestand ist keine Messung, und das muss man ihm
+      // ansehen: Wer bei 12 % an der Säule steht, will wissen, ob die Zahl
+      // aus dem Auto kam oder aus einem Modell, das seit hundert Kilometern
+      // niemand nachgeprüft hat.
+      K.wertKachel(z.soc_gemeldet === false ? "Ladestand gerechnet" : "Ladestand",
+        K.zahl(z.ist_soc) + " %"),
       K.wertKachel("Nach Plan", K.zahl(z.soll_soc) + " %"),
       K.wertKachel("Abweichung",
         (z.abweichung_pp === null ? "–"
@@ -310,6 +332,57 @@ window.joltLive = (function () {
 
   /* ---------- Ladestand von Hand ---------- */
 
+  /* ---------- Position laufend melden ---------- */
+
+  /* Ohne diese Meldungen bekommt jolt zwischen zwei eingetippten Ladeständen
+   * überhaupt nichts - keine Position, keine Zeit. Dann steht der Zeitfaktor
+   * die ganze Fahrt auf 1,0, die Ankunftsprognose auf dem Stand der Abfahrt,
+   * und ein Umweg fällt erst auf, wenn jemand von sich aus etwas eintippt.
+   *
+   * Der Ladestand wird bewusst *nicht* mitgeschickt: Er ist unbekannt, und
+   * den letzten bekannten Wert erneut zu senden hiesse, eine Messung zu
+   * erfinden - der Verbrauchsfaktor läse daraus, das Auto habe seither nichts
+   * verbraucht. Was zwischen zwei Meldungen gilt, rechnet der Server aus dem
+   * Energieprofil hoch. */
+  function positionVerfolgen() {
+    if (!navigator.geolocation || wache !== null) return;
+    wache = navigator.geolocation.watchPosition(
+      (pos) => {
+        const jetzt = Date.now();
+        // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
+        // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
+        // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
+        if (jetzt - letzteMeldung < MELDEABSTAND_MS) return;
+        letzteMeldung = jetzt;
+        positionMelden(pos.coords);
+      },
+      // Ein GPS-Fehler unterwegs ist kein Grund, den Nutzer zu behelligen -
+      // in einem Tunnel ist er der Normalfall, und die nächste Messung kommt.
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 });
+  }
+
+  function positionAufgeben() {
+    if (wache === null) return;
+    try { navigator.geolocation.clearWatch(wache); } catch (e) {}
+    wache = null;
+  }
+
+  async function positionMelden(coords) {
+    if (!K.zustand.sitzungId) return;
+    try {
+      const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
+        { method: "POST", body: {
+          lat: coords.latitude, lon: coords.longitude,
+          tempo_kmh: coords.speed === null ? null : coords.speed * 3.6 } });
+      zustandAnzeigen(zustand);
+    } catch (fehler) {
+      // Stillschweigend: Ein Funkloch ist unterwegs normal, und eine
+      // Fehlermeldung je verlorener Positionsmeldung wäre eine Meldung alle
+      // dreissig Sekunden.
+    }
+  }
+
   function standortHolen() {
     return new Promise((erfuellen, ablehnen) => {
       if (!navigator.geolocation) {
@@ -329,22 +402,50 @@ window.joltLive = (function () {
     });
   }
 
+  /* Den zuletzt bekannten Ladestand ins Feld schreiben - aber nie, während
+   * jemand darin tippt. Am Ladepunkt wird der Wert eingetippt, und ein Feld,
+   * das sich beim Eintippen unter den Fingern ändert, weil gerade eine
+   * Nachricht über den WebSocket kam, ist schlimmer als ein leeres. */
+  function socFeldVorbelegen(wert) {
+    const feld = document.getElementById("ist-soc");
+    if (!feld || document.activeElement === feld) return;
+    if (wert === null || wert === undefined || Number.isNaN(wert)) return;
+    feld.value = Math.round(wert);
+  }
+
   async function socMelden() {
     if (!K.zustand.sitzungId) { K.melden("Keine Live-Fahrt.", "fehler"); return; }
     const knopf = document.getElementById("soc-melden");
-    const soc = Number(document.getElementById("ist-soc").value);
-    if (!(soc >= 0 && soc <= 100)) {
+    const feld = document.getElementById("ist-soc");
+    const soc = Number(feld.value);
+    if (!feld.value || !(soc >= 0 && soc <= 100)) {
       K.melden("Ladestand zwischen 0 und 100 % angeben.", "fehler");
       return;
     }
 
     knopf.disabled = true;
+    // Die Tastatur weg, sonst verdeckt sie auf dem Telefon genau die Werte,
+    // wegen derer man den Ladestand gerade gemeldet hat.
+    feld.blur();
     try {
       const ort = await standortHolen();
       const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
         { method: "POST", body: { lat: ort.lat, lon: ort.lon, soc: soc,
                                   tempo_kmh: ort.tempo_kmh } });
       zustandAnzeigen(zustand);
+      // Die Abweichung ist der Grund, warum das Eintippen sich lohnt - also
+      // gehört sie unmittelbar danach als Satz auf den Schirm und nicht nur
+      // als Kachel unter fünf anderen.
+      const erklaerung = document.getElementById("soc-erklaerung");
+      if (erklaerung) {
+        erklaerung.textContent = zustand.abweichung_pp === null
+          || zustand.abweichung_pp === undefined
+          ? "Aufgenommen."
+          : (Math.abs(zustand.abweichung_pp) < 0.5
+            ? "Aufgenommen – genau im Plan."
+            : `Aufgenommen – ${K.zahl(Math.abs(zustand.abweichung_pp), 1)} `
+              + `Prozentpunkte ${zustand.abweichung_pp < 0 ? "unter" : "über"} Plan.`);
+      }
     } catch (fehler) {
       K.melden(fehler.message, "fehler");
     } finally {
@@ -357,6 +458,7 @@ window.joltLive = (function () {
     try {
       await K.api(`/api/live/${K.zustand.sitzungId}/ende`, { method: "POST" });
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
+    positionAufgeben();
     if (steckdose) { try { steckdose.close(); } catch (e) {} }
     K.zustand.sitzungId = null;
     plan = null;
@@ -374,6 +476,11 @@ window.joltLive = (function () {
     K.an("simulieren", "click", simulieren);
     K.an("live-beenden", "click", beenden);
     K.an("soc-melden", "click", socMelden);
+    // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
+    // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
+    K.an("ist-soc", "keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); socMelden(); }
+    });
   }
 
   return { einrichten, starten, beenden };

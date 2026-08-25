@@ -49,9 +49,15 @@ def aus_live_sitzung(sitzung, akku_netto_kwh: float) -> float | None:
     derselben Stelle vorhergesagt hatte. Beides steht bereits an den
     Messpunkten - `soll_soc` wird beim Eintreffen mitgeschrieben, genau
     damit hier nichts nachgerechnet werden muss.
+
+    Ausschliesslich **gemeldete** Ladestände zählen. Punkte ohne Ladestand
+    tragen zwar Position und Zeit, ihr Ladestand wird aber aus demselben
+    Modell hochgerechnet, das hier geprüft werden soll - sie mitzunehmen
+    hiesse, das Modell gegen sich selbst zu messen und dabei zuverlässig
+    einen Faktor von 1,0 zu erhalten.
     """
     punkte = [p for p in sitzung.punkte if p.soll_soc is not None
-              and p.km_auf_route is not None]
+              and p.km_auf_route is not None and p.soc is not None]
     if len(punkte) < 2:
         return None
 
