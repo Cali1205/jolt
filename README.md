@@ -57,8 +57,20 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
 - **Benachrichtigung aufs Telefon**, wenn sich der Plan ändert — auch bei
   dunklem Bildschirm, über Web Push. Und nur dann: Eine Meldung, die bei jeder
   Messung kommt, schaltet man nach zehn Minuten ab.
+- **Lernen aus gefahrenen Fahrten** — am Ende jeder Fahrt wird der
+  Korrekturfaktor des Fahrzeugs fortgeschrieben, gedämpft, damit eine einzelne
+  Fahrt mit Dachbox ihn nicht dauerhaft verbiegt.
+- **Anschluss für einen Logger im Auto** — ein Gerät, das fest im Fahrzeug
+  sitzt, kann die Sitzungs-ID einer Fahrt nicht kennen; die entsteht erst beim
+  Losfahren in der App und wechselt mit jeder Fahrt. Es weist sich deshalb mit
+  einem langlebigen **Logger-Token des Fahrzeugs** aus (`POST
+  /api/live/melden`), und jolt sucht die laufende Fahrt selbst. Steht das Auto,
+  ist das kein Fehler, sondern eine Antwort mit `aufgenommen: false` — ein
+  unbeaufsichtigtes Gerät, das auf Fehlerantworten stösst, protokolliert Fehler
+  oder schaltet sich ab.
 
-**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten).
+**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten) und der Übersetzer,
+der einem OBD2-Dongle den Ladestand entlockt (siehe „Nächste Schritte").
 
 ---
 
@@ -160,11 +172,12 @@ Geräte senden.
 
 ## Prüfen
 
-Beide Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
+Alle Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 
 ```bash
 ./tools/check_modell.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
 ./tools/check_optimierer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
+./tools/check_quellen.py    # Fremde Meldeformate übersetzen - und Schrott ablehnen
 ./tools/check_umplanung.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
 ./tools/check_push.py       # Web Push: Schlüssel, Verschlüsselung, Abos, Aufräumen
 ./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
@@ -182,11 +195,28 @@ die beiden Fälle, an denen ein gieriger Planer scheitert — eine lange Lücke 
 Schnelllader und die Wahl zwischen einer nahen schwachen und einer weiteren
 starken Säule.
 
+`check_quellen.py` prüft vor allem das, was schiefgeht. Eine Meldung, die
+stimmt, ist der langweilige Fall; interessant sind das fehlende Feld, der
+Zeitstempel in Millisekunden statt Sekunden und der aus dem Jahr 1970, wenn
+ein Kleinstrechner ohne Netz startet. Fremde Daten sind bis zum Beweis des
+Gegenteils kaputt, und ein Übersetzer, der das nicht abfängt, verlagert den
+Fehler nur — er landet dann als 500er im Log oder, schlimmer, als stiller
+Unsinn im Energieprofil.
+
 `check_umplanung.py` prüft jeden Auslöser einzeln — über seiner Schwelle muss
 er greifen, darunter schweigen; ein Auslöser, der immer feuert, ist so nutzlos
 wie einer, der es nie tut. Danach die ganze Kette: Fahrt rechnen, Ladepunkte
 anlegen, mit Mehrverbrauch und mit Stau abspielen und nachsehen, ob der Plan
 sich ändert, gültig bleibt und sich *nicht* bei jeder Messung ändert.
+
+Zuletzt eine Fahrt, in der wirklich **geladen** wird. Der Simulator tut das
+nie — sein Ladestand fällt monoton bis null —, und deshalb blieb der
+Normalfall jeder Langstrecke ungeprüft: anhalten, laden, weiterfahren. Das
+Energieprofil führt ausschliesslich Fahrzeit; die Ladezeit steht im Plan. Wer
+die Wanduhr ungefiltert dagegen hält, meldet nach dem ersten Ladestopp eine
+Verspätung in Höhe der Ladedauer — dauerhaft, denn aufgeholt wird sie nie.
+Der Auslöser „Ankunft verschiebt sich" stünde damit für den Rest der Fahrt
+über seiner Schwelle. Eine Meldung, die immer kommt, schaltet man ab.
 
 `check_push.py` prüft alles vor dem Netzsprung — und der Rundlauf durch die
 Verschlüsselung ist der Kern: Die Nutzlast wird für ein nachgebautes
@@ -210,6 +240,7 @@ backend/app/
   energie/    modell.py · wetter.py · kalibrierung.py
   laden/      kurven.py · optimierer.py · saeulen_import.py · verfuegbarkeit.py
   live/       sitzung.py · umplanung.py · kanal.py (WebSocket) · simulator.py
+              quellen/  fremde Meldeformate übersetzen (jolt.py · abrp.py)
   push.py     Web Push: Schlüssel, Abos, Versand
   routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
 frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
@@ -250,8 +281,35 @@ weil sie verlangt ist.
 
 ## Nächste Schritte
 
-1. **Echte Fahrzeugdaten** statt Handeingabe. Das Datenmodell
-   (`LiveSitzung` / `LivePunkt`) ist bereits darauf ausgelegt: Es ändert sich
-   nichts am Schema, nur die Quelle der Messpunkte.
-2. **Kalibrierung aus echten Fahrten** — das Gerüst steht in
-   `energie/kalibrierung.py`.
+**Echte Fahrzeugdaten** statt Handeingabe — der Weg dorthin ist offen, das
+Datenmodell (`LiveSitzung` / `LivePunkt`) nimmt sie unverändert entgegen.
+Was noch fehlt, ist der Übersetzer: Ein ELM327-Dongle liest den Ladestand
+eines MEB-Fahrzeugs nicht über die genormten OBD2-PIDs — die sind auf
+Verbrennungsmotoren gemünzt —, sondern über herstellerspezifische
+UDS-Abfragen. Diese Kenntnis kauft man sich sinnvollerweise über bestehende
+Software ein, statt sie nachzubauen.
+
+Die Übersetzerschicht dafür **steht**: `live/quellen/` normalisiert fremde
+Telemetrieformate auf einen `Rohpunkt`, und `POST /api/live/melden` nimmt sie
+mit `format: "…"` entgegen. Mitgeliefert sind jolts eigenes Format und das von
+Iternio (ABRP) — letzteres, weil es im Umfeld der Elektroauto-Logger so etwas
+wie ein Quasi-Standard ist: die ABRP-App selbst, ESP32-Dongles wie der WiCAN,
+OVMS und diverse Bastelskripte sprechen es. Ein Übersetzer dafür ist deshalb
+kein Adapter für einen Anbieter, sondern einer für ein halbes Ökosystem.
+
+**Die Übersetzung kennt kein Netz** — sie bekommt ein geparstes Objekt und gibt
+einen `Rohpunkt` zurück. Deshalb läuft `check_quellen.py` ohne Netz, ohne
+Datenbank und ohne Zugangsdaten, und deshalb lässt sich ein neues Format anhand
+einer aufgezeichneten Antwort einbauen, ohne im Auto zu sitzen.
+
+Was noch fehlt, ist der Transport: das Stück, das die Daten tatsächlich vom
+Dongle bis zu diesem Endpunkt bringt. Für ein iPhone führt der einzige heute
+gangbare Weg über die ABRP-App als Sensortreiber (sie liest BLE-Dongles live
+aus) und deren Telemetrie-API; Car Scanner scheidet dort aus, weil es auf iOS
+nur Aufzeichnungsdateien exportiert und keine Live-Ausgabe hat.
+
+Ein Detail, das dabei zählt: Fahrzeuge auf MEB-Basis liefern **zwei**
+Ladestände — den der Anzeige und den des Batteriemanagements. `reserve_soc`
+und `ziel_soc` meinen den der Anzeige, und der Adapter muss den richtigen von
+beiden nehmen; sonst rechnet das Modell dauerhaft um den verborgenen Puffer
+daneben.

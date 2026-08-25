@@ -328,15 +328,53 @@ sagt dagegen nichts über das Abo aus — wer es dabei wegwirft, schaltet die
 Benachrichtigungen bei der ersten Störung dauerhaft ab, und niemand merkt,
 warum sie nicht mehr kommen.
 
-**Stufe 4 — echte Fahrzeugdaten**
+**Stufe 4 — echte Fahrzeugdaten** *(halb)*
 
 Anbindung der OBD2-Logger bzw. einer Hersteller-API. Das Datenmodell
-(`LiveSitzung` / `LivePunkt`) ist bereits darauf ausgelegt — es ändert sich
-nichts am Schema, nur die Quelle der Messpunkte.
+(`LiveSitzung` / `LivePunkt`) nimmt sie unverändert entgegen — an *dieser*
+Stelle ändert sich tatsächlich nichts.
 
-**Stufe 5 — Kalibrierung aus echten Fahrten**
+Der Weg dorthin brauchte aber sehr wohl eine Ergänzung, und zwar eine, die
+beim Entwurf übersehen wurde: Messpunkte kamen ausschliesslich über
+`/api/live/{sitzung_id}/punkt` herein. Das passt zur PWA, die die Fahrt selbst
+gestartet hat und die ID deshalb kennt — aber nicht zu einem Gerät, das im
+Auto verbaut ist und beim Anschalten einfach zu senden beginnt. Die
+Sitzungs-ID entsteht erst beim Losfahren und wechselt mit jeder Fahrt; ein
+Dongle kann sie nicht wissen. Deshalb trägt jetzt das *Fahrzeug* ein
+langlebiges Logger-Token, und `POST /api/live/melden` sucht dessen laufende
+Sitzung selbst.
 
-Der Korrekturfaktor aus 2.2, gefüttert aus abgeschlossenen Fahrten.
+Ein ELM327 liest den Ladestand eines MEB-Fahrzeugs nicht über die genormten
+OBD2-PIDs — die sind auf Verbrennungsmotoren gemünzt —, sondern über
+herstellerspezifische UDS-Abfragen (Batteriemanagement auf Header `7E5`,
+Service `0x22`, DID `028C`, Rohwert durch 2,5). Diese Kenntnis kauft man sich
+über bestehende Software ein, statt sie nachzubauen. Damit steht aber fest,
+dass die Messpunkte in *deren* Format ankommen.
+
+Dafür steht `live/quellen/` analog zu `routing/provider.py`: eine Datei je
+Format, die auf einen `Rohpunkt` normalisiert. Mitgeliefert sind jolts
+eigenes Format und das von Iternio (ABRP), weil letzteres im Umfeld der
+Elektroauto-Logger ein Quasi-Standard ist. **Die Übersetzung kennt kein
+Netz** — sie bekommt ein geparstes Objekt und gibt einen `Rohpunkt` zurück.
+Ob der aus einem POST kam, aus einer Abfrage bei einem fremden Dienst oder
+aus einer Datei, ist eine Frage des Transports. Genau deshalb lässt sich ein
+neues Format anhand einer aufgezeichneten Antwort einbauen, ohne im Auto zu
+sitzen, und `check_quellen.py` läuft ohne alles.
+
+Was noch fehlt, ist dieser Transport. Für ein iPhone ist der einzige heute
+gangbare Weg die ABRP-App als Sensortreiber — sie liest BLE-Dongles live aus,
+und der verbreitete Vgate iCar Pro steht auf ihrer Empfehlungsliste — plus
+deren Telemetrie-API. Car Scanner scheidet auf iOS aus: dort gibt es nur
+Aufzeichnungsdateien zum Herunterladen, keine Live-Ausgabe. Ein Umweg über
+eine fremde Cloud ist das trotzdem, und die Alternative ohne sie wäre ein
+Dongle mit eigener Verbindung (ESP32, spricht dasselbe Format) — der hat dann
+aber kein GPS, und die Position müsste aus der PWA dazukommen.
+
+**Stufe 5 — Kalibrierung aus echten Fahrten** *(steht)*
+
+Der Korrekturfaktor aus 2.2, gefüttert aus abgeschlossenen Fahrten. Er wird
+beim Beenden einer Live-Sitzung fortgeschrieben, gedämpft und nur, wenn die
+Fahrt lang genug und der gemessene Faktor plausibel war.
 
 ---
 

@@ -36,6 +36,9 @@ window.joltLive = (function () {
       document.getElementById("live-inhalt").hidden = false;
       plan = antwort.plan || null;
       planZeichnen();
+      // Beim Losfahren ist der Startladestand der beste bekannte Wert - besser
+      // jedenfalls als eine feste Zahl, die mit diesem Auto nichts zu tun hat.
+      socFeldVorbelegen(fahrt.start_soc);
       verbinden(antwort.sitzung_id);
       window.joltApp.ansichtZeigen("live");
       // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
@@ -79,6 +82,11 @@ window.joltLive = (function () {
       planZeichnen();
       if (z.plan_geaendert) aenderungMelden(z.aenderung);
     }
+
+    // Der zuletzt bekannte Ladestand als Vorschlag fürs nächste Melden: Am
+    // Ladepunkt ist der neue Wert höher, unterwegs niedriger - in beiden
+    // Fällen ist der letzte Wert der kürzere Weg als eine feste Zahl.
+    socFeldVorbelegen(z.ist_soc);
 
     const abweichungArt = z.abweichung_pp === null ? ""
       : (z.abweichung_pp <= -5 ? "schlecht"
@@ -329,22 +337,50 @@ window.joltLive = (function () {
     });
   }
 
+  /* Den zuletzt bekannten Ladestand ins Feld schreiben - aber nie, während
+   * jemand darin tippt. Am Ladepunkt wird der Wert eingetippt, und ein Feld,
+   * das sich beim Eintippen unter den Fingern ändert, weil gerade eine
+   * Nachricht über den WebSocket kam, ist schlimmer als ein leeres. */
+  function socFeldVorbelegen(wert) {
+    const feld = document.getElementById("ist-soc");
+    if (!feld || document.activeElement === feld) return;
+    if (wert === null || wert === undefined || Number.isNaN(wert)) return;
+    feld.value = Math.round(wert);
+  }
+
   async function socMelden() {
     if (!K.zustand.sitzungId) { K.melden("Keine Live-Fahrt.", "fehler"); return; }
     const knopf = document.getElementById("soc-melden");
-    const soc = Number(document.getElementById("ist-soc").value);
-    if (!(soc >= 0 && soc <= 100)) {
+    const feld = document.getElementById("ist-soc");
+    const soc = Number(feld.value);
+    if (!feld.value || !(soc >= 0 && soc <= 100)) {
       K.melden("Ladestand zwischen 0 und 100 % angeben.", "fehler");
       return;
     }
 
     knopf.disabled = true;
+    // Die Tastatur weg, sonst verdeckt sie auf dem Telefon genau die Werte,
+    // wegen derer man den Ladestand gerade gemeldet hat.
+    feld.blur();
     try {
       const ort = await standortHolen();
       const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
         { method: "POST", body: { lat: ort.lat, lon: ort.lon, soc: soc,
                                   tempo_kmh: ort.tempo_kmh } });
       zustandAnzeigen(zustand);
+      // Die Abweichung ist der Grund, warum das Eintippen sich lohnt - also
+      // gehört sie unmittelbar danach als Satz auf den Schirm und nicht nur
+      // als Kachel unter fünf anderen.
+      const erklaerung = document.getElementById("soc-erklaerung");
+      if (erklaerung) {
+        erklaerung.textContent = zustand.abweichung_pp === null
+          || zustand.abweichung_pp === undefined
+          ? "Aufgenommen."
+          : (Math.abs(zustand.abweichung_pp) < 0.5
+            ? "Aufgenommen – genau im Plan."
+            : `Aufgenommen – ${K.zahl(Math.abs(zustand.abweichung_pp), 1)} `
+              + `Prozentpunkte ${zustand.abweichung_pp < 0 ? "unter" : "über"} Plan.`);
+      }
     } catch (fehler) {
       K.melden(fehler.message, "fehler");
     } finally {
@@ -374,6 +410,11 @@ window.joltLive = (function () {
     K.an("simulieren", "click", simulieren);
     K.an("live-beenden", "click", beenden);
     K.an("soc-melden", "click", socMelden);
+    // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
+    // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
+    K.an("ist-soc", "keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); socMelden(); }
+    });
   }
 
   return { einrichten, starten, beenden };

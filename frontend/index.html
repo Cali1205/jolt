@@ -104,6 +104,13 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+/* Das Logger-Token wird genau einmal gezeigt und muss abgetippt oder kopiert
+   werden - also umbrechend, auswählbar und in gleichbreiter Schrift, damit
+   sich l und 1 unterscheiden lassen. */
+#logger-token { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; background: #0c1116; border: 1px solid var(--rand);
+  border-radius: 8px; padding: 10px 12px; margin: 8px 0;
+  word-break: break-all; user-select: all; }
 .treffer { list-style: none; padding: 0; margin: 6px 0 0; }
 .treffer li button { width: 100%; text-align: left; background: #0c1116;
   border: 1px solid var(--rand); border-radius: 8px; padding: 8px 10px;
@@ -250,6 +257,27 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
+      <!-- Ganz oben, direkt unter den Werten: Der Ladestand wird an der Säule
+           eingetippt, im Stehen, oft mit Handschuhen und meist in Eile. Wer
+           dafür erst an einer Karte und einem Ladeplan vorbeiscrollen muss,
+           tippt ihn irgendwann nicht mehr ein - und dann rechnet jolt den
+           Rest der Fahrt gegen einen Wert von vor zwei Stunden. -->
+      <div class="karte-block">
+        <label for="ist-soc" style="margin-top:0">Ladestand jetzt</label>
+        <div class="reihe">
+          <!-- Das Feld doppelt so breit wie der Knopf: .reihe verteilt sonst
+               gleichmässig, und eine zweistellige Zahl braucht weniger Platz
+               als ein Wort - aber sie ist das, worauf gezielt wird. -->
+          <input type="number" id="ist-soc" min="0" max="100" step="1"
+                 inputmode="numeric" enterkeyhint="send"
+                 style="flex:2; font-size:22px; padding:12px; text-align:center">
+          <button class="tat" id="soc-melden"
+                  style="margin-top:0">Melden</button>
+        </div>
+        <p class="leer" id="soc-erklaerung" style="padding-bottom:0">Vorbelegt
+          ist der zuletzt gemeldete Wert. Die Position holt das Telefon per GPS.</p>
+      </div>
+
       <div id="karte-halter-live"></div>
 
       <div class="karte-block">
@@ -259,24 +287,6 @@ table.kurve input { padding: 6px 8px; }
         </div>
         <div id="live-aenderung" class="meldung warnung" hidden></div>
         <ol class="liste" id="live-plan"></ol>
-      </div>
-
-      <div class="karte-block">
-        <h2 style="margin-top:0">Ladestand melden</h2>
-        <p class="leer" style="padding-top:0">Solange das Auto seinen Ladestand
-          nicht selbst liefert, kommt er von Hand. Die Position holt das
-          Telefon per GPS.</p>
-        <div class="reihe">
-          <div>
-            <label for="ist-soc">Aktueller Ladestand in %</label>
-            <input type="number" id="ist-soc" min="0" max="100" step="1" value="60">
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <button class="tat neben" id="soc-melden"
-                    style="margin-top:0">Melden</button>
-          </div>
-        </div>
       </div>
 
       <div class="karte-block">
@@ -328,6 +338,17 @@ table.kurve input { padding: 6px 8px; }
       <table class="kurve"><tbody id="kurve-zeilen"></tbody></table>
       <button class="tat neben" id="kurve-zeile-neu">Stützstelle hinzufügen</button>
       <button class="tat" id="fahrzeug-speichern">Speichern</button>
+
+      <h2>Logger im Auto</h2>
+      <p class="leer" style="padding-top:0">Ein Gerät, das fest im Auto sitzt –
+        OBD2-Dongle, Kurzbefehl, Kleinstrechner – kann die Sitzung einer Fahrt
+        nicht kennen; die entsteht erst beim Losfahren. Mit diesem Token meldet
+        es Messpunkte an <code>POST /api/live/melden</code>, und jolt sucht die
+        laufende Fahrt dieses Fahrzeugs selbst.</p>
+      <p id="logger-stand" class="leer" style="padding-top:0"></p>
+      <div id="logger-token" hidden></div>
+      <button class="tat neben" id="logger-neu">Token erzeugen</button>
+      <button class="tat neben" id="logger-weg">Logger abmelden</button>
     </div>
   </section>
 
