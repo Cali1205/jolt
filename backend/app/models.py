@@ -198,6 +198,10 @@ class Fahrt(Base):
     start_soc = Column(Float, nullable=False)
     tempo_faktor = Column(Float, nullable=False, default=1.0)
     aussentemp_c = Column(Float)
+    # Zuladung dieser Fahrt. NULL heisst "es galt das Fahrzeugprofil" - so
+    # bleiben Fahrten aus der Zeit vor diesem Feld korrekt lesbar, statt
+    # rückwirkend eine Zuladung von 0 kg zu behaupten.
+    zuladung_kg = Column(Float)
 
     strecke_m = Column(Float, default=0.0)
     fahrzeit_s = Column(Float, default=0.0)
@@ -211,6 +215,11 @@ class Fahrt(Base):
     angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     fahrzeug = relationship("Fahrzeug")
+    # Damit die Historie "geplant" von "tatsächlich gefahren" unterscheiden
+    # kann, und das Löschen einer Fahrt ihre Sitzungen mitnimmt statt an der
+    # Fremdschlüsselbedingung zu scheitern.
+    live_sitzungen = relationship("LiveSitzung", back_populates="fahrt",
+                                  cascade="all, delete-orphan")
 
 
 class LiveSitzung(Base):
@@ -249,7 +258,7 @@ class LiveSitzung(Base):
     # ungenaue GPS-Messung an einer Brücke eine Neuplanung.
     abweg_seit = Column(DateTime)
 
-    fahrt = relationship("Fahrt")
+    fahrt = relationship("Fahrt", back_populates="live_sitzungen")
     punkte = relationship("LivePunkt", back_populates="sitzung",
                           cascade="all, delete-orphan",
                           order_by="LivePunkt.zeit")

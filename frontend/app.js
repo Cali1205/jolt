@@ -12,6 +12,8 @@ window.joltApp = (function () {
       if (abschnitt) abschnitt.hidden = !aktiv;
     }
     karteUmhaengen(name);
+    // Die Fahrtenliste holt sich ihre Daten erst, wenn jemand hinsieht.
+    if (name === "fahrten" && window.joltFahrten) window.joltFahrten.anzeigen();
   }
 
   /* Die eine Karte wandert in die gerade sichtbare Ansicht.
@@ -42,6 +44,7 @@ window.joltApp = (function () {
     karteUmhaengen("planen");
     window.joltRoute.einrichten();
     window.joltLive.einrichten();
+    window.joltFahrten.einrichten();
     window.joltFahrzeug.einrichten();
 
     let status;

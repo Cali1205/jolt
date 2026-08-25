@@ -83,6 +83,11 @@ window.joltRoute = (function () {
                 text: gewaehlt.ziel.name },
         start_soc: Number(document.getElementById("start-soc").value),
         tempo_faktor: Number(document.getElementById("tempo").value) / 100,
+        // Der Regler steht ganz links auf einem negativen Wert - das ist
+        // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
+        // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
+        // die der Regler schon beantwortet.
+        zuladung_kg: zuladungWert(),
       }});
       letzteVarianten = antwort.varianten || [];
       variantenZeichnen();
@@ -103,6 +108,22 @@ window.joltRoute = (function () {
     K.zustand.fahrt = variante;
     anzeigen(variante);
     variantenZeichnen();
+    await saeulenLaden();
+    await ladeplanLaden();
+  }
+
+  /* Eine gespeicherte Fahrt laden und zeichnen.
+   *
+   * Der Endpunkt liefert dieselbe Form wie eine frische Variante, deshalb
+   * genügt derselbe Weg wie nach dem Rechnen. Die Varianten-Karten bleiben
+   * leer: Zu einer einzeln geladenen Fahrt gibt es keine Geschwister mehr -
+   * die anderen Varianten von damals sind eigene Fahrten mit eigener ID. */
+  async function fahrtLaden(fahrtId) {
+    const fahrt = await K.api("/api/fahrten/" + fahrtId);
+    letzteVarianten = [];
+    variantenZeichnen();
+    K.zustand.fahrt = fahrt;
+    anzeigen(fahrt);
     await saeulenLaden();
     await ladeplanLaden();
   }
@@ -426,6 +447,30 @@ window.joltRoute = (function () {
     return hilfe.innerHTML;
   }
 
+  /* ---------- Zuladung ---------- */
+
+  /* Der Regler kennt einen Wert unterhalb seines Minimums als "nicht
+   * gesetzt". Das erspart einen zweiten Schalter für die Frage "eigene
+   * Zuladung oder die aus dem Profil?" - ganz links heisst Profil. */
+  function zuladungWert() {
+    const regler = document.getElementById("zuladung");
+    if (!regler) return null;
+    const wert = Number(regler.value);
+    return wert < 0 ? null : wert;
+  }
+
+  function zuladungKoppeln() {
+    const regler = document.getElementById("zuladung");
+    const anzeige = document.getElementById("zuladung-wert");
+    if (!regler || !anzeige) return;
+    const aktualisieren = () => {
+      const wert = zuladungWert();
+      anzeige.textContent = wert === null ? "wie im Profil" : wert + " kg";
+    };
+    regler.addEventListener("input", aktualisieren);
+    aktualisieren();
+  }
+
   /* ---------- Einrichten ---------- */
 
   function einrichten() {
@@ -433,6 +478,7 @@ window.joltRoute = (function () {
     ortsucheEinrichten("ziel", "ziel-treffer", "ziel");
     K.reglerKoppeln("start-soc", "start-soc-wert");
     K.reglerKoppeln("tempo", "tempo-wert");
+    zuladungKoppeln();
 
     let warten = null;
     const neuLaden = () => {
@@ -454,5 +500,6 @@ window.joltRoute = (function () {
     });
   }
 
-  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden, varianteWaehlen };
+  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden, varianteWaehlen,
+           fahrtLaden };
 })();

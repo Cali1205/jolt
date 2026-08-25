@@ -66,6 +66,12 @@ class Routenanfrage(BaseModel):
     # ein Ladestopp einsparen lässt.
     tempo_faktor: float = Field(default=1.0, ge=0.6, le=1.5)
     wetter_beruecksichtigen: bool = True
+    # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
+    # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
+    # einmal voll beladen geplant wird: Masse geht linear in Roll- und
+    # Steigungswiderstand ein, auf einer Bergstrecke sind 600 kg Unterschied
+    # deutlich mehr als Kosmetik.
+    zuladung_kg: float | None = Field(default=None, ge=0, le=2000)
 
 
 @router.get("/orte")
@@ -87,6 +93,10 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
 
     anbieter = routing.provider()
     werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
+    if anfrage.zuladung_kg is not None:
+        # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Die Zuladung
+        # ist eine Eigenschaft der Fahrt, nicht des Autos.
+        werte.masse_kg = fahrzeug.leermasse_kg + anfrage.zuladung_kg
 
     # Schritt 1: alle drei Vorgaben abfragen und anhand der reinen Routing-
     # Antwort (Strecke, Fahrzeit) zusammenlegen, was dieselbe Strasse ist.
@@ -170,6 +180,7 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
             ziel_lat=anfrage.ziel.lat, ziel_lon=anfrage.ziel.lon,
             start_soc=anfrage.start_soc, tempo_faktor=anfrage.tempo_faktor,
             aussentemp_c=kandidat["mittel"].temp_c,
+            zuladung_kg=anfrage.zuladung_kg,
             strecke_m=kandidat["strecke_km"] * 1000,
             fahrzeit_s=kandidat["fahrzeit_min"] * 60,
             geometrie=kandidat["punkte"],
@@ -189,21 +200,52 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
 
 @router.get("/fahrten/{fahrt_id}")
 def fahrt_lesen(fahrt_id: int, db: Session = Depends(get_db)):
+    """Eine gespeicherte Fahrt - in derselben Form wie eine frische Variante.
+
+    Die abgeleiteten Werte (Verbrauch, Reserve-Punkt, "reicht es?") werden aus
+    dem gespeicherten Energieprofil neu bestimmt statt mitgespeichert: Sie
+    sind Funktionen des Profils, und zwei Quellen für dieselbe Zahl laufen
+    auseinander. Die Form entspricht bewusst der von `/api/route`, damit die
+    Oberfläche eine alte Fahrt mit demselben Code zeichnet wie eine neue.
+    """
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
         raise HTTPException(404, "Fahrt nicht gefunden.")
+
     profil = fahrt.energieprofil or []
+    reserve_soc = fahrt.fahrzeug.reserve_soc
+    strecke_km = round((fahrt.strecke_m or 0) / 1000.0, 1)
+    kwh_gesamt = profil[-1].get("kwh") if profil else None
+
+    reserve_bei_km, reserve_punkt = None, None
+    for eintrag in profil:
+        if eintrag.get("soc") is not None and eintrag["soc"] <= reserve_soc:
+            reserve_bei_km = eintrag.get("km")
+            reserve_punkt = {"km": eintrag.get("km"), "lat": eintrag.get("lat"),
+                             "lon": eintrag.get("lon")}
+            break
+
     return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
             "start": {"lat": fahrt.start_lat, "lon": fahrt.start_lon,
                       "text": fahrt.start_text},
             "ziel": {"lat": fahrt.ziel_lat, "lon": fahrt.ziel_lon,
                      "text": fahrt.ziel_text},
             "fahrzeug": {"id": fahrt.fahrzeug.id, "name": fahrt.fahrzeug.name,
-                         "reserve_soc": fahrt.fahrzeug.reserve_soc},
+                         "reserve_soc": reserve_soc},
             "start_soc": fahrt.start_soc, "tempo_faktor": fahrt.tempo_faktor,
-            "aussentemp_c": fahrt.aussentemp_c,
-            "strecke_km": round((fahrt.strecke_m or 0) / 1000.0, 1),
+            "aussentemp_c": fahrt.aussentemp_c, "zuladung_kg": fahrt.zuladung_kg,
+            "strecke_km": strecke_km,
             "fahrzeit_minuten": round((fahrt.fahrzeit_s or 0) / 60.0),
+            "kwh_gesamt": round(kwh_gesamt, 3) if kwh_gesamt is not None else None,
+            "verbrauch_kwh_100km": (round(kwh_gesamt / strecke_km * 100.0, 2)
+                                    if kwh_gesamt and strecke_km else None),
+            "reserve_bei_km": reserve_bei_km,
+            "reserve_punkt": reserve_punkt,
+            "reicht": reserve_bei_km is None,
+            # Der Wind der damaligen Fahrt ist nicht gespeichert - nur die
+            # Temperatur, mit der gerechnet wurde. Sie ist die Zahl, die in
+            # der Oberfläche steht ("gerechnet bei 4 °C").
+            "wetter": {"temp_c": fahrt.aussentemp_c},
             "geometrie": fahrt.geometrie or [],
             "profil": _profil_ausduennen(profil),
             "soc_am_ziel": profil[-1]["soc"] if profil else None}
@@ -246,9 +288,13 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             lat=lp.lat, lon=lp.lon,
             gesperrt=zustand.quelle == "meldung"))
 
+    werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
+    if fahrt.zuladung_kg is not None:
+        werte.masse_kg = fahrzeug.leermasse_kg + fahrt.zuladung_kg
+
     plan = optimierer.planen(
         optimierer.Streckenprofil.aus_dicts(fahrt.energieprofil),
-        optionen, modell.Fahrzeugwerte.aus_modell(fahrzeug),
+        optionen, werte,
         kurven.als_paare(fahrzeug.ladekurve), start_soc=fahrt.start_soc,
         ziel_soc=fahrzeug.ziel_soc,
         max_fahrzeug_kw=fahrzeug.max_ladeleistung_kw,
@@ -267,13 +313,57 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
 
 
 @router.get("/fahrten")
-def fahrten_liste(db: Session = Depends(get_db), grenze: int = 20):
+def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, le=200)):
+    """Die zuletzt geplanten Fahrten.
+
+    Bewusst mehr als Start und Ziel: Ohne Verbrauch, Aussentemperatur und
+    Zuladung ist eine Liste vergangener Fahrten eine Liste von Namen. Erst
+    mit diesen Zahlen wird sie zu dem, wofür man sie aufschlägt - dem
+    Vergleich, warum dieselbe Strecke im Januar zwei Ladestopps brauchte und
+    im Juni einen.
+    """
     fahrten = (db.query(models.Fahrt).order_by(models.Fahrt.id.desc())
                .limit(grenze).all())
-    return [{"id": f.id, "start": f.start_text, "ziel": f.ziel_text,
-             "angelegt": f.angelegt.isoformat(),
-             "strecke_km": round((f.strecke_m or 0) / 1000.0, 1),
-             "fahrzeug": f.fahrzeug.name} for f in fahrten]
+
+    ergebnis = []
+    for f in fahrten:
+        profil = f.energieprofil or []
+        kwh = profil[-1].get("kwh") if profil else None
+        strecke_km = round((f.strecke_m or 0) / 1000.0, 1)
+        ergebnis.append({
+            "id": f.id, "start": f.start_text, "ziel": f.ziel_text,
+            "angelegt": f.angelegt.isoformat(),
+            "strecke_km": strecke_km,
+            "fahrzeit_minuten": round((f.fahrzeit_s or 0) / 60.0),
+            "fahrzeug": f.fahrzeug.name,
+            "start_soc": f.start_soc,
+            "soc_am_ziel": profil[-1].get("soc") if profil else None,
+            "kwh_gesamt": round(kwh, 1) if kwh is not None else None,
+            "verbrauch_kwh_100km": (round(kwh / strecke_km * 100.0, 1)
+                                    if kwh and strecke_km else None),
+            "aussentemp_c": f.aussentemp_c,
+            "tempo_faktor": f.tempo_faktor,
+            "zuladung_kg": f.zuladung_kg,
+            # Ob zu dieser Fahrt tatsächlich gefahren wurde - eine geplante
+            # Fahrt ohne Live-Sitzung ist ein Entwurf, keine Erinnerung.
+            "gefahren": bool(f.live_sitzungen)})
+    return ergebnis
+
+
+@router.delete("/fahrten/{fahrt_id}")
+def fahrt_loeschen(fahrt_id: int, db: Session = Depends(get_db)):
+    """Eine Fahrt aus der Historie entfernen.
+
+    Jede Routenberechnung legt bis zu drei Fahrten an (eine je Variante) -
+    ohne diesen Endpunkt wächst die Liste mit jedem Versuch, und die eine
+    Fahrt, die man wiederfinden will, verschwindet zwischen Entwürfen.
+    """
+    fahrt = db.get(models.Fahrt, fahrt_id)
+    if not fahrt:
+        raise HTTPException(404, "Fahrt nicht gefunden.")
+    db.delete(fahrt)
+    db.commit()
+    return {"ok": True}
 
 
 # ---------- intern ----------

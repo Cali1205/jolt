@@ -7,6 +7,7 @@ der später die echten Fahrzeugdaten andocken.
 """
 import asyncio
 import logging
+from datetime import datetime
 
 from fastapi import (APIRouter, Depends, HTTPException, Query, WebSocket,
                      WebSocketDisconnect)
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from .. import deps, models, push
 from ..database import SessionLocal, get_db
+from ..energie import kalibrierung
 from ..live import kanal, simulator, umplanung
 from ..live import sitzung as live_sitzung
 
@@ -131,10 +133,37 @@ def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{sitzung_id}/ende", dependencies=[Depends(deps.aktuelle_sitzung)])
 def beenden(sitzung_id: int, db: Session = Depends(get_db)):
+    """Fahrt abschliessen - und aus ihr lernen.
+
+    Der Verbrauchsfaktor der Sitzung gilt nur für diese eine Fahrt; er stirbt
+    mit ihr. Was bleiben soll, ist die Erkenntnis dahinter: Wenn das Modell
+    systematisch zu optimistisch rechnet, soll die *nächste* Planung das schon
+    wissen, statt es nach achtzig Kilometern erneut zu lernen. Genau dafür
+    trägt das Fahrzeug einen Korrekturfaktor, und genau hier wird er
+    fortgeschrieben - gedämpft, damit eine einzelne Fahrt mit Dachbox ihn
+    nicht dauerhaft verbiegt.
+    """
     sitzung = _sitzung_holen(db, sitzung_id)
     sitzung.laeuft = False
+    sitzung.beendet = datetime.utcnow()
+
+    gelernt = None
+    fahrzeug = sitzung.fahrt.fahrzeug if sitzung.fahrt else None
+    if fahrzeug:
+        roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
+        if roh is not None:
+            vorher = fahrzeug.korrekturfaktor
+            fahrzeug.korrekturfaktor = kalibrierung.nachfuehren(vorher, roh)
+            gelernt = {"rohfaktor": round(roh, 3), "vorher": round(vorher, 3),
+                       "nachher": fahrzeug.korrekturfaktor}
+            log.info("Kalibrierung %s: %.3f -> %.3f (roh %.3f)",
+                     fahrzeug.name, vorher, fahrzeug.korrekturfaktor, roh)
+
     db.commit()
-    return {"ok": True, "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3)}
+    return {"ok": True, "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
+            # None heisst "diese Fahrt war nicht verwertbar" - zu kurz, oder
+            # der Faktor lag ausserhalb der Plausibilitätsgrenzen.
+            "gelernt": gelernt}
 
 
 @router.post("/{sitzung_id}/simulieren",
