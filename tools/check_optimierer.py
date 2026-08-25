@@ -116,9 +116,15 @@ def plan_pruefen(plan, profil, fz, start_soc, ziel_soc, name: str) -> dict:
            f"{name}: die ausgewiesenen Ankunftswerte stimmen mit der Strecke überein",
            f"grösste Abweichung {fakten['abweichung']:.2f} Prozentpunkte")
     summe = (plan.fahrzeit_minuten + plan.ladezeit_minuten
-             + plan.umwegzeit_minuten)
+             + plan.umwegzeit_minuten + plan.haltekosten_minuten)
     pruefe(abs(summe - plan.gesamt_minuten) < 0.5,
-           f"{name}: Fahrzeit, Ladezeit und Umwege ergeben die Gesamtzeit")
+           f"{name}: Fahrzeit, Ladezeit, Umwege und Haltekosten ergeben die "
+           f"Gesamtzeit")
+    pruefe(abs(plan.haltekosten_minuten
+               - len(plan.stopps) * optimierer.STOPP_FIXKOSTEN_MIN) < 0.01,
+           f"{name}: die Haltekosten hängen an der Zahl der Stopps, nicht an "
+           f"der Lademenge",
+           f"{plan.haltekosten_minuten:.1f} min bei {len(plan.stopps)} Stopps")
 
     # Kein Stopp, der sich nicht lohnt. Ein Halt kostet allein an Fixkosten
     # rund vier Minuten; wer dafür zwei Prozentpunkte lädt, hätte dieselbe
@@ -435,7 +441,13 @@ def fall_dichte_saeulen():
     plan = optimierer.planen(profil, optionen, fz, KURVE, start_soc=65.0,
                              ziel_soc=20.0, max_fahrzeug_kw=350.0)
     pruefe(plan.machbar, "machbar", plan.grund)
-    pruefe(len(plan.stopps) >= 6, "die Strecke braucht viele Stopps",
+    # Hier stand "mindestens sechs Stopps" - und diese Erwartung war selbst
+    # ein Symptom. Ohne Fixkosten je Halt plante der Optimierer diese Strecke
+    # mit **zehn** Stopps, sechs davon drei bis vier Minuten lang, und war
+    # damit real neunundvierzig Minuten langsamer als die vier Halte, die
+    # jetzt herauskommen. Die Strecke braucht viel Energie, nicht viele Halte:
+    # 577 km bei 0,257 kWh/km sind knapp 150 kWh in einen 60-kWh-Akku.
+    pruefe(len(plan.stopps) >= 3, "die Strecke braucht mehrere Stopps",
            f"{len(plan.stopps)}")
     plan_pruefen(plan, profil, fz, 65.0, 20.0, "Dichte Säulen")
 
@@ -443,6 +455,58 @@ def fall_dichte_saeulen():
     pruefe(not kurz,
            "kein Stopp dauert unter zwei Minuten - dafür lohnt kein Abstecher",
            str([(s.option.name, s.ladezeit_minuten) for s in kurz]))
+
+
+def fall_zersplitterung():
+    abschnitt("Fixkosten je Halt - wenige lange statt vieler kurzer Stopps")
+    # Der Fehler, den dieser Fall festhält: Die Zielfunktion zählte Ladezeit
+    # und Umweg, aber nichts, was an der blossen *Anzahl* der Stopps hängt.
+    # Weil ein Akku bei 10 % viel schneller lädt als bei 60 %, ist es unter
+    # dieser Annahme immer günstiger, dieselbe Energie auf viele kurze Halte
+    # bei niedrigem Ladestand zu verteilen. Auf einer echten Fahrt
+    # (Le Gurp - Montalivet, 662 km) kamen so vier Stopps heraus, drei davon
+    # unter vier Minuten.
+    fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
+    profil = profil_bauen(660, kwh_je_km=0.21)
+    optionen = saeulen(range(60, 660, 40), max_kw=300.0, umweg=4.0,
+                       anzahl_punkte=8)
+
+    gemeinsam = dict(start_soc=80.0, ziel_soc=20.0, max_fahrzeug_kw=200.0)
+    ohne = optimierer.planen(profil, optionen, fz, KURVE,
+                             stopp_fixkosten_min=0.0, **gemeinsam)
+    mit = optimierer.planen(profil, optionen, fz, KURVE, **gemeinsam)
+
+    pruefe(ohne.machbar and mit.machbar, "beide Varianten sind machbar",
+           f"{ohne.grund} / {mit.grund}")
+    pruefe(len(mit.stopps) < len(ohne.stopps),
+           "mit Fixkosten je Halt entstehen weniger Stopps",
+           f"{len(mit.stopps)} statt {len(ohne.stopps)}")
+
+    def wirkliche_zeit(plan) -> float:
+        """Was der Plan **tatsächlich** kostet - Haltekosten inbegriffen.
+
+        Der Massstab, an dem sich beide messen lassen müssen. Der alte Plan
+        war nie schneller, er sah nur schneller aus: Ein Teil seiner Kosten
+        stand nicht in der Rechnung.
+        """
+        return (plan.fahrzeit_minuten + plan.ladezeit_minuten
+                + plan.umwegzeit_minuten
+                + len(plan.stopps) * optimierer.STOPP_FIXKOSTEN_MIN)
+
+    pruefe(wirkliche_zeit(mit) < wirkliche_zeit(ohne) - 1.0,
+           "und der neue Plan ist an der Wirklichkeit gemessen schneller - "
+           "der alte war nur billiger gerechnet",
+           f"{wirkliche_zeit(mit):.0f} min gegen {wirkliche_zeit(ohne):.0f} min")
+
+    kurz = [s for s in mit.stopps
+            if s.ladezeit_minuten < optimierer.STOPP_FIXKOSTEN_MIN]
+    pruefe(not kurz,
+           "kein Halt dauert kürzer, als er an Fixkosten kostet - für so "
+           "einen Stopp lohnt das Abfahren nie",
+           str([(s.option.name, round(s.ladezeit_minuten, 1)) for s in kurz]))
+
+    plan_pruefen(profil=profil, plan=mit, fz=fz, start_soc=80.0,
+                 ziel_soc=20.0, name="Fixkosten")
 
 
 def fall_laufzeit():
@@ -479,6 +543,7 @@ def main() -> int:
     fall_ausschluesse()
     fall_ausweich()
     fall_dichte_saeulen()
+    fall_zersplitterung()
     fall_laufzeit()
 
     return pruefe.bilanz()

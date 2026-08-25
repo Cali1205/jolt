@@ -56,17 +56,34 @@ SOC_RASTER = 5.0
 # feststeht und nur noch die Lademengen gesucht werden.
 SOC_RASTER_FEIN = 1.0
 
+# Was ein Halt kostet, bevor das erste Elektron fliesst - und nachdem das
+# letzte geflossen ist. Von der Route abfahren und wieder auffädeln steckt
+# bereits in `umweg_minuten`; hier stehen Einparken, Kabel holen,
+# Freischalten, das Warten auf den Handshake und hinterher dasselbe rückwärts.
+#
+# **Ohne diesen Posten war die Zielfunktion blind für die Anzahl der Stopps.**
+# Sie zählte Ladezeit und Umweg, sonst nichts. Ein Akku lädt bei 10 % aber
+# weit schneller als bei 60 %, und deshalb ist es unter dieser Annahme immer
+# günstiger, dieselbe Energie auf viele kurze Halte bei niedrigem Ladestand zu
+# verteilen, statt auf wenige lange. Der Optimierer tat genau das: auf der
+# Fahrt Périgueux-Vichy sieben Stopps von zwei bis sechs Minuten, jedes Mal
+# bis auf 10-12 % herunter und dann ein Schluck im steilsten Teil der Kurve.
+# Rechnerisch optimal, praktisch Unsinn - niemand fährt siebenmal ab, um
+# dreimal zwei Minuten zu laden.
+#
+# Fünf Minuten sind bewusst nicht knapp gewählt. Wer den Posten zu klein
+# ansetzt, bekommt die Zersplitterung abgeschwächt zurück; wer ihn zu gross
+# ansetzt, verliert höchstens einen sinnvollen Zwischenstopp - und das ist
+# der harmlosere Fehler.
+STOPP_FIXKOSTEN_MIN = 5.0
+
 # Wie viel an einem Halt mindestens geladen werden muss, damit er sich lohnt.
 #
-# Acht Prozentpunkte klingen willkürlich, sind aber gerechnet: Ein Stopp
-# kostet allein an Fixkosten rund vier Minuten (abfahren, einparken, Kabel
-# holen, wieder auffädeln). In derselben Zeit lädt ein Schnelllader rund zehn
-# Prozentpunkte. Wer weniger lädt, hat den Halt nicht wieder hereingeholt -
-# er hätte dieselbe Energie am nächsten Stopp in weniger Zeit bekommen.
-#
-# Mit der vorherigen Schranke von zwei Prozentpunkten entstanden Stopps von
-# einer Minute Ladezeit, die nur deshalb billig aussahen, weil der
-# Redundanzbonus ihren Umweg aufwog.
+# Seit die Fixkosten oben in der Zielfunktion stehen, ist das nur noch ein
+# Sicherheitsnetz und nicht mehr der Mechanismus: Ein Halt, der sich nicht
+# lohnt, wird jetzt schon deshalb nicht gewählt, weil er fünf Minuten kostet.
+# Die Schranke bleibt trotzdem - sie hält Halte aus dem Plan, die an einer
+# schwachen Säule rechnerisch knapp aufgehen, und kostet nichts.
 MIN_LADEHUB = 8.0
 
 # Ausdünnung der Kandidaten: je Streckenabschnitt die besten N. Ohne das
@@ -207,6 +224,9 @@ class Ladeplan:
     fahrzeit_minuten: float = 0.0
     ladezeit_minuten: float = 0.0
     umwegzeit_minuten: float = 0.0
+    # Einparken, Kabel, Freischalten - je Halt einmal. Eigener Posten, damit
+    # in der Bilanz sichtbar bleibt, was die blosse *Anzahl* der Stopps kostet.
+    haltekosten_minuten: float = 0.0
     gesamt_minuten: float = 0.0
     soc_am_ziel: float = 0.0
     gepruefte_kandidaten: int = 0
@@ -218,6 +238,7 @@ class Ladeplan:
                 "fahrzeit_minuten": round(self.fahrzeit_minuten),
                 "ladezeit_minuten": round(self.ladezeit_minuten),
                 "umwegzeit_minuten": round(self.umwegzeit_minuten),
+                "haltekosten_minuten": round(self.haltekosten_minuten),
                 "gesamt_minuten": round(self.gesamt_minuten),
                 "soc_am_ziel": round(self.soc_am_ziel, 1),
                 "gepruefte_kandidaten": self.gepruefte_kandidaten}
@@ -287,7 +308,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
            ziel_soc: float = 20.0, max_fahrzeug_kw: float = 1e9,
            temperatur_faktor: float = 1.0,
            umweg_grenze_min: float = UMWEG_GRENZE_MIN,
-           bevorzugte_betreiber: list[str] | None = None) -> Ladeplan:
+           bevorzugte_betreiber: list[str] | None = None,
+           stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN) -> Ladeplan:
     """Die zeitoptimale Folge von Ladestopps.
 
     `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
@@ -309,7 +331,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
     plan.gepruefte_kandidaten = len(gefiltert)
 
     graph = _Graph(profil, gefiltert, fz, kurve, max_fahrzeug_kw,
-                   temperatur_faktor, bevorzugte_betreiber)
+                   temperatur_faktor, bevorzugte_betreiber,
+                   stopp_fixkosten_min)
 
     # Schritt 3: Pareto-Dijkstra.
     weg = graph.suchen(start_soc, ziel_soc)
@@ -403,7 +426,9 @@ class _Graph:
 
     def __init__(self, profil: Streckenprofil, optionen: list[Ladeoption], fz,
                  kurve, max_fahrzeug_kw: float, temperatur_faktor: float,
-                 bevorzugte_betreiber: list[str] | None = None):
+                 bevorzugte_betreiber: list[str] | None = None,
+                 stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN):
+        self.stopp_fixkosten_min = stopp_fixkosten_min
         self.profil = profil
         self.optionen = optionen
         self.fz = fz
@@ -593,7 +618,12 @@ class _Graph:
                 # Nebenbei bleiben so alle Kanten positiv, was Dijkstra
                 # ohnehin braucht.
                 bonus = min(bonus_roh, umweg)
-                abfahrten.append((ladeziel, umweg + ladezeit - bonus))
+                # Die Fixkosten des Halts stehen hier und nicht bei der
+                # Ladezeit: Sie fallen einmal je Stopp an, unabhängig davon,
+                # wie viel geladen wird. Genau das ist der Unterschied, der
+                # wenige lange Halte gegen viele kurze gewinnen lässt.
+                abfahrten.append((ladeziel, self.stopp_fixkosten_min
+                                  + umweg + ladezeit - bonus))
             if not abfahrten:
                 return
 
@@ -746,8 +776,11 @@ class _Graph:
                 ladezeit = 0.0
                 abfahrt = ankunft
 
+            # Ankunft ist, wann man da ist - die Fixkosten laufen danach,
+            # sonst behauptete der Plan eine Ankunft, die schon das Einparken
+            # enthält.
             ankunft_minute = uhr
-            uhr += ladezeit
+            uhr += self.stopp_fixkosten_min + ladezeit
 
             plan.stopps.append(Stopp(
                 option=option, ankunft_soc=ankunft, abfahrt_soc=abfahrt,
@@ -758,12 +791,14 @@ class _Graph:
 
             plan.ladezeit_minuten += ladezeit
             plan.umwegzeit_minuten += option.umweg_minuten
+            plan.haltekosten_minuten += self.stopp_fixkosten_min
             soc = abfahrt
             vorher = knoten
 
         plan.soc_am_ziel = soc - self.netto_soc(vorher, self.ziel_index)
         plan.gesamt_minuten = (plan.fahrzeit_minuten + plan.ladezeit_minuten
-                               + plan.umwegzeit_minuten)
+                               + plan.umwegzeit_minuten
+                               + plan.haltekosten_minuten)
         return plan
 
     def _ausweich(self, knoten: int, ankunft_soc: float) -> dict | None:
