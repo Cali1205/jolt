@@ -11,13 +11,13 @@ from datetime import datetime
 
 from fastapi import (APIRouter, Depends, HTTPException, Query, WebSocket,
                      WebSocketDisconnect)
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from .. import deps, models, push
 from ..database import SessionLocal, get_db
 from ..energie import kalibrierung
-from ..live import kanal, simulator, umplanung
+from ..live import kanal, quellen, simulator, umplanung
 from ..live import sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -33,11 +33,47 @@ class Messpunkt(BaseModel):
     aussentemp_c: float | None = None
 
 
+class LoggerMeldung(BaseModel):
+    """Eine Meldung von einem Gerät im Auto.
+
+    Ausser `token` und `format` ist hier bewusst nichts festgeschrieben: Die
+    übrigen Felder gehören dem jeweiligen Format und werden von dessen
+    Übersetzer in `live/quellen/` geprüft. Sie hier ein zweites Mal zu
+    beschreiben hiesse, jede Formatänderung an zwei Stellen nachzuziehen -
+    und die Prüfung läge dann bei Pydantic statt bei dem Modul, das das
+    Format wirklich kennt.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    token: str = Field(min_length=1, max_length=64)
+    format: str = "jolt"
+
+
 def _sitzung_holen(db: Session, sitzung_id: int) -> models.LiveSitzung:
     sitzung = db.get(models.LiveSitzung, sitzung_id)
     if not sitzung:
         raise HTTPException(404, "Live-Sitzung nicht gefunden.")
     return sitzung
+
+
+async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
+                             punkt: quellen.Rohpunkt) -> dict:
+    """Einen Messpunkt einsortieren und alle unterrichten, die es angeht."""
+    zustand = live_sitzung.messpunkt_aufnehmen(
+        db, sitzung, punkt.lat, punkt.lon, punkt.soc,
+        punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit)
+
+    nachricht = {"typ": "zustand", "simuliert": False,
+                 **live_sitzung.zustand_als_dict(zustand)}
+    await kanal.senden(sitzung.id, nachricht)
+    # Eine geänderte Planung ist der einzige Anlass, jemanden am Steuer zu
+    # stören - und der einzige, der auch ein dunkles Telefon erreichen muss.
+    # Im Hintergrund, weil die Antwort an ein fahrendes Auto nicht auf einen
+    # Push-Dienst warten darf.
+    if zustand.plan_geaendert:
+        push.senden_hintergrund(SessionLocal, "jolt – Ladeplan geändert",
+                                zustand.aenderung)
+    return nachricht
 
 
 @router.post("/start/{fahrt_id}", dependencies=[Depends(deps.aktuelle_sitzung)])
@@ -93,22 +129,61 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
     sitzung = _sitzung_holen(db, sitzung_id)
     if not sitzung.laeuft:
         raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
+    return await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
+        lat=messpunkt.lat, lon=messpunkt.lon, soc=messpunkt.soc,
+        tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c))
 
-    zustand = live_sitzung.messpunkt_aufnehmen(
-        db, sitzung, messpunkt.lat, messpunkt.lon, messpunkt.soc,
-        messpunkt.tempo_kmh, messpunkt.aussentemp_c)
 
-    nachricht = {"typ": "zustand", "simuliert": False,
-                 **live_sitzung.zustand_als_dict(zustand)}
-    await kanal.senden(sitzung_id, nachricht)
-    # Eine geänderte Planung ist der einzige Anlass, jemanden am Steuer zu
-    # stören - und der einzige, der auch ein dunkles Telefon erreichen muss.
-    # Im Hintergrund, weil die Antwort an ein fahrendes Auto nicht auf einen
-    # Push-Dienst warten darf.
-    if zustand.plan_geaendert:
-        push.senden_hintergrund(SessionLocal, "jolt – Ladeplan geändert",
-                                zustand.aenderung)
-    return nachricht
+@router.post("/melden")
+async def logger_melden(meldung: LoggerMeldung, db: Session = Depends(get_db)):
+    """Einen Messpunkt melden, ohne die Sitzungs-ID zu kennen.
+
+    Der Weg für ein Gerät, das fest im Auto sitzt: ein OBD2-Dongle, ein
+    Kurzbefehl, ein Skript auf einem Kleinstrechner. Es weist sich mit dem
+    Logger-Token des **Fahrzeugs** aus - einem Geheimnis, das bleibt - und das
+    Backend sucht sich die laufende Live-Sitzung dieses Fahrzeugs selbst. Die
+    wechselt mit jeder Fahrt, und ein verbautes Gerät hat keine Möglichkeit,
+    davon zu erfahren.
+
+    Läuft gerade keine Fahrt, ist das **kein Fehler**: Das Auto steht dann
+    einfach vor der Tür, und der Logger sendet trotzdem. Er bekommt deshalb
+    200 mit `aufgenommen: false` und nicht 404 - ein unbeaufsichtigtes Gerät,
+    das auf Fehlerantworten stösst, fängt an, Fehler zu protokollieren oder
+    sich abzuschalten, und beides hilft niemandem.
+
+    In welchem Format die Messwerte stehen, sagt `format`; übersetzt wird in
+    `live/quellen/`. Ohne Angabe gilt jolts eigenes.
+    """
+    try:
+        uebersetzer = quellen.finden(meldung.format)
+        punkt = uebersetzer.normalisieren(
+            meldung.model_dump(exclude={"token", "format"}))
+    except quellen.QuellenFehler as fehler:
+        # 400 und nicht 422: Der Satz aus dem Übersetzer sagt, was der Logger
+        # falsch schickt, und der soll ungefiltert beim Einrichtenden ankommen.
+        raise HTTPException(400, str(fehler))
+
+    fahrzeug = (db.query(models.Fahrzeug)
+                .filter(models.Fahrzeug.logger_token == meldung.token)
+                .one_or_none())
+    if not fahrzeug:
+        # Ein falsches Token ist dagegen sehr wohl ein Fehler - sonst liesse
+        # sich nicht unterscheiden, ob der Logger falsch eingerichtet ist oder
+        # ob nur gerade keine Fahrt läuft.
+        raise HTTPException(401, "Logger-Token unbekannt.")
+
+    sitzung = (db.query(models.LiveSitzung)
+               .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
+               .filter(models.Fahrt.fahrzeug_id == fahrzeug.id,
+                       models.LiveSitzung.laeuft.is_(True))
+               .order_by(models.LiveSitzung.id.desc())
+               .first())
+    if not sitzung:
+        return {"aufgenommen": False, "fahrzeug": fahrzeug.name,
+                "grund": "Zu diesem Fahrzeug läuft gerade keine Fahrt."}
+
+    nachricht = await _punkt_verarbeiten(db, sitzung, punkt)
+    return {"aufgenommen": True, "sitzung_id": sitzung.id, **nachricht}
 
 
 @router.get("/{sitzung_id}")

@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -48,6 +50,9 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "steckertyp": fahrzeug.steckertyp,
             "bevorzugte_betreiber": fahrzeug.bevorzugte_betreiber or [],
             "korrekturfaktor": fahrzeug.korrekturfaktor,
+            # Nur ob eines eingerichtet ist, nicht welches. Das Token steht
+            # genau einmal in einer Antwort - der, mit der es entsteht.
+            "logger_aktiv": bool(fahrzeug.logger_token),
             "ladekurve": [[p.soc_prozent, p.kw] for p in fahrzeug.ladekurve]}
 
 
@@ -136,6 +141,37 @@ def aendern(fahrzeug_id: int, eingabe: FahrzeugEingabe,
         _kurve_setzen(db, fahrzeug, eingabe.ladekurve)
     db.commit()
     return _als_dict(fahrzeug)
+
+
+@router.post("/{fahrzeug_id}/logger-token")
+def logger_token_erneuern(fahrzeug_id: int, db: Session = Depends(get_db)):
+    """Ein neues Logger-Token erzeugen - und damit das alte entwerten.
+
+    Das Token ist der Schlüssel, mit dem ein Gerät im Auto Messpunkte melden
+    darf (`POST /api/live/melden`). Es steht **nur in dieser einen Antwort**;
+    danach ist es aus der Oberfläche nicht mehr abzurufen. Wer es verliert,
+    erzeugt ein neues - das kostet nichts ausser dem Neueintragen im Logger,
+    und es hält die Gewohnheit aufrecht, ein Geheimnis nicht in jeder
+    Listenantwort mitzuschleppen.
+    """
+    fahrzeug = db.get(models.Fahrzeug, fahrzeug_id)
+    if not fahrzeug:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+    fahrzeug.logger_token = secrets.token_urlsafe(32)
+    db.commit()
+    return {"logger_token": fahrzeug.logger_token,
+            "hinweis": "Dieses Token wird nur einmal angezeigt."}
+
+
+@router.delete("/{fahrzeug_id}/logger-token")
+def logger_token_loeschen(fahrzeug_id: int, db: Session = Depends(get_db)):
+    """Den Logger abmelden. Danach wird von ihm nichts mehr angenommen."""
+    fahrzeug = db.get(models.Fahrzeug, fahrzeug_id)
+    if not fahrzeug:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+    fahrzeug.logger_token = None
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/{fahrzeug_id}")

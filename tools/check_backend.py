@@ -518,6 +518,110 @@ def main() -> int:
            "danach werden keine Messpunkte mehr angenommen",
            f"HTTP {gesperrt.status_code}")
 
+    print("\nLogger im Auto meldet sich über das Fahrzeug")
+    # Ein Gerät, das fest im Auto sitzt, kann die Sitzungs-ID nicht kennen:
+    # Sie entsteht beim Losfahren in der App und wechselt mit jeder Fahrt.
+    # Es weist sich deshalb mit dem Logger-Token des Fahrzeugs aus.
+    fahrzeug_id = fahrzeuge[0]["id"]
+    client.post(f"/api/live/{sitzung_id}/ende")      # erst mal Ruhe schaffen
+
+    falsch = client.post("/api/live/melden", json={
+        "token": "gibtesnicht", "lat": 53.5, "lon": 10.0, "soc": 50.0})
+    pruefe(falsch.status_code == 401,
+           "ein unbekanntes Token wird abgewiesen",
+           f"HTTP {falsch.status_code}")
+
+    token = client.post(
+        f"/api/fahrzeuge/{fahrzeug_id}/logger-token").json()["logger_token"]
+    pruefe(len(token) >= 32, "ein Logger-Token lässt sich erzeugen",
+           f"{len(token)} Zeichen")
+    liste = client.get("/api/fahrzeuge").json()[0]
+    pruefe(liste.get("logger_aktiv") is True,
+           "das Fahrzeug meldet, dass ein Logger eingerichtet ist")
+    pruefe("logger_token" not in liste,
+           "das Token selbst steht in keiner Listenantwort - es wird genau "
+           "einmal gezeigt", str(list(liste.keys())))
+
+    # Das Auto steht vor der Tür und der Logger sendet trotzdem. Das ist kein
+    # Fehler: Ein unbeaufsichtigtes Gerät, das Fehlerantworten bekommt, fängt
+    # an zu protokollieren oder schaltet sich ab.
+    ruhend = client.post("/api/live/melden", json={
+        "token": token, "lat": 53.5, "lon": 10.0, "soc": 50.0})
+    pruefe(ruhend.status_code == 200
+           and ruhend.json().get("aufgenommen") is False,
+           "ohne laufende Fahrt wird nichts aufgenommen - aber es ist kein "
+           "Fehler", f"HTTP {ruhend.status_code}: {ruhend.text[:120]}")
+
+    sitzung3 = client.post(f"/api/live/start/{fahrt_id}").json()["sitzung_id"]
+    messpunkt = punkte_planmaessig[3]
+    gemeldet = client.post("/api/live/melden", json={
+        "token": token, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
+        "soc": messpunkt["soc"]})
+    pruefe(gemeldet.status_code == 200
+           and gemeldet.json().get("aufgenommen") is True,
+           "sobald eine Fahrt läuft, findet der Logger sie von allein",
+           f"HTTP {gemeldet.status_code}: {gemeldet.text[:120]}")
+    pruefe(gemeldet.json().get("sitzung_id") == sitzung3,
+           "und zwar die richtige", f"{gemeldet.json().get('sitzung_id')} "
+           f"statt {sitzung3}")
+    pruefe(client.get(f"/api/live/{sitzung3}").json()["punkte"] == 1,
+           "der Messpunkt liegt in dieser Sitzung")
+
+    # Fremdes Format: dieselbe Meldung, in der Sprache von Iternio/ABRP. Das
+    # ist der Weg, auf dem die OBD2-Daten hereinkommen werden - übersetzt
+    # wird in live/quellen/, geprüft im Einzelnen von check_quellen.py.
+    fremd = client.post("/api/live/melden", json={
+        "token": token, "format": "abrp",
+        "tlm": {"utc": 1787654321, "soc": 44.0, "lat": messpunkt["lat"],
+                "lon": messpunkt["lon"], "speed": 98.0, "ext_temp": 19.0,
+                "is_charging": 0}})
+    pruefe(fremd.status_code == 200
+           and fremd.json().get("aufgenommen") is True,
+           "eine Meldung im ABRP-Format wird angenommen",
+           f"HTTP {fremd.status_code}: {fremd.text[:140]}")
+    pruefe(fremd.json().get("ist_soc") == 44.0,
+           "und der Ladestand kommt übersetzt an",
+           str(fremd.json().get("ist_soc")))
+    pruefe(client.get(f"/api/live/{sitzung3}").json()["punkte"] == 2,
+           "der übersetzte Punkt liegt in derselben Sitzung")
+
+    kaputt = client.post("/api/live/melden", json={
+        "token": token, "format": "abrp",
+        "tlm": {"utc": 1787654321, "lat": 48.0, "lon": 11.0}})
+    pruefe(kaputt.status_code == 400,
+           "eine Meldung ohne Ladestand wird abgelehnt",
+           f"HTTP {kaputt.status_code}")
+    pruefe("soc" in kaputt.text.lower(),
+           "und der Grund nennt das fehlende Feld", kaputt.text[:140])
+
+    unbekannt = client.post("/api/live/melden", json={
+        "token": token, "format": "torque", "lat": 48.0, "lon": 11.0,
+        "soc": 50.0})
+    pruefe(unbekannt.status_code == 400,
+           "ein unbekanntes Format wird abgelehnt",
+           f"HTTP {unbekannt.status_code}")
+
+    # Ein neues Token entwertet das alte - sonst wäre "erneuern" wertlos.
+    neues = client.post(
+        f"/api/fahrzeuge/{fahrzeug_id}/logger-token").json()["logger_token"]
+    pruefe(neues != token, "ein erneuertes Token ist ein anderes")
+    alt = client.post("/api/live/melden", json={
+        "token": token, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
+        "soc": messpunkt["soc"]})
+    pruefe(alt.status_code == 401, "und das alte gilt nicht mehr",
+           f"HTTP {alt.status_code}")
+
+    client.delete(f"/api/fahrzeuge/{fahrzeug_id}/logger-token")
+    pruefe(client.get("/api/fahrzeuge").json()[0].get("logger_aktiv") is False,
+           "der Logger lässt sich wieder abmelden")
+    entwertet = client.post("/api/live/melden", json={
+        "token": neues, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
+        "soc": messpunkt["soc"]})
+    pruefe(entwertet.status_code == 401,
+           "danach wird von ihm nichts mehr angenommen",
+           f"HTTP {entwertet.status_code}")
+    client.post(f"/api/live/{sitzung3}/ende")
+
     print("\nOberfläche wird ausgeliefert")
     seite = client.get("/")
     pruefe(seite.status_code == 200 and b"jolt" in seite.content.lower(),
