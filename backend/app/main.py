@@ -80,4 +80,26 @@ def manifest():
                         media_type="application/manifest+json")
 
 
-app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
+class StatischOhneStaleCache(StaticFiles):
+    """Statische Dateien mit Revalidierung statt blindem Cachen.
+
+    Ohne Cache-Control am Ursprung setzt ein CDN seine eigene Vorgabe - bei
+    Cloudflare vier Stunden für .js und .css. Ein Frontend-Deploy ist dann
+    unsichtbar, bis diese Frist abläuft: Die Oberfläche lädt neues HTML, dazu
+    aber zwei Tage altes JavaScript, und der Fehler sieht aus wie ein Bug im
+    Code statt wie ein Cache-Treffer. Genau das ist hier passiert.
+
+    `no-cache` heisst nicht "nicht speichern", sondern "vor Gebrauch
+    nachfragen". StaticFiles liefert ETag und Last-Modified mit, die Rückfrage
+    endet also im Normalfall bei 304 ohne Inhalt - der Bandbreitenvorteil
+    bleibt, die Fehlerklasse verschwindet. Für das Gerüst offline zu halten
+    ist ohnehin der Service Worker zuständig, nicht das CDN.
+    """
+
+    def file_response(self, *args, **kwargs):
+        antwort = super().file_response(*args, **kwargs)
+        antwort.headers["Cache-Control"] = "no-cache"
+        return antwort
+
+
+app.mount("/static", StatischOhneStaleCache(directory=FRONTEND), name="static")
