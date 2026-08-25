@@ -28,7 +28,12 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 class Messpunkt(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
-    soc: float = Field(ge=0, le=100)
+    # Ohne Ladestand ist es eine reine Positionsmeldung - der Normalfall,
+    # solange das Auto seinen Ladestand nicht selbst liefert. Das Telefon
+    # liefert die Position im Sekundentakt, der Ladestand kommt gelegentlich
+    # von Hand dazu. Ohne diese Punkte gäbe es unterwegs weder Zeitfaktor
+    # noch Ankunftsprognose.
+    soc: float | None = Field(default=None, ge=0, le=100)
     tempo_kmh: float | None = None
     aussentemp_c: float | None = None
 

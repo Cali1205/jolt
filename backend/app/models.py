@@ -282,7 +282,12 @@ class LivePunkt(Base):
     zeit = Column(DateTime, default=datetime.utcnow, nullable=False)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
-    soc = Column(Float, nullable=False)
+    # NULL heisst "Position gemeldet, Ladestand nicht bekannt". Die beiden
+    # Grössen haben verschiedene Taktraten: Das Telefon liefert die Position
+    # im Sekundentakt und umsonst, den Ladestand tippt jemand ein, wenn er
+    # ohnehin an der Säule steht. Was dazwischen gilt, rechnet
+    # `live/sitzung.py` aus dem Energieprofil hoch.
+    soc = Column(Float)
     tempo_kmh = Column(Float)
     aussentemp_c = Column(Float)
 

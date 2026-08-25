@@ -511,6 +511,98 @@ def teil_kette_mit_ladestopp():
     client.post(f"/api/live/{sitzung_id}/ende")
 
 
+def teil_position_ohne_ladestand():
+    """Position dauernd, Ladestand gelegentlich.
+
+    Der Normalfall, solange das Auto seinen Ladestand nicht selbst meldet:
+    Das Telefon liefert die Position im Sekundentakt, der Ladestand wird an
+    der Säule eingetippt. Dazwischen muss jolt ihn aus dem Energieprofil
+    hochrechnen - und darf dabei vor allem eines nicht: die eigene Schätzung
+    für eine Messung halten. Täte es das, käme der Verbrauchsfaktor immer auf
+    1,0 heraus und behauptete, die Prognose stimme - umso überzeugter, je
+    länger niemand nachgesehen hat.
+    """
+    client = TestClient(app)
+    route = fahrt_vorbereiten(client)
+    fahrt_id = route["fahrt_id"]
+
+    print("\nPosition ohne Ladestand")
+    start = client.post(f"/api/live/start/{fahrt_id}",
+                        params={"min_kw": 100, "radius_km": 10}).json()
+    sitzung_id = start["sitzung_id"]
+
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        profil = sitzung.fahrt.energieprofil or []
+        beginn = datetime(2026, 1, 1, 8, 0)
+
+        def melden(km, soc=None):
+            eintrag = _profil_bei(profil, km)
+            zustand = live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, eintrag["lat"], eintrag["lon"], soc,
+                zeit=beginn + timedelta(minutes=eintrag.get("minuten") or 0.0))
+            return live_sitzung.zustand_als_dict(zustand)
+
+        # Ein Anker beim Losfahren, danach nur noch Position.
+        melden(0.0, soc=_profil_bei(profil, 0.0)["soc"])
+        letzter = None
+        for km in range(10, 101, 10):
+            letzter = melden(float(km))
+
+        pruefe(letzter["soc_gemeldet"] is False,
+               "ein Punkt ohne Ladestand wird als gerechnet gekennzeichnet")
+        soll_100 = _profil_bei(profil, 100.0)["soc"]
+        pruefe(letzter["ist_soc"] is not None
+               and abs(letzter["ist_soc"] - soll_100) < 1.0,
+               "und der Ladestand wird aus dem Profil hochgerechnet",
+               f"{letzter['ist_soc']} gegen Profil {soll_100}")
+        pruefe(abs(letzter["verbrauchsfaktor"] - 1.0) < 1e-6,
+               "die Schätzung selbst verändert den Verbrauchsfaktor nicht - "
+               "sonst misst das Modell sich an sich selbst",
+               f"×{letzter['verbrauchsfaktor']}")
+
+        # Das ist der eigentliche Gewinn: Ohne diese Punkte gäbe es unterwegs
+        # weder Zeitfaktor noch Ankunftsprognose.
+        pruefe(letzter["ankunft_verschiebung_min"] is not None,
+               "die Ankunftsprognose kommt allein aus Positionsmeldungen "
+               "zustande", str(letzter["ankunft_verschiebung_min"]))
+
+        # Jetzt der Anker an der Säule: acht Prozentpunkte weniger als gedacht.
+        soc_start = _profil_bei(profil, 0.0)["soc"]
+        anker = melden(100.0, soc=soll_100 - 8.0)
+        pruefe(anker["soc_gemeldet"] is True,
+               "ein eingetippter Ladestand ist eine Meldung, keine Schätzung")
+
+        # Und zwar auf den richtigen Wert. Die Zahl ist hier der ganze Punkt:
+        # Die acht Prozentpunkte sind über hundert Kilometer entstanden, nicht
+        # über die letzten zwanzig. Wer die Schätzungen dazwischen für
+        # Messungen hält, misst die Abweichung gegen die kurze Basis des
+        # gleitenden Fensters und kommt auf ×2,08 statt ×1,23 - er verdoppelt
+        # den gemessenen Mehrverbrauch und plant den Rest der Fahrt danach.
+        # Eine Schranke wie "grösser als 1" fiele darauf herein.
+        erwartet = ((soc_start - (soll_100 - 8.0))
+                    / (soc_start - soll_100))
+        pruefe(abs(anker["verbrauchsfaktor"] - erwartet) < 0.03,
+               "und der Verbrauchsfaktor misst gegen den letzten *gemeldeten* "
+               "Ladestand, nicht gegen die eigene Schätzung",
+               f"×{anker['verbrauchsfaktor']} statt ×{erwartet:.3f}")
+
+        # Und ab da rechnet die Schätzung mit dem neuen Faktor weiter.
+        weiter = None
+        for km in range(110, 161, 10):
+            weiter = melden(float(km))
+        soll_160 = _profil_bei(profil, 160.0)["soc"]
+        pruefe(weiter["ist_soc"] < soll_160 - 8.0,
+               "danach liegt die Schätzung unter dem Profil - der gemessene "
+               "Mehrverbrauch wird fortgeschrieben, nicht vergessen",
+               f"{weiter['ist_soc']} gegen Profil {soll_160}")
+    finally:
+        db.close()
+
+    client.post(f"/api/live/{sitzung_id}/ende")
+
+
 def _profil_bei(profil, km):
     for vorher, nachher in zip(profil, profil[1:]):
         if (vorher.get("km") or 0) <= km <= (nachher.get("km") or 0):
@@ -589,6 +681,7 @@ def main() -> int:
     teil_planvergleich()
     teil_kette()
     teil_kette_mit_ladestopp()
+    teil_position_ohne_ladestand()
 
     print()
     if FEHLER:

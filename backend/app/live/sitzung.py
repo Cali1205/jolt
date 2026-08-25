@@ -60,7 +60,11 @@ LADEN_SOC_PP = 0.5
 class Zustand:
     km_auf_route: float
     abstand_zur_route_m: float
-    ist_soc: float
+    # Der Ladestand, mit dem gerechnet wird - gemeldet oder hochgerechnet.
+    # `soc_gemeldet` sagt, welches von beidem: Wer am Steuer eine Zahl sieht,
+    # soll wissen, ob sie gemessen oder aus dem Profil gerechnet ist.
+    ist_soc: float | None
+    soc_gemeldet: bool
     soll_soc: float | None
     abweichung_pp: float | None
     verbrauchsfaktor: float
@@ -152,7 +156,12 @@ def _ladepausen_minuten(punkte: list, energieprofil: list) -> float:
     der Auslöser sehen.
     """
     gesamt = 0.0
-    for vorher, nachher in zip(punkte, punkte[1:]):
+    # Nur Punkte mit gemeldetem Ladestand: Ein Anstieg lässt sich an einem
+    # Punkt ohne Ladestand nicht ablesen. Die Zeitspanne dazwischen geht
+    # dadurch nicht verloren - sie liegt in einem grösseren Sprung zwischen
+    # den beiden Meldungen, und der Abzug der Fahrzeit fängt sie ab.
+    mit_soc = [p for p in punkte if p.soc is not None]
+    for vorher, nachher in zip(mit_soc, mit_soc[1:]):
         if (nachher.soc - vorher.soc) < LADEN_SOC_PP:
             continue
         if not vorher.zeit or not nachher.zeit:
@@ -171,8 +180,19 @@ def _verbrauchsfaktor(punkte: list) -> float | None:
     Gerechnet wird über SoC-Differenzen und nicht über absolute Werte: Ein
     Tacho, der grundsätzlich zwei Prozent zu hoch anzeigt, verfälscht die
     Differenz nicht - den absoluten Vergleich aber schon.
+
+    Nur gemeldete Ladestände zählen. Ein geschätzter Wert hier hiesse, das
+    Modell gegen sich selbst zu messen: Der Faktor käme immer auf 1,0 heraus
+    und behauptete damit, die Prognose stimme - und zwar umso überzeugter, je
+    länger niemand mehr nachgesehen hat.
     """
-    fenster = _fenster(punkte)
+    # Erst filtern, dann fenstern - nicht umgekehrt. Wer den Ladestand nur an
+    # Ladestopps eintippt, hat zwei Meldungen im Abstand von zweihundert
+    # Kilometern; ein Fenster von 25 km über *alle* Punkte enthielte davon
+    # keine zwei und der Faktor käme nie zustande. Über den gemeldeten
+    # Ladeständen greift stattdessen die Rückfallregel in `_fenster` und nimmt
+    # die letzten beiden - eine lange Messbasis ist hier sogar die bessere.
+    fenster = _fenster([p for p in punkte if p.soc is not None])
     if not fenster:
         return None
 
@@ -191,6 +211,35 @@ def _verbrauchsfaktor(punkte: list) -> float | None:
     if not 0.4 <= faktor <= 2.5:
         return None
     return round(faktor, 3)
+
+
+def soc_schaetzen(punkte: list, punkt, verbrauchsfaktor: float) -> float | None:
+    """Der Ladestand an dieser Stelle, wenn keiner gemeldet wurde.
+
+    Das ist der Kern des Betriebs ohne Fahrzeugdaten: Position liefert das
+    Telefon dauernd, den Ladestand tippt jemand gelegentlich ein, und
+    dazwischen trägt das Energieprofil. Das kennt Steigung, Tempo und Wetter
+    der Strecke - es ist genau das Modell, auf dem auch der Ladeplan steht -,
+    und der gemessene Verbrauchsfaktor sagt, wie weit das Auto davon abweicht.
+
+    Keine Vorhersage also, sondern dieselbe Fortschreibung, mit der die
+    Umplanung ohnehin rechnet. Und sie wird an jedem eingetippten Ladestand
+    wieder auf die Wirklichkeit zurückgeholt.
+
+    Gerechnet wird ab der **letzten Meldung** und nicht ab dem Start: Wer
+    unterwegs geladen hat, hat einen Sprung im Ladestand, den kein Profil
+    kennt. Die letzte Meldung liegt hinter diesem Sprung.
+    """
+    if punkt.soll_soc is None:
+        return None
+    vorherige = [p for p in punkte
+                 if p.soc is not None and p.soll_soc is not None
+                 and p is not punkt]
+    if not vorherige:
+        return None
+    letzte = vorherige[-1]
+    verbraucht_soll = (letzte.soll_soc or 0.0) - punkt.soll_soc
+    return round(letzte.soc - verbraucht_soll * verbrauchsfaktor, 2)
 
 
 def _zeitfaktor(punkte: list, energieprofil: list) -> float | None:
@@ -240,10 +289,16 @@ def _zeitfaktor(punkte: list, energieprofil: list) -> float | None:
 # ---------------------------------------------------------------------------
 
 def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
-                        soc: float, tempo_kmh: float | None = None,
+                        soc: float | None = None, tempo_kmh: float | None = None,
                         aussentemp_c: float | None = None,
                         zeit: datetime | None = None) -> Zustand:
     """Einen Messpunkt einsortieren und den neuen Zustand zurückgeben.
+
+    `soc` darf fehlen. Dann ist es eine reine Positionsmeldung, wie sie das
+    Telefon im Sekundentakt liefern kann - der Ladestand wird für diesen
+    Punkt aus dem Energieprofil hochgerechnet (`soc_schaetzen`). Nur so
+    kommen Zeitfaktor und Ankunftsprognose überhaupt zustande, solange das
+    Auto seinen Ladestand nicht selbst meldet.
 
     `zeit` überschreibt den Zeitstempel. Gebraucht wird das vom Simulator: Er
     spielt Stunden in Sekunden ab, und mit echten Uhrzeiten wäre der
@@ -282,8 +337,10 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
 
     zustand = _zustand_bilden(sitzung, punkt, abstand)
 
+    # Umgeplant wird mit dem Ladestand, der gilt - gemeldet oder hochgerechnet.
+    # Sonst käme ein reiner Positionspunkt mit `None` beim Optimierer an.
     if zustand.neuplanung_noetig and _darf_neu_planen(sitzung, km, zustand):
-        _umplanen(db, sitzung, zustand, km, soc)
+        _umplanen(db, sitzung, zustand, km, zustand.ist_soc)
 
     sitzung.hinweis = zustand.grund
     db.commit()
@@ -341,15 +398,24 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
     km = punkt.km_auf_route or 0.0
     rest_km = max(0.0, gesamt_km - km)
 
-    abweichung = None
-    if punkt.soll_soc is not None:
-        abweichung = round(punkt.soc - punkt.soll_soc, 2)
+    # Der Ladestand, mit dem hier gerechnet wird: der gemeldete, sonst der
+    # hochgerechnete. Welcher von beiden es war, steht als eigenes Feld im
+    # Zustand - wer am Steuer eine Zahl sieht, soll wissen, ob sie gemessen
+    # oder gerechnet ist.
+    gemeldet = punkt.soc is not None
+    ist_soc = punkt.soc if gemeldet else soc_schaetzen(
+        sitzung.punkte, punkt, sitzung.verbrauchsfaktor)
 
-    prognose = _prognose_am_ziel(profil, punkt, sitzung.verbrauchsfaktor)
-    reserve_bei = _reserve_bei(profil, punkt, sitzung.verbrauchsfaktor,
-                               fahrzeug.reserve_soc)
+    abweichung = None
+    if punkt.soll_soc is not None and ist_soc is not None:
+        abweichung = round(ist_soc - punkt.soll_soc, 2)
+
+    prognose = _prognose_am_ziel(profil, punkt, ist_soc,
+                                 sitzung.verbrauchsfaktor)
+    reserve_bei = _reserve_bei(profil, punkt, ist_soc,
+                               sitzung.verbrauchsfaktor, fahrzeug.reserve_soc)
     verschiebung = _ankunft_verschiebung(sitzung, profil, punkt, gesamt_km)
-    naechster, ankunft_soc = _naechster_stopp(sitzung, profil, punkt)
+    naechster, ankunft_soc = _naechster_stopp(sitzung, profil, punkt, ist_soc)
 
     noetig, grund, dringend = _neuplanung_pruefen(
         fahrzeug=fahrzeug, abweichung=abweichung, abstand_m=abstand_m,
@@ -360,7 +426,8 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
 
     return Zustand(
         km_auf_route=round(km, 2), abstand_zur_route_m=round(abstand_m),
-        ist_soc=round(punkt.soc, 2), soll_soc=punkt.soll_soc,
+        ist_soc=None if ist_soc is None else round(ist_soc, 2),
+        soc_gemeldet=gemeldet, soll_soc=punkt.soll_soc,
         abweichung_pp=abweichung,
         verbrauchsfaktor=round(sitzung.verbrauchsfaktor, 3),
         zeitfaktor=round(sitzung.zeitfaktor, 3),
@@ -370,22 +437,24 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
         dringend=dringend)
 
 
-def _prognose_am_ziel(profil: list, punkt, verbrauchsfaktor: float):
+def _prognose_am_ziel(profil: list, punkt, ist_soc, verbrauchsfaktor: float):
     """Der Rest der Strecke mit dem gemessenen Faktor hochgerechnet."""
-    if not profil:
+    if not profil or ist_soc is None:
         return None
-    rest_soll = (punkt.soll_soc or punkt.soc) - (profil[-1].get("soc") or 0.0)
-    return round(punkt.soc - rest_soll * verbrauchsfaktor, 2)
+    rest_soll = (punkt.soll_soc or ist_soc) - (profil[-1].get("soc") or 0.0)
+    return round(ist_soc - rest_soll * verbrauchsfaktor, 2)
 
 
-def _reserve_bei(profil: list, punkt, verbrauchsfaktor: float,
+def _reserve_bei(profil: list, punkt, ist_soc, verbrauchsfaktor: float,
                  reserve_soc: float):
     """Wo die Reserve erreicht wird, wenn es so weitergeht wie bisher."""
+    if ist_soc is None:
+        return None
     for eintrag in profil:
         if (eintrag.get("km") or 0.0) < (punkt.km_auf_route or 0.0):
             continue
-        verbraucht = (punkt.soll_soc or punkt.soc) - (eintrag.get("soc") or 0.0)
-        if punkt.soc - verbraucht * verbrauchsfaktor <= reserve_soc:
+        verbraucht = (punkt.soll_soc or ist_soc) - (eintrag.get("soc") or 0.0)
+        if ist_soc - verbraucht * verbrauchsfaktor <= reserve_soc:
             return round(eintrag.get("km") or 0.0, 1)
     return None
 
@@ -420,7 +489,7 @@ def _ankunft_verschiebung(sitzung, profil: list, punkt, gesamt_km: float):
     return round(bisher + rest, 1)
 
 
-def _naechster_stopp(sitzung, profil: list, punkt):
+def _naechster_stopp(sitzung, profil: list, punkt, ist_soc):
     """Der nächste geplante Ladestopp und der dort erwartete Ladestand.
 
     Der erwartete Wert wird mit dem gemessenen Verbrauchsfaktor hochgerechnet
@@ -437,11 +506,11 @@ def _naechster_stopp(sitzung, profil: list, punkt):
 
     ziel_km = naechster.get("km_auf_route") or 0.0
     soll_dort = soll_soc_bei(profil, ziel_km)
-    if soll_dort is None or punkt.soll_soc is None:
+    if soll_dort is None or punkt.soll_soc is None or ist_soc is None:
         return dict(naechster), None
 
     verbraucht = punkt.soll_soc - soll_dort
-    hochgerechnet = round(punkt.soc - verbraucht * sitzung.verbrauchsfaktor, 2)
+    hochgerechnet = round(ist_soc - verbraucht * sitzung.verbrauchsfaktor, 2)
     beschreibung = {"id": naechster.get("id"), "name": naechster.get("name"),
                     "km_auf_route": ziel_km,
                     "geplant_soc": naechster.get("ankunft_soc"),

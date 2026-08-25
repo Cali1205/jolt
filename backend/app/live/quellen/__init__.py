@@ -55,10 +55,18 @@ class Rohpunkt:
     noch niemand liest: Ein Übersetzer, der ein Feld des Formats wegwirft,
     ist ohne Not verlustbehaftet, und die Stelle, an der es gebraucht wird,
     steht schon fest.
+
+    `soc` darf fehlen - dann ist es eine reine Positionsmeldung, und
+    `live/sitzung.py` rechnet den Ladestand aus dem Energieprofil hoch. Für
+    eine *fremde* Quelle ist er trotzdem Pflicht: Ein Logger im Auto, der den
+    Ladestand nicht liefert, hat seinen einzigen Zweck verfehlt, und ihn
+    stillschweigend als Positionsmelder durchzuwinken würde eine kaputte
+    Einrichtung wie eine funktionierende aussehen lassen. Erzwungen wird das
+    deshalb in den Übersetzern, nicht hier.
     """
     lat: float
     lon: float
-    soc: float
+    soc: float | None = None
     tempo_kmh: float | None = None
     aussentemp_c: float | None = None
     zeit: datetime | None = None
