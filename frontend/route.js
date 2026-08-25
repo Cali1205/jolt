@@ -313,6 +313,14 @@ window.joltRoute = (function () {
 
   /* ---------- Ladeplan ---------- */
 
+  /* Was ein Halt kostet, bevor geladen wird - der Regler in der
+   * Ladeplan-Ansicht. Fehlt er (alte Oberfläche im Cache), gilt die Vorgabe
+   * des Servers, statt eine Null zu schicken und den Plan zu zersplittern. */
+  function haltekosten() {
+    const regler = document.getElementById("haltekosten");
+    return regler ? regler.value : 5;
+  }
+
   async function ladeplanLaden() {
     const fahrt = K.zustand.fahrt;
     const liste = document.getElementById("ladeplan");
@@ -324,7 +332,8 @@ window.joltRoute = (function () {
     try {
       const plan = await K.api(`/api/fahrten/${fahrt.fahrt_id}/ladeplan`
         + `?min_kw=${document.getElementById("min-kw").value}`
-        + `&radius_km=${document.getElementById("radius").value}`,
+        + `&radius_km=${document.getElementById("radius").value}`
+        + `&stopp_fixkosten_min=${haltekosten()}`,
         { method: "POST" });
       letzterPlan = plan;
       zeichnePlan(plan, liste, werte);
@@ -346,6 +355,9 @@ window.joltRoute = (function () {
       K.wertKachel("Gesamt", K.dauer(plan.gesamt_minuten)),
       K.wertKachel("davon Laden", K.dauer(plan.ladezeit_minuten)),
       K.wertKachel("davon Umwege", K.dauer(plan.umwegzeit_minuten)),
+      // Sichtbar machen, was die blosse Anzahl der Halte kostet - sonst ist
+      // der Regler daneben eine Zahl ohne Wirkung, die man sehen kann.
+      K.wertKachel("davon Halte", K.dauer(plan.haltekosten_minuten)),
       K.wertKachel("Stopps", String(plan.anzahl_stopps)),
       K.wertKachel("Am Ziel", K.zahl(plan.soc_am_ziel) + " %",
                    plan.soc_am_ziel >= 15 ? "gut" : ""),
@@ -481,6 +493,7 @@ window.joltRoute = (function () {
     zuladungKoppeln();
 
     let warten = null;
+    let wartenPlan = null;
     const neuLaden = () => {
       clearTimeout(warten);
       // Beide Regler wirken auf denselben Kandidatensatz - der Ladeplan muss
@@ -493,6 +506,12 @@ window.joltRoute = (function () {
     };
     K.reglerKoppeln("min-kw", "min-kw-wert", neuLaden);
     K.reglerKoppeln("radius", "radius-wert", neuLaden);
+    // Der Aufwand je Halt ändert nur die Planung, nicht die Kandidaten -
+    // deshalb ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
+    K.reglerKoppeln("haltekosten", "haltekosten-wert", () => {
+      clearTimeout(wartenPlan);
+      wartenPlan = setTimeout(ladeplanLaden, 350);
+    });
 
     K.an("rechnen", "click", rechnen);
     window.addEventListener("resize", () => {

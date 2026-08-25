@@ -220,6 +220,18 @@ table.kurve input { padding: 6px 8px; }
         <h2 style="margin-top:0">Ladeplan</h2>
         <div class="werte" id="ladeplan-werte"></div>
         <ol class="liste" id="ladeplan"></ol>
+        <!-- Der Regler steht beim Ladeplan und nicht bei den Säulenfiltern:
+             Er ändert nicht, welche Ladepunkte in Frage kommen, sondern wie
+             viele Halte sich lohnen. -->
+        <label for="haltekosten">Aufwand je Halt
+          <span id="haltekosten-wert">5</span> min</label>
+        <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+        <p class="leer" style="padding-top:4px">Einparken, Kabel, freischalten –
+          alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
+          jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
+          <strong>0</strong> ist Anhalten gratis, und es entstehen viele
+          Kurzstopps im steilen Teil der Ladekurve – rechnerisch schnell,
+          praktisch nicht fahrbar.</p>
       </div>
 
       <div class="karte-block">

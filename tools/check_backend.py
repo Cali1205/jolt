@@ -428,6 +428,24 @@ def main() -> int:
                "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
         client.delete(f"/api/saeulen/{geplant}/belegt")
 
+    # Der Regler "Aufwand je Halt" bis zum Optimierer durchgereicht. Bei null
+    # ist Anhalten gratis, und der Plan zersplittert in Kurzstopps - genau das
+    # Verhalten, das die Vorgabe von fünf Minuten verhindert.
+    gratis = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                         params={**LADEPLAN, "stopp_fixkosten_min": 0}).json()
+    teuer = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                        params={**LADEPLAN, "stopp_fixkosten_min": 20}).json()
+    pruefe(gratis["haltekosten_minuten"] == 0,
+           "mit Aufwand null kostet ein Halt nichts",
+           str(gratis["haltekosten_minuten"]))
+    pruefe(teuer["anzahl_stopps"] <= gratis["anzahl_stopps"],
+           "und je teurer ein Halt, desto weniger Halte plant jolt",
+           f"{teuer['anzahl_stopps']} bei 20 min gegen "
+           f"{gratis['anzahl_stopps']} bei 0 min")
+    pruefe(teuer["haltekosten_minuten"] == teuer["anzahl_stopps"] * 20,
+           "die Haltekosten in der Bilanz sind Anzahl mal Aufwand",
+           f"{teuer['haltekosten_minuten']} bei {teuer['anzahl_stopps']} Stopps")
+
     eng = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
                       params={**LADEPLAN, "umweg_grenze_min": 0.5}).json()
     pruefe(eng["machbar"] is False,
