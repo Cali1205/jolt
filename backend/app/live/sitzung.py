@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 from .. import models
+from ..energie.profil import minuten_bei as soll_minuten_bei
+from ..energie.profil import soc_bei as soll_soc_bei
 from ..laden import verfuegbarkeit
 from ..routing.korridor import punkt_auf_route
 from . import umplanung
@@ -81,39 +83,6 @@ class Zustand:
     plan_geaendert: bool = False
     aenderung: str = ""
     dringend: bool = field(default=False, repr=False)
-
-
-# ---------------------------------------------------------------------------
-# Nachschlagen im Profil
-# ---------------------------------------------------------------------------
-
-def _profilwert(energieprofil: list, km: float, feld: str) -> float | None:
-    """Einen Planwert an einem Kilometerstand nachschlagen.
-
-    Zwischen zwei Profilpunkten wird linear interpoliert - die liegen rund
-    250 m auseinander, da ist die Gerade genau genug.
-    """
-    if not energieprofil:
-        return None
-    if km <= (energieprofil[0].get("km") or 0.0):
-        return energieprofil[0].get(feld)
-    for vorher, nachher in zip(energieprofil, energieprofil[1:]):
-        km1, km2 = vorher.get("km", 0.0), nachher.get("km", 0.0)
-        if km1 <= km <= km2:
-            if km2 <= km1:
-                return vorher.get(feld)
-            anteil = (km - km1) / (km2 - km1)
-            w1, w2 = vorher.get(feld, 0.0), nachher.get(feld, 0.0)
-            return round(w1 + (w2 - w1) * anteil, 2)
-    return energieprofil[-1].get(feld)
-
-
-def soll_soc_bei(energieprofil: list, km: float) -> float | None:
-    return _profilwert(energieprofil, km, "soc")
-
-
-def soll_minuten_bei(energieprofil: list, km: float) -> float | None:
-    return _profilwert(energieprofil, km, "minuten")
 
 
 # ---------------------------------------------------------------------------

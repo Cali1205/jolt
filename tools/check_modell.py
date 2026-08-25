@@ -9,26 +9,20 @@ unterwegs an der falschen Säule stehen lässt.
 
     ./tools/check_modell.py
 """
-import math
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+
+# Dieses Skript rührt keine Datenbank an - es rechnet nur Physik.
+anwendung_bereitstellen("modell", datenbank=False)
 
 from app.energie.modell import (Fahrzeugwerte, Umgebung, hvac_leistung_w,  # noqa: E402
                                 luftdichte, profil_rechnen)
 from app.laden.kurven import ladezeit_minuten, leistung_bei  # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung: bool, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 def gerade_strecke(km: float, hoehe_ende_m: float = 0.0, punkte_je_km: int = 1):
@@ -74,7 +68,7 @@ def lauf(fz, km, kmh, hoehe=0.0, temp_c=20.0, start_soc=100.0, wind_ms=0.0,
 def main() -> int:
     fz = Fahrzeugwerte()      # 1950 kg, c_w 0.28, 2.3 m², 60 kWh netto
 
-    print("\nLuftdichte")
+    pruefe.abschnitt("Luftdichte")
     pruefe(abs(luftdichte(15.0, 0.0) - 1.225) < 0.01,
            "bei 15 °C auf Meereshöhe rund 1,225 kg/m³",
            f"ist {luftdichte(15.0, 0.0):.3f}")
@@ -195,14 +189,7 @@ def main() -> int:
     pruefe(ladezeit_minuten(kurve, 50.0, 50.0, 60.0) == 0.0,
            "kein Ladehub, keine Zeit")
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for f in FEHLER:
-            print(f"  - {f}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

@@ -257,6 +257,12 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                      steckertyp: str = "",
                      umweg_grenze_min: float = Query(
                          optimierer.UMWEG_GRENZE_MIN, gt=0, le=60),
+                     # Null ist erlaubt, aber die Folge steht im Text der
+                     # Oberfläche: Ohne Fixkosten je Halt zersplittert der
+                     # Plan in viele Kurzstopps. Wer das sehen will, soll es
+                     # sehen können.
+                     stopp_fixkosten_min: float = Query(
+                         optimierer.STOPP_FIXKOSTEN_MIN, ge=0, le=30),
                      db: Session = Depends(get_db)):
     """Die zeitoptimale Folge von Ladestopps für eine gerechnete Fahrt.
 
@@ -305,10 +311,12 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
         temperatur_faktor=kurven.temperatur_faktor(
             fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
         umweg_grenze_min=umweg_grenze_min,
+        stopp_fixkosten_min=stopp_fixkosten_min,
         bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
             "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,
+            "stopp_fixkosten_min": stopp_fixkosten_min,
             **plan.als_dict()}
 
 

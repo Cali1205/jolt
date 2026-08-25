@@ -15,8 +15,10 @@ import os
 import sys
 import tempfile
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+
+anwendung_bereitstellen("backend", datenbank=False)
 
 # Vor jedem App-Import setzen: Die Engine wird beim Import gebaut.
 _DB = os.path.join(tempfile.mkdtemp(prefix="jolt-check-"), "check.db")
@@ -32,15 +34,7 @@ from app.live import simulator  # noqa: E402
 from app.main import app  # noqa: E402
 from app import models  # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 # Ein Ausschnitt im Format des amtlichen Registers: Vorspann, Semikolon,
@@ -147,7 +141,9 @@ def main() -> int:
     try:
         harz = db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Goslar").one()
-        sylt = db.query(models.Ladepunkt).filter(
+        # Nur die Existenz zählt: `.one()` wirft, wenn der Datensatz fehlt
+        # oder doppelt ist - beides wäre ein Importfehler.
+        db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Westerland").one()
         lueneburg = db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Lüneburg").one()
@@ -432,6 +428,24 @@ def main() -> int:
                "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
         client.delete(f"/api/saeulen/{geplant}/belegt")
 
+    # Der Regler "Aufwand je Halt" bis zum Optimierer durchgereicht. Bei null
+    # ist Anhalten gratis, und der Plan zersplittert in Kurzstopps - genau das
+    # Verhalten, das die Vorgabe von fünf Minuten verhindert.
+    gratis = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                         params={**LADEPLAN, "stopp_fixkosten_min": 0}).json()
+    teuer = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                        params={**LADEPLAN, "stopp_fixkosten_min": 20}).json()
+    pruefe(gratis["haltekosten_minuten"] == 0,
+           "mit Aufwand null kostet ein Halt nichts",
+           str(gratis["haltekosten_minuten"]))
+    pruefe(teuer["anzahl_stopps"] <= gratis["anzahl_stopps"],
+           "und je teurer ein Halt, desto weniger Halte plant jolt",
+           f"{teuer['anzahl_stopps']} bei 20 min gegen "
+           f"{gratis['anzahl_stopps']} bei 0 min")
+    pruefe(teuer["haltekosten_minuten"] == teuer["anzahl_stopps"] * 20,
+           "die Haltekosten in der Bilanz sind Anzahl mal Aufwand",
+           f"{teuer['haltekosten_minuten']} bei {teuer['anzahl_stopps']} Stopps")
+
     eng = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
                       params={**LADEPLAN, "umweg_grenze_min": 0.5}).json()
     pruefe(eng["machbar"] is False,
@@ -631,14 +645,7 @@ def main() -> int:
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for f in FEHLER:
-            print(f"  - {f}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

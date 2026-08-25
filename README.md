@@ -36,6 +36,13 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   steht der Ausweichstandort dabei, der ohne Nachladen noch erreichbar ist.
   Eine Etappe gilt nur als fahrbar, wenn der Ladestand *unterwegs* über der
   Reserve bleibt — über einen Pass sieht die Bilanz am Ende sonst harmlos aus.
+  **Ein Halt kostet fünf Minuten, bevor das erste Elektron fliesst** —
+  einparken, Kabel, freischalten. Ohne diesen Posten ist die Zielfunktion
+  blind für die Anzahl der Stopps, und weil ein Akku bei 10 % viel schneller
+  lädt als bei 60 %, wird es dann immer günstiger, dieselbe Energie auf viele
+  kurze Halte zu verteilen. Der Planer tat das auch: zehn Stopps statt vier,
+  sechs davon unter vier Minuten — rechnerisch optimal und in Wirklichkeit
+  eine Dreiviertelstunde langsamer.
 - **Live-Nachführung** — Messpunkte herein, Ist gegen Soll, laufender
   Verbrauchsfaktor, und die Reserve-Marke wandert mit. Ein Simulator spielt
   die Fahrt mit einstellbarem Mehrverbrauch *und* einstellbarer Fahrzeit ab,

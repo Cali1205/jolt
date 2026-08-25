@@ -17,37 +17,25 @@ Ohne Netz, ohne Postgres, ohne API-Schlüssel:
 """
 import os
 import sys
-import tempfile
 from datetime import datetime, timedelta
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
 
-# Vor jedem App-Import setzen: Die Engine wird beim Import gebaut.
-_DB = os.path.join(tempfile.mkdtemp(prefix="jolt-umplan-"), "check.db")
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB}"
-os.environ.pop("ORS_API_KEY", None)
-os.environ.pop("APP_PASSWORT", None)
+anwendung_bereitstellen("umplan")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import models  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.energie.modell import Umgebung, haversine_m  # noqa: E402
+from app.energie.profil import eintrag_bei as _profil_bei  # noqa: E402
 from app.laden import verfuegbarkeit  # noqa: E402
 from app.live import sitzung as live_sitzung  # noqa: E402
 from app.live import umplanung  # noqa: E402
 from app.main import app  # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 class Fahrzeugstub:
@@ -740,12 +728,6 @@ def teil_tempo_in_der_kette():
     client.post(f"/api/live/{sitzung_id}/ende")
 
 
-def _profil_bei(profil, km):
-    for vorher, nachher in zip(profil, profil[1:]):
-        if (vorher.get("km") or 0) <= km <= (nachher.get("km") or 0):
-            return nachher
-    return profil[-1] if profil else {}
-
 
 def _messen(client, sitzung_id, fahrt_id, km, mehrverbrauch, zeitfaktor):
     """Einen einzelnen Messpunkt bei Kilometer `km` melden."""
@@ -822,14 +804,7 @@ def main() -> int:
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for text in FEHLER:
-            print(f"  - {text}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

@@ -35,9 +35,14 @@ window.joltLive = (function () {
       // Mit denselben Filtern wie in der Planen-Ansicht: Ein Ladeplan, der
       // unterwegs plötzlich andere Säulen zulässt als beim Planen, wäre
       // nicht mehr nachvollziehbar.
+      // Auch der Aufwand je Halt geht mit: Ein Plan, der unterwegs plötzlich
+      // nach einem anderen Massstab umgeplant wird als beim Losfahren, wäre
+      // nicht mehr nachvollziehbar.
+      const haltekosten = document.getElementById("haltekosten");
       const antwort = await K.api(`/api/live/start/${fahrt.fahrt_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
-        + `&radius_km=${document.getElementById("radius").value}`,
+        + `&radius_km=${document.getElementById("radius").value}`
+        + (haltekosten ? `&stopp_fixkosten_min=${haltekosten.value}` : ""),
         { method: "POST" });
       K.zustand.sitzungId = antwort.sitzung_id;
       document.getElementById("live-leer").hidden = true;

@@ -86,6 +86,8 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
             min_kw: float = Query(50.0, ge=0), steckertyp: str = "",
             umweg_grenze_min: float = Query(umplanung.VORGABEN["umweg_grenze_min"],
                                             gt=0, le=60),
+            stopp_fixkosten_min: float = Query(
+                umplanung.VORGABEN["stopp_fixkosten_min"], ge=0, le=30),
             db: Session = Depends(get_db)):
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
@@ -105,7 +107,8 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     # nur, dass etwas anders ist als das Energieprofil erwartet hat. Und die
     # Suchparameter bleiben für die ganze Fahrt dieselben.
     parameter = {"radius_km": radius_km, "min_kw": min_kw,
-                 "steckertyp": steckertyp, "umweg_grenze_min": umweg_grenze_min}
+                 "steckertyp": steckertyp, "umweg_grenze_min": umweg_grenze_min,
+                 "stopp_fixkosten_min": stopp_fixkosten_min}
     if fahrt.energieprofil:
         try:
             sitzung.plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc,
