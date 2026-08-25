@@ -33,7 +33,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import models  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
-from app.energie.modell import haversine_m  # noqa: E402
+from app.energie.modell import Umgebung, haversine_m  # noqa: E402
 from app.laden import verfuegbarkeit  # noqa: E402
 from app.live import sitzung as live_sitzung  # noqa: E402
 from app.live import umplanung  # noqa: E402
@@ -231,6 +231,94 @@ def teil_reststrecke():
            f"km0={km0:.1f}")
     pruefe(len(teilstueck) > 2 and teilstueck[0] in geo,
            "und die Restgeometrie ist ein echtes Teilstück der Route")
+
+
+class FahrzeugStub:
+    masse_kg = 2500.0
+    c_w = 0.29
+    stirnflaeche_m2 = 2.9
+    c_rr = 0.010
+    eta_antrieb = 0.88
+    eta_rekup = 0.70
+    p_neben_w = 350.0
+    waermepumpe = True
+    akku_netto_kwh = 77.0
+    reserve_soc = 10.0
+    korrekturfaktor = 1.0
+
+
+class FahrtStub:
+    aussentemp_c = 10.0
+    fahrzeug = FahrzeugStub()
+
+
+def teil_tempo_neurechnen():
+    """Die Reststrecke mit dem gemessenen Tempo neu rechnen statt skalieren.
+
+    Das Tempo wurde bisher **geraten**: Der Regler in der Planen-Ansicht
+    steht auf 120 %, und niemand weiss, ob das stimmt. Gleichzeitig schrieb
+    die PWA die gemessene Geschwindigkeit in eine Spalte, die nie jemand las.
+
+    Warum dafür nicht ein Faktor genügt, ist der ganze Punkt: Der
+    Luftwiderstand geht mit v², der Rollwiderstand nahezu linear, die
+    Nebenverbraucher gar nicht mit dem Tempo, sondern mit der Zeit - und die
+    sinkt, wenn man schneller fährt. Ein pauschaler Aufschlag trifft keinen
+    dieser drei.
+    """
+    print("\nReststrecke mit gemessenem Tempo neu rechnen")
+
+    # Zweihundert Kilometer eben, hundert km/h nach Plan, zehn Grad.
+    rest = []
+    for i in range(41):
+        km = i * 5.0
+        rest.append({"km": km, "lat": 48.0 + i * 0.045, "lon": 11.0,
+                     "hoehe": 100.0, "tempo_kmh": 100.0,
+                     "minuten": km * 0.6, "soc": 80 - km * 0.1,
+                     "kwh": km * 0.18})
+    umgebung = lambda lat, lon: Umgebung(temp_c=10.0)      # noqa: E731
+    fahrt = FahrtStub()
+
+    nach_plan = umplanung.restprofil_physik(fahrt, rest, 1.0, umgebung)
+    schnell = umplanung.restprofil_physik(fahrt, rest, 1.2, umgebung)
+    langsam = umplanung.restprofil_physik(fahrt, rest, 0.8, umgebung)
+
+    pruefe(nach_plan is not None and len(nach_plan.km) > 30,
+           "das gespeicherte Profil reicht zum Neurechnen aus - Position, "
+           "Höhe und Tempo je Stützstelle stehen darin")
+    pruefe(abs(nach_plan.km[-1] - 200.0) < 3.0,
+           "und die Strecke kommt dabei heraus, die hineinging",
+           f"{nach_plan.km[-1]:.1f} km")
+
+    pruefe(schnell.kwh[-1] > nach_plan.kwh[-1],
+           "zwanzig Prozent schneller kostet mehr Energie",
+           f"{schnell.kwh[-1]:.1f} gegen {nach_plan.kwh[-1]:.1f} kWh")
+    pruefe(schnell.minuten[-1] < nach_plan.minuten[-1],
+           "und weniger Zeit - beides zugleich, das kann kein Energiefaktor",
+           f"{schnell.minuten[-1]:.0f} gegen {nach_plan.minuten[-1]:.0f} min")
+
+    # Die Schranke nach oben ist der reine v²-Anteil. Läge der Zuwachs
+    # darüber, wäre mehr als der Luftwiderstand skaliert worden; läge er bei
+    # null, wäre das Tempo gar nicht angekommen.
+    zuwachs = schnell.kwh[-1] / nach_plan.kwh[-1]
+    pruefe(1.02 < zuwachs < 1.44,
+           "der Mehrverbrauch liegt zwischen spürbar und dem reinen "
+           "v²-Faktor - Rollwiderstand und Nebenverbraucher skalieren nicht "
+           "mit dem Quadrat", f"×{zuwachs:.3f}")
+
+    pruefe(langsam.kwh[-1] < nach_plan.kwh[-1]
+           and langsam.minuten[-1] > nach_plan.minuten[-1],
+           "langsamer fahren dreht beides um",
+           f"{langsam.kwh[-1]:.1f} kWh in {langsam.minuten[-1]:.0f} min")
+
+    # Fahrten aus der Zeit vor diesen Profilfeldern müssen aufs Skalieren
+    # zurückfallen und nicht abstürzen.
+    ohne_ort = [{k: v for k, v in e.items() if k not in ("lat", "lon")}
+                for e in rest]
+    pruefe(umplanung.restprofil_physik(fahrt, ohne_ort, 1.2, umgebung) is None,
+           "ohne Position im Profil wird nicht gerechnet, sondern None "
+           "gemeldet - der Aufrufer skaliert dann wie bisher")
+    pruefe(umplanung.restprofil_physik(fahrt, rest[:1], 1.2, umgebung) is None,
+           "und ein Profil mit einem einzigen Punkt ebenso")
 
 
 def teil_planvergleich():
@@ -603,6 +691,55 @@ def teil_position_ohne_ladestand():
     client.post(f"/api/live/{sitzung_id}/ende")
 
 
+def teil_tempo_in_der_kette():
+    """Kommt das gemessene Tempo in der laufenden Fahrt tatsächlich an?
+
+    Die Physik dafür steht in `teil_tempo_neurechnen`. Hier geht es nur um
+    die Verdrahtung: Solange niemand einen Ladestand gemeldet hat, gibt es
+    keinen Verbrauchsfaktor - und dann muss der Plan auf dem gemessenen Tempo
+    beruhen statt auf dem Reglerwert von vor der Abfahrt.
+    """
+    client = TestClient(app)
+    route = fahrt_vorbereiten(client)
+    fahrt_id = route["fahrt_id"]
+
+    print("\nGemessenes Tempo schlägt bis in den Plan durch")
+    start = client.post(f"/api/live/start/{fahrt_id}",
+                        params={"min_kw": 100, "radius_km": 10}).json()
+    sitzung_id = start["sitzung_id"]
+    pruefe((start.get("plan") or {}).get("grundlage") in (None, "planung"),
+           "der Startplan beruht noch auf der Planung - gemessen ist da "
+           "nichts", str((start.get("plan") or {}).get("grundlage")))
+
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        profil = sitzung.fahrt.energieprofil or []
+        beginn = datetime(2026, 1, 1, 8, 0)
+        # Achtzehn Prozent schneller als geplant: Die Uhr läuft langsamer als
+        # das Profil vorsah. Der Ladestand bleibt unbekannt - genau der Fall,
+        # für den das gemessene Tempo gedacht ist.
+        SCHNELLER = 0.82
+        for km in range(0, 141, 10):
+            eintrag = _profil_bei(profil, float(km))
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, eintrag["lat"], eintrag["lon"], None,
+                zeit=beginn + timedelta(
+                    minutes=(eintrag.get("minuten") or 0.0) * SCHNELLER))
+        db.refresh(sitzung)
+        plan = sitzung.plan or {}
+    finally:
+        db.close()
+
+    pruefe(plan.get("grundlage") == "tempo gemessen",
+           "unterwegs wird der Plan mit dem gemessenen Tempo neu gerechnet",
+           str(plan.get("grundlage")))
+    pruefe((plan.get("tempo_faktor") or 0) > 1.1,
+           "und der Faktor entspricht dem, was tatsächlich gefahren wurde",
+           f"×{plan.get('tempo_faktor')}")
+    client.post(f"/api/live/{sitzung_id}/ende")
+
+
 def _profil_bei(profil, km):
     for vorher, nachher in zip(profil, profil[1:]):
         if (vorher.get("km") or 0) <= km <= (nachher.get("km") or 0):
@@ -677,11 +814,13 @@ def _plan_pruefen(plan, route, name):
 def main() -> int:
     teil_ausloeser()
     teil_ladepausen()
+    teil_tempo_neurechnen()
     teil_reststrecke()
     teil_planvergleich()
     teil_kette()
     teil_kette_mit_ladestopp()
     teil_position_ohne_ladestand()
+    teil_tempo_in_der_kette()
 
     print()
     if FEHLER:

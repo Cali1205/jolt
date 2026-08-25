@@ -40,6 +40,15 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Verbrauchsfaktor, und die Reserve-Marke wandert mit. Ein Simulator spielt
   die Fahrt mit einstellbarem Mehrverbrauch *und* einstellbarer Fahrzeit ab,
   damit sich das ohne Auto prüfen lässt.
+- **Mit dem gemessenen Tempo rechnen statt mit dem geratenen.** Der Regler vor
+  der Abfahrt ist eine Schätzung; das Telefon weiss es besser. Solange noch
+  kein Ladestand gemeldet wurde, wird die Reststrecke deshalb nicht skaliert,
+  sondern **neu gerechnet** — mit dem tatsächlich gefahrenen Tempo und dem
+  Wetter von jetzt statt von der Abfahrt. Ein Faktor täte es hier nicht:
+  Luftwiderstand geht mit v², Rollwiderstand nahezu linear, die
+  Nebenverbraucher gar nicht mit dem Tempo, sondern mit der Zeit — und die
+  *sinkt*, wenn man schneller fährt. Sobald ein gemessener Verbrauch vorliegt,
+  gilt der, denn er enthält die Wirkung des Tempos schon.
 - **Umplanen während der Fahrt** — das eigentliche Ziel des Projekts. Greift
   einer der Auslöser, wird die Reststrecke ab der aktuellen Position neu
   geplant: mit dem gemessenen Verbrauch, der gemessenen Fahrzeit und dem

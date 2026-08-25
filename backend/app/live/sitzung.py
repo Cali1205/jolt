@@ -236,7 +236,12 @@ def soc_schaetzen(punkte: list, punkt, verbrauchsfaktor: float) -> float | None:
                  if p.soc is not None and p.soll_soc is not None
                  and p is not punkt]
     if not vorherige:
-        return None
+        # Noch nie einen Ladestand gemeldet - dann gilt der geplante. Das
+        # Profil beginnt beim Startladestand der Fahrt, also ist genau das
+        # die einzige Aussage, die überhaupt vorliegt. Ohne diesen Rückfall
+        # bliebe die ganze Anzeige leer, bis jemand von sich aus etwas
+        # eintippt, und die Nachführung wäre für den ahnungslosen Fall aus.
+        return punkt.soll_soc
     letzte = vorherige[-1]
     verbraucht_soll = (letzte.soll_soc or 0.0) - punkt.soll_soc
     return round(letzte.soc - verbraucht_soll * verbrauchsfaktor, 2)
@@ -347,13 +352,41 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
     return zustand
 
 
+def tempo_faktor_gemessen(punkte: list, energieprofil: list) -> float | None:
+    """Wie viel schneller als geplant tatsächlich gefahren wird.
+
+    Das ist der Kehrwert des Zeitfaktors: Wer eine Strecke in 90 % der
+    veranschlagten Zeit zurücklegt, fährt elf Prozent schneller. Eine eigene
+    Messung braucht es dafür nicht - der Zeitfaktor liegt schon vor, ist um
+    Ladepausen bereinigt und gegen Ausreisser abgesichert.
+
+    Gebraucht wird die Zahl, weil das Tempo bisher **geraten** wurde: Der
+    Regler in der Planen-Ansicht steht auf 120 %, und niemand weiss, ob das
+    stimmt. Über v² ist das der grösste Einzelposten der Prognose.
+    """
+    faktor = _zeitfaktor(punkte, energieprofil)
+    if faktor is None or faktor <= 0.1:
+        return None
+    return round(1.0 / faktor, 3)
+
+
 def _umplanen(db, sitzung: models.LiveSitzung, zustand: Zustand, km: float,
               soc: float) -> None:
+    profil = sitzung.fahrt.energieprofil or []
+
+    # Entweder-oder, kein Sowohl-als-auch: Ein aus echten Ladeständen
+    # gemessener Verbrauch enthält die Wirkung des Tempos bereits - und noch
+    # Beladung, Wetterfehler und Batteriealter dazu. Er ist die bessere
+    # Auskunft, sobald es ihn gibt. Solange nicht, ist das gemessene Tempo
+    # immer noch weit besser als der Reglerwert von vor der Abfahrt.
+    anker = sum(1 for p in sitzung.punkte if p.soc is not None)
+    tempo = None if anker >= 2 else tempo_faktor_gemessen(sitzung.punkte, profil)
+
     try:
         neu = umplanung.planen(
             db, sitzung.fahrt, km, soc,
             umplanung.parameter_lesen(sitzung.plan),
-            sitzung.verbrauchsfaktor, sitzung.zeitfaktor)
+            sitzung.verbrauchsfaktor, sitzung.zeitfaktor, tempo_faktor=tempo)
     except Exception as fehler:      # noqa: BLE001
         # Eine gescheiterte Umplanung darf die Fahrt nicht beenden: Die
         # Messung läuft weiter, und der alte Plan ist immer noch besser als

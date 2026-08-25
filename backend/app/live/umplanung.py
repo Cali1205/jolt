@@ -22,7 +22,8 @@ nachgezogen und nicht einmal perfekt gerechnet.
 import logging
 
 from .. import models
-from ..energie.modell import Fahrzeugwerte, haversine_m
+from ..energie import modell, wetter
+from ..energie.modell import Fahrzeugwerte, Umgebung, haversine_m
 from ..laden import kurven, optimierer, verfuegbarkeit
 from ..routing import korridor
 
@@ -88,6 +89,86 @@ def restprofil(energieprofil: list, ab_km: float, verbrauchsfaktor: float = 1.0,
         minuten=[((e.get("minuten") or 0.0) - min0) * zeitfaktor for e in rest])
 
 
+def umgebung_unterwegs(fahrt: models.Fahrt, punkte: list):
+    """Das Wetter für die Reststrecke - jetzt, nicht bei der Abfahrt.
+
+    Auf achthundert Kilometern liegen zwischen Start und Ziel im Winter
+    regelmässig zehn Grad und ein anderer Wind, und die Vorhersage von heute
+    früh ist am Nachmittag nicht mehr die von heute früh. Die Abfrage kostet
+    einen Aufruf je Umplanung, und umgeplant wird höchstens alle zehn
+    Kilometer.
+
+    Fällt sie aus, gilt die Temperatur **dieser Fahrt** und nicht die
+    Standardvorgabe von 15 °C: Eine bei -5 °C gerechnete Fahrt auf 15 °C
+    zurückzusetzen verlöre die Heizlast und machte die Reststrecke auf dem
+    Papier billiger, als sie ist - der Fehler zeigte in genau die Richtung,
+    in der er jemanden stehen lässt.
+    """
+    ersatz = Umgebung()
+    if fahrt.aussentemp_c is not None:
+        ersatz = Umgebung(temp_c=fahrt.aussentemp_c)
+    try:
+        return wetter.entlang_route(punkte, vorgabe=ersatz)
+    except Exception as fehler:      # noqa: BLE001
+        log.warning("Wetter unterwegs nicht abrufbar: %s", fehler)
+        return lambda lat, lon: ersatz
+
+
+def restprofil_physik(fahrt: models.Fahrt, rest: list, tempo_faktor: float,
+                      umgebung_fuer) -> optimierer.Streckenprofil | None:
+    """Die Reststrecke mit dem **gemessenen** Tempo neu durchrechnen.
+
+    Der Unterschied zu `restprofil` ist der zwischen Skalieren und Rechnen.
+    Skalieren nimmt das Ergebnis der Planung und multipliziert es; das ist
+    richtig, solange man einen gemessenen Verbrauch hat, den man
+    fortschreiben will. Wer aber nur weiss, dass er schneller fährt als
+    angenommen, kann daraus keinen Energiefaktor machen: Der Luftwiderstand
+    geht mit v², der Rollwiderstand nahezu linear, die Nebenverbraucher gar
+    nicht mit dem Tempo, sondern mit der Zeit - und die *sinkt*, wenn man
+    schneller fährt. Ein pauschaler Aufschlag träfe keinen dieser drei.
+
+    Deshalb wird hier das Modell erneut über die Reststrecke gefahren, mit
+    demselben Höhenprofil und denselben Streckengeschwindigkeiten wie bei der
+    Planung, nur um den gemessenen Faktor verschoben. Das geht, weil das
+    gespeicherte Energieprofil Position, Höhe und Tempo je Stützstelle
+    mitführt - es ist für sich allein auswertbar und braucht die
+    Routing-Antwort nicht mehr.
+
+    Gibt None zurück, wenn das Profil dafür nicht genug hergibt (Fahrten aus
+    der Zeit vor diesen Feldern). Der Aufrufer fällt dann aufs Skalieren
+    zurück - eine schlechtere Rechnung ist besser als keine.
+    """
+    if len(rest) < 2:
+        return None
+    punkte, tempo_ms = [], []
+    for i, eintrag in enumerate(rest):
+        lat, lon = eintrag.get("lat"), eintrag.get("lon")
+        if lat is None or lon is None:
+            return None
+        punkte.append([lon, lat, eintrag.get("hoehe") or 0.0])
+        # `tempo_kmh` an einer Stützstelle ist die Geschwindigkeit des
+        # Teilstücks, das *dort endet* - siehe modell.profil_rechnen. Für das
+        # Teilstück i (von i nach i+1) steht sie also am Punkt i+1.
+        if i > 0:
+            tempo = eintrag.get("tempo_kmh")
+            if not tempo:
+                return None
+            tempo_ms.append(tempo / 3.6)
+
+    neu = modell.profil_rechnen(
+        Fahrzeugwerte.aus_modell(fahrt.fahrzeug), punkte, tempo_ms,
+        # Der Ladestand ist für das Streckenprofil ohne Belang: Gebraucht
+        # werden nur die kumulierten kWh und Minuten, und der Energiebedarf
+        # einer Etappe hängt nicht davon ab, wie voll der Akku ist.
+        start_soc=100.0, umgebung_fuer=umgebung_fuer, tempo_faktor=tempo_faktor)
+    if len(neu.punkte) < 2:
+        return None
+    return optimierer.Streckenprofil(
+        km=[p.km for p in neu.punkte],
+        kwh=[p.kwh_kumuliert for p in neu.punkte],
+        minuten=[p.minuten_kumuliert for p in neu.punkte])
+
+
 def optionen_suchen(db, geometrie: list, fahrzeug, parameter: dict
                     ) -> list[optimierer.Ladeoption]:
     """Die Ladeoptionen im Korridor der (Rest-)Route."""
@@ -111,17 +192,47 @@ def optionen_suchen(db, geometrie: list, fahrzeug, parameter: dict
 
 def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
            parameter: dict, verbrauchsfaktor: float = 1.0,
-           zeitfaktor: float = 1.0) -> dict:
+           zeitfaktor: float = 1.0, tempo_faktor: float | None = None) -> dict:
     """Ein Ladeplan für die Reststrecke ab `ab_km` mit `start_soc`.
 
     Die Kilometerstände im Ergebnis sind wieder auf die **ganze** Fahrt
     bezogen, nicht auf die Reststrecke: Unterwegs will man wissen, dass der
     Stopp bei km 412 liegt, und nicht bei km 87 der Reststrecke.
+
+    `tempo_faktor` schaltet vom Skalieren aufs Neurechnen um: Statt das
+    geplante Profil mit einem Energiefaktor zu multiplizieren, wird das
+    Modell mit dem gemessenen Tempo und dem aktuellen Wetter erneut über die
+    Reststrecke gefahren. Gedacht ist das für den Fall, dass noch niemand
+    einen Ladestand gemeldet hat - dann gibt es keinen Verbrauchsfaktor, und
+    die Alternative wäre, weiter mit dem Reglerwert von vor der Abfahrt zu
+    rechnen.
+
+    Beides zusammen wäre falsch: Ein gemessener Verbrauch enthält die Wirkung
+    des Tempos bereits. Wer zusätzlich das Tempo einrechnet, zählt es
+    doppelt. Deshalb ist es ein Entweder-oder, und der Aufrufer entscheidet.
     """
     fahrzeug = fahrt.fahrzeug
     geometrie, km0 = rest_ab(fahrt.geometrie or [], ab_km)
-    profil = restprofil(fahrt.energieprofil or [], km0, verbrauchsfaktor,
-                        zeitfaktor)
+
+    profil = None
+    grundlage = "verbrauch gemessen" if verbrauchsfaktor != 1.0 else "planung"
+    if tempo_faktor is not None:
+        rest = [e for e in (fahrt.energieprofil or [])
+                if (e.get("km") or 0.0) >= km0]
+        try:
+            profil = restprofil_physik(fahrt, rest, tempo_faktor,
+                                       umgebung_unterwegs(fahrt, geometrie))
+        except Exception as fehler:      # noqa: BLE001
+            # Eine gescheiterte Neurechnung darf die Umplanung nicht kosten -
+            # das Skalieren darunter ist schlechter, aber es steht.
+            log.warning("Neurechnung mit gemessenem Tempo fehlgeschlagen: %s",
+                        fehler)
+        if profil is not None:
+            grundlage = "tempo gemessen"
+
+    if profil is None:
+        profil = restprofil(fahrt.energieprofil or [], km0, verbrauchsfaktor,
+                            zeitfaktor)
 
     if not profil.km or len(profil.km) < 2:
         return {**parameter, "machbar": False, "stand_km": round(ab_km, 1),
@@ -145,7 +256,12 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
         if stopp.get("ausweich"):
             stopp["ausweich"]["km_auf_route"] = round(
                 stopp["ausweich"]["km_auf_route"] + km0, 1)
-    return {**parameter, **ergebnis, "stand_km": round(km0, 1)}
+    return {**parameter, **ergebnis, "stand_km": round(km0, 1),
+            # Worauf der Plan beruht - damit am Steuer und im Log
+            # nachvollziehbar ist, ob hier eine Messung wirkt oder noch der
+            # Regler von vor der Abfahrt.
+            "grundlage": grundlage,
+            "tempo_faktor": tempo_faktor}
 
 
 def stopps_gleich(alt: dict | None, neu: dict | None) -> bool:
