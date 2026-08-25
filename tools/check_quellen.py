@@ -21,21 +21,15 @@ import os
 import sys
 from datetime import datetime
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+
+anwendung_bereitstellen("quellen", datenbank=False)
 
 from app.live import quellen                          # noqa: E402
 from app.live.quellen import QuellenFehler            # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 def wirft(quelle, daten: dict, text: str, erwartet_im_grund: str = "") -> None:
@@ -200,14 +194,7 @@ def main() -> int:
     teil_jolt()
     teil_abrp()
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for text in FEHLER:
-            print(f"  - {text}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

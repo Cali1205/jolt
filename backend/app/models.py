@@ -288,6 +288,16 @@ class LivePunkt(Base):
     # ohnehin an der Säule steht. Was dazwischen gilt, rechnet
     # `live/sitzung.py` aus dem Energieprofil hoch.
     soc = Column(Float)
+    # Rohmessung, absichtlich nicht die Grundlage des Tempofaktors. Der wird
+    # aus Strecke und Zeit über ein Fenster von Kilometern gebildet
+    # (`live/sitzung.py`), und zwar aus zwei Gründen: Die Momentangeschwindig-
+    # keit des GPS ist verrauscht, und auf iOS liefert `coords.speed`
+    # regelmässig gar nichts. Ein Faktor, der auf einem Feld beruht, das je
+    # nach Telefon fehlt, wäre kein Faktor.
+    #
+    # Aufgehoben wird sie trotzdem: Sie kostet vier Byte je Messpunkt und ist
+    # das einzige, woran sich später nachprüfen liesse, ob die Rechnung aus
+    # Strecke und Zeit mit dem übereinstimmt, was der Tacho sah.
     tempo_kmh = Column(Float)
     aussentemp_c = Column(Float)
 

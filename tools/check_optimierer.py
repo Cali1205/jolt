@@ -19,27 +19,21 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+
+anwendung_bereitstellen("optim", datenbank=False)
 
 from app.energie.modell import Fahrzeugwerte  # noqa: E402
 from app.laden import optimierer  # noqa: E402
 
-FEHLER: list[str] = []
+pruefe = Pruefung()
 
 # Eine Kurve mit deutlichem Knick: volle Leistung bis 40 %, danach fällt sie
 # steil ab. Genau daran muss sich zeigen, ob der Optimierer die Ladehübe in
 # den steilen Teil legt.
 KURVE = [(0, 110), (10, 120), (30, 120), (50, 90), (70, 60), (80, 45),
          (90, 28), (100, 8)]
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
 
 
 def abschnitt(titel: str) -> None:
@@ -487,14 +481,7 @@ def main() -> int:
     fall_dichte_saeulen()
     fall_laufzeit()
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for text in FEHLER:
-            print(f"  - {text}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

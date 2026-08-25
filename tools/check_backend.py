@@ -15,8 +15,10 @@ import os
 import sys
 import tempfile
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+
+anwendung_bereitstellen("backend", datenbank=False)
 
 # Vor jedem App-Import setzen: Die Engine wird beim Import gebaut.
 _DB = os.path.join(tempfile.mkdtemp(prefix="jolt-check-"), "check.db")
@@ -32,15 +34,7 @@ from app.live import simulator  # noqa: E402
 from app.main import app  # noqa: E402
 from app import models  # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 # Ein Ausschnitt im Format des amtlichen Registers: Vorspann, Semikolon,
@@ -147,7 +141,9 @@ def main() -> int:
     try:
         harz = db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Goslar").one()
-        sylt = db.query(models.Ladepunkt).filter(
+        # Nur die Existenz zählt: `.one()` wirft, wenn der Datensatz fehlt
+        # oder doppelt ist - beides wäre ein Importfehler.
+        db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Westerland").one()
         lueneburg = db.query(models.Ladepunkt).filter(
             models.Ladepunkt.ort == "Lüneburg").one()
@@ -631,14 +627,7 @@ def main() -> int:
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for f in FEHLER:
-            print(f"  - {f}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    return 0
+    return pruefe.bilanz()
 
 
 if __name__ == "__main__":

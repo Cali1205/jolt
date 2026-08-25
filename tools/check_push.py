@@ -27,15 +27,11 @@ import base64
 import json
 import os
 import sys
-import tempfile
 
-HIER = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HIER, "..", "backend"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
 
-_DB = os.path.join(tempfile.mkdtemp(prefix="jolt-push-"), "check.db")
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB}"
-os.environ.pop("ORS_API_KEY", None)
-os.environ.pop("APP_PASSWORT", None)
+anwendung_bereitstellen("push")
 
 import http_ece  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
@@ -48,15 +44,7 @@ from app import models, push  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 
-FEHLER: list[str] = []
-
-
-def pruefe(bedingung, text: str, zusatz: str = "") -> None:
-    if bedingung:
-        print(f"  ok    {text}")
-    else:
-        print(f"  FEHLT {text}   {zusatz}")
-        FEHLER.append(text)
+pruefe = Pruefung()
 
 
 def b64(rohdaten: bytes) -> str:
@@ -314,16 +302,12 @@ def main() -> int:
     teil_ohne_schluessel()
     teil_mit_schluessel()
 
-    print()
-    if FEHLER:
-        print(f"{len(FEHLER)} Prüfung(en) fehlgeschlagen:")
-        for text in FEHLER:
-            print(f"  - {text}")
-        return 1
-    print("Alle Prüfungen bestanden.")
-    print("\nNicht geprüft (und nicht prüfbar ohne echtes Gerät): der Sprung "
-          "zum\nPush-Dienst. Dafür gibt es POST /api/push/probe.")
-    return 0
+    # Was dieses Skript nicht kann, gehört in die Ausgabe und nicht nur in
+    # den Quelltext - ein bestandener Lauf, der verschweigt, was er nicht
+    # angefasst hat, weckt mehr Vertrauen als er verdient.
+    return pruefe.bilanz(
+        "Nicht geprüft (und nicht prüfbar ohne echtes Gerät): der Sprung zum\n"
+        "Push-Dienst. Dafür gibt es POST /api/push/probe.")
 
 
 if __name__ == "__main__":

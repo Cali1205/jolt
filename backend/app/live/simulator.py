@@ -20,6 +20,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .. import models, push
+from ..energie.profil import eintrag_bei
 from . import kanal, sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -43,7 +44,7 @@ def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
     punkte = []
     km = 0.0
     while km <= gesamt_km:
-        eintrag = _profil_bei(profil, km)
+        eintrag = eintrag_bei(profil, km)
         verbraucht = fahrt.start_soc - (eintrag.get("soc") or fahrt.start_soc)
         soc = fahrt.start_soc - verbraucht * mehrverbrauch
         punkte.append({
@@ -64,14 +65,6 @@ def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
         km += schritt_km
     return punkte
 
-
-def _profil_bei(profil: list, km: float) -> dict:
-    if km <= (profil[0].get("km") or 0.0):
-        return profil[0]
-    for vorher, nachher in zip(profil, profil[1:]):
-        if (vorher.get("km") or 0.0) <= km <= (nachher.get("km") or 0.0):
-            return nachher
-    return profil[-1]
 
 
 async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
