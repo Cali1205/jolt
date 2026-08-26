@@ -65,12 +65,30 @@
      () => ({ acceptAllDevices: true })],
   ];
 
-  // Der Handshake. ATZ setzt zurück und braucht am längsten; ATE0 schaltet
-  // das Echo aus, sonst kommt jeder Befehl als erste Zeile der Antwort
-  // zurück. ATSP6 ist CAN 11 bit / 500 kBit - das Protokoll des MEB. ATCAF1
-  // lässt den Dongle mehrteilige ISO-TP-Antworten selbst zusammensetzen;
-  // ohne das kämen Rahmen einzeln und müssten hier sortiert werden.
-  const HANDSHAKE = ["ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP6", "ATCAF1"];
+  /* Der Handshake - übernommen aus dem eigenen Android-Logger
+   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`), nicht geraten.
+   *
+   * Der erste Versuch stand auf `ATSP6` (CAN 11 bit) mit Adresse 7E5 und
+   * bekam von jeder Adresse `NO DATA` - der Bus war still, weil in der
+   * falschen Adressform gefragt wurde. Der MEB spricht Diagnose über
+   * **29-bit-Kennungen**:
+   *
+   *   ATSP7        CAN mit erweiterten 29-bit-Kennungen
+   *   ATCP17       die oberen Prioritätsbits der Kennung sind 0x17
+   *   ATCAF0       keine automatische Formatierung
+   *   ATSH17FC007B senden an das Batteriemanagement
+   *   ATCRA17FE007B  und nur dessen Antwort durchlassen
+   *
+   * ATSP0 davor lässt den ELM einmal selbst suchen; ATSP7 überschreibt das
+   * gleich darauf. So steht es im Logger, und da es dort funktioniert, wird
+   * hier nichts daran verbessert. */
+  const BMS_SENDEN = "17FC007B";
+  const BMS_EMPFANGEN = "17FE007B";
+  const HANDSHAKE = [
+    "ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP0",
+    "ATSP7", "ATCP17", "ATCAF0",
+    `ATSH${BMS_SENDEN}`, `ATCRA${BMS_EMPFANGEN}`,
+  ];
 
   const el = (id) => document.getElementById(id);
   let schreiben = null;      // Charakteristik zum Senden
@@ -180,7 +198,12 @@
     }
   }
 
-  function befehl(text, grenze_ms = 6000) {
+  /* Sechs Sekunden waren zu knapp: Nach `ATSP0` sucht der ELM das Protokoll
+ * selbst (`SEARCHING...`), und das dauert an einem Fahrzeug, das nicht
+ * antwortet, bis zu zehn Sekunden. Die Antwort kam eine Sekunde nach dem
+ * Abbruch - im Protokoll stand dann ein Zeitablauf, wo in Wirklichkeit ein
+ * Befund war. */
+function befehl(text, grenze_ms = 15000) {
     return new Promise((erfuellen, ablehnen) => {
       if (!schreiben) { ablehnen(new Error("nicht verbunden")); return; }
       if (warteAuf) { ablehnen(new Error("es läuft noch ein Befehl")); return; }
@@ -212,39 +235,59 @@
     });
   }
 
+  /* Weitermachen statt abbrechen. Ein Befehl ohne Antwort ist hier ein
+   * Befund und kein Grund aufzuhören - beim ersten Versuch riss ein
+   * Zeitablauf bei `0100` die Reihe ab, und ausgerechnet das darauf folgende
+   * `ATDP` lief nie. Genau der Befehl hätte gesagt, ob überhaupt ein
+   * Protokoll gefunden wurde. */
   async function reihe(befehle) {
+    let alles_gut = true;
     for (const b of befehle) {
       const sauber = b.trim();
       if (!sauber) continue;
       try {
-        await befehl(sauber, sauber === "ATZ" ? 10000 : 6000);
+        await befehl(sauber);
       } catch (fehler) {
-        log("FEHLER " + fehler.message);
-        return false;
+        log("FEHLER " + fehler.message + " - weiter mit dem nächsten Befehl");
+        alles_gut = false;
+        // Eine verspätete Antwort auf den abgelaufenen Befehl darf nicht dem
+        // nächsten zugeschlagen werden.
+        puffer = "";
+        await new Promise((w) => setTimeout(w, 300));
       }
     }
-    return true;
+    return alles_gut;
   }
 
   /* ---------- Ladestand ---------- */
 
   /* Die Antwort auf 22028C sieht bei einer positiven Rückmeldung so aus:
    * `62028Cxx` - 0x62 ist 0x22 + 0x40 (die Quittung des Dienstes), dann die
-   * Datenkennung, dann die Nutzdaten. Was jolt daraus macht, ist geraten,
-   * bis es einmal am Auto stimmt; deshalb steht die Rohantwort daneben. */
+   * Datenkennung, dann die Nutzdaten.
+   *
+   * Geteilt wird durch **2,55** und nicht durch 2,5: Ein Byte deckt 0 bis
+   * 255 ab, und 255/2,55 sind glatte 100 %. Der Wert stammt aus
+   * `hybridBatteryRemainingLife()` im eigenen Android-Logger, wo dieselbe
+   * Datenkennung so ausgewertet wird. Der Unterschied sind bei vollem Akku
+   * zwei Prozentpunkte - genug, um eine Reserve falsch zu setzen.
+   *
+   * Wegen ATCAF0 stehen vor der Quittung noch Rahmenbytes; deshalb wird
+   * `62028C` gesucht statt am Anfang erwartet. */
   function socAusAntwort(roh) {
     const hex = roh.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
     const marke = hex.indexOf("62028C");
     if (marke < 0) return null;
     const nutz = hex.slice(marke + 6);
     if (nutz.length < 2) return null;
-    return parseInt(nutz.slice(0, 2), 16) / 2.5;
+    return parseInt(nutz.slice(0, 2), 16) / 2.55;
   }
 
   async function socLesen() {
     el("soc-wert").textContent = "…";
     try {
-      await befehl("ATSH7E5");
+      // Adresse und Filter stehen seit dem Handshake; sie hier erneut zu
+      // setzen würde ATCP17 und ATCAF0 nicht wiederholen und damit gerade
+      // das zerstören, worauf es ankommt.
       const antwort = await befehl("22028C");
       const wert = socAusAntwort(antwort);
       if (wert === null) {

@@ -5,9 +5,11 @@ die Ladelogik in app/laden/, die Live-Nachführung in app/live/.
 """
 import logging
 import os
+import time
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import (FileResponse, HTMLResponse,
+                               RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 
 from . import deps, push, routing
@@ -80,13 +82,39 @@ def obd_seite():
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
         html = datei.read()
+    neueste = 0
     for name in ("obd.js", "obd.css"):
         try:
             marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
         except OSError:
             marke = 0
+        neueste = max(neueste, marke)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={marke}")
+    # Dieselbe Marke sichtbar auf der Seite: Zweimal war "welche Fassung ist
+    # das eigentlich" die Antwort auf einen vermeintlichen Bluetooth-Fehler,
+    # und beide Male liess sich das nur mühsam von aussen feststellen.
+    html = html.replace("STAND", time.strftime("%d.%m. %H:%M",
+                                               time.localtime(neueste)))
     return HTMLResponse(html, headers=OHNE_CACHE)
+
+
+@app.get("/static/obd.html")
+def obd_alte_adresse():
+    """Die alte Adresse der Diagnoseseite - leitet auf /obd um.
+
+    Sie muss verschwinden, nicht nur veraltet sein: Unter /static liegt sie
+    im Geltungsbereich der Cloudflare-Browserfrist, **und** sie verweist auf
+    `/static/obd.js` ohne Versionsparameter. Wer sie aus dem Verlauf oder
+    einem Lesezeichen öffnet, bekommt deshalb zuverlässig altes JavaScript -
+    und damit Fehler, die längst behoben sind. Genau das ist passiert: Der
+    Bluefy-Fehler "Request payload could not be parsed" kam wieder, zwanzig
+    Minuten nachdem dieselbe Seite unter /obd funktioniert hatte.
+
+    Vorübergehende Umleitung und ausdrücklich ohne Cache: Eine dauerhafte
+    (308) merkt sich der Browser und liesse sich später nicht mehr
+    zurücknehmen.
+    """
+    return RedirectResponse("/obd", status_code=307, headers=OHNE_CACHE)
 
 
 @app.get("/sw.js")
