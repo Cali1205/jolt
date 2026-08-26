@@ -82,7 +82,15 @@ def obd_seite():
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
         html = datei.read()
+    # Die Seite selbst zählt mit. Sie stand hier zuerst nicht drin, und
+    # prompt zeigte die Fassungskennung einen alten Stand an, nachdem nur
+    # der Text geändert worden war - also genau das Rätsel, das sie
+    # auflösen soll.
     neueste = 0
+    try:
+        neueste = int(os.path.getmtime(os.path.join(FRONTEND, "obd.html")))
+    except OSError:
+        pass
     for name in ("obd.js", "obd.css"):
         try:
             marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))

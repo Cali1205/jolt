@@ -348,8 +348,17 @@ table.kurve input { padding: 6px 8px; }
         Messpunkten, samt Höhenprofil aus Kartendaten. Gedacht für bekannte
         kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
         den echten Verbrauch des Autos zu lernen.</p>
+
+      <!-- Zwei Wege, und der Unterschied muss am Knopf stehen: Die
+           Bluetooth-Verbindung zum Dongle gibt es nur auf /obd, weil Safari
+           kein Web Bluetooth kennt. Wer das nicht weiss, sucht sie hier. -->
+      <p class="leer" style="padding-top:0"><strong>Mit OBD2-Dongle:</strong>
+        <a href="/obd">die Fahrt-Seite in Bluefy öffnen</a> – dort verbindet
+        ein Knopf den Dongle, legt die Fahrt an und liest den Ladestand
+        selbst. Hier geht es <strong>ohne</strong> Dongle, dann musst du den
+        Ladestand unterwegs von Hand melden.</p>
       <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
-      <button class="tat neben" id="aufz-start">Aufzeichnung starten</button>
+      <button class="tat neben" id="aufz-start">Ohne Dongle aufzeichnen</button>
 
       <h2>Vergangene Fahrten</h2>
       <div id="fahrten-liste"></div>
