@@ -16,15 +16,53 @@
   /* Welchen GATT-Dienst ein ELM327-Klon anbietet, ist nicht genormt. Web
    * Bluetooth verlangt aber, dass man alle Dienste, die man anfassen will,
    * **vorher** anmeldet - man kann nicht erst verbinden und dann nachsehen.
-   * Deshalb die Liste der gebräuchlichen. Der Vgate iCar Pro nutzt nach
-   * verbreiteter Auskunft 0xFFF0; die anderen kosten nichts. */
+   * Deshalb die Liste der gebräuchlichen; der Vgate iCar Pro nutzt nach
+   * verbreiteter Auskunft 0xFFF0, die anderen kosten nichts.
+   *
+   * Ausgeschrieben als 128-bit-UUID und nicht als Kurzform `0xfff0`: Die
+   * Spezifikation erlaubt beides, aber Bluefy reicht die Optionen an eine
+   * native Schicht weiter, und die stolperte über die Zahl - `RequestDevice:
+   * Request payload could not be parsed`, noch bevor ein Geräte-Dialog
+   * erschien. An der ausgeschriebenen Form gibt es nichts zu deuten, und
+   * Chrome nimmt sie ebenso. */
+  const kurz = (id) => `0000${id}-0000-1000-8000-00805f9b34fb`;
   const DIENSTE = [
-    0xfff0,   // Vgate, Veepeak, viele Klone
-    0xffe0,   // HM-10-basiert
-    0xffe5,
-    0xfee7,
-    0x18f0,
+    kurz("fff0"),   // Vgate, Veepeak, viele Klone
+    kurz("ffe0"),   // HM-10-basiert
+    kurz("ffe5"),
+    kurz("fee7"),
+    kurz("18f0"),
     "6e400001-b5a3-f393-e0a9-e50e24dcca9e",   // Nordic UART
+  ];
+
+  /* Namen, unter denen sich ELM327-Dongles melden. Der Vgate iCar Pro 2S
+   * heisst `IOS-Vlink` - abgelesen am Gerät, nicht geraten.
+   *
+   * `namePrefix` vergleicht **unterscheidend nach Gross- und
+   * Kleinschreibung**: `IOS-vlink` mit kleinem v trifft `IOS-Vlink` nicht,
+   * und der Dialog bliebe leer, als wäre kein Dongle da. Deshalb steht das
+   * kurze, eindeutige `IOS-` mit in der Liste - es trifft unabhängig davon,
+   * wie der Rest geschrieben ist. */
+  const NAMEN = ["IOS-Vlink", "IOS-", "Vlink", "vlink", "VLink",
+                 "OBD", "Vgate", "VEEPEAK"];
+
+  /* Mehrere Anläufe, weil sich die Browser hier verschieden verhalten und
+   * ein einzelner Fehlschlag nicht sagt, woran es lag. Der letzte Anlauf
+   * kann zwar keinen Dienst lesen, beantwortet aber die Frage, ob überhaupt
+   * ein Auswahldialog erscheint - und trennt damit "der Aufruf ist kaputt"
+   * von "der Dongle wird nicht gefunden". */
+
+  const VARIANTEN = [
+    ["alle Geräte, Dienste angemeldet",
+     () => ({ acceptAllDevices: true, optionalServices: DIENSTE })],
+    ["nach Namen gefiltert",
+     () => ({ filters: NAMEN.map((n) => ({ namePrefix: n })),
+              optionalServices: DIENSTE })],
+    ["nach bekannten Diensten gefiltert",
+     () => ({ filters: DIENSTE.map((d) => ({ services: [d] })),
+              optionalServices: DIENSTE })],
+    ["alle Geräte, ohne Dienstliste",
+     () => ({ acceptAllDevices: true })],
   ];
 
   // Der Handshake. ATZ setzt zurück und braucht am längsten; ATE0 schaltet
@@ -63,11 +101,28 @@
 
   async function verbinden() {
     try {
-      // acceptAllDevices statt eines Filters: Die Dongles heissen je nach
-      // Charge anders, und ein Filter, der den eigenen nicht trifft, sieht
-      // aus wie ein defekter Dongle.
-      const geraet = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true, optionalServices: DIENSTE });
+      // Der Reihe nach durchprobieren, statt auf eine Form zu setzen: Welche
+      // Gestalt der Anfrage ein Browser akzeptiert, unterscheidet sich - und
+      // ein einzelner Fehlschlag sagt nicht, woran es lag. Jeder Versuch
+      // steht im Protokoll, damit der nächste nicht wieder raten muss.
+      let geraet = null;
+      let letzterFehler = null;
+      for (const [name, bauen] of VARIANTEN) {
+        try {
+          log(`Versuch: ${name}`);
+          geraet = await navigator.bluetooth.requestDevice(bauen());
+          break;
+        } catch (fehler) {
+          letzterFehler = fehler;
+          log(`  ${fehler.name || "Fehler"}: ${fehler.message}`);
+          // Abbruch durch den Nutzer ist kein Grund weiterzuprobieren - er
+          // hat den Dialog gesehen und zugemacht. Jede weitere Variante
+          // öffnete ihn nur erneut.
+          if (fehler.name === "NotFoundError"
+              && /cancel|abbruch|user/i.test(fehler.message)) throw fehler;
+        }
+      }
+      if (!geraet) throw letzterFehler || new Error("Keine Variante ging.");
       log(`Gerät gewählt: ${geraet.name || "(ohne Namen)"}`);
       geraet.addEventListener("gattserverdisconnected", () => {
         stand("Verbindung getrennt", "schlecht");
@@ -253,5 +308,26 @@
   el("senden").addEventListener("click", () => reihe(el("frei").value.split("\n")));
   el("melden").addEventListener("click", melden);
   el("log-leeren").addEventListener("click", () => { el("log").textContent = ""; });
+  /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
+   * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die
+   * Hex-Antworten Zeichen für Zeichen. */
+  el("log-kopieren").addEventListener("click", async () => {
+    const text = el("log").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      el("log-kopieren").textContent = "kopiert";
+      setTimeout(() => { el("log-kopieren").textContent = "Protokoll kopieren"; }, 2000);
+    } catch (fehler) {
+      // Ohne Zwischenablage (älterer Browser, fehlende Erlaubnis) bleibt das
+      // Markieren von Hand - dann wenigstens alles auf einmal auswählen.
+      const bereich = document.createRange();
+      bereich.selectNodeContents(el("log"));
+      const auswahl = window.getSelection();
+      auswahl.removeAllRanges();
+      auswahl.addRange(bereich);
+      log("Zwischenablage nicht verfügbar - Protokoll ist markiert, bitte "
+          + "von Hand kopieren.");
+    }
+  });
   log("Bereit. Dongle einstecken, Zündung an, dann „Dongle suchen“.");
 })();
