@@ -65,28 +65,42 @@
      () => ({ acceptAllDevices: true })],
   ];
 
-  /* Der Handshake - übernommen aus dem eigenen Android-Logger
-   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`), nicht geraten.
+  /* Der Handshake - **am Fahrzeug bestätigt** am 26.08.2026 an einem
+   * ID.Buzz mit einem Vgate iCar Pro 2S (ELM327 v2.3).
    *
-   * Der erste Versuch stand auf `ATSP6` (CAN 11 bit) mit Adresse 7E5 und
-   * bekam von jeder Adresse `NO DATA` - der Bus war still, weil in der
-   * falschen Adressform gefragt wurde. Der MEB spricht Diagnose über
-   * **29-bit-Kennungen**:
+   * Der MEB spricht Diagnose über 29-bit-Kennungen, nicht über die kurzen
+   * 11-bit-Adressen der Abgasdiagnose. Auf 7E0/7E2/7E5/7E6 antwortete
+   * nichts, und zwar nicht weil die Steuergeräte schwiegen, sondern weil in
+   * der falschen Adressform gefragt wurde.
    *
-   *   ATSP7        CAN mit erweiterten 29-bit-Kennungen
-   *   ATCP17       die oberen Prioritätsbits der Kennung sind 0x17
-   *   ATCAF0       keine automatische Formatierung
-   *   ATSH17FC007B senden an das Batteriemanagement
-   *   ATCRA17FE007B  und nur dessen Antwort durchlassen
+   * Die Grundlage stammt aus dem eigenen Android-Logger
+   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`). Eine Sache musste
+   * dabei berichtigt werden, und sie war der Unterschied zwischen NO DATA
+   * und einer Antwort:
    *
-   * ATSP0 davor lässt den ELM einmal selbst suchen; ATSP7 überschreibt das
-   * gleich darauf. So steht es im Logger, und da es dort funktioniert, wird
-   * hier nichts daran verbessert. */
-  const BMS_SENDEN = "17FC007B";
-  const BMS_EMPFANGEN = "17FE007B";
+   *   Der Logger setzt `ATCP17` **und** gibt `ATSH17FC007B` die vollständige
+   *   Adresse. Das schliesst einander aus. `ATCP` setzt die oberen fünf Bit
+   *   der 29-bit-Kennung, `ATSH` liefert die unteren 24 - genau deshalb gibt
+   *   es `ATCP` überhaupt. 0x17FC007B zerlegt sich in 0x17 oben und
+   *   0xFC007B unten, und richtig heisst es deshalb `ATSHFC007B`. Der ELM
+   *   quittiert die lange Form zwar mit OK, sendet dann aber auf einer
+   *   anderen Kennung.
+   *
+   * Ausserdem `ATCAF1` statt `ATCAF0`: Mit abgeschalteter Formatierung
+   * müsste das ISO-TP-Längenbyte von Hand im Befehl stehen (`0322028C`).
+   * Automatisch ist weniger fehleranfällig und beherrscht mehrteilige
+   * Antworten gleich mit.
+   *
+   * `ATH1` lässt die Absenderkennung in der Antwort stehen. Ein Byte mehr
+   * zu lesen kostet nichts und beantwortet im Zweifel die Frage, *wer*
+   * geantwortet hat - beim Suchen war das die nützlichste Zeile überhaupt.
+   *
+   * Bestätigte Antwort auf 22028C:  17FE007B 04 62028C B4 */
+  const BMS_SENDEN = "FC007B";        // untere 24 Bit; obere 5 via ATCP17
+  const BMS_EMPFANGEN = "17FE007B";   // Empfangsfilter: volle Kennung
   const HANDSHAKE = [
-    "ATZ", "ATE0", "ATL0", "ATS0", "ATH0", "ATSP0",
-    "ATSP7", "ATCP17", "ATCAF0",
+    "ATZ", "ATE0", "ATL0", "ATS0", "ATH1",
+    "ATSP7", "ATCP17", "ATCAF1", "ATST FF",
     `ATSH${BMS_SENDEN}`, `ATCRA${BMS_EMPFANGEN}`,
   ];
 
@@ -261,32 +275,51 @@ function befehl(text, grenze_ms = 15000) {
 
   /* ---------- Ladestand ---------- */
 
-  /* Die Antwort auf 22028C sieht bei einer positiven Rückmeldung so aus:
-   * `62028Cxx` - 0x62 ist 0x22 + 0x40 (die Quittung des Dienstes), dann die
-   * Datenkennung, dann die Nutzdaten.
+  /* Vom Rohbyte zu den beiden Ladeständen.
    *
-   * Geteilt wird durch **2,55** und nicht durch 2,5: Ein Byte deckt 0 bis
-   * 255 ab, und 255/2,55 sind glatte 100 %. Der Wert stammt aus
-   * `hybridBatteryRemainingLife()` im eigenen Android-Logger, wo dieselbe
-   * Datenkennung so ausgewertet wird. Der Unterschied sind bei vollem Akku
-   * zwei Prozentpunkte - genug, um eine Reserve falsch zu setzen.
+   * Die Antwort auf 22028C sieht so aus: `17FE007B 04 62028C B4` - die
+   * Absenderkennung (wegen ATH1), das ISO-TP-Längenbyte, die Quittung
+   * `62` = `22` + `40`, die Datenkennung, dann ein einziges Nutzbyte.
    *
-   * Wegen ATCAF0 stehen vor der Quittung noch Rahmenbytes; deshalb wird
-   * `62028C` gesucht statt am Anfang erwartet. */
+   * Aus diesem Byte folgen **zwei** Zahlen, und die zu verwechseln ist der
+   * gefährlichste Fehler an dieser Stelle:
+   *
+   *   SoC(BMS) = Rohwert / 2,5
+   *   SoC(HMI) = SoC(BMS) * 51/46 - 6,4
+   *
+   * Der BMS-Wert ist der Brutto-Ladestand der Batterie. Die Anzeige im Auto
+   * zeigt ihn nicht - sie rechnet ihn auf das nutzbare Fenster um, das oben
+   * und unten einen Puffer freilässt (rechnerisch: 0 % Anzeige bei 5,8 %
+   * brutto, 100 % Anzeige bei 96 % brutto).
+   *
+   * Am Fahrzeug bestätigt: Rohwert 0xB4 = 180 ergibt 72,0 % brutto und
+   * 73,4 % Anzeige - das Auto zeigte 74 %. Mit dem Teiler 2,55, wie ihn der
+   * eigene Android-Logger verwendet, käme 71,9 % heraus und die Rechnung
+   * ginge nicht auf. Der Teiler ist 2,5.
+   *
+   * **jolt braucht den HMI-Wert.** `reserve_soc` und `ziel_soc` sind am
+   * Anzeigewert gedacht, und der liegt hier gut anderthalb Punkte über dem
+   * Brutto-Wert. Wer den falschen meldet, setzt die Reserve zu optimistisch
+   * - und zwar genau am unteren Ende, wo es zählt. */
   function socAusAntwort(roh) {
     const hex = roh.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
     const marke = hex.indexOf("62028C");
     if (marke < 0) return null;
     const nutz = hex.slice(marke + 6);
     if (nutz.length < 2) return null;
-    return parseInt(nutz.slice(0, 2), 16) / 2.55;
+    const bms = parseInt(nutz.slice(0, 2), 16) / 2.5;
+    // Begrenzt, weil die Umrechnung an den Rändern über 100 bzw. unter 0
+    // hinausläuft - die Konstanten stammen aus der ID.3-Dokumentation und
+    // treffen die Puffergrenzen des ID.Buzz nur ungefähr.
+    const hmi = Math.min(100, Math.max(0, bms * 51 / 46 - 6.4));
+    return { roh: parseInt(nutz.slice(0, 2), 16), bms, hmi };
   }
 
   async function socLesen() {
     el("soc-wert").textContent = "…";
     try {
       // Adresse und Filter stehen seit dem Handshake; sie hier erneut zu
-      // setzen würde ATCP17 und ATCAF0 nicht wiederholen und damit gerade
+      // setzen würde ATCP17 und ATCAF1 nicht wiederholen und damit gerade
       // das zerstören, worauf es ankommt.
       const antwort = await befehl("22028C");
       const wert = socAusAntwort(antwort);
@@ -294,12 +327,19 @@ function befehl(text, grenze_ms = 15000) {
         el("soc-wert").textContent = "?";
         log("Antwort enthält kein 62028C - siehe oben. Entweder ist die "
             + "Datenkennung eine andere, oder das Steuergerät antwortet "
-            + "nicht auf 7E5.");
+            + "nicht auf dieser Kennung.");
         return;
       }
-      letzterSoc = Math.round(wert * 10) / 10;
+      letzterSoc = Math.round(wert.hmi * 10) / 10;
+      // Beide Zahlen anzeigen: Die grosse ist die, die im Auto steht und die
+      // jolt bekommt; die kleine daneben macht nachvollziehbar, woraus sie
+      // entstanden ist.
       el("soc-wert").textContent = letzterSoc + " %";
-      log(`Ladestand ${letzterSoc} % (Rohwert / 2,5)`);
+      el("soc-herkunft").textContent =
+        `Rohwert 0x${wert.roh.toString(16).toUpperCase()} = ${wert.roh}`
+        + ` → brutto ${wert.bms.toFixed(1)} % → Anzeige ${wert.hmi.toFixed(1)} %`;
+      log(`Ladestand: brutto ${wert.bms.toFixed(1)} %, `
+          + `Anzeige ${wert.hmi.toFixed(1)} % (Rohwert ${wert.roh})`);
     } catch (fehler) {
       el("soc-wert").textContent = "–";
       log("FEHLER " + fehler.message);

@@ -51,11 +51,15 @@
   <p class="hinweis">Beim MEB antwortet das Batteriemanagement über
     29-bit-Kennungen: senden an <code>17FC007B</code>, hören auf
     <code>17FE007B</code>. Der Ladestand steht hinter UDS-Dienst
-    <code>22</code>, Datenkennung <code>028C</code>; der Rohwert wird durch
-    2,55 geteilt. Adressen und Teiler stammen aus dem eigenen
-    Android-Logger, wo sie sich am Fahrzeug bewährt haben.</p>
+    <code>22</code>, Datenkennung <code>028C</code>. Der Rohwert ergibt
+    geteilt durch 2,5 den <strong>Brutto</strong>-Ladestand; die Anzeige im
+    Auto rechnet daraus <code>× 51/46 − 6,4</code>, weil oben und unten ein
+    Puffer freibleibt. Angezeigt wird hier der Wert, den auch das Auto
+    zeigt – den braucht jolt, weil Reserve und Ziel-Ladestand darauf
+    gedacht sind.</p>
   <button id="soc" class="tat" disabled>SoC abfragen</button>
   <div id="soc-wert" class="gross">–</div>
+  <p class="hinweis" id="soc-herkunft" style="margin:4px 0 0"></p>
 </div>
 
 <div class="kasten">
