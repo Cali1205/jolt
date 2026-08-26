@@ -212,6 +212,13 @@ class Fahrt(Base):
     # rückwirkend eine Zuladung von 0 kg zu behaupten.
     zuladung_kg = Column(Float)
 
+    # Zuschlag auf den Luftwiderstand für alles, was aussen dranhängt -
+    # Fahrradträger, Dachbox. 1.0 heisst "nichts dran". Gehört zur Fahrt und
+    # nicht zum Fahrzeug: Dieselbe Strecke einmal mit und einmal ohne Träger
+    # sind zwei verschiedene Energiebilanzen, und der Träger ist im Sommer
+    # dran und im Winter nicht.
+    luftwiderstand_faktor = Column(Float, nullable=False, default=1.0)
+
     # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
     # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe
     # live/aufzeichnung.py.

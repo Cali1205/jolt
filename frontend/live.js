@@ -494,6 +494,13 @@ window.joltLive = (function () {
       return;
     }
     const g = ergebnis.gelernt;
+    if (!g && ergebnis.nicht_gelernt) {
+      // Der Zuschlag für Träger oder Box ist kein Fehler, sondern der Grund,
+      // warum diese Fahrt bewusst nicht in den Fahrzeugfaktor eingeht.
+      K.melden("Fahrt beendet. " + ergebnis.nicht_gelernt
+        + " Die Aufzeichnung bleibt erhalten.", "hinweis");
+      return;
+    }
     if (!g) {
       K.melden("Fahrt beendet. Für die Kalibrierung war sie nicht verwertbar "
         + "– unter 30 km, oder der gemessene Verbrauch lag ausserhalb des "

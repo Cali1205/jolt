@@ -83,6 +83,7 @@ window.joltRoute = (function () {
                 text: gewaehlt.ziel.name },
         start_soc: Number(document.getElementById("start-soc").value),
         tempo_faktor: Number(document.getElementById("tempo").value) / 100,
+        luftwiderstand_faktor: Number(document.getElementById("anbau").value),
         // Der Regler steht ganz links auf einem negativen Wert - das ist
         // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,

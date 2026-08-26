@@ -185,6 +185,17 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
+      <!-- Der Zuschlag gehört zur Fahrt und nicht zum Fahrzeug: Der Träger
+           ist im Sommer dran und im Winter nicht. Und ohne ihn landet sein
+           Verbrauch im Korrekturfaktor des Autos, der dauerhaft gilt. -->
+      <label for="anbau">Aussen am Auto</label>
+      <select id="anbau">
+        <option value="1.0" selected>nichts</option>
+        <option value="1.15">Fahrradträger, 2 Räder</option>
+        <option value="1.25">Fahrradträger, 4 Räder</option>
+        <option value="1.20">Dachbox</option>
+      </select>
+
       <label for="tempo">Tempo gegenüber der Routing-Annahme:
         <span id="tempo-wert">120</span> %</label>
       <input type="range" id="tempo" min="70" max="130" step="5" value="120">

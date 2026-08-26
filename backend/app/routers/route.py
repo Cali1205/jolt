@@ -21,6 +21,8 @@ ohne jedes Mal das Routing-Kontingent zu belasten.
 """
 import logging
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -65,6 +67,9 @@ class Routenanfrage(BaseModel):
     # wirkt über v² überproportional - genau der Hebel, mit dem sich unterwegs
     # ein Ladestopp einsparen lässt.
     tempo_faktor: float = Field(default=1.0, ge=0.6, le=1.5)
+    # Zuschlag auf den Luftwiderstand für Fahrradträger oder Dachbox.
+    # 1.0 = nichts dran. Siehe models.Fahrt.luftwiderstand_faktor.
+    luftwiderstand_faktor: float = Field(default=1.0, ge=1.0, le=2.0)
     wetter_beruecksichtigen: bool = True
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
@@ -92,11 +97,13 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
     anbieter = routing.provider()
-    werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
-    if anfrage.zuladung_kg is not None:
-        # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Die Zuladung
-        # ist eine Eigenschaft der Fahrt, nicht des Autos.
-        werte.masse_kg = fahrzeug.leermasse_kg + anfrage.zuladung_kg
+    # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
+    # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
+    # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht hier
+    # erst weiter unten, deshalb ein leichtgewichtiger Platzhalter.
+    werte = modell.Fahrzeugwerte.aus_fahrt(SimpleNamespace(
+        fahrzeug=fahrzeug, zuladung_kg=anfrage.zuladung_kg,
+        luftwiderstand_faktor=anfrage.luftwiderstand_faktor))
 
     # Schritt 1: alle drei Vorgaben abfragen und anhand der reinen Routing-
     # Antwort (Strecke, Fahrzeit) zusammenlegen, was dieselbe Strasse ist.
@@ -181,6 +188,7 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
             start_soc=anfrage.start_soc, tempo_faktor=anfrage.tempo_faktor,
             aussentemp_c=kandidat["mittel"].temp_c,
             zuladung_kg=anfrage.zuladung_kg,
+            luftwiderstand_faktor=anfrage.luftwiderstand_faktor,
             strecke_m=kandidat["strecke_km"] * 1000,
             fahrzeit_s=kandidat["fahrzeit_min"] * 60,
             geometrie=kandidat["punkte"],
@@ -294,9 +302,7 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             lat=lp.lat, lon=lp.lon,
             gesperrt=zustand.quelle == "meldung"))
 
-    werte = modell.Fahrzeugwerte.aus_modell(fahrzeug)
-    if fahrt.zuladung_kg is not None:
-        werte.masse_kg = fahrzeug.leermasse_kg + fahrt.zuladung_kg
+    werte = modell.Fahrzeugwerte.aus_fahrt(fahrt)
 
     plan = optimierer.planen(
         optimierer.Streckenprofil.aus_dicts(fahrt.energieprofil),

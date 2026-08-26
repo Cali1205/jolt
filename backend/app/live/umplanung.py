@@ -157,7 +157,7 @@ def restprofil_physik(fahrt: models.Fahrt, rest: list, tempo_faktor: float,
             tempo_ms.append(tempo / 3.6)
 
     neu = modell.profil_rechnen(
-        Fahrzeugwerte.aus_modell(fahrt.fahrzeug), punkte, tempo_ms,
+        Fahrzeugwerte.aus_fahrt(fahrt), punkte, tempo_ms,
         # Der Ladestand ist für das Streckenprofil ohne Belang: Gebraucht
         # werden nur die kumulierten kWh und Minuten, und der Energiebedarf
         # einer Etappe hängt nicht davon ab, wie voll der Akku ist.
@@ -242,7 +242,7 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
 
     optionen = optionen_suchen(db, geometrie, fahrzeug, parameter)
     plan = optimierer.planen(
-        profil, optionen, Fahrzeugwerte.aus_modell(fahrzeug),
+        profil, optionen, Fahrzeugwerte.aus_fahrt(fahrt),
         kurven.als_paare(fahrzeug.ladekurve), start_soc=start_soc,
         ziel_soc=fahrzeug.ziel_soc,
         max_fahrzeug_kw=fahrzeug.max_ladeleistung_kw,

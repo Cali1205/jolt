@@ -28,7 +28,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import models  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
-from app.energie.modell import Umgebung, haversine_m  # noqa: E402
+from app.energie.modell import (Fahrzeugwerte, Umgebung,  # noqa: E402
+                                haversine_m)
 from app.energie.profil import eintrag_bei as _profil_bei  # noqa: E402
 from app.laden import verfuegbarkeit  # noqa: E402
 from app.live import sitzung as live_sitzung  # noqa: E402
@@ -509,6 +510,63 @@ def teil_kette():
     client.post(f"/api/live/{sitzung4}/ende")
 
 
+def teil_anbauten():
+    """Fahrradträger und Dachbox - Zuschlag auf den Luftwiderstand.
+
+    Zwei Dinge müssen gelten, und das zweite ist das wichtigere.
+    """
+    print("\nAussen am Auto: Fahrradträger und Dachbox")
+
+    class FzStub:
+        leermasse_kg = 2550.0
+        zuladung_kg = 150.0
+        masse_kg = 2700.0
+        c_w = 0.29
+        stirnflaeche_m2 = 2.90
+        c_rr = 0.011
+        eta_antrieb = 0.87
+        eta_rekup = 0.68
+        p_neben_w = 450.0
+        waermepumpe = True
+        akku_netto_kwh = 77.0
+        reserve_soc = 10.0
+        korrekturfaktor = 1.0
+
+    class FahrtStub2:
+        def __init__(self, faktor, zuladung=None):
+            self.fahrzeug = FzStub()
+            self.zuladung_kg = zuladung
+            self.luftwiderstand_faktor = faktor
+
+    ohne = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.0))
+    mit = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.25))
+    pruefe(abs(ohne.c_w - 0.29) < 1e-9,
+           "ohne Anbau bleibt der Beiwert unverändert", str(ohne.c_w))
+    pruefe(abs(mit.c_w - 0.29 * 1.25) < 1e-9,
+           "ein Zuschlag von 25 % erhöht den Luftwiderstandsbeiwert",
+           str(mit.c_w))
+    pruefe(abs(mit.stirnflaeche_m2 - 2.90) < 1e-9,
+           "die Stirnfläche bleibt, was sie ist - sie ist eine Abmessung des "
+           "Autos und ändert sich nicht, wenn hinten Räder hängen")
+
+    # Und die Wirkung muss beim Verbrauch ankommen, mit v².
+    profil = [{"km": k, "lat": 48.0 + k * 0.009, "lon": 11.0, "hoehe": 100.0,
+               "tempo_kmh": 120.0, "minuten": k * 0.5, "soc": 80 - k * 0.1,
+               "kwh": k * 0.2} for k in range(0, 201, 5)]
+    umgebung = lambda lat, lon: Umgebung(temp_c=15.0)      # noqa: E731
+    a = umplanung.restprofil_physik(FahrtStub2(1.0), profil, 1.0, umgebung)
+    b = umplanung.restprofil_physik(FahrtStub2(1.25), profil, 1.0, umgebung)
+    pruefe(b.kwh[-1] > a.kwh[-1] * 1.05,
+           "mit Träger braucht dieselbe Strecke spürbar mehr Energie",
+           f"{b.kwh[-1]:.1f} gegen {a.kwh[-1]:.1f} kWh")
+
+    # Die Zuladung wirkt weiter unabhängig davon.
+    schwer = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.0, zuladung=500.0))
+    pruefe(abs(schwer.masse_kg - 3050.0) < 1e-9,
+           "die Zuladung der Fahrt zählt unabhängig vom Anbau",
+           str(schwer.masse_kg))
+
+
 def teil_aufzeichnung():
     """Eine gefahrene Strecke ohne Planung - und was daraus entsteht.
 
@@ -881,6 +939,7 @@ def main() -> int:
     teil_planvergleich()
     teil_kette()
     teil_kette_mit_ladestopp()
+    teil_anbauten()
     teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()

@@ -171,7 +171,7 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
     hole_umgebung, mittel_temp = umgebung_bestimmen(gewaehlt, flach)
 
     profil = modell.profil_rechnen(
-        Fahrzeugwerte.aus_modell(fahrzeug), geometrie,
+        Fahrzeugwerte.aus_fahrt(fahrt), geometrie,
         tempo_je_teilstueck(gewaehlt),
         start_soc=gewaehlt[0].soc if gewaehlt[0].soc is not None else 100.0,
         umgebung_fuer=hole_umgebung)

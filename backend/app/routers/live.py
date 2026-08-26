@@ -301,7 +301,27 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
             gebaut = {"ok": False, "grund": str(fehler)}
 
     gelernt = None
+    nicht_gelernt = None
     fahrzeug = sitzung.fahrt.fahrzeug if sitzung.fahrt else None
+
+    # Eine Fahrt mit Fahrradträger oder Dachbox lehrt nichts über das
+    # *Fahrzeug*. Der gemessene Mehrverbrauch enthält dann zwei Unbekannte -
+    # wie gut das Auto rechnet und wie teuer der Träger ist - und aus einer
+    # Messung lassen sich nicht zwei Zahlen bestimmen. Wer es trotzdem
+    # einrechnet, schreibt den Träger dauerhaft ins Fahrzeug und verbiegt
+    # damit jede Alltagsplanung. Genau davor warnt der Kommentar in
+    # kalibrierung.py schon.
+    #
+    # Die Fahrt bleibt aufgezeichnet; aus ihr liesse sich später umgekehrt
+    # der Zuschlag des Trägers bestimmen, wenn der Faktor des Fahrzeugs aus
+    # normalen Fahrten feststeht.
+    zuschlag = (sitzung.fahrt.luftwiderstand_faktor or 1.0) if sitzung.fahrt else 1.0
+    if fahrzeug and abs(zuschlag - 1.0) > 0.001:
+        nicht_gelernt = (f"Fahrt mit Luftwiderstands-Zuschlag ×{zuschlag:g} - "
+                         f"daraus lässt sich der Faktor des Fahrzeugs nicht "
+                         f"bestimmen.")
+        fahrzeug = None
+
     if fahrzeug:
         roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
         if roh is not None:
@@ -314,6 +334,7 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
 
     db.commit()
     return {"ok": True, "aufzeichnung": gebaut,
+            "nicht_gelernt": nicht_gelernt,
             "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
             # None heisst "diese Fahrt war nicht verwertbar" - zu kurz, oder
             # der Faktor lag ausserhalb der Plausibilitätsgrenzen.
