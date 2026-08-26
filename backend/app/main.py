@@ -7,7 +7,7 @@ import logging
 import os
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import deps, push, routing
@@ -58,6 +58,35 @@ OHNE_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 @app.get("/")
 def index():
     return FileResponse(os.path.join(FRONTEND, "index.html"), headers=OHNE_CACHE)
+
+
+@app.get("/obd")
+def obd_seite():
+    """Die OBD2-Diagnoseseite - bewusst **nicht** unter /static erreichbar.
+
+    Alles unter /static bekommt von Cloudflare eine Browser-Frist von vier
+    Stunden aufgedrückt: Die Einstellung "Browser Cache TTL" überschreibt das
+    `no-cache` des Ursprungs, und der Edge-Cache revalidiert zwar, das
+    Telefon aber nicht. Für eine Seite, an der jemand im Auto sitzt und beim
+    Fehlersuchen alle zehn Minuten eine neue Fassung braucht, ist das
+    unbrauchbar - man ändert etwas, es passiert nichts, und die Suche geht in
+    die falsche Richtung. Ausserhalb von /static behandelt Cloudflare sie wie
+    index.html: dynamisch.
+
+    Die Verweise auf Skript und Stylesheet bekommen die Änderungszeit der
+    jeweiligen Datei angehängt. Eine frische Seite zieht damit zwingend
+    frische Dateien nach, ohne dass jemand eine Versionsnummer von Hand
+    hochzählt - und ohne dass die Dateien selbst /static verlassen müssten.
+    """
+    with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
+        html = datei.read()
+    for name in ("obd.js", "obd.css"):
+        try:
+            marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
+        except OSError:
+            marke = 0
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={marke}")
+    return HTMLResponse(html, headers=OHNE_CACHE)
 
 
 @app.get("/sw.js")

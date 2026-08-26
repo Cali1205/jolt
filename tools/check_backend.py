@@ -641,6 +641,23 @@ def main() -> int:
     pruefe(seite.status_code == 200 and b"jolt" in seite.content.lower(),
            "index.html kommt zurück")
     pruefe(client.get("/manifest.json").status_code == 200, "manifest.json auch")
+
+    # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
+    # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
+    # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
+    # wirkt nicht" und "die Änderung ist noch gar nicht da".
+    obd = client.get("/obd")
+    pruefe(obd.status_code == 200 and b"OBD2" in obd.content,
+           "die OBD2-Diagnoseseite wird unter /obd ausgeliefert",
+           f"HTTP {obd.status_code}")
+    pruefe("no-cache" in obd.headers.get("Cache-Control", ""),
+           "und zwar ohne Cache - sonst hängt das Telefon auf einer alten "
+           "Fassung fest", obd.headers.get("Cache-Control", "(keiner)"))
+    pruefe(b"/static/obd.js?v=" in obd.content
+           and b"/static/obd.css?v=" in obd.content,
+           "die Verweise auf Skript und Stylesheet tragen eine Version - "
+           "sonst zieht eine frische Seite altes JavaScript nach",
+           str([z for z in obd.content.split() if b"obd." in z][:3]))
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")
