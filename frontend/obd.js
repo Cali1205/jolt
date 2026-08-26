@@ -106,6 +106,7 @@
 
   const el = (id) => document.getElementById(id);
   let schreiben = null;      // Charakteristik zum Senden
+  let geraetGemerkt = null;  // für das Wiederverbinden nach Abriss
   let puffer = "";
   let warteAuf = null;       // {erfuellen, ablehnen, uhr}
   let letzterSoc = null;
@@ -155,15 +156,36 @@
         }
       }
       if (!geraet) throw letzterFehler || new Error("Keine Variante ging.");
+      geraetGemerkt = geraet;
       log(`Gerät gewählt: ${geraet.name || "(ohne Namen)"}`);
       geraet.addEventListener("gattserverdisconnected", () => {
         stand("Verbindung getrennt", "schlecht");
         knoepfe(false);
         log("Verbindung getrennt.");
+        // Im Tunnel oder wenn der Dongle einschläft reisst die Verbindung
+        // ab. Während einer laufenden Aufzeichnung ist das kein Grund
+        // aufzuhören - wer dann erst eine Berührung braucht, verliert die
+        // halbe Fahrt, weil niemand am Steuer auf den Bildschirm sieht.
+        if (laeuft) wiederverbinden();
       });
 
       stand("verbinde …");
-      const server = await geraet.gatt.connect();
+      await verbindungAufbauen(geraet);
+    } catch (fehler) {
+      stand("Fehler: " + fehler.message, "schlecht");
+      log("FEHLER " + fehler.message);
+    }
+  }
+
+  /* Den GATT-Aufbau getrennt von der Geräteauswahl.
+   *
+   * `requestDevice` verlangt zwingend eine Nutzergeste - eine Seite darf
+   * sich beim Laden nicht von selbst verbinden. `gatt.connect()` auf ein
+   * bereits erlaubtes Gerät dagegen nicht. Genau deshalb steht es hier für
+   * sich: Nach einem Abriss im Tunnel lässt sich damit ohne Zutun wieder
+   * aufbauen, solange das Gerät gemerkt ist. */
+  async function verbindungAufbauen(geraet) {
+    const server = await geraet.gatt.connect();
 
       // Den brauchbaren Dienst suchen: einer, der eine beschreibbare und eine
       // benachrichtigende Charakteristik hat. Bei manchen Dongles ist das
@@ -188,9 +210,48 @@
       stand(`verbunden mit ${geraet.name || "Dongle"}`, "gut");
       knoepfe(true);
       log(`Bereit. Schreiben auf ${schreiben.uuid}, Lesen auf ${notify.uuid}`);
+  }
+
+
+  /* ---------- Wiederverbinden ---------- */
+
+  /* Nach einem Abriss ohne Zutun wieder aufbauen.
+   *
+   * Zwei Wege, und welcher geht, hängt am Browser: Ist das Gerät noch
+   * gemerkt, genügt `gatt.connect()` - das braucht keine Geste. Ist es das
+   * nicht (Seite neu geladen), fragt `getDevices()` nach den bereits
+   * erlaubten Geräten; auch das ohne Geste, aber nicht jeder Browser kennt
+   * es. Erst wenn beides scheitert, muss jemand tippen - und dann steht das
+   * auch gross da statt nur im Protokoll.
+   */
+  async function wiederverbinden(versuch = 1) {
+    if (!laeuft) return;
+    const grenze = 6;
+    try {
+      let geraet = geraetGemerkt;
+      if (!geraet && navigator.bluetooth.getDevices) {
+        const bekannt = await navigator.bluetooth.getDevices();
+        geraet = bekannt.find((g) => NAMEN.some((n) => (g.name || "").startsWith(n)))
+                 || bekannt[0];
+      }
+      if (!geraet) throw new Error("kein gemerktes Gerät");
+      log(`Wiederverbinden, Versuch ${versuch} …`);
+      await verbindungAufbauen(geraet);
+      letzteAdresse = null;          // Adresse und Filter sind weg
+      await reihe(HANDSHAKE);
+      stand2("wieder verbunden", "gut");
+      log("Wieder verbunden, Handshake erneuert.");
     } catch (fehler) {
-      stand("Fehler: " + fehler.message, "schlecht");
-      log("FEHLER " + fehler.message);
+      log(`Wiederverbinden fehlgeschlagen: ${fehler.message}`);
+      if (versuch >= grenze) {
+        stand2("Verbindung weg – bitte „Dongle suchen“ antippen.", "schlecht");
+        return;
+      }
+      // Wachsende Abstände: Ein Tunnel dauert Sekunden, ein eingeschlafener
+      // Dongle Minuten. Alle zwei Sekunden zu klopfen hilft in keinem der
+      // beiden Fälle und kostet Akku.
+      const warten = Math.min(60000, 3000 * Math.pow(2, versuch - 1));
+      setTimeout(() => wiederverbinden(versuch + 1), warten);
     }
   }
 
@@ -444,11 +505,105 @@ function befehl(text, grenze_ms = 15000) {
   }
 
 
+
+  /* ---------- Der übliche Weg: alles in einem Zug ---------- */
+
+  /* Ein Knopf statt fünf. Vollautomatisch geht es nicht - `requestDevice`
+   * verlangt zwingend eine Nutzergeste, eine Seite darf sich beim Laden
+   * nicht von selbst mit einem Gerät verbinden. Aber eine Geste genügt für
+   * die ganze Kette, und das ist der Unterschied zwischen "im Auto machbar"
+   * und "im Auto zu umständlich".
+   *
+   * Die Fahrt wird hier gleich mit angelegt: Ohne laufende Sitzung nimmt
+   * jolt die Messpunkte zwar entgegen, legt sie aber nirgends ab - und
+   * das merkt man erst hinterher. */
+  function losStand(text, art) {
+    const k = el("los-stand");
+    k.textContent = text;
+    k.className = "stand " + (art || "");
+  }
+
+  function joltToken() {
+    // Dieselbe Anmeldung wie die Haupt-App: Wer sich dort angemeldet hat,
+    // muss es hier nicht noch einmal tun.
+    try { return localStorage.getItem("jolt-token") || ""; }
+    catch (e) { return ""; }
+  }
+
+  async function losfahren() {
+    const knopf = el("los");
+    knopf.disabled = true;
+    try {
+      if (!schreiben) {
+        losStand("Dongle suchen …");
+        await verbinden();
+        if (!schreiben) throw new Error("keine Verbindung zum Dongle");
+      }
+
+      losStand("Steuergerät vorbereiten …");
+      if (!(await reihe(HANDSHAKE))) {
+        throw new Error("Handshake unvollständig – siehe Protokoll");
+      }
+
+      // Erst prüfen, ob überhaupt etwas ankommt. Eine Aufzeichnung zu
+      // starten, die dann nur Positionen ohne Ladestand sammelt, wäre eine
+      // verlorene Fahrt - und das fiele erst am Ziel auf.
+      losStand("Ladestand lesen …");
+      const probe = socAusAntwort(await befehl("22028C"));
+      if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
+
+      losStand("Fahrt anlegen …");
+      const wo = await ort();
+      const antwort = await fetch("/api/live/aufzeichnung", {
+        method: "POST",
+        headers: { "Content-Type": "application/json",
+                   "X-Token": joltToken() },
+        body: JSON.stringify({
+          fahrzeug_id: await fahrzeugId(),
+          lat: wo.lat, lon: wo.lon,
+          soc: Math.round(probe.hmi * 10) / 10,
+          name: el("fahrt-name").value }),
+      });
+      if (!antwort.ok) {
+        const fehler = await antwort.json().catch(() => ({}));
+        throw new Error(fehler.detail || `jolt antwortet HTTP ${antwort.status}`);
+      }
+      const fahrt = await antwort.json();
+      sitzungId = fahrt.sitzung_id;
+      log(`Aufzeichnung ${fahrt.fahrt_id} läuft (Sitzung ${fahrt.sitzung_id}).`);
+
+      await fahrtStarten();
+      losStand(`Aufzeichnung läuft – Fahrt ${fahrt.fahrt_id}`, "gut");
+    } catch (fehler) {
+      losStand("Ging nicht: " + fehler.message, "schlecht");
+      log("FEHLER " + fehler.message);
+    } finally {
+      knopf.disabled = false;
+    }
+  }
+
+  /* Welches Fahrzeug. Bei einem einzigen erübrigt sich die Frage; bei
+   * mehreren wird das erste genommen und im Protokoll gesagt, welches -
+   * eine Auswahlliste im Auto zu bedienen ist der falsche Ort dafür. */
+  async function fahrzeugId() {
+    const antwort = await fetch("/api/fahrzeuge", {
+      headers: { "X-Token": joltToken() } });
+    if (!antwort.ok) {
+      throw new Error("Nicht angemeldet – erst in jolt anmelden, dann hier "
+                      + "neu laden.");
+    }
+    const fahrzeuge = await antwort.json();
+    if (!fahrzeuge.length) throw new Error("Kein Fahrzeug angelegt.");
+    if (fahrzeuge.length > 1) log(`Fahrzeug: ${fahrzeuge[0].name}`);
+    return fahrzeuge[0].id;
+  }
+
   /* ---------- Aufzeichnung ---------- */
 
   let laeuft = false;
   let runde = 0;
   let wachhalter = null;   // WakeLockSentinel
+  let sitzungId = null;    // gesetzt, wenn diese Seite die Fahrt anlegte
 
   /* Den Bildschirm wach halten. Ohne das schaltet iOS ihn nach einer Minute
    * aus, und mit dem Bildschirm schläft der Seiteninhalt - die Verbindung
@@ -498,7 +653,6 @@ function befehl(text, grenze_ms = 15000) {
 
     if (typeof wo.hoehe_m === "number") roh.hoehe_m = Math.round(wo.hoehe_m);
     const nutzlast = {
-      token: el("token").value.trim(),
       lat: wo.lat, lon: wo.lon,
       soc: Math.round(soc.hmi * 10) / 10,
       rohwerte: roh,
@@ -510,12 +664,26 @@ function befehl(text, grenze_ms = 15000) {
       nutzlast.aussentemp_c = roh.aussentemp_c;
     }
 
-    const antwort = await fetch("/api/live/melden", {
+    /* Zwei Wege hinein, und welcher gilt, hängt daran, wer die Fahrt
+     * angelegt hat. Hat diese Seite es getan, kennt sie die Sitzung und
+     * meldet direkt dorthin. Läuft die Fahrt dagegen in der jolt-App auf
+     * einem anderen Gerät, weiss diese Seite die Sitzung nicht - dann
+     * weist sie sich mit dem Logger-Token des Fahrzeugs aus, und jolt
+     * sucht die laufende Sitzung selbst. */
+    const ziel = sitzungId
+      ? `/api/live/${sitzungId}/punkt`
+      : "/api/live/melden";
+    if (!sitzungId) nutzlast.token = el("token").value.trim();
+
+    const antwort = await fetch(ziel, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(nutzlast),
     });
     const daten = await antwort.json().catch(() => ({}));
+    // Der Sitzungsweg antwortet mit dem Zustand und kennt kein
+    // "aufgenommen" - wenn er 200 gibt, ist der Punkt drin.
+    if (sitzungId && antwort.ok) daten.aufgenommen = true;
     return { soc, roh, daten, status: antwort.status };
   }
 
@@ -567,8 +735,9 @@ function befehl(text, grenze_ms = 15000) {
   }
 
   async function fahrtStarten() {
-    if (!el("token").value.trim()) {
-      stand2("Erst das Logger-Token eintragen.", "schlecht");
+    if (!el("token").value.trim() && !joltToken()) {
+      stand2("Erst in jolt anmelden oder ein Logger-Token eintragen.",
+             "schlecht");
       return;
     }
     laeuft = true;
@@ -582,6 +751,33 @@ function befehl(text, grenze_ms = 15000) {
 
   async function fahrtBeenden() {
     laeuft = false;
+    // Die Fahrt in jolt abschliessen, wenn diese Seite sie angelegt hat.
+    // Ohne das bleibt die Aufzeichnung offen, und aus den Messpunkten
+    // entsteht nie eine Strecke - der ganze Zweck wäre verfehlt.
+    if (sitzungId) {
+      try {
+        const antwort = await fetch(`/api/live/${sitzungId}/ende`, {
+          method: "POST", headers: { "X-Token": joltToken() } });
+        const daten = await antwort.json().catch(() => ({}));
+        const gebaut = daten.aufzeichnung || {};
+        if (gebaut.ok) {
+          log(`Fahrt abgeschlossen: ${gebaut.strecke_km} km, `
+              + `${gebaut.verbrauch_kwh} kWh gerechnet, Höhen aus `
+              + `${gebaut.hoehen}.`);
+        } else if (gebaut.grund) {
+          log("Fahrt nicht auswertbar: " + gebaut.grund);
+        }
+        if (daten.gelernt) {
+          log(`Gelernt: Faktor ${daten.gelernt.vorher} → `
+              + `${daten.gelernt.nachher} (Fahrt ×${daten.gelernt.rohfaktor})`);
+        } else if (daten.nicht_gelernt) {
+          log("Nichts gelernt: " + daten.nicht_gelernt);
+        }
+      } catch (fehler) {
+        log("Fahrt beenden: " + fehler.message);
+      }
+      sitzungId = null;
+    }
     el("fahrt-start").hidden = false;
     el("fahrt-stop").hidden = true;
     stand2("beendet");
@@ -645,6 +841,7 @@ function befehl(text, grenze_ms = 15000) {
   /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
    * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die
    * Hex-Antworten Zeichen für Zeichen. */
+  el("los").addEventListener("click", losfahren);
   el("fahrt-start").addEventListener("click", fahrtStarten);
   el("fahrt-stop").addEventListener("click", fahrtBeenden);
   el("takt").addEventListener("input", (e) => {
