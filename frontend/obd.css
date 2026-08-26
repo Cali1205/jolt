@@ -1,0 +1,92 @@
+/* Eigenes Stylesheet statt der Hauptoberfläche: Diese Seite ist ein
+   Werkzeug, kein Teil der App, und soll nicht mitwandern, wenn jolt sein
+   Aussehen ändert. Die Farben sind dieselben, damit sie nicht fremd wirkt. */
+:root {
+  --grund: #0a0e12;
+  --flaeche: #121820;
+  --rand: #24303c;
+  --text: #e6edf3;
+  --gedaempft: #8a97a5;
+  --akzent: #f5c451;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 16px;
+  max-width: 640px;
+  background: var(--grund);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+h1 { color: var(--akzent); font-size: 22px; margin: 8px 0 4px; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+
+.kasten {
+  background: var(--flaeche);
+  border: 1px solid var(--rand);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.kasten.fehler { background: #33161b; border-color: #5d2731; color: #ffbfc8; }
+
+.hinweis { color: var(--gedaempft); font-size: 13px; margin: 0 0 10px; }
+
+button.tat {
+  background: var(--akzent);
+  color: #1a1205;
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 16px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+button.tat:disabled { opacity: .4; cursor: default; }
+button.tat.neben { background: transparent; color: var(--text);
+  border: 1px solid var(--rand); font-weight: 400; }
+
+input, textarea {
+  width: 100%;
+  background: #0c1116;
+  border: 1px solid var(--rand);
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  margin-bottom: 10px;
+}
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; resize: vertical; }
+
+.stand { margin-top: 10px; font-size: 13px; color: var(--gedaempft); }
+.stand.gut { color: #57c98a; }
+.stand.schlecht { color: #e2596a; }
+
+/* Der Ladestand ist die Zahl, wegen der die ganze Seite existiert. */
+.gross { font-size: 34px; font-weight: 700; margin-top: 10px;
+  font-variant-numeric: tabular-nums; }
+
+/* Das Protokoll ist hier kein Beiwerk, sondern das eigentliche Ergebnis:
+   Was der Dongle *wirklich* geantwortet hat, entscheidet darüber, ob die
+   Annahmen über die PIDs stimmen. Deshalb gleichbreite Schrift, umbrechend
+   und ohne Kürzung. */
+pre#log {
+  background: #0c1116;
+  border: 1px solid var(--rand);
+  border-radius: 9px;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin: 0 0 10px;
+}
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .92em; color: var(--akzent); }
