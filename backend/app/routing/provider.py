@@ -58,6 +58,23 @@ class RoutingProvider(Protocol):
         """
         ...
 
+    def hoehen(self, punkte: list) -> list | None:
+        """Höhen zu einer Liste [[lon, lat], ...] nachschlagen.
+
+        Gebraucht für aufgezeichnete Fahrten: Dort steht die Strecke erst
+        hinterher fest, und ohne Höhenprofil ist eine Verbrauchsmessung
+        nicht deutbar - ob der Mehrverbrauch am Fahrstil lag oder am Berg,
+        lässt sich sonst nicht trennen.
+
+        Ausdrücklich **nicht** aus dem GPS: Dessen Höhe streut um zehn bis
+        zwanzig Meter, und aufsummierte Differenzen ergeben für eine Fahrt
+        durch die Ebene mehrere hundert Meter Steigung.
+
+        `None` heisst "kann dieser Adapter nicht" - der Aufrufer fällt dann
+        auf die GPS-Höhe zurück oder rechnet flach.
+        """
+        ...
+
     def suchen(self, text: str, land: str = "") -> list[Ort]:
         """Ortsnamen zu Koordinaten auflösen.
 

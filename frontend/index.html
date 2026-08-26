@@ -331,7 +331,16 @@ table.kurve input { padding: 6px 8px; }
   <!-- ------------------------------- Fahrten -->
   <section id="ansicht-fahrten" hidden>
     <div class="karte-block">
-      <h2 style="margin-top:0">Vergangene Fahrten</h2>
+      <h2 style="margin-top:0">Fahrt aufzeichnen</h2>
+      <p class="leer" style="padding-top:0">Ohne Route und ohne Planung
+        losfahren – jolt schreibt mit und baut die Strecke hinterher aus den
+        Messpunkten, samt Höhenprofil aus Kartendaten. Gedacht für bekannte
+        kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
+        den echten Verbrauch des Autos zu lernen.</p>
+      <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
+      <button class="tat neben" id="aufz-start">Aufzeichnung starten</button>
+
+      <h2>Vergangene Fahrten</h2>
       <div id="fahrten-liste"></div>
     </div>
   </section>

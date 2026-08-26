@@ -521,5 +521,5 @@ window.joltLive = (function () {
     });
   }
 
-  return { einrichten, starten, beenden };
+  return { einrichten, starten, beenden, verbinden, positionVerfolgen };
 })();

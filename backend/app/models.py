@@ -212,6 +212,11 @@ class Fahrt(Base):
     # rückwirkend eine Zuladung von 0 kg zu behaupten.
     zuladung_kg = Column(Float)
 
+    # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
+    # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe
+    # live/aufzeichnung.py.
+    aufzeichnung = Column(Boolean, nullable=False, default=False)
+
     strecke_m = Column(Float, default=0.0)
     fahrzeit_s = Column(Float, default=0.0)
 

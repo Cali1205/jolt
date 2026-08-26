@@ -107,7 +107,58 @@ window.joltFahrten = (function () {
     }
   }
 
+  /* Eine Aufzeichnung starten: Position holen, Fahrt anlegen, in die
+   * Live-Ansicht wechseln. Von da an ist es eine Live-Fahrt wie jede
+   * andere - nur ohne Plan, gegen den sie sich hält. Strecke und
+   * Energieprofil entstehen beim Beenden aus den Messpunkten. */
+  async function aufzeichnungStarten() {
+    const fahrzeug = (K.zustand.fahrzeuge || [])[0];
+    const wahl = document.getElementById("fahrzeug-wahl");
+    const id = wahl && wahl.value ? Number(wahl.value)
+      : (fahrzeug && fahrzeug.id);
+    if (!id) { K.melden("Erst ein Fahrzeug anlegen.", "fehler"); return; }
+
+    let ort;
+    try {
+      ort = await new Promise((erfuellen, ablehnen) => {
+        if (!navigator.geolocation) {
+          ablehnen(new Error("Dieses Gerät liefert keinen Standort."));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (p) => erfuellen(p.coords),
+          // Ohne Startposition gäbe es keinen ersten Punkt der Strecke -
+          // und die Aufzeichnung begänne irgendwo.
+          (f) => ablehnen(new Error("Standort: " + f.message)),
+          { enableHighAccuracy: true, timeout: 10000 });
+      });
+    } catch (fehler) {
+      K.melden(fehler.message, "fehler");
+      return;
+    }
+
+    try {
+      const antwort = await K.api("/api/live/aufzeichnung", {
+        method: "POST",
+        body: { fahrzeug_id: id, lat: ort.latitude, lon: ort.longitude,
+                name: document.getElementById("aufz-name").value },
+      });
+      K.zustand.sitzungId = antwort.sitzung_id;
+      K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
+        + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
+      window.joltApp.ansichtZeigen("live");
+      document.getElementById("live-leer").hidden = true;
+      document.getElementById("live-inhalt").hidden = false;
+      window.joltLive.verbinden(antwort.sitzung_id);
+      // Ohne laufende Positionsmeldungen entstünde keine Strecke.
+      window.joltLive.positionVerfolgen();
+    } catch (fehler) {
+      K.melden("Aufzeichnung: " + fehler.message, "fehler");
+    }
+  }
+
   function einrichten() {
+    K.an("aufz-start", "click", aufzeichnungStarten);
     const halter = document.getElementById("fahrten-liste");
     if (!halter) return;
     // Ein Zuhörer am Halter statt einer je Zeile: Die Liste wird nach jedem

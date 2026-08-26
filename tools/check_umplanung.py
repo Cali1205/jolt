@@ -509,6 +509,74 @@ def teil_kette():
     client.post(f"/api/live/{sitzung4}/ende")
 
 
+def teil_aufzeichnung():
+    """Eine gefahrene Strecke ohne Planung - und was daraus entsteht.
+
+    Der umgekehrte Weg zur geplanten Fahrt: losfahren, mitschreiben, und die
+    Strecke hinterher aus den Messpunkten bauen. Gedacht für die
+    Kalibrierung, wo eine bekannte kurze Strecke die sauberste Messung ist -
+    und wo eine Route vorher zu planen umständlich genug wäre, dass man es
+    bleiben lässt.
+    """
+    client = TestClient(app)
+    print("\nFahrt aufzeichnen statt planen")
+
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+    antwort = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": "Runde um den Block"})
+    pruefe(antwort.status_code == 200,
+           "eine Aufzeichnung lässt sich ohne Route starten",
+           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+    start = antwort.json()
+    sitzung_id = start["sitzung_id"]
+
+    zustand = client.get(f"/api/live/{sitzung_id}").json()
+    pruefe(zustand["laeuft"] is True,
+           "und läuft, obwohl es weder Strecke noch Plan gibt")
+
+    # Sechzig Kilometer nach Norden, eine Stunde lang, 12 Prozentpunkte
+    # Verbrauch. Bei 0,009 Grad je Punkt sind das rund einen Kilometer.
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        beginn = datetime(2026, 1, 1, 8, 0)
+        for i in range(61):
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, 48.0 + i * 0.009, 11.0,
+                soc=90.0 - i * 0.2, aussentemp_c=7.0,
+                zeit=beginn + timedelta(minutes=i),
+                rohwerte={"soc_roh": round((90.0 - i * 0.2) * 2.5),
+                          "hoehe_m": 500.0})
+    finally:
+        db.close()
+
+    ende = client.post(f"/api/live/{sitzung_id}/ende").json()
+    gebaut = ende.get("aufzeichnung") or {}
+    pruefe(gebaut.get("ok") is True,
+           "beim Beenden entsteht aus den Messpunkten eine Strecke",
+           str(gebaut.get("grund")))
+    pruefe(55 < (gebaut.get("strecke_km") or 0) < 65,
+           "die Strecke stimmt mit dem überein, was gefahren wurde",
+           f"{gebaut.get('strecke_km')} km statt rund 60")
+    pruefe(abs((gebaut.get("aussentemp_c") or 0) - 7.0) < 0.1,
+           "die **gemessene** Aussentemperatur gilt, nicht eine Vorhersage",
+           str(gebaut.get("aussentemp_c")))
+
+    fahrt = client.get(f"/api/fahrten/{start['fahrt_id']}").json()
+    pruefe(len(fahrt.get("profil") or []) > 5,
+           "die Fahrt hat hinterher ein Energieprofil",
+           f"{len(fahrt.get('profil') or [])} Stützstellen")
+
+    # Der Zweck der ganzen Betriebsart: Aus der Aufzeichnung muss sich der
+    # Korrekturfaktor lernen lassen. Ohne Kilometerstand und Sollwert an den
+    # Messpunkten findet die Kalibrierung nichts - und beides steht erst
+    # fest, seit die Strecke gebaut wurde.
+    pruefe(ende.get("gelernt") is not None,
+           "und jolt lernt daraus einen Korrekturfaktor - genau dafür ist "
+           "die Aufzeichnung da", str(ende.get("gelernt")))
+
+
 def teil_kette_mit_ladestopp():
     """Die ganze Kette, aber diesmal wird unterwegs wirklich geladen.
 
@@ -813,6 +881,7 @@ def main() -> int:
     teil_planvergleich()
     teil_kette()
     teil_kette_mit_ladestopp()
+    teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()
 

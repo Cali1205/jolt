@@ -110,6 +110,32 @@ class ORS:
                      strecke_m=float(zusammenfassung.get("distance") or 0.0),
                      fahrzeit_s=float(zusammenfassung.get("duration") or 0.0))
 
+    def hoehen(self, punkte: list) -> list | None:
+        """Höhen über /elevation/line - derselbe Schlüssel wie fürs Routing.
+
+        Eine Anfrage je aufgezeichneter Fahrt, also einmal am Ende und nicht
+        unterwegs. Bei Ausfall wird nichts geworfen, sondern None gemeldet:
+        Eine Aufzeichnung ohne Höhen ist immer noch eine Aufzeichnung, und
+        sie deswegen zu verlieren wäre der schlechtere Tausch.
+        """
+        if not punkte or len(punkte) < 2:
+            return None
+        try:
+            antwort = requests.post(
+                f"{BASIS}/elevation/line", headers=self._kopf(), timeout=TIMEOUT,
+                json={"format_in": "polyline", "format_out": "polyline",
+                      "geometry": [[float(p[0]), float(p[1])] for p in punkte]})
+            antwort.raise_for_status()
+            geometrie = (antwort.json() or {}).get("geometry")
+        except (requests.RequestException, ValueError) as fehler:
+            log.warning("Höhenabfrage bei ORS fehlgeschlagen: %s", fehler)
+            return None
+        if not isinstance(geometrie, list) or len(geometrie) != len(punkte):
+            log.warning("Höhenantwort passt nicht zur Anfrage (%s statt %s "
+                        "Punkte).", len(geometrie or []), len(punkte))
+            return None
+        return [[p[0], p[1], p[2] if len(p) > 2 else 0.0] for p in geometrie]
+
     def suchen(self, text: str, land: str = "") -> list[Ort]:
         # Ohne Länderfilter sucht ORS weltweit - genau das will ein Reiseziel
         # jenseits der Grenze. Nur wenn `land` explizit gesetzt ist (z.B. um

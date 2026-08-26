@@ -496,6 +496,7 @@ function befehl(text, grenze_ms = 15000) {
     });
     if (!wo) return null;
 
+    if (typeof wo.hoehe_m === "number") roh.hoehe_m = Math.round(wo.hoehe_m);
     const nutzlast = {
       token: el("token").value.trim(),
       lat: wo.lat, lon: wo.lon,
@@ -597,7 +598,12 @@ function befehl(text, grenze_ms = 15000) {
     return new Promise((erfuellen, ablehnen) => {
       if (!navigator.geolocation) { ablehnen(new Error("kein GPS")); return; }
       navigator.geolocation.getCurrentPosition(
-        (p) => erfuellen({ lat: p.coords.latitude, lon: p.coords.longitude }),
+        // Die GPS-Höhe wird mitgeschrieben, obwohl sie für die Steigung zu
+        // ungenau ist (sie streut um zehn bis zwanzig Meter). Sie kostet
+        // nichts und ist der Rückfall, wenn beim Abschliessen keine
+        // Kartendaten zu bekommen sind.
+        (p) => erfuellen({ lat: p.coords.latitude, lon: p.coords.longitude,
+                           hoehe_m: p.coords.altitude }),
         (f) => ablehnen(new Error("Standort: " + f.message)),
         { enableHighAccuracy: true, timeout: 10000 });
     });
