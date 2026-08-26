@@ -460,8 +460,10 @@ window.joltLive = (function () {
 
   async function beenden() {
     if (!K.zustand.sitzungId) return;
+    let ergebnis = null;
     try {
-      await K.api(`/api/live/${K.zustand.sitzungId}/ende`, { method: "POST" });
+      ergebnis = await K.api(`/api/live/${K.zustand.sitzungId}/ende`,
+                             { method: "POST" });
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
     positionAufgeben();
     if (steckdose) { try { steckdose.close(); } catch (e) {} }
@@ -471,7 +473,38 @@ window.joltLive = (function () {
     if (kasten) kasten.hidden = true;
     document.getElementById("live-inhalt").hidden = true;
     document.getElementById("live-leer").hidden = false;
-    K.melden("Live-Fahrt beendet.", "hinweis");
+    gelerntesMelden(ergebnis);
+  }
+
+  /* Was jolt aus der Fahrt gelernt hat - und warum nicht, wenn nicht.
+   *
+   * Das Backend schreibt den Korrekturfaktor des Fahrzeugs bei jedem
+   * Fahrtende fort und meldet das Ergebnis zurück; gelesen hat es bisher
+   * niemand. Für den Zweck, um den es dabei geht - kurze bekannte Strecken
+   * fahren und daraus den echten Verbrauch lernen -, ist das der einzige
+   * Rückkanal. Ohne ihn fährt man dieselbe Strecke dreimal und weiss
+   * hinterher nicht, ob überhaupt etwas angekommen ist.
+   *
+   * Auch das Ausbleiben wird gemeldet: `gelernt: null` heisst "zu kurz oder
+   * unplausibel". Eine Fahrt, die stillschweigend nichts beiträgt, sieht
+   * sonst aus wie eine, die bestätigt hat. */
+  function gelerntesMelden(ergebnis) {
+    if (!ergebnis) {
+      K.melden("Live-Fahrt beendet.", "hinweis");
+      return;
+    }
+    const g = ergebnis.gelernt;
+    if (!g) {
+      K.melden("Fahrt beendet. Für die Kalibrierung war sie nicht verwertbar "
+        + "– unter 30 km, oder der gemessene Verbrauch lag ausserhalb des "
+        + "Plausiblen.", "hinweis");
+      return;
+    }
+    const richtung = g.nachher > g.vorher ? "mehr" : "weniger";
+    K.melden(`Gelernt: Diese Fahrt brauchte ${K.zahl(g.rohfaktor, 2)}× so viel `
+      + `wie gerechnet. Der Korrekturfaktor des Fahrzeugs geht von `
+      + `${K.zahl(g.vorher, 3)} auf ${K.zahl(g.nachher, 3)} – künftige `
+      + `Planungen rechnen also ${richtung}.`, "hinweis");
   }
 
   function einrichten() {
