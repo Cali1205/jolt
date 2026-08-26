@@ -78,14 +78,34 @@
   <button id="senden" class="tat" disabled>Senden</button>
 </div>
 
+<div class="kasten" id="fahrt-kasten">
+  <h2>5. Fahrt aufzeichnen</h2>
+  <p class="hinweis">Liest im eingestellten Takt alle Werte, holt die
+    Position und meldet beides an jolt. <strong>Bildschirm an lassen und
+    Bluefy im Vordergrund</strong> – ein Browser-Tab bekommt auf iOS keine
+    Hintergrundrechte für Bluetooth. Der Sperrbildschirm ist in Ordnung, die
+    Verbindung übersteht ihn.</p>
+  <input type="text" id="token" placeholder="Logger-Token aus der Fahrzeug-Ansicht"
+         autocomplete="off" spellcheck="false">
+  <div class="reihe">
+    <div>
+      <label for="takt">Takt <span id="takt-wert">30</span> s</label>
+      <input type="range" id="takt" min="10" max="120" step="5" value="30">
+    </div>
+  </div>
+  <button id="fahrt-start" class="tat" disabled>Aufzeichnung starten</button>
+  <button id="fahrt-stop" class="tat neben" hidden>Beenden</button>
+  <div id="fahrt-stand" class="stand"></div>
+  <div class="werte" id="fahrt-werte"></div>
+</div>
+
 <div class="kasten">
-  <h2>5. An jolt melden</h2>
+  <h2>6. Einzelne Meldung</h2>
   <p class="hinweis">Schliesst die Kette: Der gelesene Ladestand geht zusammen
     mit der Position an <code>/api/live/melden</code>. Das Token steht in der
-    Fahrzeug-Ansicht unter „Logger im Auto“. Ohne laufende Fahrt antwortet
-    jolt mit <code>aufgenommen: false</code> – das ist kein Fehler.</p>
-  <input type="text" id="token" placeholder="Logger-Token" autocomplete="off"
-         spellcheck="false">
+    Fahrzeug-Ansicht unter „Logger im Auto“ (dasselbe wie oben). Ohne
+    laufende Fahrt antwortet jolt mit <code>aufgenommen: false</code> – das
+    ist kein Fehler.</p>
   <button id="melden" class="tat" disabled>Einmal melden</button>
 </div>
 

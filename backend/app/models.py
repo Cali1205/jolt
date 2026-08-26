@@ -301,6 +301,12 @@ class LivePunkt(Base):
     tempo_kmh = Column(Float)
     aussentemp_c = Column(Float)
 
+    # Alles, was die Quelle sonst noch mitgeschickt hat - Packspannung,
+    # Strom, Kilometerstand, der unverrechnete Rohwert des Ladestands.
+    # Gerechnet wird damit nicht; es liegt hier, damit sich später auswerten
+    # lässt, was sich sonst nur durch eine zweite Fahrt klären liesse.
+    rohwerte = Column(JSON)
+
     # Beim Eintreffen berechnet und mitgeschrieben, damit die Auswertung
     # später nicht die ganze Route erneut projizieren muss.
     km_auf_route = Column(Float)

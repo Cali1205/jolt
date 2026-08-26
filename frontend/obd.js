@@ -126,7 +126,7 @@
   }
 
   function knoepfe(an) {
-    for (const id of ["init", "soc", "senden", "melden"]) el(id).disabled = !an;
+    for (const id of ["init", "soc", "senden", "melden", "fahrt-start"]) el(id).disabled = !an;
   }
 
   /* ---------- Verbinden ---------- */
@@ -301,18 +301,21 @@ function befehl(text, grenze_ms = 15000) {
    * Anzeigewert gedacht, und der liegt hier gut anderthalb Punkte über dem
    * Brutto-Wert. Wer den falschen meldet, setzt die Reserve zu optimistisch
    * - und zwar genau am unteren Ende, wo es zählt. */
+  /* Aus dem Rohbyte die beiden Ladestände. Getrennt von `socAusAntwort`,
+   * weil die Aufzeichnung das Byte schon zerlegt vorliegen hat. */
+  function socAusRoh(byte) {
+    const bms = byte / 2.5;
+    return { roh: byte, bms,
+             hmi: Math.min(100, Math.max(0, bms * 51 / 46 - 6.4)) };
+  }
+
   function socAusAntwort(roh) {
     const hex = roh.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
     const marke = hex.indexOf("62028C");
     if (marke < 0) return null;
     const nutz = hex.slice(marke + 6);
     if (nutz.length < 2) return null;
-    const bms = parseInt(nutz.slice(0, 2), 16) / 2.5;
-    // Begrenzt, weil die Umrechnung an den Rändern über 100 bzw. unter 0
-    // hinausläuft - die Konstanten stammen aus der ID.3-Dokumentation und
-    // treffen die Puffergrenzen des ID.Buzz nur ungefähr.
-    const hmi = Math.min(100, Math.max(0, bms * 51 / 46 - 6.4));
-    return { roh: parseInt(nutz.slice(0, 2), 16), bms, hmi };
+    return socAusRoh(parseInt(nutz.slice(0, 2), 16));
   }
 
   async function socLesen() {
@@ -344,6 +347,248 @@ function befehl(text, grenze_ms = 15000) {
       el("soc-wert").textContent = "–";
       log("FEHLER " + fehler.message);
     }
+  }
+
+
+  /* ---------- Was ausgelesen wird ---------- */
+
+  /* Die Datenkennungen stammen aus der MEB-Liste von spot2000 und aus dem
+   * eigenen Android-Logger; bestätigt am Fahrzeug ist bisher nur `028C`.
+   * Die übrigen stehen mit `pflicht: false` drin - schlägt eine fehl, läuft
+   * die Aufzeichnung weiter, statt an einer Nebensache zu scheitern.
+   *
+   * `adresse` schaltet die Zieladresse um: Der Kilometerstand sitzt in einem
+   * anderen Steuergerät als die Batterie. Umgeschaltet wird nur, wenn nötig -
+   * jedes ATSH kostet einen Umlauf über die serielle Strecke.
+   *
+   * Warum überhaupt mehr als der Ladestand: Die Aussentemperatur geht direkt
+   * ins Verbrauchsmodell (bisher kommt sie von Open-Meteo, also aus einer
+   * Vorhersage statt aus dem Auto). Spannung mal Strom ergibt die
+   * tatsächliche Leistung, an der sich die Prognose nachprüfen lässt. Und
+   * der Rohwert des Ladestands ist der einzige Weg, die Umrechnung auf den
+   * Anzeigewert später zu berichtigen, ohne ein zweites Mal loszufahren. */
+  const BMS = { sh: "FC007B", cra: "17FE007B" };
+  const MESSWERTE = [
+    { name: "soc_roh", did: "22028C", adresse: BMS, pflicht: true,
+      lesen: (b) => b[0] },
+    { name: "spannung_v", did: "221E3B", adresse: BMS,
+      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 4 : null },
+    { name: "strom_a", did: "221E3D", adresse: BMS,
+      lesen: (b) => b.length >= 4
+        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
+        : null },
+    { name: "energie_kwh", did: "221E32", adresse: BMS,
+      lesen: (b) => b.length >= 4
+        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3]) / 8583.07
+        : null },
+    { name: "ladegrenze_a", did: "221E1B", adresse: BMS,
+      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
+    { name: "betriebsart", did: "227448", adresse: BMS, lesen: (b) => b[0] },
+    { name: "tempo_kmh", did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
+    { name: "km_stand", did: "22295A", adresse: { sh: "FC0076", cra: "17FE0076" },
+      selten: 20,
+      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
+  ];
+
+  let letzteAdresse = null;
+
+  /* Antwort in Nutzbytes zerlegen. Die Quittung ist `62` + die zwei Bytes
+   * der Datenkennung; alles davor ist Absenderkennung und ISO-TP-Kopf,
+   * alles danach ist Nutzlast. */
+  function nutzbytes(roh, did) {
+    const hex = roh.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+    const quittung = "62" + did.slice(2).toUpperCase();
+    const marke = hex.indexOf(quittung);
+    if (marke < 0) return null;
+    const rest = hex.slice(marke + quittung.length);
+    const bytes = [];
+    for (let i = 0; i + 1 < rest.length; i += 2) {
+      bytes.push(parseInt(rest.slice(i, i + 2), 16));
+    }
+    return bytes;
+  }
+
+  async function messwertLesen(eintrag) {
+    const ziel = eintrag.adresse;
+    if (!letzteAdresse || letzteAdresse.sh !== ziel.sh) {
+      await befehl(`ATSH${ziel.sh}`);
+      await befehl(`ATCRA${ziel.cra}`);
+      letzteAdresse = ziel;
+    }
+    const antwort = await befehl(eintrag.did, 8000);
+    const bytes = nutzbytes(antwort, eintrag.did);
+    if (!bytes || !bytes.length) return null;
+    const wert = eintrag.lesen(bytes);
+    return (wert === null || wert === undefined || Number.isNaN(wert))
+      ? null : wert;
+  }
+
+  /* Einen vollständigen Satz lesen. Fehler einzelner Grössen werden
+   * vermerkt und übergangen - eine Aufzeichnung, die wegen des
+   * Kilometerstands abbricht, hätte den Ladestand mit verloren. */
+  async function satzLesen(runde) {
+    const roh = {};
+    for (const eintrag of MESSWERTE) {
+      if (eintrag.selten && runde % eintrag.selten !== 0) continue;
+      try {
+        const wert = await messwertLesen(eintrag);
+        if (wert !== null) roh[eintrag.name] = Math.round(wert * 1000) / 1000;
+        else if (eintrag.pflicht) throw new Error("keine Nutzdaten");
+      } catch (fehler) {
+        if (eintrag.pflicht) throw fehler;
+        if (!roh._fehlend) roh._fehlend = [];
+        roh._fehlend.push(eintrag.name);
+      }
+    }
+    return roh;
+  }
+
+
+  /* ---------- Aufzeichnung ---------- */
+
+  let laeuft = false;
+  let runde = 0;
+  let wachhalter = null;   // WakeLockSentinel
+
+  /* Den Bildschirm wach halten. Ohne das schaltet iOS ihn nach einer Minute
+   * aus, und mit dem Bildschirm schläft der Seiteninhalt - die Verbindung
+   * übersteht zwar den Sperrbildschirm, die Schleife aber nicht.
+   *
+   * Die Sperre geht verloren, wenn die Seite in den Hintergrund gerät, und
+   * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
+   * geholt. Kennt der Browser die Schnittstelle nicht, läuft die
+   * Aufzeichnung trotzdem - dann muss man den Bildschirm eben in den
+   * Einstellungen an lassen. */
+  async function bildschirmWachHalten() {
+    if (!("wakeLock" in navigator)) {
+      log("Dieser Browser kennt keine Bildschirmsperre-Verhinderung. "
+          + "Automatische Sperre bitte in den iOS-Einstellungen auf 'Nie'.");
+      return;
+    }
+    try {
+      wachhalter = await navigator.wakeLock.request("screen");
+      log("Bildschirm wird wachgehalten.");
+    } catch (fehler) {
+      log("Bildschirm wachhalten ging nicht: " + fehler.message);
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (laeuft && document.visibilityState === "visible" && !wachhalter) {
+      bildschirmWachHalten();
+    }
+  });
+
+  function kacheln(werte) {
+    el("fahrt-werte").innerHTML = werte.map(([name, zahl]) =>
+      `<div class="wert"><div class="zahl">${zahl}</div>`
+      + `<div class="name">${name}</div></div>`).join("");
+  }
+
+  async function eineRunde() {
+    const roh = await satzLesen(runde);
+    runde += 1;
+
+    const soc = socAusRoh(roh.soc_roh);
+    const wo = await ort().catch((f) => {
+      log("Standort: " + f.message);
+      return null;
+    });
+    if (!wo) return null;
+
+    const nutzlast = {
+      token: el("token").value.trim(),
+      lat: wo.lat, lon: wo.lon,
+      soc: Math.round(soc.hmi * 10) / 10,
+      rohwerte: roh,
+    };
+    // Was das Auto selbst misst, schlägt jede Vorhersage: Die
+    // Aussentemperatur ging bisher aus Open-Meteo ins Verbrauchsmodell.
+    if (typeof roh.tempo_kmh === "number") nutzlast.tempo_kmh = roh.tempo_kmh;
+    if (typeof roh.aussentemp_c === "number") {
+      nutzlast.aussentemp_c = roh.aussentemp_c;
+    }
+
+    const antwort = await fetch("/api/live/melden", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nutzlast),
+    });
+    const daten = await antwort.json().catch(() => ({}));
+    return { soc, roh, daten, status: antwort.status };
+  }
+
+  async function fahrtSchleife() {
+    while (laeuft) {
+      const beginn = Date.now();
+      try {
+        const ergebnis = await eineRunde();
+        if (ergebnis) {
+          const { soc, roh, daten } = ergebnis;
+          letzterSoc = Math.round(soc.hmi * 10) / 10;
+          el("soc-wert").textContent = letzterSoc + " %";
+          const leistung = (typeof roh.spannung_v === "number"
+                            && typeof roh.strom_a === "number")
+            ? (roh.spannung_v * roh.strom_a / 1000).toFixed(1) + " kW" : "–";
+          kacheln([
+            ["Ladestand", letzterSoc + " %"],
+            ["brutto", soc.bms.toFixed(1) + " %"],
+            ["Leistung", leistung],
+            ["Spannung", (roh.spannung_v ?? "–") + " V"],
+            ["aufgenommen", daten.aufgenommen ? "ja" : "nein"],
+            ["Runde", String(runde)],
+          ]);
+          stand2(daten.aufgenommen
+            ? `läuft – zuletzt ${new Date().toLocaleTimeString("de-DE")}`
+            : `läuft – jolt: ${daten.grund || "nicht aufgenommen"}`,
+            daten.aufgenommen ? "gut" : "");
+          log(`Runde ${runde}: ${letzterSoc} % (roh ${roh.soc_roh})`
+              + `${roh._fehlend ? ", ohne " + roh._fehlend.join("/") : ""}`
+              + ` → jolt ${daten.aufgenommen ? "ok" : (daten.grund || "?")}`);
+        }
+      } catch (fehler) {
+        // Ein Aussetzer beendet die Fahrt nicht. Tunnel, Funkloch, ein
+        // Steuergerät das gerade nicht mag - das nächste Mal klappt es
+        // wieder, und eine abgebrochene Aufzeichnung merkt man erst hinterher.
+        stand2("Aussetzer: " + fehler.message, "schlecht");
+        log("Runde übersprungen: " + fehler.message);
+        letzteAdresse = null;      // Adresse neu setzen, sicher ist sicher
+      }
+      const rest = Number(el("takt").value) * 1000 - (Date.now() - beginn);
+      await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
+    }
+  }
+
+  function stand2(text, art) {
+    const k = el("fahrt-stand");
+    k.textContent = text;
+    k.className = "stand " + (art || "");
+  }
+
+  async function fahrtStarten() {
+    if (!el("token").value.trim()) {
+      stand2("Erst das Logger-Token eintragen.", "schlecht");
+      return;
+    }
+    laeuft = true;
+    runde = 0;
+    el("fahrt-start").hidden = true;
+    el("fahrt-stop").hidden = false;
+    await bildschirmWachHalten();
+    log("Aufzeichnung gestartet.");
+    fahrtSchleife();
+  }
+
+  async function fahrtBeenden() {
+    laeuft = false;
+    el("fahrt-start").hidden = false;
+    el("fahrt-stop").hidden = true;
+    stand2("beendet");
+    if (wachhalter) {
+      try { await wachhalter.release(); } catch (e) {}
+      wachhalter = null;
+    }
+    log("Aufzeichnung beendet.");
   }
 
   /* ---------- An jolt melden ---------- */
@@ -394,6 +639,11 @@ function befehl(text, grenze_ms = 15000) {
   /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
    * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die
    * Hex-Antworten Zeichen für Zeichen. */
+  el("fahrt-start").addEventListener("click", fahrtStarten);
+  el("fahrt-stop").addEventListener("click", fahrtBeenden);
+  el("takt").addEventListener("input", (e) => {
+    el("takt-wert").textContent = e.target.value;
+  });
   el("log-kopieren").addEventListener("click", async () => {
     const text = el("log").textContent;
     try {

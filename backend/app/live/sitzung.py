@@ -265,7 +265,8 @@ def _zeitfaktor(punkte: list, energieprofil: list) -> float | None:
 def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
                         soc: float | None = None, tempo_kmh: float | None = None,
                         aussentemp_c: float | None = None,
-                        zeit: datetime | None = None) -> Zustand:
+                        zeit: datetime | None = None,
+                        rohwerte: dict | None = None) -> Zustand:
     """Einen Messpunkt einsortieren und den neuen Zustand zurückgeben.
 
     `soc` darf fehlen. Dann ist es eine reine Positionsmeldung, wie sie das
@@ -287,7 +288,8 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
 
     punkt = models.LivePunkt(lat=lat, lon=lon, soc=soc, tempo_kmh=tempo_kmh,
                              aussentemp_c=aussentemp_c, km_auf_route=km,
-                             soll_soc=soll, zeit=zeit or datetime.utcnow())
+                             soll_soc=soll, rohwerte=rohwerte,
+                             zeit=zeit or datetime.utcnow())
     # Über die Beziehung anhängen und nicht über db.add(): Sonst steht der
     # Punkt zweimal in der geladenen Sammlung - einmal durch das Anhängen,
     # einmal durch die Kaskade - und die Faktoren rechnen mit einem Duplikat.

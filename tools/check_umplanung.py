@@ -459,9 +459,21 @@ def teil_kette():
     start3 = client.post(f"/api/live/start/{fahrt_id}",
                          params={"min_kw": 100, "radius_km": 10}).json()
     sitzung3 = start3["sitzung_id"]
-    vorher = start3["plan"]["stopps"][0]
     _abspielen(client, sitzung3, fahrt_id, mehrverbrauch=1.0, zeitfaktor=1.0,
                bis_km=20.0)
+
+    # Gemeldet wird der Stopp, der **jetzt** gilt - nicht der aus dem
+    # Startplan. Bis km 20 ist meist schon einmal umgeplant, und dann steht
+    # dort ein anderer. Vorher stand hier `start3["plan"]["stopps"][0]`, und
+    # der Fall prüfte unbemerkt nichts mehr: Der gemeldete Stopp war gar
+    # nicht der nächste, der Auslöser griff zu Recht nicht, und die Prüfung
+    # "der belegte Stopp steht nicht mehr im Plan" bestand aus dem falschen
+    # Grund - er fehlte, weil längst umgeplant war.
+    laufend = client.get(f"/api/live/{sitzung3}").json().get("plan") or {}
+    vorher = (laufend.get("stopps") or [None])[0]
+    pruefe(vorher is not None,
+           "vor der Meldung steht ein nächster Stopp im laufenden Plan",
+           str(laufend.get("stopps")))
     client.post(f"/api/saeulen/{vorher['id']}/belegt")
     nachher = _messen(client, sitzung3, fahrt_id, km=25.0, mehrverbrauch=1.0,
                       zeitfaktor=1.0)

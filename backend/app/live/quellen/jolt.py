@@ -27,4 +27,8 @@ class JoltFormat:
             aussentemp_c=zahl(daten, "aussentemp_c"),
             zeit=datetime.fromisoformat(zeit) if isinstance(zeit, str) and zeit
             else None,
-            laedt=wahrheit(daten, "laedt"))
+            laedt=wahrheit(daten, "laedt"),
+            # Unverändert übernommen: Ein Übersetzer, der hier aufräumt,
+            # wirft genau das weg, wofür das Feld da ist.
+            rohwerte=daten.get("rohwerte") if isinstance(
+                daten.get("rohwerte"), dict) else None)

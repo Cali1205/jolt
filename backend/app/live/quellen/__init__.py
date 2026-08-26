@@ -71,6 +71,8 @@ class Rohpunkt:
     aussentemp_c: float | None = None
     zeit: datetime | None = None
     laedt: bool | None = None
+    #: Was die Quelle sonst noch lieferte, unverändert. Siehe LivePunkt.
+    rohwerte: dict | None = None
 
 
 class Quelle(Protocol):

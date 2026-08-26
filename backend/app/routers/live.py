@@ -36,6 +36,9 @@ class Messpunkt(BaseModel):
     soc: float | None = Field(default=None, ge=0, le=100)
     tempo_kmh: float | None = None
     aussentemp_c: float | None = None
+    # Alles Weitere, was die Quelle liefert - wird nur aufbewahrt, nicht
+    # verrechnet. Siehe models.LivePunkt.rohwerte.
+    rohwerte: dict | None = None
 
 
 class LoggerMeldung(BaseModel):
@@ -66,7 +69,8 @@ async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
     """Einen Messpunkt einsortieren und alle unterrichten, die es angeht."""
     zustand = live_sitzung.messpunkt_aufnehmen(
         db, sitzung, punkt.lat, punkt.lon, punkt.soc,
-        punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit)
+        punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit,
+        rohwerte=punkt.rohwerte)
 
     nachricht = {"typ": "zustand", "simuliert": False,
                  **live_sitzung.zustand_als_dict(zustand)}
@@ -139,7 +143,8 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
         raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
     return await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
         lat=messpunkt.lat, lon=messpunkt.lon, soc=messpunkt.soc,
-        tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c))
+        tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c,
+        rohwerte=messpunkt.rohwerte))
 
 
 @router.post("/melden")

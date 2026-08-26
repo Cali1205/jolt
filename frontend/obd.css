@@ -90,3 +90,13 @@ pre#log {
 }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .92em; color: var(--akzent); }
+
+/* Kacheln der laufenden Aufzeichnung. Sie werden im Fahren angesehen -
+   also gross genug für einen Blick und ohne Text, den man lesen muss. */
+.werte { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px; margin-top: 10px; }
+.wert { background: #0c1116; border: 1px solid var(--rand); border-radius: 10px;
+  padding: 8px 10px; }
+.wert .zahl { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.wert .name { font-size: 10px; color: var(--gedaempft); text-transform: uppercase;
+  letter-spacing: .05em; margin-top: 2px; }
