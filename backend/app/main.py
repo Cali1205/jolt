@@ -91,7 +91,7 @@ def obd_seite():
         neueste = int(os.path.getmtime(os.path.join(FRONTEND, "obd.html")))
     except OSError:
         pass
-    for name in ("obd.js", "obd.css"):
+    for name in ("obd-kern.js", "obd.js", "obd.css"):
         try:
             marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
         except OSError:

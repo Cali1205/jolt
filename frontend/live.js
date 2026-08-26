@@ -14,6 +14,8 @@ window.joltLive = (function () {
   let plan = null;            // der aktuell gültige Ladeplan
   let wache = null;           // watchPosition-Kennung
   let letzteMeldung = 0;      // Zeitpunkt der letzten Positionsmeldung
+  let dongle = false;         // liest der OBD2-Dongle mit?
+  let runde = 0;
 
   // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
   // und braucht mindestens 5 km, bevor sie überhaupt etwas sagt - alle
@@ -373,13 +375,56 @@ window.joltLive = (function () {
     wache = null;
   }
 
+  /* Wenn ein Dongle mitliest, wandert der Ladestand von hier aus mit.
+   *
+   * Bewusst an dieselbe Meldung gehängt und nicht als zweite Schleife: So
+   * gehören Position und Ladestand zu **einem** Messpunkt und derselben
+   * Sekunde. Zwei Schleifen ergäben Punkte, die sich abwechseln - einer mit
+   * Position, einer mit Ladestand -, und die Nachführung müsste beides
+   * wieder zusammensuchen. */
+  function dongleNutzen() {
+    dongle = true;
+    if (window.joltObd) {
+      window.joltObd.einrichten(
+        (t) => console.log("[obd]", t),
+        // Ein Abriss im Tunnel ist kein Grund aufzuhören, solange die Fahrt
+        // läuft: Der Baustein baut selbst wieder auf.
+        () => { if (K.zustand.sitzungId) window.joltObd.wiederverbinden(
+          1, () => !!K.zustand.sitzungId); });
+    }
+  }
+
   async function positionMelden(coords) {
     if (!K.zustand.sitzungId) return;
+    const nutzlast = {
+      lat: coords.latitude, lon: coords.longitude,
+      tempo_kmh: coords.speed === null ? null : coords.speed * 3.6,
+    };
+
+    if (dongle && window.joltObd && window.joltObd.verbunden()) {
+      try {
+        const roh = await window.joltObd.satzLesen(runde++);
+        if (typeof roh.hoehe_m !== "number" && typeof coords.altitude === "number") {
+          roh.hoehe_m = Math.round(coords.altitude);
+        }
+        const wert = window.joltObd.socAusRoh(roh.soc_roh);
+        nutzlast.soc = Math.round(wert.hmi * 10) / 10;
+        nutzlast.rohwerte = roh;
+        // Was das Auto selbst misst, schlägt jede Vorhersage.
+        if (typeof roh.tempo_kmh === "number") nutzlast.tempo_kmh = roh.tempo_kmh;
+        if (typeof roh.aussentemp_c === "number") {
+          nutzlast.aussentemp_c = roh.aussentemp_c;
+        }
+      } catch (fehler) {
+        // Eine Runde ohne Ladestand ist immer noch eine Positionsmeldung -
+        // und die trägt Zeitfaktor und Ankunftsprognose weiter.
+        console.log("[obd] Runde übersprungen:", fehler);
+      }
+    }
+
     try {
       const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
-        { method: "POST", body: {
-          lat: coords.latitude, lon: coords.longitude,
-          tempo_kmh: coords.speed === null ? null : coords.speed * 3.6 } });
+        { method: "POST", body: nutzlast });
       zustandAnzeigen(zustand);
     } catch (fehler) {
       // Stillschweigend: Ein Funkloch ist unterwegs normal, und eine
@@ -466,6 +511,7 @@ window.joltLive = (function () {
                              { method: "POST" });
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
     positionAufgeben();
+    dongle = false;
     if (steckdose) { try { steckdose.close(); } catch (e) {} }
     K.zustand.sitzungId = null;
     plan = null;
@@ -528,5 +574,6 @@ window.joltLive = (function () {
     });
   }
 
-  return { einrichten, starten, beenden, verbinden, positionVerfolgen };
+  return { einrichten, starten, beenden, verbinden, positionVerfolgen,
+           dongleNutzen };
 })();

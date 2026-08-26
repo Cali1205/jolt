@@ -349,16 +349,14 @@ table.kurve input { padding: 6px 8px; }
         kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
         den echten Verbrauch des Autos zu lernen.</p>
 
-      <!-- Zwei Wege, und der Unterschied muss am Knopf stehen: Die
-           Bluetooth-Verbindung zum Dongle gibt es nur auf /obd, weil Safari
-           kein Web Bluetooth kennt. Wer das nicht weiss, sucht sie hier. -->
-      <p class="leer" style="padding-top:0"><strong>Mit OBD2-Dongle:</strong>
-        <a href="/obd">die Fahrt-Seite in Bluefy öffnen</a> – dort verbindet
-        ein Knopf den Dongle, legt die Fahrt an und liest den Ladestand
-        selbst. Hier geht es <strong>ohne</strong> Dongle, dann musst du den
-        Ladestand unterwegs von Hand melden.</p>
+      <!-- Ein Knopf für beide Fälle. Ob der Dongle mitspielt, entscheidet
+           sich beim Antippen: In Bluefy gibt es Web Bluetooth, in Safari
+           nicht. Zwei Knöpfe dafür wären eine Frage an den Nutzer, die
+           der Browser schon beantwortet hat. -->
+      <p class="leer" style="padding-top:0" id="aufz-dongle-hinweis"></p>
       <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
-      <button class="tat neben" id="aufz-start">Ohne Dongle aufzeichnen</button>
+      <button class="tat" id="aufz-start">Aufzeichnung starten</button>
+      <p class="leer" id="aufz-stand"></p>
 
       <h2>Vergangene Fahrten</h2>
       <div id="fahrten-liste"></div>
@@ -408,6 +406,7 @@ table.kurve input { padding: 6px 8px; }
   </div>
 </main>
 
+<script src="/static/obd-kern.js"></script>
 <script src="/static/core.js"></script>
 <script src="/static/karte.js"></script>
 <script src="/static/route.js"></script>

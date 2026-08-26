@@ -111,54 +111,121 @@ window.joltFahrten = (function () {
    * Live-Ansicht wechseln. Von da an ist es eine Live-Fahrt wie jede
    * andere - nur ohne Plan, gegen den sie sich hält. Strecke und
    * Energieprofil entstehen beim Beenden aus den Messpunkten. */
+  /* Eine Aufzeichnung starten - mit Dongle, wenn er zu haben ist.
+   *
+   * Die Reihenfolge ist nicht beliebig: `requestDevice` darf nur in
+   * unmittelbarer Folge einer Nutzergeste laufen. Wer vorher auf GPS oder
+   * eine API-Antwort wartet, hat die Geste verbraucht und bekommt ein
+   * `SecurityError` - deshalb steht der Dongle **zuerst**, noch vor allem
+   * anderen.
+   *
+   * Scheitert er, geht es ohne weiter. Das ist der ganze Sinn: In Safari
+   * gibt es Web Bluetooth nicht, im Auto steckt der Dongle vielleicht
+   * nicht, und in beiden Fällen ist eine Aufzeichnung mit von Hand
+   * gemeldetem Ladestand besser als keine.
+   */
   async function aufzeichnungStarten() {
-    const fahrzeug = (K.zustand.fahrzeuge || [])[0];
-    const wahl = document.getElementById("fahrzeug-wahl");
-    const id = wahl && wahl.value ? Number(wahl.value)
-      : (fahrzeug && fahrzeug.id);
-    if (!id) { K.melden("Erst ein Fahrzeug anlegen.", "fehler"); return; }
-
-    let ort;
+    const knopf = document.getElementById("aufz-start");
+    const stand = (text) => {
+      const el = document.getElementById("aufz-stand");
+      if (el) el.textContent = text;
+    };
+    knopf.disabled = true;
     try {
-      ort = await new Promise((erfuellen, ablehnen) => {
+      let mitDongle = false;
+      if (window.joltObd && window.joltObd.verfuegbar()) {
+        stand("Verbinde mit dem OBD2-Dongle …");
+        try {
+          window.joltObd.einrichten((t) => console.log("[obd]", t));
+          await window.joltObd.verbinden();
+          if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
+            mitDongle = true;
+          }
+        } catch (fehler) {
+          // Kein Grund abzubrechen - nur einer, ohne Dongle weiterzumachen.
+          console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
+        }
+        if (!mitDongle) {
+          stand("Ohne Dongle – der Ladestand kommt von Hand.");
+        }
+      }
+
+      const wahl = document.getElementById("fahrzeug-wahl");
+      const id = wahl && wahl.value ? Number(wahl.value)
+        : ((K.zustand.fahrzeuge || [])[0] || {}).id;
+      if (!id) { K.melden("Erst ein Fahrzeug anlegen.", "fehler"); return; }
+
+      stand("Standort holen …");
+      const ort = await new Promise((erfuellen, ablehnen) => {
         if (!navigator.geolocation) {
           ablehnen(new Error("Dieses Gerät liefert keinen Standort."));
           return;
         }
         navigator.geolocation.getCurrentPosition(
           (p) => erfuellen(p.coords),
-          // Ohne Startposition gäbe es keinen ersten Punkt der Strecke -
-          // und die Aufzeichnung begänne irgendwo.
+          // Ohne Startposition gäbe es keinen ersten Punkt der Strecke.
           (f) => ablehnen(new Error("Standort: " + f.message)),
           { enableHighAccuracy: true, timeout: 10000 });
       });
-    } catch (fehler) {
-      K.melden(fehler.message, "fehler");
-      return;
-    }
 
-    try {
+      // Mit Dongle gleich den echten Startladestand mitgeben - besser als
+      // die 100 %, die der Server sonst annimmt.
+      let soc = null;
+      if (mitDongle) {
+        try {
+          const wert = window.joltObd.socAusAntwort(
+            await window.joltObd.befehl("22028C"));
+          if (wert) soc = Math.round(wert.hmi * 10) / 10;
+        } catch (fehler) { mitDongle = false; }
+      }
+
+      stand("Fahrt anlegen …");
       const antwort = await K.api("/api/live/aufzeichnung", {
         method: "POST",
         body: { fahrzeug_id: id, lat: ort.latitude, lon: ort.longitude,
+                soc: soc,
                 name: document.getElementById("aufz-name").value },
       });
       K.zustand.sitzungId = antwort.sitzung_id;
-      K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
-        + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
       window.joltApp.ansichtZeigen("live");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       window.joltLive.verbinden(antwort.sitzung_id);
-      // Ohne laufende Positionsmeldungen entstünde keine Strecke.
       window.joltLive.positionVerfolgen();
+      if (mitDongle) {
+        window.joltLive.dongleNutzen();
+        K.melden("Aufzeichnung läuft, Ladestand kommt aus dem Auto.",
+                 "hinweis");
+      } else {
+        K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
+          + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
+      }
+      stand("");
     } catch (fehler) {
       K.melden("Aufzeichnung: " + fehler.message, "fehler");
+      stand("");
+    } finally {
+      knopf.disabled = false;
     }
+  }
+
+  /* Beim Öffnen sagen, was dieser Browser kann - bevor jemand tippt und
+   * sich wundert, dass kein Geräte-Dialog kommt. */
+  function dongleHinweis() {
+    const el = document.getElementById("aufz-dongle-hinweis");
+    if (!el) return;
+    el.innerHTML = (window.joltObd && window.joltObd.verfuegbar())
+      ? "Dieser Browser kann Bluetooth – beim Starten wird versucht, den "
+        + "OBD2-Dongle zu verbinden. Klappt es nicht, läuft die Aufzeichnung "
+        + "trotzdem, dann mit dem Ladestand von Hand."
+      : "Dieser Browser kann kein Bluetooth, der Ladestand kommt also von "
+        + "Hand. Mit Dongle: dieselbe Adresse in <strong>Bluefy</strong> "
+        + "öffnen, dann geht es automatisch.";
   }
 
   function einrichten() {
     K.an("aufz-start", "click", aufzeichnungStarten);
+    dongleHinweis();
     const halter = document.getElementById("fahrten-liste");
     if (!halter) return;
     // Ein Zuhörer am Halter statt einer je Zeile: Die Liste wird nach jedem
