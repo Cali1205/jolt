@@ -16,8 +16,7 @@ from sqlalchemy.orm import Session
 
 from .. import deps, models, push
 from ..database import SessionLocal, get_db
-from ..energie import kalibrierung
-from ..live import aufzeichnung, kanal, quellen, simulator, umplanung
+from ..live import aufraeumen, kanal, quellen, simulator, umplanung
 from ..live import sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -179,11 +178,27 @@ def aufzeichnung_starten(start: Aufzeichnungsstart,
     if not fahrzeug:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
+    # Eine noch laufende Sitzung desselben Fahrzeugs weicht - aber sie wird
+    # **abgeschlossen** und nicht stumm fallengelassen.
+    #
+    # Hier stand nur `alt.laeuft = False`. Fuer eine Aufzeichnung war das der
+    # Totalverlust: Strecke und Energieprofil entstehen erst beim Abschliessen
+    # aus den Messpunkten, und mit `laeuft = False` sieht auch das Aufraeumen
+    # sie nie wieder. Wer eine vergessene Fahrt dadurch bemerkte, dass er eine
+    # neue startete, loeschte damit genau die, die er retten wollte.
     for alt in (db.query(models.LiveSitzung)
                 .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
                 .filter(models.Fahrt.fahrzeug_id == fahrzeug.id,
                         models.LiveSitzung.laeuft.is_(True)).all()):
         alt.laeuft = False
+        alt.beendet = datetime.utcnow()
+        try:
+            aufraeumen.beenden_und_lernen(db, alt)
+        except Exception as fehler:      # noqa: BLE001
+            # Die neue Fahrt darf daran nicht scheitern - jemand sitzt im
+            # Auto und will losfahren.
+            log.warning("Vorige Sitzung %s nicht abzuschliessen: %s",
+                        alt.id, fehler)
 
     beschriftung = (start.name or "").strip() or "Aufzeichnung"
     fahrt = models.Fahrt(
@@ -295,48 +310,12 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
     # Prognose entstehen aus den Messpunkten. Das muss **vor** der
     # Kalibrierung geschehen - die vergleicht Soll und Ist an den Punkten,
     # und der Sollwert steht erst danach dort.
-    gebaut = None
-    if sitzung.fahrt is not None and sitzung.fahrt.aufzeichnung \
-            and not sitzung.fahrt.geometrie:
-        try:
-            gebaut = aufzeichnung.abschliessen(db, sitzung.fahrt, sitzung)
-        except Exception as fehler:      # noqa: BLE001
-            # Die Messpunkte sind gespeichert; eine gescheiterte
-            # Rekonstruktion darf sie nicht mitnehmen.
-            log.warning("Aufzeichnung nicht abzuschliessen: %s", fehler)
-            gebaut = {"ok": False, "grund": str(fehler)}
-
-    gelernt = None
-    nicht_gelernt = None
-    fahrzeug = sitzung.fahrt.fahrzeug if sitzung.fahrt else None
-
-    # Eine Fahrt mit Fahrradträger oder Dachbox lehrt nichts über das
-    # *Fahrzeug*. Der gemessene Mehrverbrauch enthält dann zwei Unbekannte -
-    # wie gut das Auto rechnet und wie teuer der Träger ist - und aus einer
-    # Messung lassen sich nicht zwei Zahlen bestimmen. Wer es trotzdem
-    # einrechnet, schreibt den Träger dauerhaft ins Fahrzeug und verbiegt
-    # damit jede Alltagsplanung. Genau davor warnt der Kommentar in
-    # kalibrierung.py schon.
-    #
-    # Die Fahrt bleibt aufgezeichnet; aus ihr liesse sich später umgekehrt
-    # der Zuschlag des Trägers bestimmen, wenn der Faktor des Fahrzeugs aus
-    # normalen Fahrten feststeht.
-    zuschlag = (sitzung.fahrt.luftwiderstand_faktor or 1.0) if sitzung.fahrt else 1.0
-    if fahrzeug and abs(zuschlag - 1.0) > 0.001:
-        nicht_gelernt = (f"Fahrt mit Luftwiderstands-Zuschlag ×{zuschlag:g} - "
-                         f"daraus lässt sich der Faktor des Fahrzeugs nicht "
-                         f"bestimmen.")
-        fahrzeug = None
-
-    if fahrzeug:
-        roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
-        if roh is not None:
-            vorher = fahrzeug.korrekturfaktor
-            fahrzeug.korrekturfaktor = kalibrierung.nachfuehren(vorher, roh)
-            gelernt = {"rohfaktor": round(roh, 3), "vorher": round(vorher, 3),
-                       "nachher": fahrzeug.korrekturfaktor}
-            log.info("Kalibrierung %s: %.3f -> %.3f (roh %.3f)",
-                     fahrzeug.name, vorher, fahrzeug.korrekturfaktor, roh)
+    # Strecke bauen, dann lernen - der Ablauf steht in
+    # `live/aufraeumen.beenden_und_lernen`, weil ihn drei Wege brauchen.
+    ergebnis = aufraeumen.beenden_und_lernen(db, sitzung)
+    gebaut = ergebnis["aufzeichnung"]
+    gelernt = ergebnis["gelernt"]
+    nicht_gelernt = ergebnis["nicht_gelernt"]
 
     db.commit()
     return {"ok": True, "aufzeichnung": gebaut,

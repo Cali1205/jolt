@@ -627,6 +627,31 @@ def fall_kosten():
            "die ausgewiesenen Kosten passen zur geladenen Energie",
            f"{summe:.1f} kWh, {mit.kosten_eur:.2f} EUR")
 
+    # Die Nachoptimierung (Schritt 4) läuft **nach** der Suche und
+    # überschreibt deren Lademengen. Kennt sie die Kosten nicht, verschiebt
+    # sie Energie von der billigen Säule zur teuren, sobald das Sekunden
+    # spart - und macht damit still zunichte, was Schritt 3 gerade
+    # optimiert hat.
+    billig_dann_teuer = [
+        optimierer.Ladeoption(id=1, km_auf_route=170.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=8,
+                              name="Billig", betreiber="Ionity"),
+        optimierer.Ladeoption(id=2, km_auf_route=340.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=8,
+                              name="Teuer", betreiber="Teuer"),
+    ]
+    lang = profil_bauen(500, kwh_je_km=0.21)
+    p3 = optimierer.planen(lang, billig_dann_teuer, fz, KURVE, start_soc=60.0,
+                           ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                           preis_fuer=preis, zeitwert_eur_h=20.0)
+    if p3.machbar and len(p3.stopps) == 2:
+        billig, teuer = p3.stopps[0], p3.stopps[1]
+        pruefe(billig.kwh_geladen > teuer.kwh_geladen,
+               "auch nach der Nachoptimierung liegt das Gewicht auf der "
+               "billigen Säule - Schritt 4 darf Schritt 3 nicht widersprechen",
+               f"billig {billig.kwh_geladen:.1f} kWh, "
+               f"teuer {teuer.kwh_geladen:.1f} kWh")
+
 
 def fall_laufzeit():
     abschnitt("Laufzeit")

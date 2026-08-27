@@ -106,6 +106,29 @@
     catch (e) { return ""; }
   }
 
+  /* Wie schnell das Auto sein muss, damit es als "fährt" gilt. Zehn km/h
+   * liegen sicher über GPS-Rauschen und über dem Rangieren auf dem Hof, und
+   * sicher unter allem, was eine Fahrt ist. */
+  const FAEHRT_AB_KMH = 10;
+  // Zwei Messungen hintereinander, damit ein einzelner Ausreisser keine
+  // Fahrt anlegt.
+  const FAEHRT_RUNDEN = 2;
+  let bewegt = 0;
+
+  /* Ein Name, den niemand tippen muss.
+   *
+   * Das Namensfeld war ein Handgriff zu viel: Wer im Auto sitzt, tippt
+   * nichts. Datum und Uhrzeit sind ohnehin die Angabe, nach der man später
+   * sucht - und Start und Ziel trägt jolt beim Abschliessen selbst nach,
+   * aus dem ersten und letzten Messpunkt. */
+  function fahrtName() {
+    const eigener = el("fahrt-name").value.trim();
+    if (eigener) return eigener;
+    return new Date().toLocaleString("de-DE", {
+      weekday: "short", day: "2-digit", month: "2-digit",
+      hour: "2-digit", minute: "2-digit" });
+  }
+
   async function losfahren() {
     const knopf = el("los");
     knopf.disabled = true;
@@ -127,29 +150,36 @@
       losStand("Ladestand lesen …");
       const probe = O.socAusAntwort(await O.befehl("22028C"));
       if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
+      el("soc-wert").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
-      losStand("Fahrt anlegen …");
-      const wo = await ort();
-      const antwort = await fetch("/api/live/aufzeichnung", {
-        method: "POST",
-        headers: { "Content-Type": "application/json",
-                   "X-Token": joltToken() },
-        body: JSON.stringify({
-          fahrzeug_id: await fahrzeugId(),
-          lat: wo.lat, lon: wo.lon,
-          soc: Math.round(probe.hmi * 10) / 10,
-          name: el("fahrt-name").value }),
-      });
-      if (!antwort.ok) {
-        const fehler = await antwort.json().catch(() => ({}));
-        throw new Error(fehler.detail || `jolt antwortet HTTP ${antwort.status}`);
+      if (el("automatik").checked) {
+        // Dieselbe Prüfung wie beim Start von Hand. Ohne sie liefe die
+        // Schleife los und scheiterte bei jedem Anlegen der Fahrt an einem
+        // 401 - sichtbar nur im Protokoll, während oben "Bereit" steht.
+        if (!el("token").value.trim() && !joltToken()) {
+          throw new Error("Erst in jolt anmelden oder ein Logger-Token "
+                          + "eintragen");
+        }
+        // Nicht sofort anlegen: Wer im Stand verbindet, bekäme sonst eine
+        // Fahrt, die an der Auffahrt beginnt und eine halbe Stunde
+        // Parkplatz enthält. Die Seite wartet, bis sich etwas bewegt.
+        losStand("Bereit – wartet, bis das Auto fährt.", "gut");
+        laeuft = true;
+        bewegt = 0;
+        // `runde` steuert, welche selten gelesenen Messwerte drankommen
+        // (`satzLesen`). Ohne Rücksetzen zählt die zweite Fahrt einer
+        // Sitzung dort weiter, wo die erste aufhörte.
+        runde = 0;
+        el("fahrt-start").hidden = true;
+        el("fahrt-stop").hidden = false;
+        await bildschirmWachHalten();
+        log("Automatik: warte auf Bewegung.");
+        fahrtSchleife();
+        return;
       }
-      const fahrt = await antwort.json();
-      sitzungId = fahrt.sitzung_id;
-      log(`Aufzeichnung ${fahrt.fahrt_id} läuft (Sitzung ${fahrt.sitzung_id}).`);
 
+      await fahrtAnlegen(probe);
       await fahrtStarten();
-      losStand(`Aufzeichnung läuft – Fahrt ${fahrt.fahrt_id}`, "gut");
     } catch (fehler) {
       losStand("Ging nicht: " + fehler.message, "schlecht");
       log("FEHLER " + fehler.message);
@@ -158,20 +188,73 @@
     }
   }
 
-  /* Welches Fahrzeug. Bei einem einzigen erübrigt sich die Frage; bei
-   * mehreren wird das erste genommen und im Protokoll gesagt, welches -
-   * eine Auswahlliste im Auto zu bedienen ist der falsche Ort dafür. */
-  async function fahrzeugId() {
-    const antwort = await fetch("/api/fahrzeuge", {
-      headers: { "X-Token": joltToken() } });
+  /* Die Fahrt in jolt anlegen. Getrennt vom Verbinden, weil sie bei
+   * eingeschalteter Automatik erst entsteht, wenn das Auto losfährt. */
+  async function fahrtAnlegen(soc) {
+    losStand("Fahrt anlegen …");
+    const wo = await ort();
+    const antwort = await fetch("/api/live/aufzeichnung", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Token": joltToken() },
+      body: JSON.stringify({
+        fahrzeug_id: fahrzeugId(),
+        lat: wo.lat, lon: wo.lon,
+        soc: soc ? Math.round(soc.hmi * 10) / 10 : null,
+        name: fahrtName() }),
+    });
     if (!antwort.ok) {
-      throw new Error("Nicht angemeldet – erst in jolt anmelden, dann hier "
-                      + "neu laden.");
+      const fehler = await antwort.json().catch(() => ({}));
+      throw new Error(fehler.detail || `jolt antwortet HTTP ${antwort.status}`);
     }
-    const fahrzeuge = await antwort.json();
-    if (!fahrzeuge.length) throw new Error("Kein Fahrzeug angelegt.");
-    if (fahrzeuge.length > 1) log(`Fahrzeug: ${fahrzeuge[0].name}`);
-    return fahrzeuge[0].id;
+    const fahrt = await antwort.json();
+    sitzungId = fahrt.sitzung_id;
+    log(`Aufzeichnung ${fahrt.fahrt_id} läuft (Sitzung ${fahrt.sitzung_id}).`);
+    losStand(`Aufzeichnung läuft – Fahrt ${fahrt.fahrt_id}`, "gut");
+    return fahrt;
+  }
+
+  /* Welches Fahrzeug - gefragt, nicht geraten.
+   *
+   * Hier stand `fahrzeuge[0]`. Die Liste kommt nach ID sortiert, und die
+   * erste ist das beim ersten Start angelegte "Allgemeine E-Auto" - nicht
+   * das, in dem man sitzt. Die Aufzeichnung wäre dem falschen Fahrzeug
+   * zugeschrieben worden, und schlimmer: Die Kalibrierung hätte den
+   * Korrekturfaktor eines Autos verstellt, mit dem niemand gefahren ist.
+   *
+   * Die Wahl bleibt im Browser stehen. Wer im Auto sitzt, will sie einmal
+   * treffen und nie wieder. */
+  async function fahrzeugeLaden() {
+    const auswahl = el("fahrzeug-wahl-obd");
+    if (!auswahl) return;
+    try {
+      const antwort = await fetch("/api/fahrzeuge",
+                                  { headers: { "X-Token": joltToken() } });
+      if (!antwort.ok) throw new Error(`HTTP ${antwort.status}`);
+      const fahrzeuge = await antwort.json();
+      let gemerkt = null;
+      try { gemerkt = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
+      auswahl.innerHTML = fahrzeuge
+        .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+      if (gemerkt && fahrzeuge.some((f) => String(f.id) === gemerkt)) {
+        auswahl.value = gemerkt;
+      }
+      auswahl.addEventListener("change", () => {
+        try { localStorage.setItem("jolt-obd-fahrzeug", auswahl.value); }
+        catch (e) {}
+      });
+    } catch (fehler) {
+      log("Fahrzeugliste: " + fehler.message
+          + " - erst in jolt anmelden, dann hier neu laden.");
+    }
+  }
+
+  function fahrzeugId() {
+    const auswahl = el("fahrzeug-wahl-obd");
+    if (!auswahl || !auswahl.value) {
+      throw new Error("Kein Fahrzeug gewählt - erst in jolt anmelden, "
+                      + "dann hier neu laden.");
+    }
+    return Number(auswahl.value);
   }
 
   /* ---------- Aufzeichnung ---------- */
@@ -228,6 +311,47 @@
     if (!wo) return null;
 
     if (typeof wo.hoehe_m === "number") roh.hoehe_m = Math.round(wo.hoehe_m);
+
+    /* Automatik: warten, bis das Auto wirklich fährt.
+     *
+     * Gemessen wird am Tempo des Fahrzeugs, nicht am GPS - das Auto weiss
+     * es genauer und liefert es ohnehin mit. Fehlt der Wert, gilt das GPS
+     * als Rückfall; fehlt auch das, wird nicht gewartet, sondern gleich
+     * aufgezeichnet. Eine Automatik, die mangels Messwert gar nichts tut,
+     * wäre die schlechteste Sorte Automatik.
+     *
+     * Zwei Runden hintereinander, damit ein einzelner Ausreisser keine
+     * Fahrt anlegt - und keine Fahrt entsteht, während das Auto auf dem Hof
+     * rangiert. */
+    if (!sitzungId && el("automatik").checked && !el("token").value.trim()) {
+      const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh
+        : (typeof wo.tempo_kmh === "number" && !Number.isNaN(wo.tempo_kmh)
+           ? wo.tempo_kmh : null);
+      if (tempo !== null && tempo < FAEHRT_AB_KMH) {
+        bewegt = 0;
+        return { soc, roh, wartet: true,
+                 daten: { grund: `steht (${Math.round(tempo)} km/h)` } };
+      }
+      bewegt += 1;
+      if (tempo !== null && bewegt < FAEHRT_RUNDEN) {
+        return { soc, roh, wartet: true,
+                 daten: { grund: `fährt an (${Math.round(tempo)} km/h)` } };
+      }
+      log(`Bewegung erkannt${tempo === null ? " (kein Tempo messbar)"
+                                            : ` (${Math.round(tempo)} km/h)`}`
+          + " - Fahrt wird angelegt.");
+      try {
+        await fahrtAnlegen(soc);
+      } catch (fehler) {
+        // Nicht aufgeben: Die nächste Runde versucht es erneut. Ein
+        // Funkloch beim Losfahren ist der Normalfall, nicht die Ausnahme.
+        log("Fahrt anlegen: " + fehler.message + " - nächste Runde erneut");
+        bewegt = 0;
+        return { soc, roh, wartet: true,
+                 daten: { grund: "jolt nicht erreichbar" } };
+      }
+    }
+
     const nutzlast = {
       lat: wo.lat, lon: wo.lon,
       soc: Math.round(soc.hmi * 10) / 10,
@@ -268,7 +392,16 @@
       const beginn = Date.now();
       try {
         const ergebnis = await eineRunde();
-        if (ergebnis) {
+        if (ergebnis && ergebnis.wartet) {
+          // Im Wartezustand wird gemessen, aber nichts gemeldet. Angezeigt
+          // wird trotzdem, was gelesen wurde - sonst sähe die Seite aus,
+          // als täte sie nichts.
+          kacheln([
+            ["Ladestand", Math.round(ergebnis.soc.hmi * 10) / 10 + " %"],
+            ["Zustand", "wartet auf Fahrt"],
+          ]);
+          stand2("Bereit – " + (ergebnis.daten.grund || "wartet"), "gut");
+        } else if (ergebnis) {
           const { soc, roh, daten } = ergebnis;
           letzterSoc = Math.round(soc.hmi * 10) / 10;
           el("soc-wert").textContent = letzterSoc + " %";
@@ -297,7 +430,6 @@
         // wieder, und eine abgebrochene Aufzeichnung merkt man erst hinterher.
         stand2("Aussetzer: " + fehler.message, "schlecht");
         log("Runde übersprungen: " + fehler.message);
-              // Adresse neu setzen, sicher ist sicher
       }
       const rest = Number(el("takt").value) * 1000 - (Date.now() - beginn);
       await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
@@ -374,8 +506,15 @@
         // ungenau ist (sie streut um zehn bis zwanzig Meter). Sie kostet
         // nichts und ist der Rückfall, wenn beim Abschliessen keine
         // Kartendaten zu bekommen sind.
+        // `speed` kommt in m/s und ist oft null (kalter Fix, Standlauf).
+        // Ohne diese Umrechnung war der GPS-Rueckfall der Bewegungserkennung
+        // weiter unten toter Code: `wo.tempo_kmh` gab es schlicht nicht, und
+        // ohne Tempo vom Auto legte die Automatik die Fahrt sofort an -
+        // mitsamt dem Parkplatz davor.
         (p) => erfuellen({ lat: p.coords.latitude, lon: p.coords.longitude,
-                           hoehe_m: p.coords.altitude }),
+                           hoehe_m: p.coords.altitude,
+                           tempo_kmh: typeof p.coords.speed === "number"
+                             ? p.coords.speed * 3.6 : null }),
         (f) => ablehnen(new Error("Standort: " + f.message)),
         { enableHighAccuracy: true, timeout: 10000 });
     });
@@ -449,5 +588,6 @@
           + "von Hand kopieren.");
     }
   });
-  log("Bereit. Dongle einstecken, Zündung an, dann „Dongle suchen“.");
+  fahrzeugeLaden();
+  log("Bereit. Dongle einstecken, Zündung an, dann „Fahrt starten“.");
 })();

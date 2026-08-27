@@ -1,0 +1,20 @@
+{
+  "name": "jolt Aufzeichnung",
+  "short_name": "Aufzeichnen",
+  "description": "Liest den Ladestand aus dem Auto und zeichnet die Fahrt auf.",
+  "start_url": "/obd",
+  "scope": "/obd",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

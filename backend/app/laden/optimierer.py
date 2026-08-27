@@ -802,7 +802,17 @@ class _Graph:
                 zeit = tab.zeit(ankunft, d)
                 if zeit == math.inf:
                     break
-                gesamt = zeit_vor + zeit
+                # Die Kosten müssen hier genauso zählen wie in der Suche.
+                # Ohne sie minimierte die Nachoptimierung reine Zeit - und
+                # weil sie *nach* dem Dijkstra läuft und dessen Lademengen
+                # überschreibt, verschob sie Energie von der billigen Säule
+                # zur teuren, sobald das ein paar Sekunden sparte. Sie machte
+                # damit still zunichte, was Schritt 3 an Kostenoptimierung
+                # gerade geleistet hatte.
+                kosten_min = ((d - ankunft) / 100.0 * self.fz.akku_netto_kwh
+                              * self.preis_fuer(self.optionen[knoten - 1])
+                              * self.kosten_gewicht)
+                gesamt = zeit_vor + zeit + kosten_min
                 vorhanden = stufe.get(d)
                 if vorhanden is None or gesamt < vorhanden[0] - _EPS:
                     stufe[d] = (gesamt, herkunft)

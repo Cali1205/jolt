@@ -165,7 +165,16 @@ window.joltLive = (function () {
       K.wertKachel("Noch", K.zahl(z.rest_km) + " km"),
     ].join("");
 
-    if (z.ist_soc !== null && z.ist_soc !== undefined) {
+    /* Jeder Messpunkt kommt **zweimal** hier an: einmal als Antwort auf den
+     * eigenen POST, einmal über den WebSocket, der ihn an alle Zuschauer
+     * zurückspiegelt - und der eigene Browser ist einer davon. Ohne diese
+     * Prüfung stünde jeder Punkt doppelt im Verlauf und in der Spur; über
+     * eine Langstrecke wären das tausend Einträge zu viel. */
+    const vorheriger = verlauf[verlauf.length - 1];
+    const istNeu = z.ist_soc !== null && z.ist_soc !== undefined
+      && !(vorheriger && vorheriger.km === (z.km_auf_route || 0)
+           && vorheriger.soc === z.ist_soc);
+    if (istNeu) {
       verlauf.push({ km: z.km_auf_route || 0, soc: z.ist_soc,
                      gemeldet: z.soc_gemeldet !== false });
     }
@@ -196,7 +205,11 @@ window.joltLive = (function () {
       const marker = [{ lat: z_lat(z), lon: z_lon(z), typ: "auto", text: "hier" }];
       // Bei einer Aufzeichnung ist die gefahrene Spur das, was es zu sehen
       // gibt: Sie wächst mit und zeigt, dass wirklich mitgeschrieben wird.
-      spur.push([z_lon(z), z_lat(z)]);
+      // Dieselbe Doppelung wie beim Verlauf - siehe oben.
+      const zuletzt = spur[spur.length - 1];
+      if (!zuletzt || zuletzt[0] !== z_lon(z) || zuletzt[1] !== z_lat(z)) {
+        spur.push([z_lon(z), z_lat(z)]);
+      }
       if (!fahrt) {
         window.joltKarte.routeSetzen(spur);
         // Nur beim ersten Punkt zentrieren - danach würde die Karte bei
@@ -256,6 +269,19 @@ window.joltLive = (function () {
     kasten.className = art;
   }
 
+  /* Luftlinie zwischen zwei [lon, lat] in Kilometern. Für eine gefahrene
+   * Spur mit Punkten alle dreissig Sekunden ist der Unterschied zur
+   * Strassenlänge vernachlässigbar - und für die Achse einer Kurve zählt
+   * ohnehin nur, dass sie monoton wächst. */
+  function abstandKm(a, b) {
+    if (!a || !b) return 0;
+    const R = 6371, r = Math.PI / 180;
+    const dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
   /* ---------- Der Verlauf ---------- */
 
   /* Soll und Ist über die Strecke, in einem Bild.
@@ -289,6 +315,23 @@ window.joltLive = (function () {
 
     // Der Massstab richtet sich nach dem, was es gibt: mit Plan nach der
     // ganzen Strecke, ohne Plan nach dem, was schon gefahren wurde.
+    /* Ohne Plan gibt es kein `km_auf_route` - es kommt aus der Projektion
+     * auf die Route, und eine Aufzeichnung hat keine. Es steht deshalb
+     * für **jeden** Punkt auf null, und die Kurve fiel zu einem senkrechten
+     * Strich am linken Rand zusammen. Ausgerechnet dort, wo sie das
+     * Einzige ist, was es zu sehen gibt.
+     *
+     * Gemessen wird dann entlang der gefahrenen Spur: Für Punkt i die
+     * Summe der Abstände bis dorthin. Das ist die Strecke, die wirklich
+     * zurückgelegt wurde, und damit die richtige Achse. */
+    const eigeneKm = !profil.length;
+    if (eigeneKm) {
+      let summe = 0;
+      for (let i = 0; i < verlauf.length; i++) {
+        if (i > 0) summe += abstandKm(spur[i - 1], spur[i]);
+        verlauf[i].km = summe;
+      }
+    }
     const maxKm = profil.length
       ? (profil[profil.length - 1].km || 1)
       : Math.max(1, ...verlauf.map((v) => v.km));
@@ -790,6 +833,9 @@ window.joltLive = (function () {
       ergebnis = await K.api(`/api/live/${K.zustand.sitzungId}/ende`,
                              { method: "POST" });
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
+    // Die Fahrten-Ansicht hat die Liste zwischengespeichert; eine gerade
+    // beendete Fahrt gehört hinein.
+    if (window.joltFahrten) window.joltFahrten.veraltet();
     positionAufgeben();
     dongle = false;
     spur = [];

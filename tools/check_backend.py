@@ -721,8 +721,8 @@ def main() -> int:
     # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
     # wirkt nicht" und "die Änderung ist noch gar nicht da".
     obd = client.get("/obd")
-    pruefe(obd.status_code == 200 and b"OBD2" in obd.content,
-           "die OBD2-Diagnoseseite wird unter /obd ausgeliefert",
+    pruefe(obd.status_code == 200 and b"aufzeichnen" in obd.content.lower(),
+           "die Aufzeichnungsseite wird unter /obd ausgeliefert",
            f"HTTP {obd.status_code}")
     pruefe("no-cache" in obd.headers.get("Cache-Control", ""),
            "und zwar ohne Cache - sonst hängt das Telefon auf einer alten "
@@ -732,6 +732,19 @@ def main() -> int:
            "die Verweise auf Skript und Stylesheet tragen eine Version - "
            "sonst zieht eine frische Seite altes JavaScript nach",
            str([z for z in obd.content.split() if b"obd." in z][:3]))
+    # Ein eigenes Manifest, damit die Seite als Symbol auf dem
+    # Home-Bildschirm liegt. Ohne das ist Aufzeichnen ein Weg durch Bluefy
+    # und die Adresszeile - und damit etwas, das man sich für "nächstes Mal"
+    # aufhebt.
+    obd_manifest = client.get("/manifest-obd.json")
+    pruefe(obd_manifest.status_code == 200
+           and obd_manifest.json().get("start_url") == "/obd",
+           "und hat ein eigenes Manifest, das direkt auf /obd startet",
+           f"HTTP {obd_manifest.status_code}")
+    pruefe(b"/manifest-obd.json" in obd.content,
+           "auf das die Seite auch verweist - ein Manifest, das niemand "
+           "verlinkt, legt kein Symbol an")
+
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")
