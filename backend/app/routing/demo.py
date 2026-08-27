@@ -67,6 +67,14 @@ class DemoRouting:
         return Route(punkte=punkte, tempo_ms=tempo, strecke_m=strecke,
                      fahrzeit_s=fahrzeit)
 
+    def hoehen(self, punkte: list) -> list | None:
+        """Das Demo-Routing erfindet Routen, aber keine Höhen.
+
+        Eine erfundene Höhe wäre hier schädlicher als gar keine: Sie sähe
+        aus wie eine Messung und ginge in den Korrekturfaktor ein.
+        """
+        return None
+
     def suchen(self, text: str, land: str = "") -> list[Ort]:
         schluessel = (text or "").strip().lower()
         for name, (lat, lon) in ORTE.items():

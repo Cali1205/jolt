@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from .. import deps, models, push
 from ..database import SessionLocal, get_db
 from ..energie import kalibrierung
-from ..live import kanal, quellen, simulator, umplanung
+from ..live import aufzeichnung, kanal, quellen, simulator, umplanung
 from ..live import sitzung as live_sitzung
 
 log = logging.getLogger("uvicorn.error")
@@ -36,6 +36,9 @@ class Messpunkt(BaseModel):
     soc: float | None = Field(default=None, ge=0, le=100)
     tempo_kmh: float | None = None
     aussentemp_c: float | None = None
+    # Alles Weitere, was die Quelle liefert - wird nur aufbewahrt, nicht
+    # verrechnet. Siehe models.LivePunkt.rohwerte.
+    rohwerte: dict | None = None
 
 
 class LoggerMeldung(BaseModel):
@@ -66,7 +69,8 @@ async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
     """Einen Messpunkt einsortieren und alle unterrichten, die es angeht."""
     zustand = live_sitzung.messpunkt_aufnehmen(
         db, sitzung, punkt.lat, punkt.lon, punkt.soc,
-        punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit)
+        punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit,
+        rohwerte=punkt.rohwerte)
 
     nachricht = {"typ": "zustand", "simuliert": False,
                  **live_sitzung.zustand_als_dict(zustand)}
@@ -88,6 +92,10 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
                                             gt=0, le=60),
             stopp_fixkosten_min: float = Query(
                 umplanung.VORGABEN["stopp_fixkosten_min"], ge=0, le=30),
+            ladepark_bonus_min: float = Query(
+                umplanung.VORGABEN["ladepark_bonus_min"], ge=0, le=15),
+            zeitwert_eur_h: float = Query(
+                umplanung.VORGABEN["zeitwert_eur_h"], ge=0, le=200),
             db: Session = Depends(get_db)):
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
@@ -108,7 +116,9 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     # Suchparameter bleiben für die ganze Fahrt dieselben.
     parameter = {"radius_km": radius_km, "min_kw": min_kw,
                  "steckertyp": steckertyp, "umweg_grenze_min": umweg_grenze_min,
-                 "stopp_fixkosten_min": stopp_fixkosten_min}
+                 "stopp_fixkosten_min": stopp_fixkosten_min,
+                 "ladepark_bonus_min": ladepark_bonus_min,
+                 "zeitwert_eur_h": zeitwert_eur_h}
     if fahrt.energieprofil:
         try:
             sitzung.plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc,
@@ -139,7 +149,58 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
         raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
     return await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
         lat=messpunkt.lat, lon=messpunkt.lon, soc=messpunkt.soc,
-        tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c))
+        tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c,
+        rohwerte=messpunkt.rohwerte))
+
+
+class Aufzeichnungsstart(BaseModel):
+    fahrzeug_id: int
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    soc: float | None = Field(default=None, ge=0, le=100)
+    name: str = ""
+
+
+@router.post("/aufzeichnung", dependencies=[Depends(deps.aktuelle_sitzung)])
+def aufzeichnung_starten(start: Aufzeichnungsstart,
+                         db: Session = Depends(get_db)):
+    """Eine Fahrt aufzeichnen, ohne sie vorher zu planen.
+
+    Der Weg für den Fall, für den sich Planen nicht lohnt: eine bekannte
+    kurze Strecke, ein paarmal gefahren, um den Verbrauch des Fahrzeugs zu
+    lernen. Strecke, Höhenprofil und Prognose entstehen erst beim Beenden
+    aus den Messpunkten (`live/aufzeichnung.py`).
+
+    Start ist, wo das Gerät gerade steht - das Ziel ist zu diesem Zeitpunkt
+    noch unbekannt und wird zunächst gleichgesetzt. Beides wird beim
+    Abschliessen aus dem ersten und letzten Messpunkt berichtigt.
+    """
+    fahrzeug = db.get(models.Fahrzeug, start.fahrzeug_id)
+    if not fahrzeug:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+
+    for alt in (db.query(models.LiveSitzung)
+                .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
+                .filter(models.Fahrt.fahrzeug_id == fahrzeug.id,
+                        models.LiveSitzung.laeuft.is_(True)).all()):
+        alt.laeuft = False
+
+    beschriftung = (start.name or "").strip() or "Aufzeichnung"
+    fahrt = models.Fahrt(
+        fahrzeug_id=fahrzeug.id, aufzeichnung=True,
+        start_text=beschriftung, ziel_text="unterwegs",
+        start_lat=start.lat, start_lon=start.lon,
+        ziel_lat=start.lat, ziel_lon=start.lon,
+        start_soc=start.soc if start.soc is not None else 100.0,
+        geometrie=[], energieprofil=[])
+    db.add(fahrt)
+    db.flush()
+
+    sitzung = models.LiveSitzung(fahrt_id=fahrt.id)
+    db.add(sitzung)
+    db.commit()
+    return {"sitzung_id": sitzung.id, "fahrt_id": fahrt.id,
+            "aufzeichnung": True}
 
 
 @router.post("/melden")
@@ -230,8 +291,43 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
     sitzung.laeuft = False
     sitzung.beendet = datetime.utcnow()
 
+    # Eine Aufzeichnung wird hier erst zur Fahrt: Strecke, Höhenprofil und
+    # Prognose entstehen aus den Messpunkten. Das muss **vor** der
+    # Kalibrierung geschehen - die vergleicht Soll und Ist an den Punkten,
+    # und der Sollwert steht erst danach dort.
+    gebaut = None
+    if sitzung.fahrt is not None and sitzung.fahrt.aufzeichnung \
+            and not sitzung.fahrt.geometrie:
+        try:
+            gebaut = aufzeichnung.abschliessen(db, sitzung.fahrt, sitzung)
+        except Exception as fehler:      # noqa: BLE001
+            # Die Messpunkte sind gespeichert; eine gescheiterte
+            # Rekonstruktion darf sie nicht mitnehmen.
+            log.warning("Aufzeichnung nicht abzuschliessen: %s", fehler)
+            gebaut = {"ok": False, "grund": str(fehler)}
+
     gelernt = None
+    nicht_gelernt = None
     fahrzeug = sitzung.fahrt.fahrzeug if sitzung.fahrt else None
+
+    # Eine Fahrt mit Fahrradträger oder Dachbox lehrt nichts über das
+    # *Fahrzeug*. Der gemessene Mehrverbrauch enthält dann zwei Unbekannte -
+    # wie gut das Auto rechnet und wie teuer der Träger ist - und aus einer
+    # Messung lassen sich nicht zwei Zahlen bestimmen. Wer es trotzdem
+    # einrechnet, schreibt den Träger dauerhaft ins Fahrzeug und verbiegt
+    # damit jede Alltagsplanung. Genau davor warnt der Kommentar in
+    # kalibrierung.py schon.
+    #
+    # Die Fahrt bleibt aufgezeichnet; aus ihr liesse sich später umgekehrt
+    # der Zuschlag des Trägers bestimmen, wenn der Faktor des Fahrzeugs aus
+    # normalen Fahrten feststeht.
+    zuschlag = (sitzung.fahrt.luftwiderstand_faktor or 1.0) if sitzung.fahrt else 1.0
+    if fahrzeug and abs(zuschlag - 1.0) > 0.001:
+        nicht_gelernt = (f"Fahrt mit Luftwiderstands-Zuschlag ×{zuschlag:g} - "
+                         f"daraus lässt sich der Faktor des Fahrzeugs nicht "
+                         f"bestimmen.")
+        fahrzeug = None
+
     if fahrzeug:
         roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
         if roh is not None:
@@ -243,7 +339,9 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
                      fahrzeug.name, vorher, fahrzeug.korrekturfaktor, roh)
 
     db.commit()
-    return {"ok": True, "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
+    return {"ok": True, "aufzeichnung": gebaut,
+            "nicht_gelernt": nicht_gelernt,
+            "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
             # None heisst "diese Fahrt war nicht verwertbar" - zu kurz, oder
             # der Faktor lag ausserhalb der Plausibilitätsgrenzen.
             "gelernt": gelernt}

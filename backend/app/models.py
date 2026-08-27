@@ -101,6 +101,13 @@ class Fahrzeug(Base):
     # nur nicht zusätzlich begünstigt.
     bevorzugte_betreiber = Column(JSON, nullable=False, default=list)
 
+    # Was eine Kilowattstunde kostet - am Fahrzeug, weil sie am Vertrag
+    # hängt und nicht an der Säule. `strompreise` ist eine Liste von
+    # {muster, eur_kwh}, `strompreis_eur_kwh` gilt für alles Übrige.
+    # Siehe laden/preise.py.
+    strompreis_eur_kwh = Column(Float, nullable=False, default=0.59)
+    strompreise = Column(JSON)
+
     # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
     korrekturfaktor = Column(Float, nullable=False, default=1.0)
 
@@ -180,6 +187,21 @@ class Ladepunkt(Base):
     steckertypen = Column(String(120), default="")   # "CCS,Typ2"
 
     stand = Column(String(20), default="")
+
+    # Was einen Ladepunkt für eine konkrete Fahrt unbrauchbar macht, steht
+    # bei den Quellen in Worten - und wurde bisher weggeworfen. Siehe
+    # Migration 0013.
+    #
+    # NULL heisst bei den Wahrheitswerten **unbekannt** und nicht "nein":
+    # Für den grössten Teil der Datenbank gibt es die Angabe nicht, und wer
+    # Unbekanntes wie Ausgeschlossenes behandelt, verliert fast alles.
+    betriebsbereit = Column(Boolean)
+    zugang = Column(String(60))
+    mitgliedschaft_noetig = Column(Boolean)
+    # Freitext der Quelle: Kosten, Zugangshinweise, Kommentare. Wird
+    # zunächst nur aufgehoben - siehe Migration 0013.
+    hinweise = Column(JSON)
+
     aktualisiert = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
@@ -211,6 +233,18 @@ class Fahrt(Base):
     # bleiben Fahrten aus der Zeit vor diesem Feld korrekt lesbar, statt
     # rückwirkend eine Zuladung von 0 kg zu behaupten.
     zuladung_kg = Column(Float)
+
+    # Zuschlag auf den Luftwiderstand für alles, was aussen dranhängt -
+    # Fahrradträger, Dachbox. 1.0 heisst "nichts dran". Gehört zur Fahrt und
+    # nicht zum Fahrzeug: Dieselbe Strecke einmal mit und einmal ohne Träger
+    # sind zwei verschiedene Energiebilanzen, und der Träger ist im Sommer
+    # dran und im Winter nicht.
+    luftwiderstand_faktor = Column(Float, nullable=False, default=1.0)
+
+    # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
+    # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe
+    # live/aufzeichnung.py.
+    aufzeichnung = Column(Boolean, nullable=False, default=False)
 
     strecke_m = Column(Float, default=0.0)
     fahrzeit_s = Column(Float, default=0.0)
@@ -300,6 +334,12 @@ class LivePunkt(Base):
     # Strecke und Zeit mit dem übereinstimmt, was der Tacho sah.
     tempo_kmh = Column(Float)
     aussentemp_c = Column(Float)
+
+    # Alles, was die Quelle sonst noch mitgeschickt hat - Packspannung,
+    # Strom, Kilometerstand, der unverrechnete Rohwert des Ladestands.
+    # Gerechnet wird damit nicht; es liegt hier, damit sich später auswerten
+    # lässt, was sich sonst nur durch eine zweite Fahrt klären liesse.
+    rohwerte = Column(JSON)
 
     # Beim Eintreffen berechnet und mitgeschrieben, damit die Auswertung
     # später nicht die ganze Route erneut projizieren muss.

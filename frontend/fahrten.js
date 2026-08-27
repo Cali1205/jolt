@@ -21,49 +21,61 @@ window.joltFahrten = (function () {
                                        minute: "2-digit" });
   }
 
-  /* Die Zeile unter dem Titel: nur was tatsächlich bekannt ist.
+  const zahl = (wert, stellen) =>
+    (wert === null || wert === undefined) ? "" : K.zahl(wert, stellen);
+
+  /* Was eine Fahrt mit einer anderen unvergleichbar macht.
    *
-   * Ein "– °C" neben einem "– kg" ist keine Information, sondern Rauschen,
-   * und Fahrten aus der Zeit vor dem Zuladungsfeld haben diesen Wert
-   * zwangsläufig nicht. */
-  function merkmale(fahrt) {
-    const teile = [];
-    if (fahrt.verbrauch_kwh_100km !== null && fahrt.verbrauch_kwh_100km !== undefined) {
-      teile.push(K.zahl(fahrt.verbrauch_kwh_100km, 1) + " kWh/100 km");
+   * Eine Fahrt mit Fahrradträger ist keine Vergleichsgrösse für eine ohne,
+   * und ein blosser Entwurf keine für eine gefahrene Strecke. Ohne diese
+   * Marken vergleicht man Äpfel mit Birnen und wundert sich über den
+   * Verbrauch. */
+  function marken(fahrt) {
+    const m = [];
+    if (fahrt.aufzeichnung) m.push('<span class="marke auf">aufgez.</span>');
+    else if (fahrt.gefahren) m.push('<span class="marke gut">gefahren</span>');
+    else m.push('<span class="marke">Entwurf</span>');
+    if (fahrt.luftwiderstand_faktor && fahrt.luftwiderstand_faktor > 1.001) {
+      m.push(`<span class="marke warn">Anbau ×${K.zahl(fahrt.luftwiderstand_faktor, 2)}</span>`);
     }
-    if (fahrt.aussentemp_c !== null && fahrt.aussentemp_c !== undefined) {
-      teile.push(K.zahl(fahrt.aussentemp_c, 1) + " °C");
-    }
-    if (fahrt.tempo_faktor && Math.abs(fahrt.tempo_faktor - 1) > 0.001) {
-      teile.push("Tempo " + Math.round(fahrt.tempo_faktor * 100) + " %");
-    }
-    if (fahrt.zuladung_kg !== null && fahrt.zuladung_kg !== undefined) {
-      teile.push(K.zahl(fahrt.zuladung_kg, 0) + " kg zu");
-    }
-    return teile.join(" · ");
+    return m.join(" ");
   }
 
+  /* Eine Tabelle statt einer Liste aus punktgetrennten Sätzen.
+   *
+   * Der Zweck dieser Ansicht ist Vergleich - dieselbe Strecke im Januar und
+   * im Juni, einmal leer und einmal beladen. Vergleichen heisst Zahlen
+   * untereinander lesen, und dafür ist eine Tabelle das richtige Mittel:
+   * gleiche Spalte, gleiche Stelle, rechtsbündig und in gleichbreiten
+   * Ziffern. In einer Textzeile steht der Verbrauch mal an dritter, mal an
+   * fünfter Stelle - je nachdem, was sonst noch bekannt ist.
+   *
+   * Auf schmalen Schirmen fallen die hinteren Spalten weg (siehe CSS), und
+   * zwar in der Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist
+   * Datum, Strecke, Kilometer und Verbrauch. */
   function zeile(fahrt) {
-    const strecke = K.zahl(fahrt.strecke_km, 1) + " km";
-    const zeit = K.dauer(fahrt.fahrzeit_minuten);
     const soc = (fahrt.soc_am_ziel === null || fahrt.soc_am_ziel === undefined)
-      ? "" : ` · ${K.zahl(fahrt.start_soc, 0)} % → ${K.zahl(fahrt.soc_am_ziel, 0)} %`;
-    // Eine Fahrt ohne Live-Sitzung ist ein Entwurf: geplant, aber nie
-    // gefahren. Jede Routenberechnung legt bis zu drei davon an.
-    const marke = fahrt.gefahren
-      ? '<span class="kw">gefahren</span>' : "";
-
-    return `<li data-id="${fahrt.id}">
-      <div class="haupt">
+      ? "" : `${zahl(fahrt.start_soc, 0)}→${zahl(fahrt.soc_am_ziel, 0)} %`;
+    return `<tr data-id="${fahrt.id}">
+      <td class="datum">${datum(fahrt.angelegt)}</td>
+      <td class="strecke">
         <div class="titel">${fahrt.start || "?"} → ${fahrt.ziel || "?"}</div>
-        <div class="unter">${datum(fahrt.angelegt)} · ${fahrt.fahrzeug}
-          · ${strecke} · ${zeit}${soc}</div>
-        <div class="unter">${merkmale(fahrt)}</div>
-      </div>
-      ${marke}
-      <button class="tat neben" data-oeffnen="${fahrt.id}">Öffnen</button>
-      <button class="tat neben" data-loeschen="${fahrt.id}">×</button>
-    </li>`;
+        <div class="unter">${fahrt.fahrzeug || ""} ${marken(fahrt)}</div>
+      </td>
+      <td class="num">${zahl(fahrt.strecke_km, 0)}</td>
+      <td class="num weg-eng">${K.dauer(fahrt.fahrzeit_minuten)}</td>
+      <td class="num stark">${zahl(fahrt.verbrauch_kwh_100km, 1)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.kwh_gesamt, 0)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.aussentemp_c, 0)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.zuladung_kg, 0)}</td>
+      <td class="num weg-schmal">${fahrt.tempo_faktor
+        ? Math.round(fahrt.tempo_faktor * 100) : ""}</td>
+      <td class="num weg-schmal">${soc}</td>
+      <td class="tat-spalte">
+        <button class="klein" data-oeffnen="${fahrt.id}">öffnen</button>
+        <button class="klein" data-loeschen="${fahrt.id}">×</button>
+      </td>
+    </tr>`;
   }
 
   async function laden() {
@@ -76,7 +88,25 @@ window.joltFahrten = (function () {
         halter.innerHTML = '<p class="leer">Noch keine Fahrt geplant.</p>';
         return;
       }
-      halter.innerHTML = `<ul class="liste">${fahrten.map(zeile).join("")}</ul>`;
+      halter.innerHTML = `
+        <div class="tabelle-halter">
+          <table class="fahrten">
+            <thead><tr>
+              <th class="datum">Datum</th>
+              <th>Strecke</th>
+              <th class="num">km</th>
+              <th class="num weg-eng">Zeit</th>
+              <th class="num">kWh/100</th>
+              <th class="num weg-schmal">kWh</th>
+              <th class="num weg-schmal">°C</th>
+              <th class="num weg-schmal">Zuladung</th>
+              <th class="num weg-schmal">Tempo %</th>
+              <th class="num weg-schmal">Ladestand</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${fahrten.map(zeile).join("")}</tbody>
+          </table>
+        </div>`;
       geladen = true;
     } catch (fehler) {
       halter.innerHTML = "";
@@ -107,7 +137,127 @@ window.joltFahrten = (function () {
     }
   }
 
+  /* Eine Aufzeichnung starten: Position holen, Fahrt anlegen, in die
+   * Live-Ansicht wechseln. Von da an ist es eine Live-Fahrt wie jede
+   * andere - nur ohne Plan, gegen den sie sich hält. Strecke und
+   * Energieprofil entstehen beim Beenden aus den Messpunkten. */
+  /* Eine Aufzeichnung starten - mit Dongle, wenn er zu haben ist.
+   *
+   * Die Reihenfolge ist nicht beliebig: `requestDevice` darf nur in
+   * unmittelbarer Folge einer Nutzergeste laufen. Wer vorher auf GPS oder
+   * eine API-Antwort wartet, hat die Geste verbraucht und bekommt ein
+   * `SecurityError` - deshalb steht der Dongle **zuerst**, noch vor allem
+   * anderen.
+   *
+   * Scheitert er, geht es ohne weiter. Das ist der ganze Sinn: In Safari
+   * gibt es Web Bluetooth nicht, im Auto steckt der Dongle vielleicht
+   * nicht, und in beiden Fällen ist eine Aufzeichnung mit von Hand
+   * gemeldetem Ladestand besser als keine.
+   */
+  async function aufzeichnungStarten() {
+    const knopf = document.getElementById("aufz-start");
+    const stand = (text) => {
+      const el = document.getElementById("aufz-stand");
+      if (el) el.textContent = text;
+    };
+    knopf.disabled = true;
+    try {
+      let mitDongle = false;
+      if (window.joltObd && window.joltObd.verfuegbar()) {
+        stand("Verbinde mit dem OBD2-Dongle …");
+        try {
+          window.joltObd.einrichten((t) => console.log("[obd]", t));
+          // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt
+          // worden, verbindet er ohne Berührung.
+          await window.joltObd.anschliessen();
+          if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
+            mitDongle = true;
+          }
+        } catch (fehler) {
+          // Kein Grund abzubrechen - nur einer, ohne Dongle weiterzumachen.
+          console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
+        }
+        if (!mitDongle) {
+          stand("Ohne Dongle – der Ladestand kommt von Hand.");
+        }
+      }
+
+      const wahl = document.getElementById("fahrzeug-wahl");
+      const id = wahl && wahl.value ? Number(wahl.value)
+        : ((K.zustand.fahrzeuge || [])[0] || {}).id;
+      if (!id) { K.melden("Erst ein Fahrzeug anlegen.", "fehler"); return; }
+
+      stand("Standort holen …");
+      const ort = await new Promise((erfuellen, ablehnen) => {
+        if (!navigator.geolocation) {
+          ablehnen(new Error("Dieses Gerät liefert keinen Standort."));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (p) => erfuellen(p.coords),
+          // Ohne Startposition gäbe es keinen ersten Punkt der Strecke.
+          (f) => ablehnen(new Error("Standort: " + f.message)),
+          { enableHighAccuracy: true, timeout: 10000 });
+      });
+
+      // Mit Dongle gleich den echten Startladestand mitgeben - besser als
+      // die 100 %, die der Server sonst annimmt.
+      let soc = null;
+      if (mitDongle) {
+        try {
+          const wert = window.joltObd.socAusAntwort(
+            await window.joltObd.befehl("22028C"));
+          if (wert) soc = Math.round(wert.hmi * 10) / 10;
+        } catch (fehler) { mitDongle = false; }
+      }
+
+      stand("Fahrt anlegen …");
+      const antwort = await K.api("/api/live/aufzeichnung", {
+        method: "POST",
+        body: { fahrzeug_id: id, lat: ort.latitude, lon: ort.longitude,
+                soc: soc,
+                name: document.getElementById("aufz-name").value },
+      });
+      K.zustand.sitzungId = antwort.sitzung_id;
+      window.joltApp.ansichtZeigen("live");
+      document.getElementById("live-leer").hidden = true;
+      document.getElementById("live-inhalt").hidden = false;
+      window.joltLive.verbinden(antwort.sitzung_id);
+      window.joltLive.positionVerfolgen();
+      if (mitDongle) {
+        window.joltLive.dongleNutzen();
+        K.melden("Aufzeichnung läuft, Ladestand kommt aus dem Auto.",
+                 "hinweis");
+      } else {
+        K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
+          + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
+      }
+      stand("");
+    } catch (fehler) {
+      K.melden("Aufzeichnung: " + fehler.message, "fehler");
+      stand("");
+    } finally {
+      knopf.disabled = false;
+    }
+  }
+
+  /* Beim Öffnen sagen, was dieser Browser kann - bevor jemand tippt und
+   * sich wundert, dass kein Geräte-Dialog kommt. */
+  function dongleHinweis() {
+    const el = document.getElementById("aufz-dongle-hinweis");
+    if (!el) return;
+    el.innerHTML = (window.joltObd && window.joltObd.verfuegbar())
+      ? "Dieser Browser kann Bluetooth – beim Starten wird versucht, den "
+        + "OBD2-Dongle zu verbinden. Klappt es nicht, läuft die Aufzeichnung "
+        + "trotzdem, dann mit dem Ladestand von Hand."
+      : "Dieser Browser kann kein Bluetooth, der Ladestand kommt also von "
+        + "Hand. Mit Dongle: dieselbe Adresse in <strong>Bluefy</strong> "
+        + "öffnen, dann geht es automatisch.";
+  }
+
   function einrichten() {
+    K.an("aufz-start", "click", aufzeichnungStarten);
+    dongleHinweis();
     const halter = document.getElementById("fahrten-liste");
     if (!halter) return;
     // Ein Zuhörer am Halter statt einer je Zeile: Die Liste wird nach jedem

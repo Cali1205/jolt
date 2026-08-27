@@ -103,6 +103,45 @@ window.joltFahrzeug = (function () {
     return zeile;
   }
 
+  /* ---------- Strompreise ---------- */
+
+  /* Dieselbe Bauart wie die Ladekurve: eine Zeile je Eintrag, frei zu
+   * ergänzen. Zwei bis drei Anbieter deckt jeder ab, der eine Ladekarte
+   * hat - mehr Bedienung braucht es nicht. */
+  function preisZeile(muster, eurKwh) {
+    const zeile = document.createElement("tr");
+    zeile.innerHTML = `
+      <td><input type="text" class="preis-muster" value="${muster || ""}"
+                 placeholder="Ionity"></td>
+      <td><input type="number" class="preis-wert" step="0.01" min="0" max="5"
+                 value="${eurKwh}"></td>
+      <td style="width:40px"><button type="button" class="preis-weg"
+          style="width:auto;padding:6px 10px">×</button></td>`;
+    zeile.querySelector(".preis-weg").addEventListener("click", () => zeile.remove());
+    return zeile;
+  }
+
+  function preiseFuellen(liste) {
+    const koerper = document.getElementById("preis-zeilen");
+    if (!koerper) return;
+    koerper.innerHTML = "<tr><th>Anbieter</th><th>€/kWh</th><th></th></tr>";
+    for (const eintrag of liste || []) {
+      koerper.appendChild(preisZeile(eintrag.muster, eintrag.eur_kwh));
+    }
+  }
+
+  function preiseLesen() {
+    const zeilen = document.querySelectorAll("#preis-zeilen tr");
+    const liste = [];
+    for (const zeile of zeilen) {
+      const muster = zeile.querySelector(".preis-muster");
+      const wert = zeile.querySelector(".preis-wert");
+      if (!muster || !wert || !muster.value.trim()) continue;
+      liste.push({ muster: muster.value.trim(), eur_kwh: Number(wert.value) });
+    }
+    return liste;
+  }
+
   function kurveFuellen(paare) {
     const koerper = document.getElementById("kurve-zeilen");
     koerper.innerHTML = `<tr><th>Ladestand %</th><th>Leistung kW</th><th></th></tr>`;
@@ -155,7 +194,12 @@ window.joltFahrzeug = (function () {
       return;
     }
     const fahrzeug = K.zustand.fahrzeuge.find((f) => String(f.id) === String(wahl));
-    if (fahrzeug) formularFuellen(fahrzeug);
+    if (fahrzeug) {
+      formularFuellen(fahrzeug);
+      preiseFuellen(fahrzeug.strompreise);
+      const standard = document.getElementById("standardpreis");
+      if (standard) standard.value = fahrzeug.strompreis_eur_kwh ?? 0.59;
+    }
     loggerZeigen(fahrzeug);
   }
 
@@ -235,6 +279,9 @@ window.joltFahrzeug = (function () {
   async function speichern() {
     const wahl = document.getElementById("fahrzeug-liste").value;
     const daten = formularLesen();
+    daten.strompreise = preiseLesen();
+    const standard = document.getElementById("standardpreis");
+    daten.strompreis_eur_kwh = standard ? Number(standard.value) : 0.59;
     if (!daten.name) { K.melden("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
 
     // Jeder Ladestand darf nur einmal vorkommen - die Datenbank erzwingt das,
@@ -273,6 +320,9 @@ window.joltFahrzeug = (function () {
     });
     K.an("kurve-zeile-neu", "click", () => {
       document.getElementById("kurve-zeilen").appendChild(kurveZeile(50, 100));
+    });
+    K.an("preis-zeile-neu", "click", () => {
+      document.getElementById("preis-zeilen").appendChild(preisZeile("", 0.39));
     });
     K.an("fahrzeug-speichern", "click", speichern);
     K.an("logger-neu", "click", loggerNeu);

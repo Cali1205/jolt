@@ -103,6 +103,12 @@ def suchen(db, punkte: list, radius_km: float = 8.0, min_kw: float = 50.0,
         abfrage = abfrage.filter(models.Ladepunkt.max_kw >= min_kw)
     if steckertyp:
         abfrage = abfrage.filter(models.Ladepunkt.steckertypen.contains(steckertyp))
+    # Was die Quelle ausdrücklich als ausser Betrieb meldet, gehört nicht in
+    # einen Plan. `isnot(False)` und nicht `is_(True)`: NULL heisst
+    # **unbekannt**, und das ist für den grössten Teil der Datenbank der
+    # Fall. Wer Unbekanntes wie Ausgeschlossenes behandelt, verliert fast
+    # alle Kandidaten und plant dann gar nicht mehr.
+    abfrage = abfrage.filter(models.Ladepunkt.betriebsbereit.isnot(False))
 
     kandidaten: list[Kandidat] = []
     for lp in abfrage.limit(hoechstens * 5).all():

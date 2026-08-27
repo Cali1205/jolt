@@ -104,6 +104,25 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+/* Die eine Zahl, die im Fahren zählt: Reicht es? Alles andere ist Beiwerk,
+   und Beiwerk gehört nicht in dieselbe Grösse wie die Antwort. */
+#live-antwort { text-align: center; padding: 6px 0 12px; }
+#live-antwort .antwort-zahl { font-size: 46px; font-weight: 700;
+  letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#live-antwort .antwort-text { font-size: 13px; color: var(--gedaempft);
+  margin-top: 2px; }
+#live-antwort.gut .antwort-zahl { color: var(--gut); }
+#live-antwort.warnung .antwort-zahl { color: var(--warnung); }
+#live-antwort.schlecht .antwort-zahl { color: var(--schlecht); }
+#live-verlauf { width: 100%; height: 150px; display: block; margin-top: 10px;
+  border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
+/* Der Kontextstreifen: eine Zeile Text statt sechs Kacheln. Was man nur
+   gelegentlich braucht, soll nicht so aussehen wie das, was man dauernd
+   braucht. */
+#live-auto-zeile { font-size: 13px; color: var(--gedaempft); margin-top: 10px;
+  line-height: 1.6; }
+#live-auto-zeile b { color: var(--text); font-weight: 600;
+  font-variant-numeric: tabular-nums; }
 /* Das Logger-Token wird genau einmal gezeigt und muss abgetippt oder kopiert
    werden - also umbrechend, auswählbar und in gleichbreiter Schrift, damit
    sich l und 1 unterscheiden lassen. */
@@ -119,6 +138,53 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .balken { height: 8px; background: #0c1116; border-radius: 99px; overflow: hidden;
   border: 1px solid var(--rand); margin-top: 6px; }
 .balken > i { display: block; height: 100%; background: var(--gut); }
+/* Die Fahrten-Historie. Ihr Zweck ist Vergleich, und Vergleichen heisst
+   Zahlen untereinander lesen - deshalb eine Tabelle mit rechtsbündigen,
+   gleichbreiten Ziffern statt punktgetrennter Sätze. */
+.tabelle-halter { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  margin: 0 -14px; padding: 0 14px; }
+table.fahrten { width: 100%; border-collapse: collapse; font-size: 13px;
+  white-space: nowrap; }
+table.fahrten th { text-align: left; font-weight: 600; font-size: 11px;
+  color: var(--gedaempft); text-transform: uppercase; letter-spacing: .04em;
+  padding: 0 8px 6px 0; border-bottom: 1px solid var(--rand); }
+table.fahrten td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--rand);
+  vertical-align: top; }
+table.fahrten tr:last-child td { border-bottom: none; }
+table.fahrten .num { text-align: right; font-variant-numeric: tabular-nums;
+  padding-right: 12px; }
+table.fahrten th.num { padding-right: 12px; }
+/* Der Verbrauch ist die Zahl, wegen der man die Tabelle aufschlägt. */
+table.fahrten .stark { color: var(--akzent); font-weight: 650; }
+/* Das Datum bleibt auch auf dem Telefon stehen: Es ist die Achse, an der
+   verglichen wird - dieselbe Strecke im Januar und im Juni. Es darf dafür
+   umbrechen. */
+table.fahrten .datum { color: var(--gedaempft); font-size: 12px;
+  white-space: normal; max-width: 92px; }
+table.fahrten .strecke { white-space: normal; min-width: 190px; }
+table.fahrten .titel { font-weight: 600; }
+table.fahrten .unter { font-size: 11px; color: var(--gedaempft); margin-top: 2px; }
+table.fahrten tr:hover td { background: #0c1116; }
+.marke { font-size: 10px; padding: 1px 6px; border-radius: 99px;
+  border: 1px solid var(--rand); color: var(--gedaempft); }
+.marke.gut { border-color: #235c3c; color: var(--gut); }
+.marke.auf { border-color: #56421a; color: var(--akzent); }
+.marke.warn { border-color: #5b441a; color: var(--warnung); }
+button.klein { background: transparent; border: 1px solid var(--rand);
+  color: var(--gedaempft); border-radius: 7px; padding: 4px 9px; font: inherit;
+  font-size: 12px; cursor: pointer; width: auto; }
+button.klein:hover { color: var(--text); border-color: var(--gedaempft); }
+table.fahrten .tat-spalte { white-space: nowrap; text-align: right; }
+/* Auf schmalen Schirmen fallen die hinteren Spalten weg - in der
+   Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist Datum,
+   Strecke, Kilometer und Verbrauch. */
+@media (max-width: 720px) {
+  table.fahrten .weg-schmal { display: none; }
+}
+@media (max-width: 430px) {
+  table.fahrten .weg-eng { display: none; }
+}
+
 table.kurve { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.kurve th, table.kurve td { padding: 4px; text-align: left; }
 table.kurve input { padding: 6px 8px; }
@@ -185,6 +251,17 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
+      <!-- Der Zuschlag gehört zur Fahrt und nicht zum Fahrzeug: Der Träger
+           ist im Sommer dran und im Winter nicht. Und ohne ihn landet sein
+           Verbrauch im Korrekturfaktor des Autos, der dauerhaft gilt. -->
+      <label for="anbau">Aussen am Auto</label>
+      <select id="anbau">
+        <option value="1.0" selected>nichts</option>
+        <option value="1.15">Fahrradträger, 2 Räder</option>
+        <option value="1.25">Fahrradträger, 4 Räder</option>
+        <option value="1.20">Dachbox</option>
+      </select>
+
       <label for="tempo">Tempo gegenüber der Routing-Annahme:
         <span id="tempo-wert">120</span> %</label>
       <input type="range" id="tempo" min="70" max="130" step="5" value="120">
@@ -223,15 +300,41 @@ table.kurve input { padding: 6px 8px; }
         <!-- Der Regler steht beim Ladeplan und nicht bei den Säulenfiltern:
              Er ändert nicht, welche Ladepunkte in Frage kommen, sondern wie
              viele Halte sich lohnen. -->
-        <label for="haltekosten">Aufwand je Halt
-          <span id="haltekosten-wert">5</span> min</label>
-        <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+        <div class="reihe">
+          <div>
+            <label for="haltekosten">Aufwand je Halt
+              <span id="haltekosten-wert">5</span> min</label>
+            <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+          </div>
+          <div>
+            <label for="ladepark">Grosser Ladepark zählt
+              <span id="ladepark-wert">4</span> min</label>
+            <input type="range" id="ladepark" min="0" max="12" step="1" value="4">
+          </div>
+        </div>
+        <label for="zeitwert">Deine Stunde ist
+          <span id="zeitwert-wert">30</span> € wert</label>
+        <input type="range" id="zeitwert" min="0" max="120" step="5" value="30">
+        <p class="leer" style="padding-top:4px">Damit wird aus Geld eine Zeit,
+          und beides lässt sich gegeneinander abwägen. Bei <strong>30 €</strong>
+          wiegt ein Euro zwei Minuten: Zehn Minuten länger laden lohnt sich,
+          wenn es fünf Euro spart. Höher gestellt zählt Zeit mehr, niedriger
+          der Preis. Bei <strong>0</strong> sind Kosten gleichgültig und jolt
+          rechnet rein auf Zeit – so war es bisher.
+          <br>Die Preise pflegst du beim Fahrzeug.</p>
         <p class="leer" style="padding-top:4px">Einparken, Kabel, freischalten –
           alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
           jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
           <strong>0</strong> ist Anhalten gratis, und es entstehen viele
           Kurzstopps im steilen Teil der Ladekurve – rechnerisch schnell,
           praktisch nicht fahrbar.</p>
+        <p class="leer" style="padding-top:0">Der zweite Regler sagt, was ein
+          <strong>grosser Ladepark</strong> wert ist. Wo dreissig Säulen
+          stehen, ist eher eine frei – das ist die einzige belastbare Aussage
+          über Belegung, solange es keine echten Verfügbarkeitsdaten gibt.
+          Die Gutschrift wiegt Umweg und Aufwand des Halts auf, nie die
+          Ladezeit. Auf <strong>0</strong> entscheidet allein die Uhr.
+          Bevorzugte Anbieter stellst du beim Fahrzeug ein.</p>
       </div>
 
       <div class="karte-block">
@@ -261,8 +364,33 @@ table.kurve input { padding: 6px 8px; }
 
     <div id="live-inhalt" hidden>
       <div class="karte-block">
-        <div class="werte" id="live-werte"></div>
+        <!-- Die Antwort zuerst, gross: nicht der Ladestand (der ist eine
+             Eingabe), sondern ob es reicht. -->
+        <div id="live-antwort">
+          <div class="antwort-zahl" id="live-antwort-zahl">–</div>
+          <div class="antwort-text" id="live-antwort-text">warte auf Messung</div>
+        </div>
         <div class="balken"><i id="live-balken" style="width:0%"></i></div>
+
+        <!-- Der Verlauf. Eine Momentaufnahme sagt nicht, ob es besser oder
+             schlechter wird; Soll und Ist nebeneinander sagt es sofort. -->
+        <canvas id="live-verlauf"></canvas>
+        <div class="karte-fuss">
+          <span id="live-verlauf-fuss">Soll und Ist über die Strecke</span>
+          <span id="live-hinweis-kurz"></span>
+        </div>
+
+        <div class="werte" id="live-werte"></div>
+        <!-- Nur sichtbar, wenn ein OBD2-Dongle mitliest. Getrennt von den
+             Kacheln darüber, weil es zwei verschiedene Dinge sind: oben,
+             was jolt rechnet, hier, was das Auto misst. -->
+        <div id="live-auto" hidden>
+          <div class="karte-fuss" style="margin:12px 0 6px">
+            <span>Aus dem Auto</span>
+            <span id="live-auto-stand"></span>
+          </div>
+          <div class="werte" id="live-auto-werte"></div>
+        </div>
         <div class="karte-fuss">
           <span id="live-hinweis">–</span>
           <span id="live-verbindung">getrennt</span>
@@ -331,7 +459,23 @@ table.kurve input { padding: 6px 8px; }
   <!-- ------------------------------- Fahrten -->
   <section id="ansicht-fahrten" hidden>
     <div class="karte-block">
-      <h2 style="margin-top:0">Vergangene Fahrten</h2>
+      <h2 style="margin-top:0">Fahrt aufzeichnen</h2>
+      <p class="leer" style="padding-top:0">Ohne Route und ohne Planung
+        losfahren – jolt schreibt mit und baut die Strecke hinterher aus den
+        Messpunkten, samt Höhenprofil aus Kartendaten. Gedacht für bekannte
+        kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
+        den echten Verbrauch des Autos zu lernen.</p>
+
+      <!-- Ein Knopf für beide Fälle. Ob der Dongle mitspielt, entscheidet
+           sich beim Antippen: In Bluefy gibt es Web Bluetooth, in Safari
+           nicht. Zwei Knöpfe dafür wären eine Frage an den Nutzer, die
+           der Browser schon beantwortet hat. -->
+      <p class="leer" style="padding-top:0" id="aufz-dongle-hinweis"></p>
+      <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
+      <button class="tat" id="aufz-start">Aufzeichnung starten</button>
+      <p class="leer" id="aufz-stand"></p>
+
+      <h2>Vergangene Fahrten</h2>
       <div id="fahrten-liste"></div>
     </div>
   </section>
@@ -351,6 +495,17 @@ table.kurve input { padding: 6px 8px; }
       <button class="tat neben" id="kurve-zeile-neu">Stützstelle hinzufügen</button>
       <button class="tat" id="fahrzeug-speichern">Speichern</button>
 
+      <h2>Strompreise</h2>
+      <p class="leer" style="padding-top:0">Was du je Kilowattstunde zahlst.
+        jolt kann das nicht wissen – der Preis hängt an deinem Vertrag, nicht
+        an der Säule: Dieselbe Ionity-Säule kostet mit Abo etwa die Hälfte
+        von dem, was sie ad hoc kostet. Der Name wird als Teil verglichen,
+        „Ionity“ trifft also „Ionity GmbH“.</p>
+      <label for="standardpreis">Standardpreis (alles Übrige) in €/kWh</label>
+      <input type="number" id="standardpreis" min="0" max="5" step="0.01" value="0.59">
+      <table class="kurve"><tbody id="preis-zeilen"></tbody></table>
+      <button class="tat neben" id="preis-zeile-neu">Anbieter hinzufügen</button>
+
       <h2>Logger im Auto</h2>
       <p class="leer" style="padding-top:0">Ein Gerät, das fest im Auto sitzt –
         OBD2-Dongle, Kurzbefehl, Kleinstrechner – kann die Sitzung einer Fahrt
@@ -362,7 +517,7 @@ table.kurve input { padding: 6px 8px; }
       <button class="tat neben" id="logger-neu">Token erzeugen</button>
       <button class="tat neben" id="logger-weg">Logger abmelden</button>
       <p class="leer">Zum Ausprobieren, ob der OBD2-Dongle überhaupt antwortet,
-        gibt es <a href="/static/obd.html">die Diagnoseseite</a>. Sie braucht
+        gibt es <a href="/obd">die Diagnoseseite</a>. Sie braucht
         einen Browser mit Web Bluetooth – auf dem iPhone <strong>Bluefy</strong>,
         auf Android Chrome.</p>
     </div>
@@ -379,6 +534,7 @@ table.kurve input { padding: 6px 8px; }
   </div>
 </main>
 
+<script src="/static/obd-kern.js"></script>
 <script src="/static/core.js"></script>
 <script src="/static/karte.js"></script>
 <script src="/static/route.js"></script>

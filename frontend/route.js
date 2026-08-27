@@ -83,6 +83,7 @@ window.joltRoute = (function () {
                 text: gewaehlt.ziel.name },
         start_soc: Number(document.getElementById("start-soc").value),
         tempo_faktor: Number(document.getElementById("tempo").value) / 100,
+        luftwiderstand_faktor: Number(document.getElementById("anbau").value),
         // Der Regler steht ganz links auf einem negativen Wert - das ist
         // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
@@ -158,6 +159,23 @@ window.joltRoute = (function () {
       });
       liste.appendChild(knopf);
     }
+  }
+
+  /* Zugangsbeschränkungen sichtbar machen.
+   *
+   * Ein Ladepunkt kann tadellos aussehen - 300 kW, acht Säulen, kein Umweg -
+   * und trotzdem unbrauchbar sein, weil er hinter einer Schranke steht oder
+   * nur Hotelgästen offensteht. jolt kennt diese Angaben seit dem Umbau des
+   * OCM-Imports; sie zu haben und nicht zu zeigen wäre die schlechteste
+   * aller Möglichkeiten. */
+  function zugangHinweis(k) {
+    const teile = [];
+    if (k.zugang && !/^public$/i.test(k.zugang)) teile.push(entschaerfen(k.zugang));
+    if (k.mitgliedschaft_noetig) teile.push("Mitgliedschaft nötig");
+    const h = k.hinweise || {};
+    if (h.kosten) teile.push(entschaerfen(String(h.kosten).slice(0, 40)));
+    if (h.zugang) teile.push(entschaerfen(String(h.zugang).slice(0, 60)));
+    return teile.length ? ` · <span style="color:var(--warnung)">${teile.join(" · ")}</span>` : "";
   }
 
   /* ---------- Ergebnis ---------- */
@@ -316,9 +334,11 @@ window.joltRoute = (function () {
   /* Was ein Halt kostet, bevor geladen wird - der Regler in der
    * Ladeplan-Ansicht. Fehlt er (alte Oberfläche im Cache), gilt die Vorgabe
    * des Servers, statt eine Null zu schicken und den Plan zu zersplittern. */
-  function haltekosten() {
-    const regler = document.getElementById("haltekosten");
-    return regler ? regler.value : 5;
+  function haltekosten() { return regler("haltekosten", 5); }
+
+  function regler(id, vorgabe) {
+    const el = document.getElementById(id);
+    return el ? el.value : vorgabe;
   }
 
   async function ladeplanLaden() {
@@ -333,7 +353,9 @@ window.joltRoute = (function () {
       const plan = await K.api(`/api/fahrten/${fahrt.fahrt_id}/ladeplan`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
-        + `&stopp_fixkosten_min=${haltekosten()}`,
+        + `&stopp_fixkosten_min=${haltekosten()}`
+        + `&ladepark_bonus_min=${regler("ladepark", 4)}`
+        + `&zeitwert_eur_h=${regler("zeitwert", 30)}`,
         { method: "POST" });
       letzterPlan = plan;
       zeichnePlan(plan, liste, werte);
@@ -358,6 +380,9 @@ window.joltRoute = (function () {
       // Sichtbar machen, was die blosse Anzahl der Halte kostet - sonst ist
       // der Regler daneben eine Zahl ohne Wirkung, die man sehen kann.
       K.wertKachel("davon Halte", K.dauer(plan.haltekosten_minuten)),
+      // Der zweite Massstab neben der Zeit. Ohne ihn wäre der Zeitwert-Regler
+      // eine Einstellung, deren Wirkung man nicht sieht.
+      K.wertKachel("Stromkosten", K.zahl(plan.kosten_eur, 2) + " €"),
       K.wertKachel("Stopps", String(plan.anzahl_stopps)),
       K.wertKachel("Am Ziel", K.zahl(plan.soc_am_ziel) + " %",
                    plan.soc_am_ziel >= 15 ? "gut" : ""),
@@ -399,7 +424,8 @@ window.joltRoute = (function () {
             ${K.dauer(s.ankunft_minute)} · ${K.zahl(s.ankunft_soc)} %
             → ${K.zahl(s.abfahrt_soc)} % · ${K.zahl(s.kwh_geladen, 1)} kWh
             · Umweg ${K.zahl(s.umweg_minuten, 1)} min
-            · ${s.anzahl_punkte} Ladepunkte</div>
+            · ${s.anzahl_punkte} Ladepunkte${
+              s.kosten_eur ? " · " + K.zahl(s.kosten_eur, 2) + " €" : ""}</div>
           ${ausweich}
         </div>
         <div class="kw">${K.dauer(s.ladezeit_minuten)}</div>`;
@@ -424,7 +450,8 @@ window.joltRoute = (function () {
         <div class="haupt">
           <div class="titel">${entschaerfen(k.name || k.betreiber || "Ladepunkt")}</div>
           <div class="unter">km ${K.zahl(k.km_auf_route)} · Umweg
-            ${K.zahl(k.umweg_minuten, 1)} min · ${k.anzahl_punkte} Ladepunkte
+            ${K.zahl(k.umweg_minuten, 1)} min · ${k.anzahl_punkte} Ladepunkte${
+              zugangHinweis(k)}
             · ${entschaerfen(k.steckertypen)}${belegt}</div>
         </div>
         <div class="kw">${K.zahl(k.max_kw)} kW</div>`;
@@ -508,10 +535,15 @@ window.joltRoute = (function () {
     K.reglerKoppeln("radius", "radius-wert", neuLaden);
     // Der Aufwand je Halt ändert nur die Planung, nicht die Kandidaten -
     // deshalb ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
-    K.reglerKoppeln("haltekosten", "haltekosten-wert", () => {
+    // Beide Regler ändern nur die Planung, nicht die Kandidaten - deshalb
+    // ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
+    const planNachziehen = () => {
       clearTimeout(wartenPlan);
       wartenPlan = setTimeout(ladeplanLaden, 350);
-    });
+    };
+    K.reglerKoppeln("haltekosten", "haltekosten-wert", planNachziehen);
+    K.reglerKoppeln("ladepark", "ladepark-wert", planNachziehen);
+    K.reglerKoppeln("zeitwert", "zeitwert-wert", planNachziehen);
 
     K.an("rechnen", "click", rechnen);
     window.addEventListener("resize", () => {

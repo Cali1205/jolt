@@ -28,7 +28,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import models  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
-from app.energie.modell import Umgebung, haversine_m  # noqa: E402
+from app.energie.modell import (Fahrzeugwerte, Umgebung,  # noqa: E402
+                                haversine_m)
 from app.energie.profil import eintrag_bei as _profil_bei  # noqa: E402
 from app.laden import verfuegbarkeit  # noqa: E402
 from app.live import sitzung as live_sitzung  # noqa: E402
@@ -459,9 +460,21 @@ def teil_kette():
     start3 = client.post(f"/api/live/start/{fahrt_id}",
                          params={"min_kw": 100, "radius_km": 10}).json()
     sitzung3 = start3["sitzung_id"]
-    vorher = start3["plan"]["stopps"][0]
     _abspielen(client, sitzung3, fahrt_id, mehrverbrauch=1.0, zeitfaktor=1.0,
                bis_km=20.0)
+
+    # Gemeldet wird der Stopp, der **jetzt** gilt - nicht der aus dem
+    # Startplan. Bis km 20 ist meist schon einmal umgeplant, und dann steht
+    # dort ein anderer. Vorher stand hier `start3["plan"]["stopps"][0]`, und
+    # der Fall prüfte unbemerkt nichts mehr: Der gemeldete Stopp war gar
+    # nicht der nächste, der Auslöser griff zu Recht nicht, und die Prüfung
+    # "der belegte Stopp steht nicht mehr im Plan" bestand aus dem falschen
+    # Grund - er fehlte, weil längst umgeplant war.
+    laufend = client.get(f"/api/live/{sitzung3}").json().get("plan") or {}
+    vorher = (laufend.get("stopps") or [None])[0]
+    pruefe(vorher is not None,
+           "vor der Meldung steht ein nächster Stopp im laufenden Plan",
+           str(laufend.get("stopps")))
     client.post(f"/api/saeulen/{vorher['id']}/belegt")
     nachher = _messen(client, sitzung3, fahrt_id, km=25.0, mehrverbrauch=1.0,
                       zeitfaktor=1.0)
@@ -495,6 +508,131 @@ def teil_kette():
            "aber mindestens einmal - sonst wäre die Sperre eine Blockade",
            f"{aenderungen} Änderungen")
     client.post(f"/api/live/{sitzung4}/ende")
+
+
+def teil_anbauten():
+    """Fahrradträger und Dachbox - Zuschlag auf den Luftwiderstand.
+
+    Zwei Dinge müssen gelten, und das zweite ist das wichtigere.
+    """
+    print("\nAussen am Auto: Fahrradträger und Dachbox")
+
+    class FzStub:
+        leermasse_kg = 2550.0
+        zuladung_kg = 150.0
+        masse_kg = 2700.0
+        c_w = 0.29
+        stirnflaeche_m2 = 2.90
+        c_rr = 0.011
+        eta_antrieb = 0.87
+        eta_rekup = 0.68
+        p_neben_w = 450.0
+        waermepumpe = True
+        akku_netto_kwh = 77.0
+        reserve_soc = 10.0
+        korrekturfaktor = 1.0
+
+    class FahrtStub2:
+        def __init__(self, faktor, zuladung=None):
+            self.fahrzeug = FzStub()
+            self.zuladung_kg = zuladung
+            self.luftwiderstand_faktor = faktor
+
+    ohne = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.0))
+    mit = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.25))
+    pruefe(abs(ohne.c_w - 0.29) < 1e-9,
+           "ohne Anbau bleibt der Beiwert unverändert", str(ohne.c_w))
+    pruefe(abs(mit.c_w - 0.29 * 1.25) < 1e-9,
+           "ein Zuschlag von 25 % erhöht den Luftwiderstandsbeiwert",
+           str(mit.c_w))
+    pruefe(abs(mit.stirnflaeche_m2 - 2.90) < 1e-9,
+           "die Stirnfläche bleibt, was sie ist - sie ist eine Abmessung des "
+           "Autos und ändert sich nicht, wenn hinten Räder hängen")
+
+    # Und die Wirkung muss beim Verbrauch ankommen, mit v².
+    profil = [{"km": k, "lat": 48.0 + k * 0.009, "lon": 11.0, "hoehe": 100.0,
+               "tempo_kmh": 120.0, "minuten": k * 0.5, "soc": 80 - k * 0.1,
+               "kwh": k * 0.2} for k in range(0, 201, 5)]
+    umgebung = lambda lat, lon: Umgebung(temp_c=15.0)      # noqa: E731
+    a = umplanung.restprofil_physik(FahrtStub2(1.0), profil, 1.0, umgebung)
+    b = umplanung.restprofil_physik(FahrtStub2(1.25), profil, 1.0, umgebung)
+    pruefe(b.kwh[-1] > a.kwh[-1] * 1.05,
+           "mit Träger braucht dieselbe Strecke spürbar mehr Energie",
+           f"{b.kwh[-1]:.1f} gegen {a.kwh[-1]:.1f} kWh")
+
+    # Die Zuladung wirkt weiter unabhängig davon.
+    schwer = Fahrzeugwerte.aus_fahrt(FahrtStub2(1.0, zuladung=500.0))
+    pruefe(abs(schwer.masse_kg - 3050.0) < 1e-9,
+           "die Zuladung der Fahrt zählt unabhängig vom Anbau",
+           str(schwer.masse_kg))
+
+
+def teil_aufzeichnung():
+    """Eine gefahrene Strecke ohne Planung - und was daraus entsteht.
+
+    Der umgekehrte Weg zur geplanten Fahrt: losfahren, mitschreiben, und die
+    Strecke hinterher aus den Messpunkten bauen. Gedacht für die
+    Kalibrierung, wo eine bekannte kurze Strecke die sauberste Messung ist -
+    und wo eine Route vorher zu planen umständlich genug wäre, dass man es
+    bleiben lässt.
+    """
+    client = TestClient(app)
+    print("\nFahrt aufzeichnen statt planen")
+
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+    antwort = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": "Runde um den Block"})
+    pruefe(antwort.status_code == 200,
+           "eine Aufzeichnung lässt sich ohne Route starten",
+           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+    start = antwort.json()
+    sitzung_id = start["sitzung_id"]
+
+    zustand = client.get(f"/api/live/{sitzung_id}").json()
+    pruefe(zustand["laeuft"] is True,
+           "und läuft, obwohl es weder Strecke noch Plan gibt")
+
+    # Sechzig Kilometer nach Norden, eine Stunde lang, 12 Prozentpunkte
+    # Verbrauch. Bei 0,009 Grad je Punkt sind das rund einen Kilometer.
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        beginn = datetime(2026, 1, 1, 8, 0)
+        for i in range(61):
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, 48.0 + i * 0.009, 11.0,
+                soc=90.0 - i * 0.2, aussentemp_c=7.0,
+                zeit=beginn + timedelta(minutes=i),
+                rohwerte={"soc_roh": round((90.0 - i * 0.2) * 2.5),
+                          "hoehe_m": 500.0})
+    finally:
+        db.close()
+
+    ende = client.post(f"/api/live/{sitzung_id}/ende").json()
+    gebaut = ende.get("aufzeichnung") or {}
+    pruefe(gebaut.get("ok") is True,
+           "beim Beenden entsteht aus den Messpunkten eine Strecke",
+           str(gebaut.get("grund")))
+    pruefe(55 < (gebaut.get("strecke_km") or 0) < 65,
+           "die Strecke stimmt mit dem überein, was gefahren wurde",
+           f"{gebaut.get('strecke_km')} km statt rund 60")
+    pruefe(abs((gebaut.get("aussentemp_c") or 0) - 7.0) < 0.1,
+           "die **gemessene** Aussentemperatur gilt, nicht eine Vorhersage",
+           str(gebaut.get("aussentemp_c")))
+
+    fahrt = client.get(f"/api/fahrten/{start['fahrt_id']}").json()
+    pruefe(len(fahrt.get("profil") or []) > 5,
+           "die Fahrt hat hinterher ein Energieprofil",
+           f"{len(fahrt.get('profil') or [])} Stützstellen")
+
+    # Der Zweck der ganzen Betriebsart: Aus der Aufzeichnung muss sich der
+    # Korrekturfaktor lernen lassen. Ohne Kilometerstand und Sollwert an den
+    # Messpunkten findet die Kalibrierung nichts - und beides steht erst
+    # fest, seit die Strecke gebaut wurde.
+    pruefe(ende.get("gelernt") is not None,
+           "und jolt lernt daraus einen Korrekturfaktor - genau dafür ist "
+           "die Aufzeichnung da", str(ende.get("gelernt")))
 
 
 def teil_kette_mit_ladestopp():
@@ -801,6 +939,8 @@ def main() -> int:
     teil_planvergleich()
     teil_kette()
     teil_kette_mit_ladestopp()
+    teil_anbauten()
+    teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()
 

@@ -81,20 +81,41 @@ class Meldungen:
         return self._weiter.zustand(ladepunkt)
 
 
-def redundanz_bonus(anzahl_punkte: int) -> float:
+# Ab wie vielen Ladepunkten ein Standort als "gross" gilt und die volle
+# Gutschrift bekommt. Darüber wächst nichts mehr - der Sprung von 30 auf 40
+# Säulen ändert nichts mehr an der Frage, ob etwas frei ist.
+#
+# Stand vorher bei rund 15, und das war zu früh: In den Daten einer
+# Frankreich-Route bekamen Standorte mit 15, 17, 20, 28 und 30 Ladepunkten
+# alle exakt dieselbe Gutschrift. Die Grösse hörte damit genau dort auf zu
+# zählen, wo die interessanten Ladeparks anfangen.
+GROSSER_PARK = 30
+LADEPARK_BONUS_MIN = 4.0
+
+
+def redundanz_bonus(anzahl_punkte: int, hoechstens: float = LADEPARK_BONUS_MIN
+                    ) -> float:
     """Zeitgutschrift in Minuten für einen Standort mit vielen Ladepunkten.
 
     Solange niemand weiss, was frei ist, ist die Anzahl der Ladepunkte die
     einzige belastbare Aussage über das Risiko, vor einer belegten Säule zu
-    stehen. Ein Standort mit acht Punkten bekommt gut vier Minuten
-    gutgeschrieben - genug, um einen kleinen Umweg dorthin zu rechtfertigen,
-    zu wenig, um einen grossen zu erzwingen.
+    stehen. Ein Standort mit vielen Punkten ist einen kleinen Umweg wert -
+    und, seit die Gutschrift nicht mehr am Umweg hängt, auch einen Vorzug
+    gegenüber einem kleineren direkt daneben.
 
     Der Logarithmus, weil der Sprung von 2 auf 4 Ladepunkten viel mehr
-    bedeutet als der von 20 auf 22.
+    bedeutet als der von 20 auf 22. Die volle Gutschrift gibt es ab
+    `GROSSER_PARK` Punkten.
+
+    `hoechstens` ist einstellbar, weil es eine Vorliebe ist und keine
+    Naturkonstante: Wem ein grosser Ladepark wenig bedeutet, stellt es auf
+    null, und dann entscheidet allein die Zeit.
     """
     import math
-    return round(min(6.0, 2.2 * math.log(max(1, anzahl_punkte))), 2)
+    if hoechstens <= 0:
+        return 0.0
+    anteil = math.log(max(1, anzahl_punkte)) / math.log(GROSSER_PARK)
+    return round(min(hoechstens, hoechstens * anteil), 2)
 
 
 # Zeitgutschrift für einen bevorzugten Anbieter - in derselben Grössenordnung

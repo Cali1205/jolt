@@ -47,6 +47,28 @@ class Fahrzeugwerte:
     korrekturfaktor: float = 1.0
 
     @classmethod
+    def aus_fahrt(cls, fahrt) -> "Fahrzeugwerte":
+        """Die Werte des Fahrzeugs, angepasst an *diese* Fahrt.
+
+        Zwei Dinge gehören der Fahrt und nicht dem Auto: die Zuladung und
+        das, was aussen dranhängt. Beides hier zusammenzuführen ist der
+        einzige Weg, der sicherstellt, dass Planung, Umplanung und
+        Aufzeichnung mit denselben Werten rechnen - vorher stand
+        `aus_modell(fahrzeug)` an fünf Stellen, und ein Träger, der an einer
+        davon fehlt, ergibt einen Plan, der unterwegs nicht mehr aufgeht.
+        """
+        werte = cls.aus_modell(fahrt.fahrzeug)
+        if getattr(fahrt, "zuladung_kg", None) is not None:
+            werte.masse_kg = fahrt.fahrzeug.leermasse_kg + fahrt.zuladung_kg
+        faktor = getattr(fahrt, "luftwiderstand_faktor", None) or 1.0
+        # Der Zuschlag geht auf den Beiwert und nicht auf die Stirnfläche -
+        # rechnerisch dasselbe, weil beide sich multiplizieren, aber die
+        # Stirnfläche ist eine Abmessung des Autos und ändert sich nicht,
+        # wenn hinten Räder hängen.
+        werte.c_w = werte.c_w * faktor
+        return werte
+
+    @classmethod
     def aus_modell(cls, fahrzeug) -> "Fahrzeugwerte":
         return cls(masse_kg=fahrzeug.masse_kg, c_w=fahrzeug.c_w,
                    stirnflaeche_m2=fahrzeug.stirnflaeche_m2, c_rr=fahrzeug.c_rr,

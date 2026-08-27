@@ -215,6 +215,17 @@ def main() -> int:
                 "Connections": [{"ConnectionType": {"Title": "CCS"},
                                  "PowerKW": 150.0, "Quantity": 2}],
                 "NumberOfPoints": 2, "DateLastStatusUpdate": "2026-08-24T00:00:00Z",
+                # Genau die Felder, die der Import bisher weggeworfen hat.
+                # Darin steht, was einen Ladepunkt für eine Fahrt
+                # unbrauchbar macht - und das entscheidet mehr als jede
+                # Zielfunktion.
+                "StatusType": {"Title": "Operational", "IsOperational": True},
+                "UsageType": {"Title": "Private - Restricted access",
+                              "IsMembershipRequired": True},
+                "UsageCost": "0,59 EUR/kWh",
+                "GeneralComments": "Kabel kurz, für Kastenwagen ungeeignet",
+                "AccessComments": "Hinter Schranke, nachts geschlossen",
+                "DateLastVerified": "2026-07-01T00:00:00Z",
             }]
 
     def _gefaelschtes_ocm_get(url, timeout=None, params=None):
@@ -242,6 +253,32 @@ def main() -> int:
                "und der Betreiber ebenso", f"ist {eintrag.betreiber!r}")
     finally:
         saeulen_import_modul.requests.get = ocm_get_original
+        db.close()
+
+    # Was in Worten dasteht, wird jetzt aufgehoben. Ein Ladepunkt kann
+    # tadellos aussehen - 150 kW, zwei Säulen - und trotzdem unbrauchbar
+    # sein, weil er hinter einer Schranke steht.
+    db = SessionLocal()
+    try:
+        lp = db.query(models.Ladepunkt).filter_by(quelle="ocm",
+                                                  fremd_id="999001").one()
+        pruefe(lp.betriebsbereit is True,
+               "der Betriebszustand wird übernommen", str(lp.betriebsbereit))
+        pruefe(lp.zugang == "Private - Restricted access",
+               "die Zugangsart auch", str(lp.zugang))
+        pruefe(lp.mitgliedschaft_noetig is True,
+               "und ob eine Mitgliedschaft nötig ist")
+        pruefe((lp.hinweise or {}).get("kosten") == "0,59 EUR/kWh",
+               "der Preistext der Quelle wird aufgehoben",
+               str(lp.hinweise))
+        pruefe("Kastenwagen" in (lp.hinweise or {}).get("allgemein", ""),
+               "und die Kommentare - hier steht, was kein Datenfeld verrät",
+               str((lp.hinweise or {}).get("allgemein")))
+        pruefe("Schranke" in (lp.hinweise or {}).get("zugang", ""),
+               "Zugangshinweise ebenso")
+        pruefe("geprueft_am" in (lp.hinweise or {}),
+               "und wann die Angabe zuletzt geprüft wurde")
+    finally:
         db.close()
 
     print("\nOpen-Charge-Map-Import entlang einer Strecke")
@@ -641,6 +678,23 @@ def main() -> int:
     pruefe(seite.status_code == 200 and b"jolt" in seite.content.lower(),
            "index.html kommt zurück")
     pruefe(client.get("/manifest.json").status_code == 200, "manifest.json auch")
+
+    # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
+    # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
+    # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
+    # wirkt nicht" und "die Änderung ist noch gar nicht da".
+    obd = client.get("/obd")
+    pruefe(obd.status_code == 200 and b"OBD2" in obd.content,
+           "die OBD2-Diagnoseseite wird unter /obd ausgeliefert",
+           f"HTTP {obd.status_code}")
+    pruefe("no-cache" in obd.headers.get("Cache-Control", ""),
+           "und zwar ohne Cache - sonst hängt das Telefon auf einer alten "
+           "Fassung fest", obd.headers.get("Cache-Control", "(keiner)"))
+    pruefe(b"/static/obd.js?v=" in obd.content
+           and b"/static/obd.css?v=" in obd.content,
+           "die Verweise auf Skript und Stylesheet tragen eine Version - "
+           "sonst zieht eine frische Seite altes JavaScript nach",
+           str([z for z in obd.content.split() if b"obd." in z][:3]))
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")

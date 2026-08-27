@@ -31,6 +31,11 @@ class FahrzeugEingabe(BaseModel):
     steckertyp: str = "CCS"
     # Namen oder Namensteile, die der Ladeplan bevorzugt - kein harter Filter.
     bevorzugte_betreiber: list[str] = []
+    # Was eine Kilowattstunde kostet. Am Fahrzeug, weil der Preis am Vertrag
+    # hängt und nicht an der Säule - siehe laden/preise.py.
+    strompreis_eur_kwh: float = Field(default=0.59, ge=0, le=5)
+    # [{"muster": "Ionity", "eur_kwh": 0.39}, ...]
+    strompreise: list[dict] = []
     # [[soc, kw], ...] - leer heisst "Kurve unverändert lassen"
     ladekurve: list[list[float]] = []
 
@@ -49,6 +54,8 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "max_ladeleistung_kw": fahrzeug.max_ladeleistung_kw,
             "steckertyp": fahrzeug.steckertyp,
             "bevorzugte_betreiber": fahrzeug.bevorzugte_betreiber or [],
+            "strompreis_eur_kwh": fahrzeug.strompreis_eur_kwh,
+            "strompreise": fahrzeug.strompreise or [],
             "korrekturfaktor": fahrzeug.korrekturfaktor,
             # Nur ob eines eingerichtet ist, nicht welches. Das Token steht
             # genau einmal in einer Antwort - der, mit der es entsteht.

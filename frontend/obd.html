@@ -14,6 +14,11 @@
 <link rel="stylesheet" href="/static/obd.css">
 
 <h1>OBD2-Erprobung</h1>
+<!-- Sichtbare Fassungskennung. Bei einer Seite, die per Bluetooth im Auto
+     bedient wird und deren Cache sich zweimal als Fehlerquelle erwiesen
+     hat, ist "welche Fassung habe ich eigentlich offen" keine
+     Nebensächlichkeit - sie war beide Male die eigentliche Antwort. -->
+<p class="hinweis" style="margin-top:-6px">Fassung <code>STAND</code></p>
 <p class="hinweis">Braucht einen Browser mit Web Bluetooth. Auf iOS gibt es
   den nicht von Apple – dort funktioniert <strong>Bluefy</strong> aus dem App
   Store. Safari und Chrome auf dem iPhone können es nicht und werden es
@@ -23,6 +28,22 @@
   Dieser Browser kennt kein <code>navigator.bluetooth</code>. Auf dem iPhone
   diese Seite in <strong>Bluefy</strong> öffnen, auf Android in Chrome.
 </div>
+
+<div class="kasten" id="loslegen">
+  <h2>Losfahren</h2>
+  <p class="hinweis"><strong>Hier wird der Dongle verbunden</strong> – ein
+    Knopf für alles: verbinden, vorbereiten, Ladestand probelesen, Fahrt
+    anlegen, aufzeichnen. Die Abschnitte darunter sind zum Fehlersuchen und
+    einzeln nicht nötig.</p>
+  <p class="hinweis">Beim ersten Antippen fragt Bluefy, welches Gerät es sein
+    soll – dort <code>IOS-Vlink</code> auswählen. Danach dauert es ein paar
+    Sekunden bis zur ersten Zahl.</p>
+  <input type="text" id="fahrt-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
+  <button id="los" class="tat">Fahrt starten und aufzeichnen</button>
+  <div id="los-stand" class="stand"></div>
+</div>
+
+<h2 style="margin-top:26px">Einzelschritte</h2>
 
 <div class="kasten">
   <h2>1. Verbinden</h2>
@@ -43,12 +64,18 @@
 
 <div class="kasten">
   <h2>3. Ladestand lesen</h2>
-  <p class="hinweis">Beim MEB sitzt das Batteriemanagement auf Header
-    <code>7E5</code>, der Ladestand hinter UDS-Dienst <code>22</code>,
-    Datenkennung <code>028C</code>. Der Rohwert wird durch 2,5 geteilt.
-    <strong>Ob das für den ID.Buzz stimmt, ist genau die Frage.</strong></p>
+  <p class="hinweis">Beim MEB antwortet das Batteriemanagement über
+    29-bit-Kennungen: senden an <code>17FC007B</code>, hören auf
+    <code>17FE007B</code>. Der Ladestand steht hinter UDS-Dienst
+    <code>22</code>, Datenkennung <code>028C</code>. Der Rohwert ergibt
+    geteilt durch 2,5 den <strong>Brutto</strong>-Ladestand; die Anzeige im
+    Auto rechnet daraus <code>× 51/46 − 6,4</code>, weil oben und unten ein
+    Puffer freibleibt. Angezeigt wird hier der Wert, den auch das Auto
+    zeigt – den braucht jolt, weil Reserve und Ziel-Ladestand darauf
+    gedacht sind.</p>
   <button id="soc" class="tat" disabled>SoC abfragen</button>
   <div id="soc-wert" class="gross">–</div>
+  <p class="hinweis" id="soc-herkunft" style="margin:4px 0 0"></p>
 </div>
 
 <div class="kasten">
@@ -56,21 +83,45 @@
   <p class="hinweis">Ein Befehl je Zeile, wird der Reihe nach gesendet.
     Damit lassen sich andere Datenkennungen durchprobieren, ohne dass
     jemand die Seite neu baut – die PID-Liste für MEB steht bei
-    <code>github.com/spot2000/Volkswagen-MEB-EV-CAN-parameters</code>.</p>
+    <code>github.com/spot2000/Volkswagen-MEB-EV-CAN-parameters</code>.
+    Weitere bewährte Kennungen: <code>221E3B</code> Spannung,
+    <code>221E3D</code> Strom, <code>22295A</code> Kilometerstand (dafür
+    aber <code>ATSH17FC0076</code> / <code>ATCRA17FE0076</code>).</p>
   <textarea id="frei" rows="3" spellcheck="false"
-            placeholder="ATSH7E5&#10;221E3B">ATSH7E5
-22028C</textarea>
+            placeholder="221E3B">221E3B
+221E3D
+22295A</textarea>
   <button id="senden" class="tat" disabled>Senden</button>
 </div>
 
+<div class="kasten" id="fahrt-kasten">
+  <h2>5. Fahrt aufzeichnen</h2>
+  <p class="hinweis">Liest im eingestellten Takt alle Werte, holt die
+    Position und meldet beides an jolt. <strong>Bildschirm an lassen und
+    Bluefy im Vordergrund</strong> – ein Browser-Tab bekommt auf iOS keine
+    Hintergrundrechte für Bluetooth. Der Sperrbildschirm ist in Ordnung, die
+    Verbindung übersteht ihn.</p>
+  <input type="text" id="token" placeholder="Logger-Token aus der Fahrzeug-Ansicht"
+         autocomplete="off" spellcheck="false">
+  <div class="reihe">
+    <div>
+      <label for="takt">Takt <span id="takt-wert">30</span> s</label>
+      <input type="range" id="takt" min="10" max="120" step="5" value="30">
+    </div>
+  </div>
+  <button id="fahrt-start" class="tat" disabled>Aufzeichnung starten</button>
+  <button id="fahrt-stop" class="tat neben" hidden>Beenden</button>
+  <div id="fahrt-stand" class="stand"></div>
+  <div class="werte" id="fahrt-werte"></div>
+</div>
+
 <div class="kasten">
-  <h2>5. An jolt melden</h2>
+  <h2>6. Einzelne Meldung</h2>
   <p class="hinweis">Schliesst die Kette: Der gelesene Ladestand geht zusammen
     mit der Position an <code>/api/live/melden</code>. Das Token steht in der
-    Fahrzeug-Ansicht unter „Logger im Auto“. Ohne laufende Fahrt antwortet
-    jolt mit <code>aufgenommen: false</code> – das ist kein Fehler.</p>
-  <input type="text" id="token" placeholder="Logger-Token" autocomplete="off"
-         spellcheck="false">
+    Fahrzeug-Ansicht unter „Logger im Auto“ (dasselbe wie oben). Ohne
+    laufende Fahrt antwortet jolt mit <code>aufgenommen: false</code> – das
+    ist kein Fehler.</p>
   <button id="melden" class="tat" disabled>Einmal melden</button>
 </div>
 
@@ -79,4 +130,5 @@
 <button id="log-kopieren" class="tat neben">Protokoll kopieren</button>
 <button id="log-leeren" class="tat neben">Protokoll leeren</button>
 
+<script src="/static/obd-kern.js"></script>
 <script src="/static/obd.js"></script>
