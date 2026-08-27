@@ -57,9 +57,46 @@ if not os.path.isdir(FRONTEND):
 OHNE_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
+def _mit_version(html: str, dateien) -> str:
+    """Verweise auf eigene Dateien mit ihrer Änderungszeit versehen.
+
+    Der Kern des Problems, das hier viermal zugeschlagen hat: index.html
+    wird nie zwischengespeichert (`OHNE_CACHE`, und Cloudflare behandelt sie
+    als dynamisch), die Dateien unter `/static` aber sehr wohl - Cloudflare
+    ersetzt dort das `no-cache` des Ursprungs durch `max-age=14400`. Der
+    Browser holt also frisches HTML und **fragt für das JavaScript gar nicht
+    erst nach**. Vier Stunden lang sieht man neue Oberfläche mit alter Logik,
+    und der Fehler sieht aus wie ein Bug im frisch geschriebenen Code.
+
+    Mit der Änderungszeit im Verweis bricht die Kette an der einzigen
+    Stelle, an der sie zu brechen ist: Ändert sich die Datei, ändert sich
+    die Adresse, und eine unbekannte Adresse muss der Browser holen. Ändert
+    sie sich nicht, bleibt der Cache gültig und spart weiter Bandbreite.
+
+    Von Hand hochgezählte Versionsnummern kämen dafür nicht in Frage - man
+    vergisst sie genau dann, wenn es darauf ankommt.
+    """
+    for name in dateien:
+        try:
+            marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
+        except OSError:
+            continue
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={marke}")
+    return html
+
+
+# Die Dateien, die index.html einbindet. Ausdrücklich aufgezählt und nicht
+# aus dem HTML geraten: Ein Suchausdruck über fremden Text ist genau die
+# Sorte Findigkeit, die beim nächsten Umbau still danebenliegt.
+INDEX_DATEIEN = ("obd-kern.js", "core.js", "karte.js", "route.js", "live.js",
+                 "fahrten.js", "fahrzeug.js", "app.js")
+
+
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(FRONTEND, "index.html"), headers=OHNE_CACHE)
+    with open(os.path.join(FRONTEND, "index.html"), encoding="utf-8") as datei:
+        return HTMLResponse(_mit_version(datei.read(), INDEX_DATEIEN),
+                            headers=OHNE_CACHE)
 
 
 @app.get("/obd")
@@ -81,26 +118,17 @@ def obd_seite():
     hochzählt - und ohne dass die Dateien selbst /static verlassen müssten.
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
-        html = datei.read()
-    # Die Seite selbst zählt mit. Sie stand hier zuerst nicht drin, und
-    # prompt zeigte die Fassungskennung einen alten Stand an, nachdem nur
-    # der Text geändert worden war - also genau das Rätsel, das sie
-    # auflösen soll.
-    neueste = 0
-    try:
-        neueste = int(os.path.getmtime(os.path.join(FRONTEND, "obd.html")))
-    except OSError:
-        pass
-    for name in ("obd-kern.js", "obd.js", "obd.css"):
-        try:
-            marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
-        except OSError:
-            marke = 0
-        neueste = max(neueste, marke)
-        html = html.replace(f"/static/{name}", f"/static/{name}?v={marke}")
+        html = _mit_version(datei.read(), ("obd-kern.js", "obd.js", "obd.css"))
     # Dieselbe Marke sichtbar auf der Seite: Zweimal war "welche Fassung ist
     # das eigentlich" die Antwort auf einen vermeintlichen Bluetooth-Fehler,
     # und beide Male liess sich das nur mühsam von aussen feststellen.
+    neueste = 0
+    for name in ("obd.html", "obd-kern.js", "obd.js", "obd.css"):
+        try:
+            neueste = max(neueste,
+                          int(os.path.getmtime(os.path.join(FRONTEND, name))))
+        except OSError:
+            pass
     html = html.replace("STAND", time.strftime("%d.%m. %H:%M",
                                                time.localtime(neueste)))
     return HTMLResponse(html, headers=OHNE_CACHE)
