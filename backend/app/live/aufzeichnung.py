@@ -47,6 +47,12 @@ HOECHSTENS_STUETZPUNKTE = 1800
 # jede Geschwindigkeit, die daraus gerechnet wird.
 MINDESTABSTAND_M = 25.0
 
+# Fensterbreite, über die GPS-Höhen gemittelt werden. Fünfhundert Meter sind
+# ein Kompromiss: schmal genug, dass eine echte Autobahnsteigung stehen
+# bleibt (die zieht sich über Kilometer), und breit genug, dass vom
+# hochfrequenten Rauschen wenig übrig ist.
+GLAETTUNG_M = 500.0
+
 
 def strecke_bauen(punkte: list) -> list:
     """Aus den Messpunkten eine Geometrie [[lon, lat], ...].
@@ -82,32 +88,99 @@ def _ausduennen(punkte: list, hoechstens: int) -> list:
     return gewaehlt
 
 
-def hoehen_ergaenzen(geometrie: list, gps_hoehen: list | None = None) -> list:
+def gps_hoehen_glaetten(geometrie: list, hoehen: list) -> list:
+    """GPS-Höhen über ein Streckenfenster mitteln.
+
+    **Warum das nötig ist.** Das Verbrauchsmodell interessiert sich nicht
+    für Höhen, sondern für Höhen*unterschiede* zwischen aufeinanderfolgenden
+    Punkten - und davon summiert es die positiven auf. Genau diese
+    Gleichrichtung ist der Haken: Aus mittelwertfreiem Rauschen wird dabei
+    ein systematischer Zuschlag (der Erwartungswert des positiven Anteils
+    ist rund 0,4·σ), und der addiert sich linear über die Punkte auf, nicht
+    mit der Wurzel. Eine 40-km-Fahrt hat bei 25 m Mindestabstand rund 1600
+    Stützpunkte; schon bei σ = 5 m je Differenz kommen so kilometerweise
+    erfundene Steigung zusammen. Bei 2,5 t sind 1000 m Steigung etwa 7 kWh -
+    die Ebene sähe aus wie eine Alpenetappe, und das ginge ungebremst in
+    den Korrekturfaktor.
+
+    **Warum Mitteln hilft.** Der Fehler der GPS-Höhe hat zwei Anteile. Der
+    langsam veränderliche (gleiche Satellitengeometrie über Minuten) ist
+    der harmlosere: Er sieht aus wie ein langer Hügel, ist falsch, aber
+    beschränkt. Der hochfrequente, von Messung zu Messung unabhängige Anteil
+    ist der, der die Gleichrichtung füttert - und genau den nimmt ein
+    gleitendes Mittel heraus. Die Glättung greift also da an, wo der Schaden
+    entsteht.
+
+    Gemittelt wird über die **Strecke**, nicht über eine Punktzahl: Die
+    Messpunkte stehen im Stau dicht und auf der Autobahn weit auseinander,
+    ein Fenster aus zwanzig Punkten wäre einmal 300 m und einmal 3 km breit.
+    """
+    if len(geometrie) != len(hoehen) or len(geometrie) < 3:
+        return list(hoehen)
+
+    # Laufende Strecke entlang der Route - einmal gerechnet, danach ist das
+    # Fenster ein Schieben zweier Ränder.
+    km_stand = [0.0]
+    for (lon1, lat1), (lon2, lat2) in zip(geometrie, geometrie[1:]):
+        km_stand.append(km_stand[-1] + haversine_m(lat1, lon1, lat2, lon2))
+
+    halb = GLAETTUNG_M / 2.0
+    geglaettet = []
+    links = rechts = 0
+    for i, mitte in enumerate(km_stand):
+        while km_stand[links] < mitte - halb:
+            links += 1
+        while rechts + 1 < len(km_stand) and km_stand[rechts + 1] <= mitte + halb:
+            rechts += 1
+        fenster = [hoehen[j] for j in range(links, rechts + 1)
+                   if hoehen[j] is not None]
+        geglaettet.append(sum(fenster) / len(fenster) if fenster
+                          else (hoehen[i] or 0.0))
+    return geglaettet
+
+
+def hoehen_ergaenzen(geometrie: list, gps_hoehen: list | None = None
+                     ) -> tuple[list, str]:
     """[[lon, lat], ...] zu [[lon, lat, hoehe], ...] machen.
 
-    Erste Wahl sind Kartendaten. Fällt die Abfrage aus, gilt die GPS-Höhe,
-    und wenn auch die fehlt, wird flach gerechnet. Der Reihe nach ist das
-    absteigend genau, aber jede Stufe ist besser als keine Fahrt.
+    Gibt die Geometrie **und die Quelle** zurück. Die Quelle ist keine
+    Nebensache: Hier stand vorher nur die Geometrie, und der Aufrufer riet
+    aus "irgendeine Höhe ist ungleich null" auf `karte`. Fiel die
+    ORS-Abfrage aus - erschöpftes Kontingent, Netzhänger -, rutschte es
+    still auf GPS und meldete trotzdem `karte`. Man konnte einer Fahrt
+    hinterher nicht ansehen, ob ihre Höhen etwas taugen.
 
-    Eine flach gerechnete Strecke ist ausdrücklich **kein** Beinbruch für
-    die Kalibrierung, solange Start und Ziel gleich hoch liegen - über eine
-    geschlossene Runde hebt sich die Höhe ohnehin auf. Für eine Fahrt ins
-    Gebirge taugt sie nicht, und das steht dann auch im Log.
+    Erste Wahl sind Kartendaten. Ihr Fehler ist zwar absolut ähnlich gross
+    wie beim GPS, aber räumlich korreliert und **immer derselbe**: Dieselbe
+    Strasse bekommt bei jeder Fahrt dasselbe Profil. Für den Zweck der
+    Fahrtenansicht - Januar gegen Juni, leer gegen beladen - kürzt sich ein
+    Fehler, der bei beiden Fahrten gleich ist, gerade heraus.
+
+    Fällt die Abfrage aus, gilt die geglättete GPS-Höhe (roh ist sie
+    unbrauchbar, siehe `gps_hoehen_glaetten`), und wenn auch die fehlt, wird
+    flach gerechnet. Eine flach gerechnete Strecke ist ausdrücklich **kein**
+    Beinbruch für die Kalibrierung, solange Start und Ziel gleich hoch
+    liegen - über eine geschlossene Runde hebt sich die Höhe ohnehin auf.
+    Für eine Fahrt ins Gebirge taugt sie nicht, und das steht dann auch im
+    Log.
     """
     try:
         mit_hoehe = routing.provider().hoehen(geometrie)
         if mit_hoehe:
-            return mit_hoehe
+            return mit_hoehe, "karte"
     except Exception as fehler:      # noqa: BLE001
         log.warning("Höhenabfrage fehlgeschlagen: %s", fehler)
 
-    if gps_hoehen and len(gps_hoehen) == len(geometrie):
-        log.info("Höhen aus dem GPS - ungenauer als Kartendaten.")
-        return [[lon, lat, hoehe if hoehe is not None else 0.0]
-                for (lon, lat), hoehe in zip(geometrie, gps_hoehen)]
+    if gps_hoehen and len(gps_hoehen) == len(geometrie) \
+            and any(h is not None for h in gps_hoehen):
+        geglaettet = gps_hoehen_glaetten(geometrie, gps_hoehen)
+        log.info("Höhen aus dem GPS, über %.0f m geglättet - ungenauer als "
+                 "Kartendaten.", GLAETTUNG_M)
+        return ([[lon, lat, hoehe] for (lon, lat), hoehe
+                 in zip(geometrie, geglaettet)], "gps")
 
     log.warning("Keine Höhendaten - die Strecke wird flach gerechnet.")
-    return [[lon, lat, 0.0] for lon, lat in geometrie]
+    return [[lon, lat, 0.0] for lon, lat in geometrie], "flach"
 
 
 def tempo_je_teilstueck(punkte: list) -> list:
@@ -165,7 +238,7 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
     gewaehlt = _ausduennen(roh, HOECHSTENS_STUETZPUNKTE)
     flach = [[p.lon, p.lat] for p in gewaehlt]
     gps_hoehen = [(p.rohwerte or {}).get("hoehe_m") for p in gewaehlt]
-    geometrie = hoehen_ergaenzen(flach, gps_hoehen)
+    geometrie, hoehen_quelle = hoehen_ergaenzen(flach, gps_hoehen)
 
     fahrzeug = fahrt.fahrzeug
     hole_umgebung, mittel_temp = umgebung_bestimmen(gewaehlt, flach)
@@ -201,7 +274,7 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
             "fahrzeit_minuten": round(profil.minuten),
             "verbrauch_kwh": round(profil.kwh_gesamt, 2),
             "aussentemp_c": fahrt.aussentemp_c,
-            "hoehen": "karte" if any(p[2] for p in geometrie) else "flach"}
+            "hoehen": hoehen_quelle}
 
 
 def _soll_bei(energieprofil: list, km: float):

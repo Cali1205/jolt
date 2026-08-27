@@ -598,6 +598,68 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_hoehenquelle():
+    """Geglättete GPS-Höhen - und eine ehrliche Auskunft, woher sie stammen.
+
+    Das Verbrauchsmodell summiert die *positiven* Höhenunterschiede auf.
+    Diese Gleichrichtung macht aus mittelwertfreiem Rauschen einen
+    systematischen Zuschlag, der sich linear über die Punkte aufaddiert -
+    aus einer Fahrt durch die Ebene wird eine Alpenetappe, und die geht
+    ungebremst in den Korrekturfaktor.
+    """
+    import random
+
+    from app.energie.modell import haversine_m as _haversine
+    from app.live import aufzeichnung as auf
+
+    print("\nHöhen: Quelle und Glättung")
+
+    def steigung(hoehen):
+        return sum(max(0.0, b - a) for a, b in zip(hoehen, hoehen[1:]))
+
+    # Eine Fahrt geradeaus durch die Ebene, rund 800 Punkte im Abstand von
+    # etwa 25 m. Die wahre Steigung ist null.
+    strecke = [[11.0 + i * 0.00032, 48.0] for i in range(800)]
+    abstand = _haversine(48.0, strecke[0][0], 48.0, strecke[1][0])
+    pruefe(15.0 < abstand < 40.0,
+           "die Testpunkte liegen etwa so dicht wie echte Messpunkte",
+           f"{abstand:.0f} m")
+
+    random.seed(7)
+    verrauscht = [random.gauss(0.0, 10.0) for _ in strecke]
+    roh_steigung = steigung(verrauscht)
+    pruefe(roh_steigung > 2000.0,
+           "rohes GPS macht aus der Ebene mehrere Kilometer Steigung - "
+           "genau der Grund für die Glättung", f"{roh_steigung:.0f} m")
+
+    geglaettet = auf.gps_hoehen_glaetten(strecke, verrauscht)
+    glatt_steigung = steigung(geglaettet)
+    pruefe(glatt_steigung < roh_steigung / 5.0,
+           "geglättet bleibt davon weniger als ein Fünftel",
+           f"{roh_steigung:.0f} m → {glatt_steigung:.0f} m")
+
+    # Aber ein echter Hügel muss stehen bleiben - eine Glättung, die auch
+    # das Gelände wegnimmt, wäre nur eine umständliche Art, flach zu rechnen.
+    hoch = 300.0
+    berg = [hoch * (i / 400.0 if i < 400 else (800 - i) / 400.0)
+            for i in range(800)]
+    berg_glatt = auf.gps_hoehen_glaetten(strecke, berg)
+    pruefe(steigung(berg_glatt) > 0.9 * hoch,
+           "ein echter Anstieg über 10 km übersteht die Glättung",
+           f"{steigung(berg_glatt):.0f} von {hoch:.0f} m")
+
+    # Und die Auskunft muss stimmen. Ohne ORS-Schlüssel liefert das
+    # Demo-Routing bewusst keine Höhen; dann ist die Quelle "gps" - und
+    # nicht, wie vorher, immer "karte".
+    _, quelle = auf.hoehen_ergaenzen(strecke, verrauscht)
+    pruefe(quelle == "gps",
+           "fällt die Kartenabfrage aus, heisst die Quelle auch 'gps'", quelle)
+    _, quelle = auf.hoehen_ergaenzen(strecke, None)
+    pruefe(quelle == "flach",
+           "und ohne jede Höhe 'flach' - man muss einer Fahrt ansehen "
+           "können, ob ihre Höhen etwas taugen", quelle)
+
+
 def teil_abgeloeste_fahrt():
     """Eine neue Aufzeichnung loest die alte ab - aber verschluckt sie nicht.
 
@@ -1082,6 +1144,7 @@ def main() -> int:
     teil_anbauten()
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
+    teil_hoehenquelle()
     teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()
