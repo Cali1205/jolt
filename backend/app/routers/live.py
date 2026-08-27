@@ -94,6 +94,8 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
                 umplanung.VORGABEN["stopp_fixkosten_min"], ge=0, le=30),
             ladepark_bonus_min: float = Query(
                 umplanung.VORGABEN["ladepark_bonus_min"], ge=0, le=15),
+            zeitwert_eur_h: float = Query(
+                umplanung.VORGABEN["zeitwert_eur_h"], ge=0, le=200),
             db: Session = Depends(get_db)):
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
@@ -115,7 +117,8 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     parameter = {"radius_km": radius_km, "min_kw": min_kw,
                  "steckertyp": steckertyp, "umweg_grenze_min": umweg_grenze_min,
                  "stopp_fixkosten_min": stopp_fixkosten_min,
-                 "ladepark_bonus_min": ladepark_bonus_min}
+                 "ladepark_bonus_min": ladepark_bonus_min,
+                 "zeitwert_eur_h": zeitwert_eur_h}
     if fahrt.energieprofil:
         try:
             sitzung.plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc,

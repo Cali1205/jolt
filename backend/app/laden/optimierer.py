@@ -99,6 +99,21 @@ HOECHSTENS_KANDIDATEN = 60
 # Abrunden ist die pessimistische Richtung.
 LABEL_RASTER = 0.5
 
+# Was eine Stunde des Fahrers wert ist, in Euro. Damit wird aus Geld eine
+# Zeit, und die Zielfunktion bleibt eine einzige Grösse - Dijkstra braucht
+# das, und man kann weiter alles in Minuten lesen.
+#
+# 30 EUR/h heisst: Ein Euro wiegt zwei Minuten. Wer 60 einstellt, kauft Zeit
+# teuer und fährt schneller; wer 10 einstellt, nimmt Umwege für billigen
+# Strom in Kauf. **Null heisst "Kosten sind mir gleich"** - dann rechnet
+# jolt wie bisher rein auf Zeit.
+#
+# Ohne diesen Posten war der Wunsch nach einem bestimmten Anbieter nur als
+# Zeitgutschrift auszudrücken - eine Vorliebe, als Minuten verkleidet. Der
+# Handel, um den es wirklich geht, liess sich damit gar nicht formulieren:
+# länger laden, dafür billiger.
+ZEITWERT_EUR_H = 30.0
+
 _EPS = 1e-9
 
 
@@ -201,6 +216,10 @@ class Stopp:
     # Minuten seit Abfahrt, inklusive aller vorherigen Stopps und Umwege.
     ankunft_minute: float
     abfahrt_minute: float
+    # Was diese Ladung kostet. Hinter den Feldern ohne Vorgabewert, weil
+    # eine Dataclass das so verlangt - und mit Vorgabe, damit Aufrufer, die
+    # keine Preise kennen, unverändert weiterlaufen.
+    kosten_eur: float = 0.0
     # Der Standort, an den man ohne Nachladen noch käme, wenn hier alles
     # belegt ist. None = es gibt keinen.
     ausweich: dict | None = None
@@ -210,6 +229,7 @@ class Stopp:
                 "ankunft_soc": round(self.ankunft_soc, 1),
                 "abfahrt_soc": round(self.abfahrt_soc, 1),
                 "ladezeit_minuten": round(self.ladezeit_minuten, 1),
+                "kosten_eur": round(self.kosten_eur, 2),
                 "umweg_minuten": round(self.umweg_minuten, 1),
                 "kwh_geladen": round(self.kwh_geladen, 1),
                 "ankunft_minute": round(self.ankunft_minute),
@@ -228,6 +248,9 @@ class Ladeplan:
     # Einparken, Kabel, Freischalten - je Halt einmal. Eigener Posten, damit
     # in der Bilanz sichtbar bleibt, was die blosse *Anzahl* der Stopps kostet.
     haltekosten_minuten: float = 0.0
+    # Was die Ladungen kosten. Kein Zeitposten - er steht neben der Zeit,
+    # weil er die zweite Grösse ist, nach der man einen Plan beurteilt.
+    kosten_eur: float = 0.0
     gesamt_minuten: float = 0.0
     soc_am_ziel: float = 0.0
     gepruefte_kandidaten: int = 0
@@ -240,6 +263,7 @@ class Ladeplan:
                 "ladezeit_minuten": round(self.ladezeit_minuten),
                 "umwegzeit_minuten": round(self.umwegzeit_minuten),
                 "haltekosten_minuten": round(self.haltekosten_minuten),
+                "kosten_eur": round(self.kosten_eur, 2),
                 "gesamt_minuten": round(self.gesamt_minuten),
                 "soc_am_ziel": round(self.soc_am_ziel, 1),
                 "gepruefte_kandidaten": self.gepruefte_kandidaten}
@@ -311,7 +335,9 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
            umweg_grenze_min: float = UMWEG_GRENZE_MIN,
            bevorzugte_betreiber: list[str] | None = None,
            stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN,
-           ladepark_bonus_min: float = LADEPARK_BONUS_MIN) -> Ladeplan:
+           ladepark_bonus_min: float = LADEPARK_BONUS_MIN,
+           preis_fuer=None,
+           zeitwert_eur_h: float = ZEITWERT_EUR_H) -> Ladeplan:
     """Die zeitoptimale Folge von Ladestopps.
 
     `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
@@ -334,7 +360,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
 
     graph = _Graph(profil, gefiltert, fz, kurve, max_fahrzeug_kw,
                    temperatur_faktor, bevorzugte_betreiber,
-                   stopp_fixkosten_min, ladepark_bonus_min)
+                   stopp_fixkosten_min, ladepark_bonus_min,
+                   preis_fuer, zeitwert_eur_h)
 
     # Schritt 3: Pareto-Dijkstra.
     weg = graph.suchen(start_soc, ziel_soc)
@@ -430,9 +457,14 @@ class _Graph:
                  kurve, max_fahrzeug_kw: float, temperatur_faktor: float,
                  bevorzugte_betreiber: list[str] | None = None,
                  stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN,
-                 ladepark_bonus_min: float = LADEPARK_BONUS_MIN):
+                 ladepark_bonus_min: float = LADEPARK_BONUS_MIN,
+                 preis_fuer=None, zeitwert_eur_h: float = ZEITWERT_EUR_H):
         self.stopp_fixkosten_min = stopp_fixkosten_min
         self.ladepark_bonus_min = ladepark_bonus_min
+        self.preis_fuer = preis_fuer or (lambda option: 0.0)
+        # Umrechnungsfaktor Euro -> Minuten. Null bei zeitwert 0: Dann sind
+        # Kosten gleichgültig und es wird rein auf Zeit optimiert.
+        self.kosten_gewicht = (60.0 / zeitwert_eur_h) if zeitwert_eur_h > 0 else 0.0
         self.profil = profil
         self.optionen = optionen
         self.fz = fz
@@ -638,8 +670,15 @@ class _Graph:
                 # Ladezeit: Sie fallen einmal je Stopp an, unabhängig davon,
                 # wie viel geladen wird. Genau das ist der Unterschied, der
                 # wenige lange Halte gegen viele kurze gewinnen lässt.
+                # Was diese Ladung kostet, in gleichwertigen Minuten. Der
+                # Energiebedarf einer Etappe hängt nicht vom Ladestand ab,
+                # die *Kosten* eines Halts aber sehr wohl von der Lademenge -
+                # deshalb steht das hier je Ladeziel und nicht je Stopp.
+                kwh = (ladeziel - soc) / 100.0 * self.fz.akku_netto_kwh
+                kosten_min = (kwh * self.preis_fuer(option)
+                              * self.kosten_gewicht)
                 abfahrten.append((ladeziel, self.stopp_fixkosten_min
-                                  + umweg + ladezeit - bonus))
+                                  + umweg + ladezeit - bonus + kosten_min))
             if not abfahrten:
                 return
 
@@ -802,12 +841,15 @@ class _Graph:
                 option=option, ankunft_soc=ankunft, abfahrt_soc=abfahrt,
                 ladezeit_minuten=ladezeit, umweg_minuten=option.umweg_minuten,
                 kwh_geladen=(abfahrt - ankunft) / 100.0 * self.fz.akku_netto_kwh,
+                kosten_eur=((abfahrt - ankunft) / 100.0 * self.fz.akku_netto_kwh
+                            * self.preis_fuer(option)),
                 ankunft_minute=ankunft_minute, abfahrt_minute=uhr,
                 ausweich=self._ausweich(knoten, ankunft)))
 
             plan.ladezeit_minuten += ladezeit
             plan.umwegzeit_minuten += option.umweg_minuten
             plan.haltekosten_minuten += self.stopp_fixkosten_min
+            plan.kosten_eur += plan.stopps[-1].kosten_eur
             soc = abfahrt
             vorher = knoten
 

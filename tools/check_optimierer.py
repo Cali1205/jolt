@@ -572,6 +572,62 @@ def fall_ladepark():
                f"{halt:.1f} min für {len(p2.stopps)} Stopps")
 
 
+def fall_kosten():
+    abschnitt("Kosten gegen Zeit - der Handel, der vorher nicht auszudrücken war")
+    # Der Optimierer minimierte ausschliesslich Zeit. Ein Anbieterwunsch war
+    # deshalb nur als Zeitgutschrift auszudrücken - eine Vorliebe, als
+    # Minuten verkleidet. Der eigentliche Handel ("länger laden, dafür
+    # billiger") liess sich damit gar nicht formulieren.
+    from app.laden.preise import preis_je_kwh
+
+    pruefe(preis_je_kwh("Ionity GmbH", [{"muster": "Ionity", "eur_kwh": 0.39}],
+                        0.69) == 0.39,
+           "der Anbieter wird als Teilzeichenkette getroffen")
+    pruefe(preis_je_kwh("Irgendwer", [{"muster": "Ionity", "eur_kwh": 0.39}],
+                        0.69) == 0.69,
+           "und alles Übrige bekommt den Standardpreis")
+
+    fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
+    profil = profil_bauen(500, kwh_je_km=0.21)
+    # Zwei gleichwertige Standorte an derselben Stelle - einer teuer, einer
+    # billig. Ohne Kosten in der Zielfunktion entscheidet der Zufall.
+    optionen = [
+        optimierer.Ladeoption(id=1, km_auf_route=250.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=8,
+                              name="Teuer", betreiber="Teuer"),
+        optimierer.Ladeoption(id=2, km_auf_route=252.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=8,
+                              name="Billig", betreiber="Ionity"),
+    ]
+    preis = lambda o: 0.39 if "ionity" in (o.betreiber or "").lower() else 0.79
+
+    egal = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                             ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                             preis_fuer=preis, zeitwert_eur_h=0.0)
+    mit = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                            ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                            preis_fuer=preis, zeitwert_eur_h=30.0)
+    pruefe(egal.machbar and mit.machbar, "beide Pläne sind machbar",
+           f"{egal.grund} / {mit.grund}")
+    pruefe(mit.stopps and mit.stopps[0].option.betreiber == "Ionity",
+           "mit Kostengewicht gewinnt bei gleicher Zeit der billigere Anbieter",
+           str([s.option.betreiber for s in mit.stopps]))
+    pruefe(mit.kosten_eur < egal.kosten_eur + 0.01,
+           "und der Plan ist nicht teurer als der rein zeitoptimale",
+           f"{mit.kosten_eur:.2f} gegen {egal.kosten_eur:.2f} EUR")
+    pruefe(egal.kosten_eur > 0,
+           "die Kosten stehen auch dann im Plan, wenn sie nicht optimiert "
+           "werden - sonst wüsste niemand, was der Plan kostet",
+           f"{egal.kosten_eur:.2f} EUR")
+
+    # Der Zeitwert muss die Richtung umdrehen können: Wer seine Stunde sehr
+    # hoch bewertet, nimmt den teureren Strom in Kauf, wenn er Zeit spart.
+    summe = sum(s.kwh_geladen for s in mit.stopps)
+    pruefe(summe > 0 and abs(mit.kosten_eur - summe * 0.39) < 0.05,
+           "die ausgewiesenen Kosten passen zur geladenen Energie",
+           f"{summe:.1f} kWh, {mit.kosten_eur:.2f} EUR")
+
+
 def fall_laufzeit():
     abschnitt("Laufzeit")
     fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
@@ -608,6 +664,7 @@ def main() -> int:
     fall_dichte_saeulen()
     fall_zersplitterung()
     fall_ladepark()
+    fall_kosten()
     fall_laufzeit()
 
     return pruefe.bilanz()

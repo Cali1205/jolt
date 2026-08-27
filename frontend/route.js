@@ -337,7 +337,8 @@ window.joltRoute = (function () {
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
         + `&stopp_fixkosten_min=${haltekosten()}`
-        + `&ladepark_bonus_min=${regler("ladepark", 4)}`,
+        + `&ladepark_bonus_min=${regler("ladepark", 4)}`
+        + `&zeitwert_eur_h=${regler("zeitwert", 30)}`,
         { method: "POST" });
       letzterPlan = plan;
       zeichnePlan(plan, liste, werte);
@@ -362,6 +363,9 @@ window.joltRoute = (function () {
       // Sichtbar machen, was die blosse Anzahl der Halte kostet - sonst ist
       // der Regler daneben eine Zahl ohne Wirkung, die man sehen kann.
       K.wertKachel("davon Halte", K.dauer(plan.haltekosten_minuten)),
+      // Der zweite Massstab neben der Zeit. Ohne ihn wäre der Zeitwert-Regler
+      // eine Einstellung, deren Wirkung man nicht sieht.
+      K.wertKachel("Stromkosten", K.zahl(plan.kosten_eur, 2) + " €"),
       K.wertKachel("Stopps", String(plan.anzahl_stopps)),
       K.wertKachel("Am Ziel", K.zahl(plan.soc_am_ziel) + " %",
                    plan.soc_am_ziel >= 15 ? "gut" : ""),
@@ -403,7 +407,8 @@ window.joltRoute = (function () {
             ${K.dauer(s.ankunft_minute)} · ${K.zahl(s.ankunft_soc)} %
             → ${K.zahl(s.abfahrt_soc)} % · ${K.zahl(s.kwh_geladen, 1)} kWh
             · Umweg ${K.zahl(s.umweg_minuten, 1)} min
-            · ${s.anzahl_punkte} Ladepunkte</div>
+            · ${s.anzahl_punkte} Ladepunkte${
+              s.kosten_eur ? " · " + K.zahl(s.kosten_eur, 2) + " €" : ""}</div>
           ${ausweich}
         </div>
         <div class="kw">${K.dauer(s.ladezeit_minuten)}</div>`;
@@ -520,6 +525,7 @@ window.joltRoute = (function () {
     };
     K.reglerKoppeln("haltekosten", "haltekosten-wert", planNachziehen);
     K.reglerKoppeln("ladepark", "ladepark-wert", planNachziehen);
+    K.reglerKoppeln("zeitwert", "zeitwert-wert", planNachziehen);
 
     K.an("rechnen", "click", rechnen);
     window.addEventListener("resize", () => {

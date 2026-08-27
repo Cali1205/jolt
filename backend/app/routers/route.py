@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
-from ..laden import kurven, optimierer, verfuegbarkeit
+from ..laden import kurven, optimierer, preise, verfuegbarkeit
 from ..routing import korridor
 from ..routing.provider import PRAEFERENZEN, RoutingFehler
 
@@ -275,6 +275,10 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                      # Null heisst "nur die Zeit zählt".
                      ladepark_bonus_min: float = Query(
                          optimierer.LADEPARK_BONUS_MIN, ge=0, le=15),
+                     # Was eine Stunde wert ist. Null heisst "Kosten sind
+                     # mir gleich" - dann wird rein auf Zeit optimiert.
+                     zeitwert_eur_h: float = Query(
+                         optimierer.ZEITWERT_EUR_H, ge=0, le=200),
                      db: Session = Depends(get_db)):
     """Die zeitoptimale Folge von Ladestopps für eine gerechnete Fahrt.
 
@@ -323,12 +327,15 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
         umweg_grenze_min=umweg_grenze_min,
         stopp_fixkosten_min=stopp_fixkosten_min,
         ladepark_bonus_min=ladepark_bonus_min,
+        preis_fuer=preise.preisfunktion(fahrzeug),
+        zeitwert_eur_h=zeitwert_eur_h,
         bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
             "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,
             "stopp_fixkosten_min": stopp_fixkosten_min,
             "ladepark_bonus_min": ladepark_bonus_min,
+            "zeitwert_eur_h": zeitwert_eur_h,
             **plan.als_dict()}
 
 

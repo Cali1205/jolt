@@ -101,6 +101,13 @@ class Fahrzeug(Base):
     # nur nicht zusätzlich begünstigt.
     bevorzugte_betreiber = Column(JSON, nullable=False, default=list)
 
+    # Was eine Kilowattstunde kostet - am Fahrzeug, weil sie am Vertrag
+    # hängt und nicht an der Säule. `strompreise` ist eine Liste von
+    # {muster, eur_kwh}, `strompreis_eur_kwh` gilt für alles Übrige.
+    # Siehe laden/preise.py.
+    strompreis_eur_kwh = Column(Float, nullable=False, default=0.59)
+    strompreise = Column(JSON)
+
     # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
     korrekturfaktor = Column(Float, nullable=False, default=1.0)
 

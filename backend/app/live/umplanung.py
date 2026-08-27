@@ -24,7 +24,7 @@ import logging
 from .. import models
 from ..energie import modell, wetter
 from ..energie.modell import Fahrzeugwerte, Umgebung, haversine_m
-from ..laden import kurven, optimierer, verfuegbarkeit
+from ..laden import kurven, optimierer, preise, verfuegbarkeit
 from ..routing import korridor
 
 log = logging.getLogger("uvicorn.error")
@@ -34,7 +34,8 @@ log = logging.getLogger("uvicorn.error")
 VORGABEN = {"radius_km": 10.0, "min_kw": 50.0, "steckertyp": "",
             "umweg_grenze_min": optimierer.UMWEG_GRENZE_MIN,
             "stopp_fixkosten_min": optimierer.STOPP_FIXKOSTEN_MIN,
-            "ladepark_bonus_min": optimierer.LADEPARK_BONUS_MIN}
+            "ladepark_bonus_min": optimierer.LADEPARK_BONUS_MIN,
+            "zeitwert_eur_h": optimierer.ZEITWERT_EUR_H}
 
 
 def parameter_lesen(plan: dict | None) -> dict:
@@ -252,6 +253,8 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
         umweg_grenze_min=parameter["umweg_grenze_min"],
         stopp_fixkosten_min=parameter["stopp_fixkosten_min"],
         ladepark_bonus_min=parameter["ladepark_bonus_min"],
+        preis_fuer=preise.preisfunktion(fahrzeug),
+        zeitwert_eur_h=parameter["zeitwert_eur_h"],
         bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     ergebnis = plan.als_dict()

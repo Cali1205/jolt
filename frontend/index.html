@@ -265,6 +265,16 @@ table.kurve input { padding: 6px 8px; }
             <input type="range" id="ladepark" min="0" max="12" step="1" value="4">
           </div>
         </div>
+        <label for="zeitwert">Deine Stunde ist
+          <span id="zeitwert-wert">30</span> € wert</label>
+        <input type="range" id="zeitwert" min="0" max="120" step="5" value="30">
+        <p class="leer" style="padding-top:4px">Damit wird aus Geld eine Zeit,
+          und beides lässt sich gegeneinander abwägen. Bei <strong>30 €</strong>
+          wiegt ein Euro zwei Minuten: Zehn Minuten länger laden lohnt sich,
+          wenn es fünf Euro spart. Höher gestellt zählt Zeit mehr, niedriger
+          der Preis. Bei <strong>0</strong> sind Kosten gleichgültig und jolt
+          rechnet rein auf Zeit – so war es bisher.
+          <br>Die Preise pflegst du beim Fahrzeug.</p>
         <p class="leer" style="padding-top:4px">Einparken, Kabel, freischalten –
           alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
           jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
@@ -437,6 +447,17 @@ table.kurve input { padding: 6px 8px; }
       <table class="kurve"><tbody id="kurve-zeilen"></tbody></table>
       <button class="tat neben" id="kurve-zeile-neu">Stützstelle hinzufügen</button>
       <button class="tat" id="fahrzeug-speichern">Speichern</button>
+
+      <h2>Strompreise</h2>
+      <p class="leer" style="padding-top:0">Was du je Kilowattstunde zahlst.
+        jolt kann das nicht wissen – der Preis hängt an deinem Vertrag, nicht
+        an der Säule: Dieselbe Ionity-Säule kostet mit Abo etwa die Hälfte
+        von dem, was sie ad hoc kostet. Der Name wird als Teil verglichen,
+        „Ionity“ trifft also „Ionity GmbH“.</p>
+      <label for="standardpreis">Standardpreis (alles Übrige) in €/kWh</label>
+      <input type="number" id="standardpreis" min="0" max="5" step="0.01" value="0.59">
+      <table class="kurve"><tbody id="preis-zeilen"></tbody></table>
+      <button class="tat neben" id="preis-zeile-neu">Anbieter hinzufügen</button>
 
       <h2>Logger im Auto</h2>
       <p class="leer" style="padding-top:0">Ein Gerät, das fest im Auto sitzt –
