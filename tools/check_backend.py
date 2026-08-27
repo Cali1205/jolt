@@ -679,6 +679,20 @@ def main() -> int:
            "index.html kommt zurück")
     pruefe(client.get("/manifest.json").status_code == 200, "manifest.json auch")
 
+    # Der Fehler, der viermal zugeschlagen hat: index.html wird nie
+    # zwischengespeichert, die Dateien unter /static aber schon - Cloudflare
+    # ersetzt dort das no-cache des Ursprungs durch max-age=14400. Der
+    # Browser holt frisches HTML und fragt fürs JavaScript gar nicht erst
+    # nach. Vier Stunden lang neue Oberfläche mit alter Logik.
+    inhalt = seite.content
+    pruefe(b"/static/app.js?v=" in inhalt and b"/static/fahrten.js?v=" in inhalt,
+           "die Skriptverweise in index.html tragen eine Version - sonst "
+           "zieht frisches HTML altes JavaScript nach",
+           str([z for z in inhalt.split() if b"app.js" in z][:2]))
+    pruefe(b'"/static/core.js"' not in inhalt,
+           "und zwar alle, nicht nur einige",
+           "core.js steht ohne Version im HTML")
+
     # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
     # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
     # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
