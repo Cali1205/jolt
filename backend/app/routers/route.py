@@ -371,6 +371,12 @@ def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, le=200)
             "aussentemp_c": f.aussentemp_c,
             "tempo_faktor": f.tempo_faktor,
             "zuladung_kg": f.zuladung_kg,
+            # Für den Vergleich in der Historie: Eine Fahrt mit Träger ist
+            # nicht mit einer ohne vergleichbar, und eine Aufzeichnung nicht
+            # mit einem Entwurf. Beides muss man sehen können, sonst
+            # vergleicht man Äpfel mit Birnen und wundert sich.
+            "luftwiderstand_faktor": f.luftwiderstand_faktor,
+            "aufzeichnung": bool(f.aufzeichnung),
             # Ob zu dieser Fahrt tatsächlich gefahren wurde - eine geplante
             # Fahrt ohne Live-Sitzung ist ein Entwurf, keine Erinnerung.
             "gefahren": bool(f.live_sitzungen)})

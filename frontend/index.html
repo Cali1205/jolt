@@ -138,6 +138,53 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .balken { height: 8px; background: #0c1116; border-radius: 99px; overflow: hidden;
   border: 1px solid var(--rand); margin-top: 6px; }
 .balken > i { display: block; height: 100%; background: var(--gut); }
+/* Die Fahrten-Historie. Ihr Zweck ist Vergleich, und Vergleichen heisst
+   Zahlen untereinander lesen - deshalb eine Tabelle mit rechtsbündigen,
+   gleichbreiten Ziffern statt punktgetrennter Sätze. */
+.tabelle-halter { overflow-x: auto; -webkit-overflow-scrolling: touch;
+  margin: 0 -14px; padding: 0 14px; }
+table.fahrten { width: 100%; border-collapse: collapse; font-size: 13px;
+  white-space: nowrap; }
+table.fahrten th { text-align: left; font-weight: 600; font-size: 11px;
+  color: var(--gedaempft); text-transform: uppercase; letter-spacing: .04em;
+  padding: 0 8px 6px 0; border-bottom: 1px solid var(--rand); }
+table.fahrten td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--rand);
+  vertical-align: top; }
+table.fahrten tr:last-child td { border-bottom: none; }
+table.fahrten .num { text-align: right; font-variant-numeric: tabular-nums;
+  padding-right: 12px; }
+table.fahrten th.num { padding-right: 12px; }
+/* Der Verbrauch ist die Zahl, wegen der man die Tabelle aufschlägt. */
+table.fahrten .stark { color: var(--akzent); font-weight: 650; }
+/* Das Datum bleibt auch auf dem Telefon stehen: Es ist die Achse, an der
+   verglichen wird - dieselbe Strecke im Januar und im Juni. Es darf dafür
+   umbrechen. */
+table.fahrten .datum { color: var(--gedaempft); font-size: 12px;
+  white-space: normal; max-width: 92px; }
+table.fahrten .strecke { white-space: normal; min-width: 190px; }
+table.fahrten .titel { font-weight: 600; }
+table.fahrten .unter { font-size: 11px; color: var(--gedaempft); margin-top: 2px; }
+table.fahrten tr:hover td { background: #0c1116; }
+.marke { font-size: 10px; padding: 1px 6px; border-radius: 99px;
+  border: 1px solid var(--rand); color: var(--gedaempft); }
+.marke.gut { border-color: #235c3c; color: var(--gut); }
+.marke.auf { border-color: #56421a; color: var(--akzent); }
+.marke.warn { border-color: #5b441a; color: var(--warnung); }
+button.klein { background: transparent; border: 1px solid var(--rand);
+  color: var(--gedaempft); border-radius: 7px; padding: 4px 9px; font: inherit;
+  font-size: 12px; cursor: pointer; width: auto; }
+button.klein:hover { color: var(--text); border-color: var(--gedaempft); }
+table.fahrten .tat-spalte { white-space: nowrap; text-align: right; }
+/* Auf schmalen Schirmen fallen die hinteren Spalten weg - in der
+   Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist Datum,
+   Strecke, Kilometer und Verbrauch. */
+@media (max-width: 720px) {
+  table.fahrten .weg-schmal { display: none; }
+}
+@media (max-width: 430px) {
+  table.fahrten .weg-eng { display: none; }
+}
+
 table.kurve { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.kurve th, table.kurve td { padding: 4px; text-align: left; }
 table.kurve input { padding: 6px 8px; }

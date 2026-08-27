@@ -21,49 +21,61 @@ window.joltFahrten = (function () {
                                        minute: "2-digit" });
   }
 
-  /* Die Zeile unter dem Titel: nur was tatsächlich bekannt ist.
+  const zahl = (wert, stellen) =>
+    (wert === null || wert === undefined) ? "" : K.zahl(wert, stellen);
+
+  /* Was eine Fahrt mit einer anderen unvergleichbar macht.
    *
-   * Ein "– °C" neben einem "– kg" ist keine Information, sondern Rauschen,
-   * und Fahrten aus der Zeit vor dem Zuladungsfeld haben diesen Wert
-   * zwangsläufig nicht. */
-  function merkmale(fahrt) {
-    const teile = [];
-    if (fahrt.verbrauch_kwh_100km !== null && fahrt.verbrauch_kwh_100km !== undefined) {
-      teile.push(K.zahl(fahrt.verbrauch_kwh_100km, 1) + " kWh/100 km");
+   * Eine Fahrt mit Fahrradträger ist keine Vergleichsgrösse für eine ohne,
+   * und ein blosser Entwurf keine für eine gefahrene Strecke. Ohne diese
+   * Marken vergleicht man Äpfel mit Birnen und wundert sich über den
+   * Verbrauch. */
+  function marken(fahrt) {
+    const m = [];
+    if (fahrt.aufzeichnung) m.push('<span class="marke auf">aufgez.</span>');
+    else if (fahrt.gefahren) m.push('<span class="marke gut">gefahren</span>');
+    else m.push('<span class="marke">Entwurf</span>');
+    if (fahrt.luftwiderstand_faktor && fahrt.luftwiderstand_faktor > 1.001) {
+      m.push(`<span class="marke warn">Anbau ×${K.zahl(fahrt.luftwiderstand_faktor, 2)}</span>`);
     }
-    if (fahrt.aussentemp_c !== null && fahrt.aussentemp_c !== undefined) {
-      teile.push(K.zahl(fahrt.aussentemp_c, 1) + " °C");
-    }
-    if (fahrt.tempo_faktor && Math.abs(fahrt.tempo_faktor - 1) > 0.001) {
-      teile.push("Tempo " + Math.round(fahrt.tempo_faktor * 100) + " %");
-    }
-    if (fahrt.zuladung_kg !== null && fahrt.zuladung_kg !== undefined) {
-      teile.push(K.zahl(fahrt.zuladung_kg, 0) + " kg zu");
-    }
-    return teile.join(" · ");
+    return m.join(" ");
   }
 
+  /* Eine Tabelle statt einer Liste aus punktgetrennten Sätzen.
+   *
+   * Der Zweck dieser Ansicht ist Vergleich - dieselbe Strecke im Januar und
+   * im Juni, einmal leer und einmal beladen. Vergleichen heisst Zahlen
+   * untereinander lesen, und dafür ist eine Tabelle das richtige Mittel:
+   * gleiche Spalte, gleiche Stelle, rechtsbündig und in gleichbreiten
+   * Ziffern. In einer Textzeile steht der Verbrauch mal an dritter, mal an
+   * fünfter Stelle - je nachdem, was sonst noch bekannt ist.
+   *
+   * Auf schmalen Schirmen fallen die hinteren Spalten weg (siehe CSS), und
+   * zwar in der Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist
+   * Datum, Strecke, Kilometer und Verbrauch. */
   function zeile(fahrt) {
-    const strecke = K.zahl(fahrt.strecke_km, 1) + " km";
-    const zeit = K.dauer(fahrt.fahrzeit_minuten);
     const soc = (fahrt.soc_am_ziel === null || fahrt.soc_am_ziel === undefined)
-      ? "" : ` · ${K.zahl(fahrt.start_soc, 0)} % → ${K.zahl(fahrt.soc_am_ziel, 0)} %`;
-    // Eine Fahrt ohne Live-Sitzung ist ein Entwurf: geplant, aber nie
-    // gefahren. Jede Routenberechnung legt bis zu drei davon an.
-    const marke = fahrt.gefahren
-      ? '<span class="kw">gefahren</span>' : "";
-
-    return `<li data-id="${fahrt.id}">
-      <div class="haupt">
+      ? "" : `${zahl(fahrt.start_soc, 0)}→${zahl(fahrt.soc_am_ziel, 0)} %`;
+    return `<tr data-id="${fahrt.id}">
+      <td class="datum">${datum(fahrt.angelegt)}</td>
+      <td class="strecke">
         <div class="titel">${fahrt.start || "?"} → ${fahrt.ziel || "?"}</div>
-        <div class="unter">${datum(fahrt.angelegt)} · ${fahrt.fahrzeug}
-          · ${strecke} · ${zeit}${soc}</div>
-        <div class="unter">${merkmale(fahrt)}</div>
-      </div>
-      ${marke}
-      <button class="tat neben" data-oeffnen="${fahrt.id}">Öffnen</button>
-      <button class="tat neben" data-loeschen="${fahrt.id}">×</button>
-    </li>`;
+        <div class="unter">${fahrt.fahrzeug || ""} ${marken(fahrt)}</div>
+      </td>
+      <td class="num">${zahl(fahrt.strecke_km, 0)}</td>
+      <td class="num weg-eng">${K.dauer(fahrt.fahrzeit_minuten)}</td>
+      <td class="num stark">${zahl(fahrt.verbrauch_kwh_100km, 1)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.kwh_gesamt, 0)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.aussentemp_c, 0)}</td>
+      <td class="num weg-schmal">${zahl(fahrt.zuladung_kg, 0)}</td>
+      <td class="num weg-schmal">${fahrt.tempo_faktor
+        ? Math.round(fahrt.tempo_faktor * 100) : ""}</td>
+      <td class="num weg-schmal">${soc}</td>
+      <td class="tat-spalte">
+        <button class="klein" data-oeffnen="${fahrt.id}">öffnen</button>
+        <button class="klein" data-loeschen="${fahrt.id}">×</button>
+      </td>
+    </tr>`;
   }
 
   async function laden() {
@@ -76,7 +88,25 @@ window.joltFahrten = (function () {
         halter.innerHTML = '<p class="leer">Noch keine Fahrt geplant.</p>';
         return;
       }
-      halter.innerHTML = `<ul class="liste">${fahrten.map(zeile).join("")}</ul>`;
+      halter.innerHTML = `
+        <div class="tabelle-halter">
+          <table class="fahrten">
+            <thead><tr>
+              <th class="datum">Datum</th>
+              <th>Strecke</th>
+              <th class="num">km</th>
+              <th class="num weg-eng">Zeit</th>
+              <th class="num">kWh/100</th>
+              <th class="num weg-schmal">kWh</th>
+              <th class="num weg-schmal">°C</th>
+              <th class="num weg-schmal">Zuladung</th>
+              <th class="num weg-schmal">Tempo %</th>
+              <th class="num weg-schmal">Ladestand</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${fahrten.map(zeile).join("")}</tbody>
+          </table>
+        </div>`;
       geladen = true;
     } catch (fehler) {
       halter.innerHTML = "";
