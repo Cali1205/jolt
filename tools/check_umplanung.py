@@ -598,6 +598,58 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_abgeloeste_fahrt():
+    """Eine neue Aufzeichnung loest die alte ab - aber verschluckt sie nicht.
+
+    `/api/live/aufzeichnung` beendet laufende Sitzungen desselben Fahrzeugs.
+    Das ist richtig; nur wurde dabei bloss `laeuft = False` gesetzt. Fuer eine
+    Aufzeichnung war das der Totalverlust: Strecke und Energieprofil entstehen
+    erst beim Abschliessen aus den Messpunkten, und mit `laeuft = False` sieht
+    auch das Aufraeumen sie nie wieder.
+
+    Der Fall ist nicht konstruiert - er ist der wahrscheinlichste ueberhaupt.
+    Wer das Beenden vergessen hat, merkt es beim naechsten Losfahren, und
+    genau dieser Griff loeschte dann die Fahrt, die er retten wollte.
+    """
+    client = TestClient(app)
+    print("\nAbgelöste Aufzeichnung")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+
+    erste = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": "Vergessen"}).json()
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, erste["sitzung_id"])
+        beginn = datetime.utcnow() - timedelta(minutes=40)
+        for i in range(41):
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, 48.0 + i * 0.009, 11.0, soc=90.0 - i * 0.25,
+                aussentemp_c=12.0, zeit=beginn + timedelta(minutes=i))
+    finally:
+        db.close()
+
+    # Und jetzt faehrt jemand los, ohne die alte Fahrt beendet zu haben.
+    client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 49.0, "lon": 9.0,
+        "soc": 80.0, "name": "Die neue"})
+
+    db = SessionLocal()
+    try:
+        alte = db.get(models.LiveSitzung, erste["sitzung_id"])
+        pruefe(alte.laeuft is False, "die alte Sitzung weicht der neuen")
+        fahrt = alte.fahrt
+        pruefe(bool(fahrt.geometrie),
+               "aber sie wird dabei abgeschlossen - die Strecke entsteht "
+               "noch, statt mit der Sitzung zu verschwinden",
+               f"geometrie={len(fahrt.geometrie or [])} Punkte")
+        pruefe(bool(fahrt.energieprofil) and (fahrt.strecke_m or 0) > 1000,
+               "mit Energieprofil und Strecke, also auswertbar",
+               f"strecke_m={fahrt.strecke_m}")
+    finally:
+        db.close()
+
+
 def teil_anbauten():
     """Fahrradträger und Dachbox - Zuschlag auf den Luftwiderstand.
 
@@ -1029,6 +1081,7 @@ def main() -> int:
     teil_kette_mit_ladestopp()
     teil_anbauten()
     teil_verwaiste_fahrt()
+    teil_abgeloeste_fahrt()
     teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()

@@ -153,12 +153,23 @@
       el("soc-wert").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
       if (el("automatik").checked) {
+        // Dieselbe Prüfung wie beim Start von Hand. Ohne sie liefe die
+        // Schleife los und scheiterte bei jedem Anlegen der Fahrt an einem
+        // 401 - sichtbar nur im Protokoll, während oben "Bereit" steht.
+        if (!el("token").value.trim() && !joltToken()) {
+          throw new Error("Erst in jolt anmelden oder ein Logger-Token "
+                          + "eintragen");
+        }
         // Nicht sofort anlegen: Wer im Stand verbindet, bekäme sonst eine
         // Fahrt, die an der Auffahrt beginnt und eine halbe Stunde
         // Parkplatz enthält. Die Seite wartet, bis sich etwas bewegt.
         losStand("Bereit – wartet, bis das Auto fährt.", "gut");
         laeuft = true;
         bewegt = 0;
+        // `runde` steuert, welche selten gelesenen Messwerte drankommen
+        // (`satzLesen`). Ohne Rücksetzen zählt die zweite Fahrt einer
+        // Sitzung dort weiter, wo die erste aufhörte.
+        runde = 0;
         el("fahrt-start").hidden = true;
         el("fahrt-stop").hidden = false;
         await bildschirmWachHalten();
@@ -314,7 +325,8 @@
      * rangiert. */
     if (!sitzungId && el("automatik").checked && !el("token").value.trim()) {
       const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh
-        : (typeof wo.tempo_kmh === "number" ? wo.tempo_kmh : null);
+        : (typeof wo.tempo_kmh === "number" && !Number.isNaN(wo.tempo_kmh)
+           ? wo.tempo_kmh : null);
       if (tempo !== null && tempo < FAEHRT_AB_KMH) {
         bewegt = 0;
         return { soc, roh, wartet: true,
@@ -418,7 +430,6 @@
         // wieder, und eine abgebrochene Aufzeichnung merkt man erst hinterher.
         stand2("Aussetzer: " + fehler.message, "schlecht");
         log("Runde übersprungen: " + fehler.message);
-              // Adresse neu setzen, sicher ist sicher
       }
       const rest = Number(el("takt").value) * 1000 - (Date.now() - beginn);
       await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
@@ -495,8 +506,15 @@
         // ungenau ist (sie streut um zehn bis zwanzig Meter). Sie kostet
         // nichts und ist der Rückfall, wenn beim Abschliessen keine
         // Kartendaten zu bekommen sind.
+        // `speed` kommt in m/s und ist oft null (kalter Fix, Standlauf).
+        // Ohne diese Umrechnung war der GPS-Rueckfall der Bewegungserkennung
+        // weiter unten toter Code: `wo.tempo_kmh` gab es schlicht nicht, und
+        // ohne Tempo vom Auto legte die Automatik die Fahrt sofort an -
+        // mitsamt dem Parkplatz davor.
         (p) => erfuellen({ lat: p.coords.latitude, lon: p.coords.longitude,
-                           hoehe_m: p.coords.altitude }),
+                           hoehe_m: p.coords.altitude,
+                           tempo_kmh: typeof p.coords.speed === "number"
+                             ? p.coords.speed * 3.6 : null }),
         (f) => ablehnen(new Error("Standort: " + f.message)),
         { enableHighAccuracy: true, timeout: 10000 });
     });

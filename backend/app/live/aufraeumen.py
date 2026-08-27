@@ -69,6 +69,59 @@ FEHLSTART_MINUTEN = 20
 TAKT_SEKUNDEN = 5 * 60
 
 
+def beenden_und_lernen(db, sitzung) -> dict:
+    """Eine Sitzung ordentlich zu Ende bringen: Strecke bauen, dann lernen.
+
+    Die Reihenfolge ist keine Geschmacksfrage. Die Kalibrierung vergleicht
+    `soll_soc` mit `soc` an den Messpunkten, und der Sollwert entsteht erst
+    beim Bauen der Strecke - andersherum lernt sie gegen lauter Nullen.
+
+    Diese Funktion steht hier und nicht im Router, weil es **drei** Wege
+    gibt, auf denen eine Sitzung endet: der Knopf am Telefon, das Aufraeumen
+    weiter unten, und das Starten einer neuen Aufzeichnung, die die alte
+     abloest. Drei Abschriften desselben Ablaufs laufen unweigerlich
+    auseinander, und auf dem dritten Weg fehlte er zuletzt ganz.
+    """
+    ergebnis: dict = {"aufzeichnung": None, "gelernt": None,
+                      "nicht_gelernt": None}
+    fahrt = sitzung.fahrt
+
+    if fahrt is not None and fahrt.aufzeichnung and not fahrt.geometrie:
+        try:
+            ergebnis["aufzeichnung"] = aufzeichnung.abschliessen(
+                db, fahrt, sitzung)
+        except Exception as fehler:      # noqa: BLE001
+            # Die Messpunkte bleiben; eine gescheiterte Rekonstruktion darf
+            # sie nicht mitnehmen.
+            log.warning("Aufzeichnung %s nicht abzuschliessen: %s",
+                        fahrt.id, fehler)
+            ergebnis["aufzeichnung"] = {"ok": False, "grund": str(fehler)}
+
+    fahrzeug = fahrt.fahrzeug if fahrt else None
+
+    # Eine Fahrt mit Fahrradtraeger oder Dachbox lehrt nichts ueber das
+    # *Fahrzeug*: Der gemessene Mehrverbrauch enthaelt dann zwei Unbekannte,
+    # und aus einer Messung lassen sich nicht zwei Zahlen bestimmen.
+    zuschlag = (fahrt.luftwiderstand_faktor or 1.0) if fahrt else 1.0
+    if fahrzeug and abs(zuschlag - 1.0) > 0.001:
+        ergebnis["nicht_gelernt"] = (
+            f"Fahrt mit Luftwiderstands-Zuschlag ×{zuschlag:g} - daraus "
+            f"lässt sich der Faktor des Fahrzeugs nicht bestimmen.")
+        fahrzeug = None
+
+    if fahrzeug:
+        roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
+        if roh is not None:
+            vorher = fahrzeug.korrekturfaktor
+            fahrzeug.korrekturfaktor = kalibrierung.nachfuehren(vorher, roh)
+            ergebnis["gelernt"] = {"rohfaktor": round(roh, 3),
+                                   "vorher": round(vorher, 3),
+                                   "nachher": fahrzeug.korrekturfaktor}
+            log.info("Kalibrierung %s: %.3f -> %.3f (roh %.3f)",
+                     fahrzeug.name, vorher, fahrzeug.korrekturfaktor, roh)
+    return ergebnis
+
+
 def _laedt_gerade(punkte) -> bool:
     """Sah der Schluss der Messpunkte nach einem Ladevorgang aus?
 
@@ -117,31 +170,9 @@ def verwaiste_beenden(db) -> list[dict]:
                     "frist_minuten": minuten,
                     "stille_minuten": round((jetzt - letzte).total_seconds() / 60)}
 
-        fahrt = sitzung.fahrt
-        if fahrt is not None and fahrt.aufzeichnung and not fahrt.geometrie:
-            try:
-                ergebnis["aufzeichnung"] = aufzeichnung.abschliessen(
-                    db, fahrt, sitzung)
-            except Exception as fehler:      # noqa: BLE001
-                # Die Messpunkte bleiben; eine gescheiterte Rekonstruktion
-                # darf sie nicht mitnehmen.
-                log.warning("Verwaiste Aufzeichnung %s nicht abzuschliessen: %s",
-                            fahrt.id, fehler)
-                ergebnis["aufzeichnung"] = {"ok": False, "grund": str(fehler)}
-
         # Gelernt wird auch hier - eine vergessene Fahrt ist keine schlechtere
-        # Messung als eine ordentlich beendete. Der Zuschlag fuer Anbauten
-        # sperrt das Lernen wie beim Beenden von Hand.
-        zuschlag = (fahrt.luftwiderstand_faktor or 1.0) if fahrt else 1.0
-        if fahrt is not None and fahrt.fahrzeug and abs(zuschlag - 1.0) <= 0.001:
-            roh = kalibrierung.aus_live_sitzung(sitzung,
-                                                fahrt.fahrzeug.akku_netto_kwh)
-            if roh is not None:
-                vorher = fahrt.fahrzeug.korrekturfaktor
-                fahrt.fahrzeug.korrekturfaktor = kalibrierung.nachfuehren(
-                    vorher, roh)
-                ergebnis["gelernt"] = {"vorher": round(vorher, 3),
-                                       "nachher": fahrt.fahrzeug.korrekturfaktor}
+        # Messung als eine ordentlich beendete.
+        ergebnis.update(beenden_und_lernen(db, sitzung))
 
         beendet.append(ergebnis)
         log.info("Verwaiste Sitzung %s nach %s min Stille beendet: %s",

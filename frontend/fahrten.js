@@ -128,7 +128,17 @@ window.joltFahrten = (function () {
     }
   }
 
-  async function loeschen(id) {
+  /* Nachfragen, bevor gelöscht wird.
+   *
+   * Das Kreuz sitzt in einer Tabellenzeile, auf dem Telefon eine Daumenbreite
+   * neben "öffnen". Und eine aufgezeichnete Fahrt ist nicht wiederherstellbar:
+   * Sie ist eine Messung, die genau einmal stattgefunden hat - anders als eine
+   * geplante Route, die man neu rechnen kann. */
+  async function loeschen(id, beschriftung) {
+    if (!window.confirm(`„${beschriftung}" löschen?\n\nEine aufgezeichnete `
+                        + "Fahrt lässt sich nicht wiederherstellen.")) {
+      return;
+    }
     try {
       await K.api("/api/fahrten/" + id, { method: "DELETE" });
       await laden();
@@ -219,6 +229,7 @@ window.joltFahrten = (function () {
                 name: document.getElementById("aufz-name").value },
       });
       K.zustand.sitzungId = antwort.sitzung_id;
+      veraltet();   // die neue Aufzeichnung gehört in die Liste
       window.joltApp.ansichtZeigen("live");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
@@ -266,15 +277,31 @@ window.joltFahrten = (function () {
       const auf = ereignis.target.closest("[data-oeffnen]");
       if (auf) { oeffnen(auf.dataset.oeffnen); return; }
       const weg = ereignis.target.closest("[data-loeschen]");
-      if (weg) loeschen(weg.dataset.loeschen);
+      if (weg) {
+        const zeile = weg.closest("tr");
+        const titel = zeile ? zeile.querySelector(".titel") : null;
+        loeschen(weg.dataset.loeschen,
+                 titel ? titel.textContent.trim() : "Diese Fahrt");
+      }
     });
   }
 
   // Beim Wechsel in die Ansicht laden, nicht beim Start: Wer nie auf den
   // Reiter tippt, soll die Liste auch nicht bezahlen.
+  //
+  // Aber `geladen` wurde nirgends zurückgesetzt, und damit war die Liste nach
+  // dem ersten Öffnen eingefroren: Wer eine Route plante oder eine
+  // Aufzeichnung beendete und dann hierher wechselte, sah sie nicht - bis er
+  // die Seite neu lud. Das Zwischenspeichern soll den zweiten Blick sparen,
+  // nicht neue Fahrten verstecken; deshalb hält `veraltet()` fest, dass sich
+  // etwas geändert hat, und die Ansicht lädt beim nächsten Mal neu.
   function anzeigen() {
     if (!geladen) laden();
   }
 
-  return { einrichten, laden, anzeigen };
+  function veraltet() {
+    geladen = false;
+  }
+
+  return { einrichten, laden, anzeigen, veraltet };
 })();
