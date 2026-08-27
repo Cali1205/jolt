@@ -864,11 +864,32 @@ window.joltLive = (function () {
    * Auch das Ausbleiben wird gemeldet: `gelernt: null` heisst "zu kurz oder
    * unplausibel". Eine Fahrt, die stillschweigend nichts beiträgt, sieht
    * sonst aus wie eine, die bestätigt hat. */
+  /* Woher die Höhen kamen - und zwar nur, wenn es nicht die Karte war.
+   *
+   * Ein Verbrauch ohne Höhenprofil ist nicht deutbar: Ob 22 kWh/100 km am
+   * Fahrstil lagen oder an vierhundert Höhenmetern, lässt sich aus dem
+   * Verbrauch allein nicht trennen. Fällt die Kartenabfrage aus, geht die
+   * Fahrt trotzdem durch - aber dann soll man es wissen, statt die Zahl
+   * später für bare Münze zu nehmen. */
+  function hoehenMelden(gebaut) {
+    if (!gebaut || !gebaut.ok) return;
+    if (gebaut.hoehen === "gps") {
+      K.melden("Die Höhen dieser Fahrt kommen aus dem GPS, nicht aus der "
+        + "Karte – geglättet, aber ungenauer. Der gelernte Faktor ist "
+        + "entsprechend weicher.", "hinweis");
+    } else if (gebaut.hoehen === "flach") {
+      K.melden("Für diese Fahrt gab es keine Höhendaten; sie wurde flach "
+        + "gerechnet. Auf einer Runde macht das wenig aus, auf einer Fahrt "
+        + "ins Gebirge viel.", "hinweis");
+    }
+  }
+
   function gelerntesMelden(ergebnis) {
     if (!ergebnis) {
       K.melden("Live-Fahrt beendet.", "hinweis");
       return;
     }
+    hoehenMelden(ergebnis.aufzeichnung);
     const g = ergebnis.gelernt;
     if (!g && ergebnis.nicht_gelernt) {
       // Der Zuschlag für Träger oder Box ist kein Fehler, sondern der Grund,
