@@ -41,12 +41,14 @@ class DemoRouting:
     ist_demo = True
 
     def route(self, start, ziel, zwischenstopps=None,
-             praeferenz: str = "recommended") -> Route:
-        # Es gibt kein echtes Strassennetz, aus dem sich schnellste, kürzeste
-        # und empfohlene Route unterscheiden liessen - alle drei ergäben die
-        # exakt gleiche Luftlinie. `praeferenz` wird deshalb entgegengenommen
-        # und ignoriert; /api/route erkennt die identischen Ergebnisse selbst
-        # und zeigt sie zusammengefasst als eine Variante mit drei Etiketten.
+             praeferenz: str = "recommended",
+             mautfrei: bool = False) -> Route:
+        # Es gibt kein echtes Strassennetz, aus dem sich schnellste und
+        # empfohlene Route unterscheiden liessen, und eine erfundene
+        # Luftlinie hat auch keine Mautstrassen. `praeferenz` und `mautfrei`
+        # werden deshalb entgegengenommen und ignoriert; /api/route erkennt
+        # die identischen Ergebnisse selbst und legt sie zu einer Variante
+        # mit mehreren Etiketten zusammen.
         stationen = [start] + list(zwischenstopps or []) + [ziel]
         punkte: list[list[float]] = []
         tempo: list[float] = []

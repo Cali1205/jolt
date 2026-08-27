@@ -370,15 +370,38 @@ def main() -> int:
     varianten = antwort.json()["varianten"]
     # Der Demo-Adapter kennt keinen Unterschied zwischen den drei ORS-Vorgaben
     # und liefert für alle dieselbe Luftlinie - /api/route erkennt das und legt
-    # sie zu einer einzigen Variante mit allen Etiketten zusammen.
+    # Vorgabe ist eine einzige Route, die schnellste.
+    #
+    # Vorher waren es drei ("fastest", "shortest", "recommended"). "shortest"
+    # ist inzwischen ganz raus: Auf Le Gurp - Montchanin liefert sie 554 km
+    # in 11,8 Stunden gegen 654 km in 6,3 - hundert Kilometer weniger,
+    # gekauft mit fünfeinhalb Stunden. Und "recommended" ergibt auf
+    # Autobahnstrecken meist dieselbe Strasse wie "fastest". Drei Anfragen
+    # für eine Antwort, bei 2.500 ORS-Anfragen am Tag.
     pruefe(len(varianten) == 1,
-           "die drei Vorgaben ergeben im Demo-Modus dieselbe Route",
+           "ohne Alternative wird genau eine Route gerechnet",
            f"{len(varianten)} Varianten")
     route = varianten[0]
     fahrt_id = route["fahrt_id"]
-    pruefe(set(route["etiketten"]) == {"schnellste", "kürzeste", "empfohlene",
-                                       "sparsamste"},
-           "und trägt alle vier Etiketten", str(route["etiketten"]))
+    pruefe(route["etiketten"] == ["schnellste"],
+           "und sie ist die schnellste", str(route["etiketten"]))
+
+    # Mit Alternative kommt die mautfreie dazu. Das Demo-Routing erfindet
+    # eine Luftlinie und kennt keine Mautstrassen - beide Anfragen ergeben
+    # deshalb dieselbe Strecke, und /api/route legt sie zu einer Variante
+    # mit beiden Etiketten zusammen. Genau das ist hier zu prüfen: dass die
+    # Zusammenlegung greift und nicht zweimal dasselbe angeboten wird.
+    mit_alt = client.post("/api/route", json={
+        "fahrzeug_id": fahrzeuge[0]["id"],
+        "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
+        "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
+        "start_soc": 80.0, "alternative": True}).json()["varianten"]
+    pruefe(len(mit_alt) == 1,
+           "im Demo-Modus ist die mautfreie Route dieselbe - sie wird "
+           "zusammengelegt statt doppelt angeboten",
+           f"{len(mit_alt)} Varianten")
+    pruefe("mautfrei" in mit_alt[0]["etiketten"],
+           "und das Etikett sagt es", str(mit_alt[0]["etiketten"]))
     pruefe(route["demo"] is True, "und ist als Demo gekennzeichnet")
     pruefe(500 < route["strecke_km"] < 900, "Strecke plausibel",
            f"{route['strecke_km']} km")

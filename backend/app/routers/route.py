@@ -31,8 +31,9 @@ from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
 from ..laden import kurven, optimierer, preise, verfuegbarkeit
+from ..live import umplanung
 from ..routing import korridor
-from ..routing.provider import PRAEFERENZEN, RoutingFehler
+from ..routing.provider import RoutingFehler
 
 # Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
 # liest. "empfohlen" statt "recommended", weil das Wort sonst niemand
@@ -71,6 +72,15 @@ class Routenanfrage(BaseModel):
     # 1.0 = nichts dran. Siehe models.Fahrt.luftwiderstand_faktor.
     luftwiderstand_faktor: float = Field(default=1.0, ge=1.0, le=2.0)
     wetter_beruecksichtigen: bool = True
+    # Eine zweite Route mitrechnen. Aus: Es bleibt bei der schnellsten.
+    #
+    # "shortest" fehlt hier bewusst und ganz. Auf der Strecke Le Gurp -
+    # Montchanin liefert sie 554 km in 11,8 Stunden gegen 654 km in 6,3 -
+    # hundert Kilometer weniger, gekauft mit fünfeinhalb Stunden. Das
+    # entscheidet niemand so, und eine Auswahl, in der eine Möglichkeit
+    # nie gewählt wird, macht die Auswahl nur unübersichtlich. Sie kostet
+    # ausserdem ein Drittel des ORS-Tageskontingents.
+    alternative: bool = False
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
     # einmal voll beladen geplant wird: Masse geht linear in Roll- und
@@ -97,6 +107,14 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
     anbieter = routing.provider()
+    # Jede Vorgabe ist eine eigene ORS-Anfrage, und davon gibt es 2.500 am
+    # Tag. Eine statt dreier ist deshalb nicht nur übersichtlicher.
+    # (Vorgabe, mautfrei) - die zweite nur auf Wunsch. `recommended` wäre
+    # die naheliegende Alternative, liefert auf Autobahnstrecken aber
+    # dieselbe Strasse wie `fastest` und damit keine.
+    wege = [("fastest", False)]
+    if anfrage.alternative:
+        wege.append(("fastest", True))
     # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
     # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
     # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht hier
@@ -113,11 +131,11 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     # derselben Route.
     gruppen: list[dict] = []
     letzter_fehler: RoutingFehler | None = None
-    for praeferenz in PRAEFERENZEN:
+    for praeferenz, mautfrei in wege:
         try:
             strecke = anbieter.route((anfrage.start.lat, anfrage.start.lon),
                                      (anfrage.ziel.lat, anfrage.ziel.lon),
-                                     praeferenz=praeferenz)
+                                     praeferenz=praeferenz, mautfrei=mautfrei)
         except RoutingFehler as fehler:
             # Eine Vorgabe, die scheitert, darf die anderen nicht mitreissen -
             # nur wenn am Ende keine einzige übrig ist, ist die Anfrage
@@ -133,9 +151,13 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
                         and abs(g["strecke"].fahrzeit_s - strecke.fahrzeit_s)
                         <= GLEICH_MIN * 60), None)
         if passend:
-            passend["etiketten"].append(ETIKETT[praeferenz])
+            etikett = "mautfrei" if mautfrei else ETIKETT[praeferenz]
+            if etikett not in passend["etiketten"]:
+                passend["etiketten"].append(etikett)
             continue
-        gruppen.append({"etiketten": [ETIKETT[praeferenz]], "strecke": strecke})
+        gruppen.append({"etiketten": ["mautfrei" if mautfrei
+                                      else ETIKETT[praeferenz]],
+                        "strecke": strecke})
 
     if not gruppen:
         if letzter_fehler:
@@ -175,9 +197,6 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     # die schon vorliegenden Kandidaten. Bei nur einem Kandidaten (Demo-Modus,
     # oder wenn zwei Vorgaben dieselbe Strecke ergeben) landet das Etikett
     # zwangsläufig dort, wo die anderen auch schon stehen.
-    guenstigste = min(kandidaten, key=lambda k: k["profil"].kwh_gesamt)
-    guenstigste["etiketten"].append("sparsamste")
-
     varianten = []
     for kandidat in kandidaten:
         fahrt = models.Fahrt(
@@ -200,10 +219,64 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
                                     fahrzeug)})
     db.commit()
 
-    # Reihenfolge fürs Auge: die günstigste zuerst, sie ist meist die Antwort
-    # auf die Frage, die jolt beantworten soll.
-    varianten.sort(key=lambda v: "sparsamste" not in v["etiketten"])
+    _varianten_bewerten(db, varianten, fahrzeug)
     return {"varianten": varianten}
+
+
+def _varianten_bewerten(db, varianten: list, fahrzeug) -> None:
+    """Die Varianten am **fertigen Ladeplan** messen, nicht an der Fahrzeit.
+
+    Das ist die Frage, die für ein Elektroauto zählt und die sonst niemand
+    beantwortet: Nicht "welche Strasse ist kürzer", sondern "wo bin ich
+    früher, wenn das Laden mitzählt". Eine Route mit hundert Kilometern
+    Umweg kann gewinnen, wenn an ihr die stärkeren Säulen stehen - und eine
+    sparsame Landstrasse verliert, obwohl sie weniger Energie braucht.
+
+    Vorher trug die energieärmste Variante das Etikett "sparsamste". Das war
+    irreführend: Auf Le Gurp - Montchanin zeichnete es die Strecke aus, die
+    mit 47 km/h Schnitt zwar 17 statt 27 kWh/100 km braucht, dafür aber
+    fünfeinhalb Stunden länger unterwegs ist. Sparsam war sie, sinnvoll
+    nicht.
+
+    Gerechnet wird mit den Vorgabewerten für Radius und Mindestleistung -
+    die Regler der Oberfläche gelten für den Ladeplan darunter. Das ist
+    unschädlich, weil **alle** Varianten dieselbe Behandlung bekommen: Für
+    einen Vergleich zählt der Massstab, nicht sein Nullpunkt.
+    """
+    if len(varianten) < 2:
+        return
+    parameter = dict(umplanung.VORGABEN)
+    for variante in varianten:
+        fahrt = db.get(models.Fahrt, variante["fahrt_id"])
+        try:
+            plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc, parameter)
+        except Exception as fehler:      # noqa: BLE001
+            # Ohne Plan bleibt die Variante wählbar - sie trägt dann nur
+            # keine Bewertung. Eine Route zu verwerfen, weil ihr Ladeplan
+            # nicht rechnet, wäre die falsche Reaktion.
+            log.warning("Variante %s nicht planbar: %s", variante["fahrt_id"],
+                        fehler)
+            continue
+        if not plan.get("machbar"):
+            variante["plan_machbar"] = False
+            continue
+        variante.update({
+            "plan_machbar": True,
+            "plan_stopps": plan.get("anzahl_stopps"),
+            "plan_gesamt_minuten": plan.get("gesamt_minuten"),
+            "plan_kosten_eur": plan.get("kosten_eur")})
+
+    bewertet = [v for v in varianten if v.get("plan_machbar")]
+    if bewertet:
+        min(bewertet, key=lambda v: v["plan_gesamt_minuten"])["etiketten"] \
+            .append("insgesamt schnellste")
+        guenstigste = min(bewertet, key=lambda v: v["plan_kosten_eur"])
+        if "insgesamt schnellste" not in guenstigste["etiketten"]:
+            guenstigste["etiketten"].append("günstigste")
+
+    # Reihenfolge fürs Auge: die insgesamt schnellste zuerst - sie ist die
+    # Antwort auf die Frage, die jolt beantworten soll.
+    varianten.sort(key=lambda v: "insgesamt schnellste" not in v["etiketten"])
 
 
 @router.get("/fahrten/{fahrt_id}")
