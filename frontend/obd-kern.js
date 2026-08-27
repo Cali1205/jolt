@@ -373,6 +373,11 @@ function befehl(text, grenze_ms = 15000) {
    * die Suche nach dem Ladestand aufgehalten hat. */
   const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B" };
   const KLIMA = { cp: "00", sh: "000746", cra: "000007B0" };
+  // Fahrzeug-Steuergerät: Kilometerstand und - der eigentliche Fund - die
+  // Leistung der Nebenverbraucher als fertige Zahl.
+  const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076" };
+  // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
+  const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9" };
   const MESSWERTE = [
     { name: "soc_roh", did: "22028C", adresse: BMS, pflicht: true,
       lesen: (b) => b[0] },
@@ -389,6 +394,11 @@ function befehl(text, grenze_ms = 15000) {
     { name: "ladegrenze_a", did: "221E1B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
     { name: "betriebsart", did: "227448", adresse: BMS, lesen: (b) => b[0] },
+    /* Der Strom der PTC-Heizung. Mal Packspannung ergibt das, was die
+     * Heizung allein zieht - im Winter die Frage hinter der Frage, weil sie
+     * der einzige grosse Verbraucher ist, den man selbst beeinflusst. */
+    { name: "ptc_strom_a", did: "221620", adresse: BMS,
+      lesen: (b) => b.length ? b[0] / 4 : null },
     { name: "tempo_kmh", did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
     /* Die Aussentemperatur ist der grösste Einzelposten der Kälte und ging
      * bisher aus einer Vorhersage ins Verbrauchsmodell. Aus dem Auto ist sie
@@ -398,8 +408,20 @@ function befehl(text, grenze_ms = 15000) {
       lesen: (b) => b.length ? b[0] / 2 - 50 : null },
     { name: "innentemp_c", did: "222613", adresse: KLIMA,
       lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
-    { name: "km_stand", did: "22295A",
-      adresse: { cp: "17", sh: "FC0076", cra: "17FE0076" },
+    /* **Nebenverbraucher als fertige Zahl.** Alles ausser dem Antrieb -
+     * Heizung, Klima, Steuergeräte, 12-V-Netz - in kW, direkt aus dem
+     * Steuergerät.
+     *
+     * Vorher wurde das im Stand gemessen und dazwischen fortgeschrieben:
+     * Steht das Auto, ist die Packleistung die der Nebenverbraucher. Das
+     * war eine brauchbare Näherung, aber eben eine - sie galt nur so lange,
+     * wie sich an der Heizung nichts änderte, und im Fahren gar nicht. Ein
+     * gemessener Wert schlägt jede Näherung. */
+    { name: "nebenverbrauch_kw", did: "220364", adresse: FAHRZEUG,
+      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 10 : null },
+    { name: "dcdc_strom_a", did: "22465B", adresse: DCDC, selten: 10,
+      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
+    { name: "km_stand", did: "22295A", adresse: FAHRZEUG,
       selten: 20,
       lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
   ];

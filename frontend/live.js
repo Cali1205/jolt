@@ -21,18 +21,18 @@ window.joltLive = (function () {
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
   let letzteRohwerte = null;
-  /* Die Leistung der Nebenverbraucher, gemessen im Stand.
+  /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
-   * Sie lässt sich im Fahren nicht sauber messen: Die Packleistung enthält
-   * dann Antrieb und Nebenverbraucher, und den Antrieb zu modellieren
-   * brauchte die Steigung, die während einer Aufzeichnung niemand kennt.
-   * Steht das Auto aber (unter 5 km/h) und lädt nicht, dann **ist** die
-   * Packleistung die der Nebenverbraucher - Heizung, Klima, Steuergeräte.
+   * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
+   * und die ist jeder Rechnung überlegen. Antwortet dieses Steuergerät
+   * nicht, bleibt die Näherung: Im Fahren enthält die Packleistung Antrieb
+   * **und** Nebenverbraucher, und den Antrieb zu modellieren brauchte die
+   * Steigung, die während einer Aufzeichnung niemand kennt. Steht das Auto
+   * aber und lädt nicht, dann ist die Packleistung die der Nebenverbraucher.
    *
-   * Das ist keine Behelfslösung, sondern die genauere Messung: An der Ampel
-   * oder an der Säule liest man ab, was die Heizung wirklich zieht, und die
-   * Zahl bleibt danach eine Weile gültig. Deshalb wird sie mit ihrem Alter
-   * angezeigt statt stillschweigend fortgeschrieben. */
+   * Weil dieser Rückfall nur so lange gilt, wie sich an der Heizung nichts
+   * ändert, wird er mit seinem Alter angezeigt - anders als der gemessene
+   * Wert, der immer von jetzt ist. */
   let nebenverbrauch = null;   // {kw, zeit}
 
   // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
@@ -443,6 +443,8 @@ window.joltLive = (function () {
   }
 
   function nebenverbrauchMerken(roh) {
+    // Liegt der gemessene Wert vor, braucht es die Näherung nicht.
+    if (typeof roh.nebenverbrauch_kw === "number") return;
     const kw = leistungKw(roh);
     if (kw === null) return;
     const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
@@ -480,11 +482,27 @@ window.joltLive = (function () {
       kacheln.push(K.wertKachel("Momentan", K.zahl(momentan, 1) + " kWh/100",
         momentan > 30 ? "warnung" : ""));
     }
-    if (nebenverbrauch) {
+    // Gemessen schlägt geschätzt. Der Unterschied steht in der
+    // Beschriftung, damit niemand eine Näherung für eine Messung hält.
+    if (typeof roh.nebenverbrauch_kw === "number") {
+      kacheln.push(K.wertKachel("Nebenverbraucher",
+        K.zahl(roh.nebenverbrauch_kw, 1) + " kW",
+        roh.nebenverbrauch_kw > 3 ? "warnung" : ""));
+    } else if (nebenverbrauch) {
       kacheln.push(K.wertKachel(
-        alter > 0 ? `Nebenverbr. (vor ${alter} min)` : "Nebenverbraucher",
+        alter > 0 ? `Nebenverbr. (Stand, vor ${alter} min)`
+                  : "Nebenverbr. (im Stand)",
         K.zahl(nebenverbrauch.kw, 1) + " kW",
         nebenverbrauch.kw > 3 ? "warnung" : ""));
+    }
+    /* Was davon die Heizung ist. Der grosse Verbraucher, den man selbst in
+     * der Hand hat - und im Winter der Unterschied zwischen einem
+     * Ladestopp und keinem. */
+    if (typeof roh.ptc_strom_a === "number"
+        && typeof roh.spannung_v === "number") {
+      const heizung = roh.ptc_strom_a * roh.spannung_v / 1000;
+      kacheln.push(K.wertKachel("davon Heizung", K.zahl(heizung, 1) + " kW",
+        heizung > 2 ? "warnung" : ""));
     }
     if (typeof roh.aussentemp_c === "number") {
       kacheln.push(K.wertKachel("Aussen", K.zahl(roh.aussentemp_c, 1) + " °C",
