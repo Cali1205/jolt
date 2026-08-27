@@ -317,9 +317,11 @@ window.joltRoute = (function () {
   /* Was ein Halt kostet, bevor geladen wird - der Regler in der
    * Ladeplan-Ansicht. Fehlt er (alte Oberfläche im Cache), gilt die Vorgabe
    * des Servers, statt eine Null zu schicken und den Plan zu zersplittern. */
-  function haltekosten() {
-    const regler = document.getElementById("haltekosten");
-    return regler ? regler.value : 5;
+  function haltekosten() { return regler("haltekosten", 5); }
+
+  function regler(id, vorgabe) {
+    const el = document.getElementById(id);
+    return el ? el.value : vorgabe;
   }
 
   async function ladeplanLaden() {
@@ -334,7 +336,8 @@ window.joltRoute = (function () {
       const plan = await K.api(`/api/fahrten/${fahrt.fahrt_id}/ladeplan`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
-        + `&stopp_fixkosten_min=${haltekosten()}`,
+        + `&stopp_fixkosten_min=${haltekosten()}`
+        + `&ladepark_bonus_min=${regler("ladepark", 4)}`,
         { method: "POST" });
       letzterPlan = plan;
       zeichnePlan(plan, liste, werte);
@@ -509,10 +512,14 @@ window.joltRoute = (function () {
     K.reglerKoppeln("radius", "radius-wert", neuLaden);
     // Der Aufwand je Halt ändert nur die Planung, nicht die Kandidaten -
     // deshalb ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
-    K.reglerKoppeln("haltekosten", "haltekosten-wert", () => {
+    // Beide Regler ändern nur die Planung, nicht die Kandidaten - deshalb
+    // ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
+    const planNachziehen = () => {
       clearTimeout(wartenPlan);
       wartenPlan = setTimeout(ladeplanLaden, 350);
-    });
+    };
+    K.reglerKoppeln("haltekosten", "haltekosten-wert", planNachziehen);
+    K.reglerKoppeln("ladepark", "ladepark-wert", planNachziehen);
 
     K.an("rechnen", "click", rechnen);
     window.addEventListener("resize", () => {

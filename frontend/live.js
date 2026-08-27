@@ -64,7 +64,11 @@ window.joltLive = (function () {
       const antwort = await K.api(`/api/live/start/${fahrt.fahrt_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
-        + (haltekosten ? `&stopp_fixkosten_min=${haltekosten.value}` : ""),
+        + (haltekosten ? `&stopp_fixkosten_min=${haltekosten.value}` : "")
+        + (function () {
+            const p = document.getElementById("ladepark");
+            return p ? `&ladepark_bonus_min=${p.value}` : "";
+          })(),
         { method: "POST" });
       K.zustand.sitzungId = antwort.sitzung_id;
       document.getElementById("live-leer").hidden = true;

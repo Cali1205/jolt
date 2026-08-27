@@ -36,7 +36,8 @@ from bisect import bisect_left
 from dataclasses import dataclass, field
 
 from .kurven import leistung_bei
-from .verfuegbarkeit import betreiber_bonus, redundanz_bonus
+from .verfuegbarkeit import (LADEPARK_BONUS_MIN, betreiber_bonus,
+                             redundanz_bonus)
 
 # Kandidaten mit mehr Umweg fallen raus: Sie gewinnen die Zeit an der Säule
 # fast nie zurück. Fünfzehn Minuten Umweg sind fünfzehn Minuten Ladezeit, und
@@ -309,7 +310,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
            temperatur_faktor: float = 1.0,
            umweg_grenze_min: float = UMWEG_GRENZE_MIN,
            bevorzugte_betreiber: list[str] | None = None,
-           stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN) -> Ladeplan:
+           stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN,
+           ladepark_bonus_min: float = LADEPARK_BONUS_MIN) -> Ladeplan:
     """Die zeitoptimale Folge von Ladestopps.
 
     `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
@@ -332,7 +334,7 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
 
     graph = _Graph(profil, gefiltert, fz, kurve, max_fahrzeug_kw,
                    temperatur_faktor, bevorzugte_betreiber,
-                   stopp_fixkosten_min)
+                   stopp_fixkosten_min, ladepark_bonus_min)
 
     # Schritt 3: Pareto-Dijkstra.
     weg = graph.suchen(start_soc, ziel_soc)
@@ -427,8 +429,10 @@ class _Graph:
     def __init__(self, profil: Streckenprofil, optionen: list[Ladeoption], fz,
                  kurve, max_fahrzeug_kw: float, temperatur_faktor: float,
                  bevorzugte_betreiber: list[str] | None = None,
-                 stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN):
+                 stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN,
+                 ladepark_bonus_min: float = LADEPARK_BONUS_MIN):
         self.stopp_fixkosten_min = stopp_fixkosten_min
+        self.ladepark_bonus_min = ladepark_bonus_min
         self.profil = profil
         self.optionen = optionen
         self.fz = fz
@@ -593,7 +597,8 @@ class _Graph:
             option = self.optionen[knoten - 1]
             umweg = option.umweg_minuten
             tabelle = self.tabelle(knoten)
-            bonus_roh = (redundanz_bonus(option.anzahl_punkte or 1)
+            bonus_roh = (redundanz_bonus(option.anzahl_punkte or 1,
+                                         self.ladepark_bonus_min)
                         + betreiber_bonus(option.betreiber,
                                           self.bevorzugte_betreiber))
 
@@ -610,14 +615,25 @@ class _Graph:
                 ladezeit = tabelle.zeit(soc, ladeziel)
                 if ladezeit == math.inf:
                     break
-                # Der Bonus wiegt den *Umweg* auf, nie die Ladezeit. Er sagt
-                # "hierhin zu fahren lohnt sich, weil hier eher etwas frei
-                # ist" - nicht "hier zu laden kostet keine Zeit". Ohne diese
-                # Grenze wird ein Halt an einem grossen Ladepark rechnerisch
-                # gratis, und es entstehen Stopps, die niemand fährt.
-                # Nebenbei bleiben so alle Kanten positiv, was Dijkstra
-                # ohnehin braucht.
-                bonus = min(bonus_roh, umweg)
+                # Die Gutschrift darf Umweg **und** Fixkosten des Halts
+                # aufwiegen, aber nie die Ladezeit. Damit bleibt jede Kante
+                # positiv - Dijkstra braucht das - und ein Halt kostet
+                # mindestens so viel, wie das Laden dauert.
+                #
+                # Vorher stand hier `min(bonus_roh, umweg)`, und das war der
+                # Fehler: Ein Ladepark **direkt an der Route** hat keinen
+                # Umweg, also bekam er auch keine Gutschrift. Ausgerechnet
+                # dort, wo die grossen Parks stehen - an der Autobahn -,
+                # wirkte die Bevorzugung damit gar nicht. Auf einer
+                # Frankreich-Route wurde sie bei sechs von sieben
+                # Ionity-Standorten vollständig weggeschnitten.
+                #
+                # Die Fixkosten mit hereinzunehmen ist dabei kein
+                # Zugeständnis, sondern die richtige Bezugsgrösse: Die
+                # Gutschrift sagt "dieser Halt ist weniger lästig als ein
+                # anderer" - und lästig ist am Halt das Anhalten, nicht das
+                # Laden.
+                bonus = min(bonus_roh, umweg + self.stopp_fixkosten_min)
                 # Die Fixkosten des Halts stehen hier und nicht bei der
                 # Ladezeit: Sie fallen einmal je Stopp an, unabhängig davon,
                 # wie viel geladen wird. Genau das ist der Unterschied, der

@@ -33,7 +33,8 @@ log = logging.getLogger("uvicorn.error")
 # Sie entsprechen den Vorgaben der Oberfläche.
 VORGABEN = {"radius_km": 10.0, "min_kw": 50.0, "steckertyp": "",
             "umweg_grenze_min": optimierer.UMWEG_GRENZE_MIN,
-            "stopp_fixkosten_min": optimierer.STOPP_FIXKOSTEN_MIN}
+            "stopp_fixkosten_min": optimierer.STOPP_FIXKOSTEN_MIN,
+            "ladepark_bonus_min": optimierer.LADEPARK_BONUS_MIN}
 
 
 def parameter_lesen(plan: dict | None) -> dict:
@@ -250,6 +251,7 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
             fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
         umweg_grenze_min=parameter["umweg_grenze_min"],
         stopp_fixkosten_min=parameter["stopp_fixkosten_min"],
+        ladepark_bonus_min=parameter["ladepark_bonus_min"],
         bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     ergebnis = plan.als_dict()

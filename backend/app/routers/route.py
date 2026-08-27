@@ -271,6 +271,10 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                      # sehen können.
                      stopp_fixkosten_min: float = Query(
                          optimierer.STOPP_FIXKOSTEN_MIN, ge=0, le=30),
+                     # Was ein grosser Ladepark wert ist, in Minuten.
+                     # Null heisst "nur die Zeit zählt".
+                     ladepark_bonus_min: float = Query(
+                         optimierer.LADEPARK_BONUS_MIN, ge=0, le=15),
                      db: Session = Depends(get_db)):
     """Die zeitoptimale Folge von Ladestopps für eine gerechnete Fahrt.
 
@@ -318,11 +322,13 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
         umweg_grenze_min=umweg_grenze_min,
         stopp_fixkosten_min=stopp_fixkosten_min,
+        ladepark_bonus_min=ladepark_bonus_min,
         bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
 
     return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
             "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,
             "stopp_fixkosten_min": stopp_fixkosten_min,
+            "ladepark_bonus_min": ladepark_bonus_min,
             **plan.als_dict()}
 
 

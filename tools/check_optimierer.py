@@ -509,6 +509,69 @@ def fall_zersplitterung():
                  ziel_soc=20.0, name="Fixkosten")
 
 
+def fall_ladepark():
+    abschnitt("Grosser Ladepark - Gutschrift wirkt auch ohne Umweg")
+    # Zwei Fehler, die zusammen dafür sorgten, dass die Bevorzugung
+    # ausgerechnet an der Autobahn nicht wirkte.
+    from app.laden.verfuegbarkeit import redundanz_bonus
+
+    # (1) Die Gutschrift sättigte bei rund 15 Punkten. In den Daten einer
+    # Frankreich-Route bekamen Standorte mit 15, 17, 20, 28 und 30
+    # Ladepunkten alle exakt denselben Wert - die Grösse hörte genau dort
+    # auf zu zählen, wo die interessanten Parks anfangen.
+    pruefe(redundanz_bonus(30) > redundanz_bonus(15) + 0.3,
+           "dreissig Ladepunkte zählen mehr als fünfzehn",
+           f"{redundanz_bonus(30)} gegen {redundanz_bonus(15)}")
+    pruefe(redundanz_bonus(4) > redundanz_bonus(2) + 0.3,
+           "und der Sprung von zwei auf vier zählt am meisten",
+           f"{redundanz_bonus(2)} → {redundanz_bonus(4)}")
+    pruefe(redundanz_bonus(30, 0.0) == 0.0,
+           "auf null gestellt gibt es keine Gutschrift - dann zählt die Uhr")
+
+    # (2) Der eigentliche Fehler: Die Gutschrift war am Umweg gedeckelt
+    # (`min(bonus, umweg)`). Ein Ladepark **direkt an der Route** hat keinen
+    # Umweg - also bekam er auch keine Gutschrift, obwohl genau dort die
+    # grossen Parks stehen.
+    fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
+    profil = profil_bauen(400, kwh_je_km=0.21)
+    # Zwei Standorte fast an derselben Stelle, beide ohne Umweg: einer
+    # gross, einer klein. Ohne Gutschrift entscheidet der Zufall der
+    # Kandidatenreihenfolge.
+    optionen = [
+        optimierer.Ladeoption(id=1, km_auf_route=200.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=2,
+                              name="Zwei Säulen", betreiber="Klein"),
+        optimierer.Ladeoption(id=2, km_auf_route=203.0, umweg_minuten=0.0,
+                              max_kw=150.0, anzahl_punkte=30,
+                              name="Grosser Park", betreiber="Gross"),
+    ]
+    plan = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                             ziel_soc=20.0, max_fahrzeug_kw=150.0)
+    pruefe(plan.machbar and plan.stopps, "machbar", plan.grund)
+    pruefe(plan.stopps[0].option.id == 2,
+           "bei gleichem Umweg gewinnt der grosse Ladepark",
+           f"gewählt wurde {plan.stopps[0].option.name}")
+
+    ohne = optimierer.planen(profil, optionen, fz, KURVE, start_soc=90.0,
+                             ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                             ladepark_bonus_min=0.0)
+    pruefe(ohne.machbar,
+           "und auf null gestellt bleibt der Plan trotzdem gültig",
+           ohne.grund)
+
+    # Die Gutschrift darf die Ladezeit nie aufwiegen - ein Halt kostet
+    # mindestens so viel, wie das Laden dauert.
+    fuer_einen = [optionen[1]]
+    p2 = optimierer.planen(profil, fuer_einen, fz, KURVE, start_soc=90.0,
+                           ziel_soc=20.0, max_fahrzeug_kw=150.0,
+                           ladepark_bonus_min=12.0)
+    if p2.machbar and p2.stopps:
+        halt = (p2.gesamt_minuten - p2.fahrzeit_minuten)
+        pruefe(halt > 0,
+               "auch mit grosser Gutschrift kostet ein Halt noch Zeit",
+               f"{halt:.1f} min für {len(p2.stopps)} Stopps")
+
+
 def fall_laufzeit():
     abschnitt("Laufzeit")
     fz = Fahrzeugwerte(akku_netto_kwh=77.0, reserve_soc=10.0)
@@ -544,6 +607,7 @@ def main() -> int:
     fall_ausweich()
     fall_dichte_saeulen()
     fall_zersplitterung()
+    fall_ladepark()
     fall_laufzeit()
 
     return pruefe.bilanz()

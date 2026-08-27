@@ -253,15 +253,31 @@ table.kurve input { padding: 6px 8px; }
         <!-- Der Regler steht beim Ladeplan und nicht bei den Säulenfiltern:
              Er ändert nicht, welche Ladepunkte in Frage kommen, sondern wie
              viele Halte sich lohnen. -->
-        <label for="haltekosten">Aufwand je Halt
-          <span id="haltekosten-wert">5</span> min</label>
-        <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+        <div class="reihe">
+          <div>
+            <label for="haltekosten">Aufwand je Halt
+              <span id="haltekosten-wert">5</span> min</label>
+            <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+          </div>
+          <div>
+            <label for="ladepark">Grosser Ladepark zählt
+              <span id="ladepark-wert">4</span> min</label>
+            <input type="range" id="ladepark" min="0" max="12" step="1" value="4">
+          </div>
+        </div>
         <p class="leer" style="padding-top:4px">Einparken, Kabel, freischalten –
           alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
           jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
           <strong>0</strong> ist Anhalten gratis, und es entstehen viele
           Kurzstopps im steilen Teil der Ladekurve – rechnerisch schnell,
           praktisch nicht fahrbar.</p>
+        <p class="leer" style="padding-top:0">Der zweite Regler sagt, was ein
+          <strong>grosser Ladepark</strong> wert ist. Wo dreissig Säulen
+          stehen, ist eher eine frei – das ist die einzige belastbare Aussage
+          über Belegung, solange es keine echten Verfügbarkeitsdaten gibt.
+          Die Gutschrift wiegt Umweg und Aufwand des Halts auf, nie die
+          Ladezeit. Auf <strong>0</strong> entscheidet allein die Uhr.
+          Bevorzugte Anbieter stellst du beim Fahrzeug ein.</p>
       </div>
 
       <div class="karte-block">
