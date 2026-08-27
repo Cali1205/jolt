@@ -187,6 +187,21 @@ class Ladepunkt(Base):
     steckertypen = Column(String(120), default="")   # "CCS,Typ2"
 
     stand = Column(String(20), default="")
+
+    # Was einen Ladepunkt für eine konkrete Fahrt unbrauchbar macht, steht
+    # bei den Quellen in Worten - und wurde bisher weggeworfen. Siehe
+    # Migration 0013.
+    #
+    # NULL heisst bei den Wahrheitswerten **unbekannt** und nicht "nein":
+    # Für den grössten Teil der Datenbank gibt es die Angabe nicht, und wer
+    # Unbekanntes wie Ausgeschlossenes behandelt, verliert fast alles.
+    betriebsbereit = Column(Boolean)
+    zugang = Column(String(60))
+    mitgliedschaft_noetig = Column(Boolean)
+    # Freitext der Quelle: Kosten, Zugangshinweise, Kommentare. Wird
+    # zunächst nur aufgehoben - siehe Migration 0013.
+    hinweise = Column(JSON)
+
     aktualisiert = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (

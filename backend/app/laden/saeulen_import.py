@@ -279,6 +279,21 @@ def _ocm_eintrag_verarbeiten(db, eintrag: dict, min_kw: float) -> str:
     if max_kw < min_kw:
         return "uebersprungen"
 
+    # Was in Worten dasteht - und bisher weggeworfen wurde. Genau hier
+    # steht, warum ein Ladepunkt für eine konkrete Fahrt nichts taugt:
+    # "nur für Hotelgäste", "hinter Schranke", "Kabel zu kurz".
+    nutzung = eintrag.get("UsageType") or {}
+    zustand = eintrag.get("StatusType") or {}
+    hinweise = {
+        "kosten": eintrag.get("UsageCost") or "",
+        "allgemein": eintrag.get("GeneralComments") or "",
+        "zugang": eintrag.get("AccessComments") or "",
+        "geprueft_am": (eintrag.get("DateLastVerified") or "")[:10],
+    }
+    # Leere Felder gar nicht erst aufheben - sonst steht in fast jedem
+    # Datensatz ein Objekt aus vier leeren Zeichenketten.
+    hinweise = {k: v for k, v in hinweise.items() if v}
+
     return _speichern(db, "ocm", str(eintrag.get("ID")), {
         "name": adresse.get("Title") or "",
         "betreiber": (eintrag.get("OperatorInfo") or {}).get("Title") or "",
@@ -290,7 +305,13 @@ def _ocm_eintrag_verarbeiten(db, eintrag: dict, min_kw: float) -> str:
         "anschluesse": anschluesse, "max_kw": max_kw,
         "anzahl_punkte": eintrag.get("NumberOfPoints") or len(anschluesse) or 1,
         "steckertypen": ",".join(sorted(set(typen))),
-        "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10]})
+        "stand": (eintrag.get("DateLastStatusUpdate") or "")[:10],
+        # `IsOperational` fehlt bei OCM häufig. Dann bleibt es None -
+        # "unbekannt" und nicht "kaputt".
+        "betriebsbereit": zustand.get("IsOperational"),
+        "zugang": (nutzung.get("Title") or "")[:60] or None,
+        "mitgliedschaft_noetig": nutzung.get("IsMembershipRequired"),
+        "hinweise": hinweise or None})
 
 
 def aus_ocm(db, api_key: str, laender: list[str] | None = None,

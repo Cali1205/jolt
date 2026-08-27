@@ -52,7 +52,14 @@ def entlang_fahrt(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             # Ladepunkte die einzige belastbare Aussage über das Risiko,
             # vor einer belegten Säule zu stehen.
             "redundanz_bonus_min": verfuegbarkeit.redundanz_bonus(
-                kandidat.ladepunkt.anzahl_punkte or 1)})
+                kandidat.ladepunkt.anzahl_punkte or 1),
+            # Zugangsbeschränkungen und Freitext der Quelle. Sie stehen hier
+            # roh, weil sie noch nicht ausgewertet werden - aber ein Hinweis
+            # wie "nur für Hotelgäste" ändert die Wahl, und ihn zu haben und
+            # nicht zu zeigen wäre die schlechteste aller Möglichkeiten.
+            "zugang": kandidat.ladepunkt.zugang,
+            "mitgliedschaft_noetig": kandidat.ladepunkt.mitgliedschaft_noetig,
+            "hinweise": kandidat.ladepunkt.hinweise or {}})
 
     return {"anzahl": len(ergebnis), "steckertyp": typ, "min_kw": min_kw,
             "radius_km": radius_km, "kandidaten": ergebnis}

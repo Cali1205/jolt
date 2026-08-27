@@ -161,6 +161,23 @@ window.joltRoute = (function () {
     }
   }
 
+  /* Zugangsbeschränkungen sichtbar machen.
+   *
+   * Ein Ladepunkt kann tadellos aussehen - 300 kW, acht Säulen, kein Umweg -
+   * und trotzdem unbrauchbar sein, weil er hinter einer Schranke steht oder
+   * nur Hotelgästen offensteht. jolt kennt diese Angaben seit dem Umbau des
+   * OCM-Imports; sie zu haben und nicht zu zeigen wäre die schlechteste
+   * aller Möglichkeiten. */
+  function zugangHinweis(k) {
+    const teile = [];
+    if (k.zugang && !/^public$/i.test(k.zugang)) teile.push(entschaerfen(k.zugang));
+    if (k.mitgliedschaft_noetig) teile.push("Mitgliedschaft nötig");
+    const h = k.hinweise || {};
+    if (h.kosten) teile.push(entschaerfen(String(h.kosten).slice(0, 40)));
+    if (h.zugang) teile.push(entschaerfen(String(h.zugang).slice(0, 60)));
+    return teile.length ? ` · <span style="color:var(--warnung)">${teile.join(" · ")}</span>` : "";
+  }
+
   /* ---------- Ergebnis ---------- */
 
   function anzeigen(fahrt) {
@@ -433,7 +450,8 @@ window.joltRoute = (function () {
         <div class="haupt">
           <div class="titel">${entschaerfen(k.name || k.betreiber || "Ladepunkt")}</div>
           <div class="unter">km ${K.zahl(k.km_auf_route)} · Umweg
-            ${K.zahl(k.umweg_minuten, 1)} min · ${k.anzahl_punkte} Ladepunkte
+            ${K.zahl(k.umweg_minuten, 1)} min · ${k.anzahl_punkte} Ladepunkte${
+              zugangHinweis(k)}
             · ${entschaerfen(k.steckertypen)}${belegt}</div>
         </div>
         <div class="kw">${K.zahl(k.max_kw)} kW</div>`;
