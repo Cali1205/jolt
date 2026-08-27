@@ -112,7 +112,7 @@
     try {
       if (!O.verbunden()) {
         losStand("Dongle suchen …");
-        await O.verbinden();
+        await O.anschliessen();
         if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
       }
 
@@ -411,7 +411,7 @@
   O.einrichten(log, () => { if (laeuft) O.wiederverbinden(1, () => laeuft); });
   el("verbinden").addEventListener("click", async () => {
     stand("verbinde …");
-    await O.verbinden();
+    await O.anschliessen();
     if (O.verbunden()) { stand("verbunden", "gut"); knoepfe(true); }
     else { stand("nicht verbunden", "schlecht"); }
   });

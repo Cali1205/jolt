@@ -274,6 +274,16 @@ table.kurve input { padding: 6px 8px; }
       <div class="karte-block">
         <div class="werte" id="live-werte"></div>
         <div class="balken"><i id="live-balken" style="width:0%"></i></div>
+        <!-- Nur sichtbar, wenn ein OBD2-Dongle mitliest. Getrennt von den
+             Kacheln darüber, weil es zwei verschiedene Dinge sind: oben,
+             was jolt rechnet, hier, was das Auto misst. -->
+        <div id="live-auto" hidden>
+          <div class="karte-fuss" style="margin:12px 0 6px">
+            <span>Aus dem Auto</span>
+            <span id="live-auto-stand"></span>
+          </div>
+          <div class="werte" id="live-auto-werte"></div>
+        </div>
         <div class="karte-fuss">
           <span id="live-hinweis">–</span>
           <span id="live-verbindung">getrennt</span>

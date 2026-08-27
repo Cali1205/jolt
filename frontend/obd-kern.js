@@ -365,7 +365,14 @@ function befehl(text, grenze_ms = 15000) {
    * tatsächliche Leistung, an der sich die Prognose nachprüfen lässt. Und
    * der Rohwert des Ladestands ist der einzige Weg, die Umrechnung auf den
    * Anzeigewert später zu berichtigen, ohne ein zweites Mal loszufahren. */
-  const BMS = { sh: "FC007B", cra: "17FE007B" };
+  /* Eine Adresse besteht aus drei Teilen, und der dritte wird gern
+   * vergessen: `cp` sind die oberen fünf Bit der 29-bit-Kennung, `sh` die
+   * unteren 24. Beim Batteriemanagement (0x17FC007B) ist cp = 17; beim
+   * Klimasteuergerät (0x00000746) ist es 00. Wer cp stehen lässt, sendet an
+   * eine ganz andere Kennung und bekommt NO DATA - genau der Fehler, der
+   * die Suche nach dem Ladestand aufgehalten hat. */
+  const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B" };
+  const KLIMA = { cp: "00", sh: "000746", cra: "000007B0" };
   const MESSWERTE = [
     { name: "soc_roh", did: "22028C", adresse: BMS, pflicht: true,
       lesen: (b) => b[0] },
@@ -383,7 +390,16 @@ function befehl(text, grenze_ms = 15000) {
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
     { name: "betriebsart", did: "227448", adresse: BMS, lesen: (b) => b[0] },
     { name: "tempo_kmh", did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
-    { name: "km_stand", did: "22295A", adresse: { sh: "FC0076", cra: "17FE0076" },
+    /* Die Aussentemperatur ist der grösste Einzelposten der Kälte und ging
+     * bisher aus einer Vorhersage ins Verbrauchsmodell. Aus dem Auto ist sie
+     * gemessen, von der Strecke, zur richtigen Zeit. Sie sitzt in einem
+     * anderen Steuergerät als die Batterie - siehe KLIMA. */
+    { name: "aussentemp_c", did: "222609", adresse: KLIMA,
+      lesen: (b) => b.length ? b[0] / 2 - 50 : null },
+    { name: "innentemp_c", did: "222613", adresse: KLIMA,
+      lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
+    { name: "km_stand", did: "22295A",
+      adresse: { cp: "17", sh: "FC0076", cra: "17FE0076" },
       selten: 20,
       lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
   ];
@@ -408,6 +424,12 @@ function befehl(text, grenze_ms = 15000) {
   async function messwertLesen(eintrag) {
     const ziel = eintrag.adresse;
     if (!letzteAdresse || letzteAdresse.sh !== ziel.sh) {
+      // Die Prioritätsbits gehören dazu: Zwischen Batterie (0x17…) und
+      // Klima (0x00…) unterscheiden sie sich, und ohne Umschalten geht die
+      // Anfrage an eine Kennung, auf der niemand hört.
+      if (!letzteAdresse || letzteAdresse.cp !== ziel.cp) {
+        await befehl(`ATCP${ziel.cp}`);
+      }
       await befehl(`ATSH${ziel.sh}`);
       await befehl(`ATCRA${ziel.cra}`);
       letzteAdresse = ziel;
@@ -443,6 +465,72 @@ function befehl(text, grenze_ms = 15000) {
 
 
 
+
+  /* ---------- Ohne Auswahldialog verbinden ---------- */
+
+  /* Der Dongle soll nicht jedes Mal ausgewählt werden müssen.
+   *
+   * Die Erlaubnis für ein Gerät bleibt im Browser bestehen, sobald sie
+   * einmal erteilt wurde - `getDevices()` gibt die bekannten zurück, **ohne
+   * Nutzergeste**, und `gatt.connect()` darauf braucht auch keine. Nur
+   * `requestDevice` verlangt zwingend eine, und genau deshalb ist es der
+   * zweite Weg und nicht der erste.
+   *
+   * Ob ein Browser `getDevices()` kennt, ist offen: Es ist neuer als der
+   * Rest von Web Bluetooth. Fehlt es, kommt der Dialog wie bisher - dann
+   * ist nichts verloren, es ist nur eine Berührung mehr.
+   *
+   * Zurückgegeben wird, welcher Weg gegangen wurde, damit der Aufrufer es
+   * sagen kann statt es zu verschweigen.
+   */
+  async function verbindenOhneDialog() {
+    if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
+      melde("Dieser Browser kann bekannte Geräte nicht wiederfinden "
+            + "(getDevices fehlt) - der Auswahldialog kommt.");
+      return null;
+    }
+    let bekannt = [];
+    try {
+      bekannt = await navigator.bluetooth.getDevices();
+    } catch (fehler) {
+      melde("Bekannte Geräte nicht abrufbar: " + fehler.message);
+      return null;
+    }
+    if (!bekannt.length) {
+      melde("Noch kein Gerät erlaubt - beim ersten Mal muss ausgewählt werden.");
+      return null;
+    }
+    // Den passenden nehmen, nicht irgendeinen: In der Liste stehen alle
+    // Geräte, denen diese Seite je erlaubt wurde.
+    const geraet = bekannt.find((g) => NAMEN.some(
+      (n) => (g.name || "").startsWith(n))) || bekannt[0];
+    melde(`Bekanntes Gerät: ${geraet.name || "(ohne Namen)"} - verbinde ohne Dialog.`);
+    try {
+      geraetGemerkt = geraet;
+      geraet.addEventListener("gattserverdisconnected", () => {
+        melde("Verbindung getrennt.");
+        if (beiAbriss) beiAbriss();
+      });
+      await verbindungAufbauen(geraet);
+      return geraet;
+    } catch (fehler) {
+      // Das Gerät ist bekannt, aber nicht da - ausgeschaltet, ausser
+      // Reichweite, oder es steckt gerade nicht im Auto.
+      melde("Bekanntes Gerät antwortet nicht: " + fehler.message);
+      return null;
+    }
+  }
+
+  /* Erst ohne Dialog, dann mit. Das ist der Weg, den Aufrufer nehmen
+   * sollten - er kostet beim zweiten Mal keine Berührung mehr. */
+  async function anschliessen() {
+    if (await verbindenOhneDialog()) return true;
+    await verbinden();
+    return verbunden_();
+  }
+
+  function verbunden_() { return !!schreiben; }
+
   /* ---------- Nach aussen ---------- */
 
   return {
@@ -453,6 +541,7 @@ function befehl(text, grenze_ms = 15000) {
      * Wiederverbinden ist, entscheidet der Aufrufer, nicht dieses Modul. */
     einrichten(melder, abriss) { melde = melder || melde; beiAbriss = abriss; },
     verbinden,
+    anschliessen,
     wiederverbinden,
     handshake: () => reihe(HANDSHAKE),
     befehl,

@@ -16,6 +16,24 @@ window.joltLive = (function () {
   let letzteMeldung = 0;      // Zeitpunkt der letzten Positionsmeldung
   let dongle = false;         // liest der OBD2-Dongle mit?
   let runde = 0;
+  // Die gefahrene Spur einer Aufzeichnung, [[lon, lat], ...].
+  let spur = [];
+  // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
+  // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
+  let letzteRohwerte = null;
+  /* Die Leistung der Nebenverbraucher, gemessen im Stand.
+   *
+   * Sie lässt sich im Fahren nicht sauber messen: Die Packleistung enthält
+   * dann Antrieb und Nebenverbraucher, und den Antrieb zu modellieren
+   * brauchte die Steigung, die während einer Aufzeichnung niemand kennt.
+   * Steht das Auto aber (unter 5 km/h) und lädt nicht, dann **ist** die
+   * Packleistung die der Nebenverbraucher - Heizung, Klima, Steuergeräte.
+   *
+   * Das ist keine Behelfslösung, sondern die genauere Messung: An der Ampel
+   * oder an der Säule liest man ab, was die Heizung wirklich zieht, und die
+   * Zahl bleibt danach eine Weile gültig. Deshalb wird sie mit ihrem Alter
+   * angezeigt statt stillschweigend fortgeschrieben. */
+  let nebenverbrauch = null;   // {kw, zeit}
 
   // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
   // und braucht mindestens 5 km, bevor sie überhaupt etwas sagt - alle
@@ -150,6 +168,8 @@ window.joltLive = (function () {
         prognoseArt),
     ].join("");
 
+    autoKacheln(z);
+
     const balken = document.getElementById("live-balken");
     balken.style.width = Math.max(0, Math.min(100, z.ist_soc)) + "%";
     balken.style.background = z.ist_soc <= reserve ? "#e2596a"
@@ -162,9 +182,26 @@ window.joltLive = (function () {
     // Die Reserve-Marke wandert mit: Das ist die eigentliche Aussage der
     // Live-Funktion - nicht "du verbrauchst mehr", sondern "es reicht jetzt
     // nur noch bis dorthin".
-    if (fahrt && window.joltKarte) {
+    /* Die Karte auch **ohne** geplante Route bedienen.
+     *
+     * Hier stand `if (fahrt && ...)`, und `K.zustand.fahrt` ist nur gesetzt,
+     * wenn vorher eine Route gerechnet wurde. Bei einer Aufzeichnung gibt es
+     * keine - also wurde der ganze Block übersprungen und die Karte blieb
+     * leer, obwohl die Position längst hereinkam. Die eigene Position hat
+     * mit dem Vorhandensein einer Route nichts zu tun.
+     */
+    if (window.joltKarte) {
       const marker = [{ lat: z_lat(z), lon: z_lon(z), typ: "auto", text: "hier" }];
-      if (z.reserve_bei_km !== null && fahrt.profil) {
+      // Bei einer Aufzeichnung ist die gefahrene Spur das, was es zu sehen
+      // gibt: Sie wächst mit und zeigt, dass wirklich mitgeschrieben wird.
+      spur.push([z_lon(z), z_lat(z)]);
+      if (!fahrt) {
+        window.joltKarte.routeSetzen(spur);
+        // Nur beim ersten Punkt zentrieren - danach würde die Karte bei
+        // jeder Meldung springen, und niemand könnte sie verschieben.
+        if (spur.length === 1) window.joltKarte.aufPunkt(z_lat(z), z_lon(z), 12);
+      }
+      if (fahrt && z.reserve_bei_km !== null && fahrt.profil) {
         const treffer = fahrt.profil.find((p) => p.km >= z.reserve_bei_km);
         if (treffer) {
           marker.push({ lat: treffer.lat, lon: treffer.lon, typ: "reserve",
@@ -394,6 +431,78 @@ window.joltLive = (function () {
     }
   }
 
+  /* Leistung aus Spannung mal Strom. Das Vorzeichen ist **nicht** bestätigt:
+   * Der Rohwert des Stroms ist um 150000 versetzt, positiv heisst also
+   * entweder Entladen oder Laden - welches davon, zeigt die erste Messung
+   * am Fahrzeug. Deshalb wird der Betrag angezeigt und die Richtung
+   * benannt, statt eine Annahme zu treffen, die man nicht sieht. */
+  function leistungKw(roh) {
+    if (!roh || typeof roh.spannung_v !== "number"
+        || typeof roh.strom_a !== "number") return null;
+    return roh.spannung_v * roh.strom_a / 1000;
+  }
+
+  function nebenverbrauchMerken(roh) {
+    const kw = leistungKw(roh);
+    if (kw === null) return;
+    const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
+    // Nur im Stand, und nur wenn Energie entnommen wird - beim Laden misst
+    // man den Lader, nicht die Heizung.
+    if (tempo !== null && tempo < 5 && kw > 0) {
+      nebenverbrauch = { kw, zeit: Date.now() };
+    }
+  }
+
+  function autoKacheln(z) {
+    const block = document.getElementById("live-auto");
+    const roh = letzteRohwerte;
+    if (!block) return;
+    if (!roh) { block.hidden = true; return; }
+    block.hidden = false;
+
+    const kw = leistungKw(roh);
+    const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
+    // Der Momentanverbrauch ist die Zahl, die eine Entscheidung ändert:
+    // Er sagt, ob der Fuss vom Gas etwas bringt. Unter 5 km/h ist er
+    // sinnlos (Division durch fast null), dort steht der Strich.
+    const momentan = (kw !== null && tempo !== null && tempo >= 5)
+      ? Math.abs(kw) / tempo * 100 : null;
+
+    const alter = nebenverbrauch
+      ? Math.round((Date.now() - nebenverbrauch.zeit) / 60000) : null;
+
+    const kacheln = [];
+    if (kw !== null) {
+      kacheln.push(K.wertKachel(kw < 0 ? "Leistung (rück)" : "Leistung",
+                                K.zahl(Math.abs(kw), 1) + " kW"));
+    }
+    if (momentan !== null) {
+      kacheln.push(K.wertKachel("Momentan", K.zahl(momentan, 1) + " kWh/100",
+        momentan > 30 ? "warnung" : ""));
+    }
+    if (nebenverbrauch) {
+      kacheln.push(K.wertKachel(
+        alter > 0 ? `Nebenverbr. (vor ${alter} min)` : "Nebenverbraucher",
+        K.zahl(nebenverbrauch.kw, 1) + " kW",
+        nebenverbrauch.kw > 3 ? "warnung" : ""));
+    }
+    if (typeof roh.aussentemp_c === "number") {
+      kacheln.push(K.wertKachel("Aussen", K.zahl(roh.aussentemp_c, 1) + " °C",
+        roh.aussentemp_c < 5 ? "warnung" : ""));
+    }
+    if (typeof roh.innentemp_c === "number") {
+      kacheln.push(K.wertKachel("Innen", K.zahl(roh.innentemp_c, 1) + " °C"));
+    }
+    if (typeof roh.km_stand === "number") {
+      kacheln.push(K.wertKachel("Kilometerstand", K.zahl(roh.km_stand) + " km"));
+    }
+    document.getElementById("live-auto-werte").innerHTML = kacheln.join("");
+
+    const fehlend = (roh._fehlend || []).length;
+    document.getElementById("live-auto-stand").textContent =
+      fehlend ? `${fehlend} Werte antworten nicht` : "alle Werte gelesen";
+  }
+
   async function positionMelden(coords) {
     if (!K.zustand.sitzungId) return;
     const nutzlast = {
@@ -407,6 +516,8 @@ window.joltLive = (function () {
         if (typeof roh.hoehe_m !== "number" && typeof coords.altitude === "number") {
           roh.hoehe_m = Math.round(coords.altitude);
         }
+        letzteRohwerte = roh;
+        nebenverbrauchMerken(roh);
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
         nutzlast.soc = Math.round(wert.hmi * 10) / 10;
         nutzlast.rohwerte = roh;
@@ -512,6 +623,9 @@ window.joltLive = (function () {
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
     positionAufgeben();
     dongle = false;
+    spur = [];
+    letzteRohwerte = null;
+    nebenverbrauch = null;
     if (steckdose) { try { steckdose.close(); } catch (e) {} }
     K.zustand.sitzungId = null;
     plan = null;

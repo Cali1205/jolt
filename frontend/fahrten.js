@@ -137,7 +137,9 @@ window.joltFahrten = (function () {
         stand("Verbinde mit dem OBD2-Dongle …");
         try {
           window.joltObd.einrichten((t) => console.log("[obd]", t));
-          await window.joltObd.verbinden();
+          // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt
+          // worden, verbindet er ohne Berührung.
+          await window.joltObd.anschliessen();
           if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
             mitDongle = true;
           }
