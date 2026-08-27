@@ -12,8 +12,11 @@ from fastapi.responses import (FileResponse, HTMLResponse,
                                RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 
+import asyncio
+
 from . import deps, push, routing
-from .database import migrate, seed_vorlagen
+from .live import aufraeumen
+from .database import SessionLocal, migrate, seed_vorlagen
 from .routers import ALLE_ROUTER
 from .security import SecurityMiddleware
 
@@ -44,6 +47,10 @@ def _beim_start():
     push.beim_start_warnen()
     if routing.ist_demo():
         log.warning("jolt läuft mit Demo-Routing - die Routen sind erfunden.")
+    # Vergessene Fahrten selbst beenden. Für eine Aufzeichnung ist das
+    # Vergessen ein Totalverlust: Strecke und Energieprofil entstehen erst
+    # beim Beenden aus den Messpunkten.
+    asyncio.create_task(aufraeumen.schleife(SessionLocal))
 
 
 # ---------- Frontend ausliefern ----------
@@ -170,6 +177,20 @@ def favicon():
 @app.get("/manifest.json")
 def manifest():
     return FileResponse(os.path.join(FRONTEND, "manifest.json"),
+                        media_type="application/manifest+json")
+
+
+@app.get("/manifest-obd.json")
+def manifest_obd():
+    """Ein eigenes Manifest fuer die Aufzeichnungsseite.
+
+    Es hat `start_url: /obd`, damit die Seite als eigenes Symbol auf dem
+    Home-Bildschirm landet und mit einem Tippen aufgeht - ohne Bluefy, ohne
+    Adresszeile, ohne den Umweg ueber die Hauptoberflaeche. Genau das ist
+    der Unterschied zwischen "ich zeichne die Fahrt auf" und "ich mache das
+    naechstes Mal".
+    """
+    return FileResponse(os.path.join(FRONTEND, "manifest-obd.json"),
                         media_type="application/manifest+json")
 
 

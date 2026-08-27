@@ -1,19 +1,27 @@
 <!doctype html>
 <html lang="de">
-<!-- Diagnoseseite für den OBD2-Dongle. Bewusst eine eigene Seite und nicht
-     ein Reiter in jolt: Sie funktioniert nur in einem Browser mit Web
-     Bluetooth (auf iOS heisst der Bluefy), und ein Bedienelement, das in
-     Safari stumm bleibt, hat in der Hauptoberfläche nichts verloren.
+<!-- Die Aufzeichnungsseite. Bewusst eine eigene Seite und nicht ein Reiter
+     in jolt: Sie funktioniert nur in einem Browser mit Web Bluetooth (auf
+     iOS heisst der Bluefy), und ein Bedienelement, das in Safari stumm
+     bleibt, hat in der Hauptoberfläche nichts verloren.
 
-     Zweck ist nicht der Dauerbetrieb, sondern eine einzige Frage: Antwortet
+     Angefangen hat sie als Diagnoseseite für eine einzige Frage - antwortet
      der ID.Buzz auf die UDS-Abfrage, mit der man seinen Ladestand liest?
-     Solange die offen ist, wäre jede native App ein Blindflug. -->
+     Die ist beantwortet, und daraus ist der eigentliche Zweck geworden:
+     einsteigen, einmal tippen, losfahren. Mit dem Manifest unten liegt sie
+     als eigenes Symbol auf dem Home-Bildschirm; alles, was danach noch ein
+     Handgriff wäre, macht sie selbst (Name aus Datum und Uhrzeit, Start bei
+     der ersten Bewegung, Ende durch das Aufräumen im Server). -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>jolt – OBD2-Erprobung</title>
+<title>jolt – Fahrt aufzeichnen</title>
+<link rel="manifest" href="/manifest-obd.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Aufzeichnen">
+<meta name="theme-color" content="#101418">
 <link rel="stylesheet" href="/static/obd.css">
 
-<h1>OBD2-Erprobung</h1>
+<h1>Fahrt aufzeichnen</h1>
 <!-- Sichtbare Fassungskennung. Bei einer Seite, die per Bluetooth im Auto
      bedient wird und deren Cache sich zweimal als Fehlerquelle erwiesen
      hat, ist "welche Fassung habe ich eigentlich offen" keine
@@ -36,12 +44,19 @@
     anlegen, aufzeichnen. Die Abschnitte darunter sind zum Fehlersuchen und
     einzeln nicht nötig.</p>
   <p class="hinweis">Beim ersten Antippen fragt Bluefy, welches Gerät es sein
-    soll – dort <code>IOS-Vlink</code> auswählen. Danach dauert es ein paar
-    Sekunden bis zur ersten Zahl.</p>
+    soll – dort <code>IOS-Vlink</code> auswählen. Danach ist nichts mehr zu
+    tun: Mit Automatik wartet die Seite, bis das Auto fährt, und legt die
+    Fahrt dann selbst an. Ans Beenden musst du auch nicht denken – jolt
+    schliesst eine Fahrt ab, die anderthalb Stunden schweigt.</p>
   <label for="fahrzeug-wahl-obd">Fahrzeug</label>
   <select id="fahrzeug-wahl-obd"></select>
-  <input type="text" id="fahrt-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
-  <button id="los" class="tat">Fahrt starten und aufzeichnen</button>
+  <label style="display:flex;gap:8px;align-items:center">
+    <input type="checkbox" id="automatik" checked style="width:auto">
+    <span>Von selbst starten, sobald das Auto fährt</span>
+  </label>
+  <input type="text" id="fahrt-name"
+         placeholder="Bezeichnung (leer = Datum und Uhrzeit)">
+  <button id="los" class="tat">Verbinden und aufzeichnen</button>
   <div id="los-stand" class="stand"></div>
 </div>
 

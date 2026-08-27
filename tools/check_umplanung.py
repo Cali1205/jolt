@@ -510,6 +510,94 @@ def teil_kette():
     client.post(f"/api/live/{sitzung4}/ende")
 
 
+def _fahrt_anlegen(client, fahrzeug, name, minuten_her, laedt=False):
+    """Eine Aufzeichnung mit Messpunkten, deren letzter `minuten_her` alt ist.
+
+    Achtung beim Lesen: `/api/live/aufzeichnung` beendet beim Start **alle**
+    anderen laufenden Sitzungen. Zwei Sitzungen nebeneinander aufzubauen geht
+    deshalb nicht - jeder Fall wird einzeln geprüft.
+    """
+    antwort = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": name}).json()
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, antwort["sitzung_id"])
+        beginn = datetime.utcnow() - timedelta(minutes=minuten_her + 40)
+        for i in range(41):
+            # Beim Laden steht das Auto und der Ladestand steigt; sonst fährt
+            # es und der Ladestand fällt.
+            soc = (65.0 + i * 0.6) if laedt else (90.0 - i * 0.25)
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, 48.0 + (0.0 if laedt else i * 0.009), 11.0,
+                soc=soc, aussentemp_c=12.0, zeit=beginn + timedelta(minutes=i))
+        return antwort["sitzung_id"], aufraeumen.verwaiste_beenden(db)
+    finally:
+        db.close()
+
+
+def teil_verwaiste_fahrt():
+    """Vergessene Fahrten beendet jolt selbst - aber nicht die Ladepause.
+
+    Für eine geplante Fahrt ist das Vergessen halb so schlimm: Die Messpunkte
+    liegen in der Datenbank. Für eine **Aufzeichnung** ist es der
+    Totalverlust - Strecke und Energieprofil entstehen erst beim Beenden aus
+    den Messpunkten.
+
+    Der teurere Fehler ist aber der umgekehrte: eine Fahrt abschneiden, die
+    nur gerade lädt. Die zweite Hälfte wäre unwiederbringlich weg.
+    """
+    from app.live import aufraeumen as _a
+    globals()["aufraeumen"] = _a
+
+    client = TestClient(app)
+    print("\nVergessene Fahrt selbst beenden")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+
+    # 1. Seit Stunden still, zuletzt gefahren - die wird beendet.
+    still_id, beendet = _fahrt_anlegen(client, fahrzeug, "Vergessen", 200)
+    treffer = next((b for b in beendet if b["sitzung_id"] == still_id), None)
+    pruefe(treffer is not None,
+           "eine Fahrt, die seit Stunden schweigt, wird beendet",
+           str([b["sitzung_id"] for b in beendet]))
+    if treffer:
+        gebaut = treffer.get("aufzeichnung") or {}
+        pruefe(gebaut.get("ok") is True,
+               "und dabei entsteht die Strecke aus den Messpunkten - genau "
+               "das, was beim Vergessen sonst verloren geht",
+               str(gebaut.get("grund")))
+        pruefe(treffer.get("gelernt") is not None,
+               "auch gelernt wird - eine vergessene Fahrt ist keine "
+               "schlechtere Messung als eine ordentlich beendete")
+    pruefe(client.get(f"/api/live/{still_id}").json()["laeuft"] is False,
+           "die Sitzung ist danach beendet")
+
+    # 2. Genauso lange still, aber zuletzt wurde geladen. Eine Ladepause kann
+    #    eine Stunde dauern, das Telefon liegt derweil gesperrt im Auto - und
+    #    danach geht die Fahrt weiter.
+    lade_id, beendet = _fahrt_anlegen(client, fahrzeug, "Ladepause", 200,
+                                      laedt=True)
+    pruefe(lade_id not in [b["sitzung_id"] for b in beendet],
+           "eine Fahrt, deren Ladestand zuletzt stieg, wird nach derselben "
+           "Stille noch nicht beendet - sie lädt und fährt gleich weiter",
+           str(beendet))
+    pruefe(client.get(f"/api/live/{lade_id}").json()["laeuft"] is True,
+           "sie läuft weiter")
+
+    # 3. Aber auch die Ladepause ist irgendwann vorbei.
+    lange_id, beendet = _fahrt_anlegen(client, fahrzeug, "Lange Pause", 400,
+                                       laedt=True)
+    pruefe(lange_id in [b["sitzung_id"] for b in beendet],
+           "nach sieben Stunden wird auch sie beendet - sonst bliebe sie "
+           "ewig offen", str(beendet))
+
+    # 4. Eine Sitzung, die gerade eben gemeldet hat, bleibt unangetastet.
+    frisch_id, beendet = _fahrt_anlegen(client, fahrzeug, "Läuft noch", 0)
+    pruefe(frisch_id not in [b["sitzung_id"] for b in beendet],
+           "eine, die gerade gemeldet hat, bleibt in Ruhe - Aufräumen darf "
+           "keine laufende Fahrt abschneiden", str(beendet))
+
+
 def teil_anbauten():
     """Fahrradträger und Dachbox - Zuschlag auf den Luftwiderstand.
 
@@ -940,6 +1028,7 @@ def main() -> int:
     teil_kette()
     teil_kette_mit_ladestopp()
     teil_anbauten()
+    teil_verwaiste_fahrt()
     teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()
