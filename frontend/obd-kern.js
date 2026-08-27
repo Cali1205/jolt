@@ -220,7 +220,11 @@ window.joltObd = (function () {
       // Dongle Minuten. Alle zwei Sekunden zu klopfen hilft in keinem der
       // beiden Fälle und kostet Akku.
       const warten = Math.min(60000, 3000 * Math.pow(2, versuch - 1));
-      setTimeout(() => wiederverbinden(versuch + 1), warten);
+      // `weiter` muss mitgereicht werden. Ohne das galt beim zweiten
+      // Versuch wieder die Vorgabe `() => true`, und die Kette lief nach dem
+      // Ende der Fahrt einfach weiter - sie verband einen Dongle neu, den
+      // niemand mehr braucht, und hielt die Verbindung offen.
+      setTimeout(() => wiederverbinden(versuch + 1, weiter), warten);
     }
   }
 

@@ -135,7 +135,7 @@
         headers: { "Content-Type": "application/json",
                    "X-Token": joltToken() },
         body: JSON.stringify({
-          fahrzeug_id: await fahrzeugId(),
+          fahrzeug_id: fahrzeugId(),
           lat: wo.lat, lon: wo.lon,
           soc: Math.round(probe.hmi * 10) / 10,
           name: el("fahrt-name").value }),
@@ -158,20 +158,48 @@
     }
   }
 
-  /* Welches Fahrzeug. Bei einem einzigen erübrigt sich die Frage; bei
-   * mehreren wird das erste genommen und im Protokoll gesagt, welches -
-   * eine Auswahlliste im Auto zu bedienen ist der falsche Ort dafür. */
-  async function fahrzeugId() {
-    const antwort = await fetch("/api/fahrzeuge", {
-      headers: { "X-Token": joltToken() } });
-    if (!antwort.ok) {
-      throw new Error("Nicht angemeldet – erst in jolt anmelden, dann hier "
-                      + "neu laden.");
+  /* Welches Fahrzeug - gefragt, nicht geraten.
+   *
+   * Hier stand `fahrzeuge[0]`. Die Liste kommt nach ID sortiert, und die
+   * erste ist das beim ersten Start angelegte "Allgemeine E-Auto" - nicht
+   * das, in dem man sitzt. Die Aufzeichnung wäre dem falschen Fahrzeug
+   * zugeschrieben worden, und schlimmer: Die Kalibrierung hätte den
+   * Korrekturfaktor eines Autos verstellt, mit dem niemand gefahren ist.
+   *
+   * Die Wahl bleibt im Browser stehen. Wer im Auto sitzt, will sie einmal
+   * treffen und nie wieder. */
+  async function fahrzeugeLaden() {
+    const auswahl = el("fahrzeug-wahl-obd");
+    if (!auswahl) return;
+    try {
+      const antwort = await fetch("/api/fahrzeuge",
+                                  { headers: { "X-Token": joltToken() } });
+      if (!antwort.ok) throw new Error(`HTTP ${antwort.status}`);
+      const fahrzeuge = await antwort.json();
+      let gemerkt = null;
+      try { gemerkt = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
+      auswahl.innerHTML = fahrzeuge
+        .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+      if (gemerkt && fahrzeuge.some((f) => String(f.id) === gemerkt)) {
+        auswahl.value = gemerkt;
+      }
+      auswahl.addEventListener("change", () => {
+        try { localStorage.setItem("jolt-obd-fahrzeug", auswahl.value); }
+        catch (e) {}
+      });
+    } catch (fehler) {
+      log("Fahrzeugliste: " + fehler.message
+          + " - erst in jolt anmelden, dann hier neu laden.");
     }
-    const fahrzeuge = await antwort.json();
-    if (!fahrzeuge.length) throw new Error("Kein Fahrzeug angelegt.");
-    if (fahrzeuge.length > 1) log(`Fahrzeug: ${fahrzeuge[0].name}`);
-    return fahrzeuge[0].id;
+  }
+
+  function fahrzeugId() {
+    const auswahl = el("fahrzeug-wahl-obd");
+    if (!auswahl || !auswahl.value) {
+      throw new Error("Kein Fahrzeug gewählt - erst in jolt anmelden, "
+                      + "dann hier neu laden.");
+    }
+    return Number(auswahl.value);
   }
 
   /* ---------- Aufzeichnung ---------- */
@@ -449,5 +477,6 @@
           + "von Hand kopieren.");
     }
   });
-  log("Bereit. Dongle einstecken, Zündung an, dann „Dongle suchen“.");
+  fahrzeugeLaden();
+  log("Bereit. Dongle einstecken, Zündung an, dann „Fahrt starten“.");
 })();
