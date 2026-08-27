@@ -47,8 +47,17 @@ PRAEFERENZEN = ("fastest", "shortest", "recommended")
 class RoutingProvider(Protocol):
     def route(self, start: tuple[float, float], ziel: tuple[float, float],
               zwischenstopps: list[tuple[float, float]] | None = None,
-              praeferenz: str = "recommended") -> Route:
+              praeferenz: str = "recommended",
+              mautfrei: bool = False) -> Route:
         """Route von Start nach Ziel. Koordinaten als (lat, lon).
+
+        `mautfrei` meidet Mautstrassen. Fuer Frankreich ist das die einzige
+        Alternative, die sich wirklich lohnt zu rechnen: `fastest` und
+        `recommended` liefern auf Autobahnstrecken meist dieselbe Strasse,
+        `shortest` eine, die niemand faehrt. Der Verzicht auf die Autoroute
+        kostet Stunden und spart auf einer Langstrecke leicht vierzig Euro -
+        das ist eine Abwaegung, die dem Fahrer zusteht und die er nur
+        treffen kann, wenn beide Wege nebeneinander stehen.
 
         `praeferenz` ist eine der drei Werte aus PRAEFERENZEN. Ein Adapter, der
         keine echte Unterscheidung treffen kann (siehe demo.py), darf den

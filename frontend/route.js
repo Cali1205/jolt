@@ -84,6 +84,7 @@ window.joltRoute = (function () {
         start_soc: Number(document.getElementById("start-soc").value),
         tempo_faktor: Number(document.getElementById("tempo").value) / 100,
         luftwiderstand_faktor: Number(document.getElementById("anbau").value),
+        alternative: document.getElementById("alternative").checked,
         // Der Regler steht ganz links auf einem negativen Wert - das ist
         // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
@@ -94,8 +95,8 @@ window.joltRoute = (function () {
       variantenZeichnen();
       // Die sparsamste Variante ist jolts Grundhaltung - sie wird
       // vorausgewählt, ein Tippen auf eine andere Karte wechselt.
-      const vorschlag = letzteVarianten.find((v) => v.etiketten.includes("sparsamste"))
-        || letzteVarianten[0];
+      const vorschlag = letzteVarianten.find(
+        (v) => v.etiketten.includes("insgesamt schnellste")) || letzteVarianten[0];
       if (vorschlag) await varianteWaehlen(vorschlag);
     } catch (fehler) {
       K.melden("Route: " + fehler.message, "fehler");
@@ -146,12 +147,20 @@ window.joltRoute = (function () {
       knopf.type = "button";
       knopf.setAttribute("aria-pressed", String(v.fahrt_id === aktiveId));
       const etiketten = v.etiketten.map((e) =>
-        `<span class="etikett ${e === "sparsamste" ? "sparsamste" : ""}">${e}</span>`
+        `<span class="etikett ${e === "insgesamt schnellste" ? "sparsamste" : ""}">${e}</span>`
       ).join("");
+      /* Die Kennwerte zeigen, was zählt: die Zeit **inklusive Laden** und
+       * die Kosten. Vorher standen dort Fahrzeit und kWh - beides sagt
+       * nichts darüber, wann man ankommt, wenn zweimal geladen werden muss. */
+      const gesamt = v.plan_machbar
+        ? `${K.dauer(v.plan_gesamt_minuten)} inkl. Laden · ${v.plan_stopps} Stopps`
+        : (v.plan_machbar === false ? "kein Ladeplan möglich"
+                                    : K.dauer(v.fahrzeit_minuten) + " Fahrzeit");
+      const kosten = (v.plan_kosten_eur !== undefined && v.plan_kosten_eur !== null)
+        ? ` · ${K.zahl(v.plan_kosten_eur, 2)} €` : "";
       knopf.innerHTML = `
         <span class="etiketten">${etiketten}</span>
-        <span class="kennwerte">${K.zahl(v.strecke_km)} km ·
-          ${K.dauer(v.fahrzeit_minuten)} · ${K.zahl(v.kwh_gesamt, 1)} kWh</span>`;
+        <span class="kennwerte">${K.zahl(v.strecke_km)} km · ${gesamt}${kosten}</span>`;
       knopf.addEventListener("click", () => {
         if (v.fahrt_id !== (K.zustand.fahrt && K.zustand.fahrt.fahrt_id)) {
           varianteWaehlen(v);

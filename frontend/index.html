@@ -254,6 +254,20 @@ table.kurve input { padding: 6px 8px; }
       <!-- Der Zuschlag gehört zur Fahrt und nicht zum Fahrzeug: Der Träger
            ist im Sommer dran und im Winter nicht. Und ohne ihn landet sein
            Verbrauch im Korrekturfaktor des Autos, der dauerhaft gilt. -->
+      <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <input type="checkbox" id="alternative" style="width:auto">
+        <span>Mautfreie Route mitrechnen und vergleichen</span>
+      </label>
+      <p class="leer" style="padding-top:0">Ohne Haken wird nur die schnellste
+        gerechnet – eine Anfrage statt zweier, und das Tageskontingent des
+        Routings ist begrenzt. Mit Haken kommt eine Route ohne Mautstraßen
+        dazu, und jolt vergleicht beide <strong>am fertigen Ladeplan</strong>:
+        nicht welche Straße kürzer ist, sondern wo du früher ankommst und was
+        es kostet, wenn das Laden mitzählt.
+        <br>Die Maut selbst kennt jolt nicht – auf einer Frankreich-Langstrecke
+        sind es leicht vierzig Euro, und die musst du gegen die Mehrzeit
+        halten.</p>
+
       <label for="anbau">Aussen am Auto</label>
       <select id="anbau">
         <option value="1.0" selected>nichts</option>
