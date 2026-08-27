@@ -18,6 +18,8 @@ window.joltLive = (function () {
   let runde = 0;
   // Die gefahrene Spur einer Aufzeichnung, [[lon, lat], ...].
   let spur = [];
+  // Der gemessene Verlauf: [{km, soc, gemeldet}, ...] für die Kurve.
+  let verlauf = [];
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
   let letzteRohwerte = null;
@@ -129,23 +131,27 @@ window.joltLive = (function () {
       : (z.prognose_soc_am_ziel < reserve ? "schlecht"
         : (z.prognose_soc_am_ziel < reserve + 10 ? "warnung" : "gut"));
 
+    /* Die Antwort zuerst, und die Antwort ist nicht der Ladestand.
+     *
+     * Der Ladestand ist eine Eingabe - die Frage im Auto lautet "reicht
+     * es?", und die beantwortet der Ankunftswert. Solange ein Ladeplan
+     * steht, ist der nächste Stopp die nähere und damit dringlichere
+     * Antwort; ohne Plan zählt das Ziel. */
+    antwortZeigen(z, reserve);
+
+    /* Darunter nur das, was eine Entscheidung ändert. Ladestand und
+     * Abweichung stehen bewusst hier und nicht oben: Sie sind Beleg, nicht
+     * Antwort - man liest sie, wenn man der grossen Zahl nachgehen will. */
     document.getElementById("live-werte").innerHTML = [
-      // Ein gerechneter Ladestand ist keine Messung, und das muss man ihm
-      // ansehen: Wer bei 12 % an der Säule steht, will wissen, ob die Zahl
-      // aus dem Auto kam oder aus einem Modell, das seit hundert Kilometern
-      // niemand nachgeprüft hat.
-      K.wertKachel(z.soc_gemeldet === false ? "Ladestand gerechnet" : "Ladestand",
+      K.wertKachel(z.soc_gemeldet === false ? "Ladestand (gerechnet)" : "Ladestand",
         K.zahl(z.ist_soc) + " %"),
-      K.wertKachel("Nach Plan", K.zahl(z.soll_soc) + " %"),
       K.wertKachel("Abweichung",
         (z.abweichung_pp === null ? "–"
           : (z.abweichung_pp > 0 ? "+" : "") + K.zahl(z.abweichung_pp, 1) + " pp"),
         abweichungArt),
-      K.wertKachel("Verbrauch", "×" + K.zahl(z.verbrauchsfaktor, 2),
-        z.verbrauchsfaktor > 1.1 ? "warnung" : ""),
-      // Die Ankunftszeit steht neben dem Verbrauch, weil sie das Zweite ist,
-      // was sich unterwegs verschiebt - und die einzige Grösse, die ein Stau
-      // bewegt, ohne den Verbrauch anzufassen.
+      // Die Ankunftszeit ist die zweite Grösse, die sich unterwegs
+      // verschiebt - und die einzige, die ein Stau bewegt, ohne den
+      // Verbrauch anzufassen.
       K.wertKachel("Ankunft",
         (z.ankunft_verschiebung_min === null ? "–"
           : (Math.abs(z.ankunft_verschiebung_min) < 1 ? "nach Plan"
@@ -153,22 +159,14 @@ window.joltLive = (function () {
               + K.dauer(Math.abs(z.ankunft_verschiebung_min)))),
         (z.ankunft_verschiebung_min || 0) >= 10 ? "warnung" : ""),
       K.wertKachel("Noch", K.zahl(z.rest_km) + " km"),
-      // Ein negativer Ladestand ist keine Aussage über den Akku, sondern
-      // darüber, dass es ohne Nachladen nicht reicht. Genau das gehört dann
-      // auch dort zu stehen - "-188 %" liest niemand als Antwort.
-      //
-      // Und die Kachel heisst "Ohne Laden", nicht "Am Ziel": Sie rechnet die
-      // Reststrecke ohne jeden Ladestopp hoch. Solange darunter kein Plan
-      // stand, war das dasselbe; jetzt stünde sonst "reicht nicht" direkt
-      // über einem Ladeplan, der aufgeht.
-      K.wertKachel("Ohne Laden",
-        (z.prognose_soc_am_ziel === null ? "–"
-          : (z.prognose_soc_am_ziel < 0 ? "reicht nicht"
-            : K.zahl(z.prognose_soc_am_ziel) + " %")),
-        prognoseArt),
     ].join("");
 
-    autoKacheln(z);
+    if (z.ist_soc !== null && z.ist_soc !== undefined) {
+      verlauf.push({ km: z.km_auf_route || 0, soc: z.ist_soc,
+                     gemeldet: z.soc_gemeldet !== false });
+    }
+    verlaufZeichnen();
+    autoZeile(z);
 
     const balken = document.getElementById("live-balken");
     balken.style.width = Math.max(0, Math.min(100, z.ist_soc)) + "%";
@@ -214,6 +212,169 @@ window.joltLive = (function () {
       }
       window.joltKarte.markerSetzen(marker);
     }
+  }
+
+
+  /* ---------- Die Antwort ---------- */
+
+  function antwortZeigen(z, reserve) {
+    const kasten = document.getElementById("live-antwort");
+    const zahl = document.getElementById("live-antwort-zahl");
+    const text = document.getElementById("live-antwort-text");
+    if (!kasten) return;
+
+    const stopp = z.naechster_stopp;
+    let wert = null, wo = "", art = "";
+    if (stopp && stopp.erwartet_soc !== null && stopp.erwartet_soc !== undefined) {
+      wert = stopp.erwartet_soc;
+      wo = `an ${stopp.name || "nächster Stopp"} · km ${K.zahl(stopp.km_auf_route)}`;
+    } else if (z.prognose_soc_am_ziel !== null) {
+      wert = z.prognose_soc_am_ziel;
+      wo = "am Ziel, ohne Nachladen";
+    }
+
+    if (wert === null) {
+      zahl.textContent = K.zahl(z.ist_soc) + " %";
+      text.textContent = "Ladestand – noch keine Prognose";
+      kasten.className = "";
+      return;
+    }
+    // Ein negativer Wert ist keine Aussage über den Akku, sondern darüber,
+    // dass es so nicht reicht. Genau das gehört dann da zu stehen.
+    if (wert < 0) {
+      zahl.textContent = "reicht nicht";
+      art = "schlecht";
+    } else {
+      zahl.textContent = K.zahl(wert) + " %";
+      art = wert < reserve ? "schlecht" : (wert < reserve + 8 ? "warnung" : "gut");
+    }
+    text.textContent = wo;
+    kasten.className = art;
+  }
+
+  /* ---------- Der Verlauf ---------- */
+
+  /* Soll und Ist über die Strecke, in einem Bild.
+   *
+   * Das ist jolts These als Zeichnung: Ein Plan, der bei Abfahrt gerechnet
+   * wurde, ist nach achtzig Kilometern falsch - und zwei Kurven, die
+   * auseinanderlaufen, sagen das in einem Blick, während eine Kachel mit
+   * "-6 pp" erst gelesen und eingeordnet werden will. Vor allem sagt die
+   * Kurve, ob es besser oder schlechter wird; eine Momentaufnahme kann das
+   * grundsätzlich nicht.
+   *
+   * Gezeichnet wird auch ohne Plan: Bei einer Aufzeichnung gibt es keine
+   * Soll-Kurve, aber die gemessene ist dann erst recht das, was man sehen
+   * will.
+   */
+  function verlaufZeichnen() {
+    const leinwand = document.getElementById("live-verlauf");
+    if (!leinwand) return;
+    const dpr = window.devicePixelRatio || 1;
+    const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
+    if (!breite || !hoehe) return;
+    leinwand.width = breite * dpr;
+    leinwand.height = hoehe * dpr;
+    const stift = leinwand.getContext("2d");
+    stift.setTransform(dpr, 0, 0, dpr, 0, 0);
+    stift.clearRect(0, 0, breite, hoehe);
+
+    const fahrt = K.zustand.fahrt;
+    const profil = (fahrt && fahrt.profil) || [];
+    const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
+
+    // Der Massstab richtet sich nach dem, was es gibt: mit Plan nach der
+    // ganzen Strecke, ohne Plan nach dem, was schon gefahren wurde.
+    const maxKm = profil.length
+      ? (profil[profil.length - 1].km || 1)
+      : Math.max(1, ...verlauf.map((v) => v.km));
+    const links = 4, rechts = breite - 4, oben = 8, unten = hoehe - 16;
+    const x = (km) => links + (km / maxKm) * (rechts - links);
+    const y = (soc) => unten - (Math.max(0, Math.min(100, soc)) / 100)
+      * (unten - oben);
+
+    // Höhenprofil im Hintergrund. Es erklärt die Knicke in beiden Kurven -
+    // ohne diese Erklärung wirken sie wie Messfehler.
+    if (profil.length > 1) {
+      let maxHoehe = 1;
+      for (const p of profil) maxHoehe = Math.max(maxHoehe, p.hoehe || 0);
+      stift.beginPath();
+      stift.moveTo(x(0), unten);
+      for (const p of profil) {
+        stift.lineTo(x(p.km), unten - ((p.hoehe || 0) / maxHoehe) * (unten - oben) * 0.3);
+      }
+      stift.lineTo(x(maxKm), unten);
+      stift.closePath();
+      stift.fillStyle = "rgba(138,151,165,.12)";
+      stift.fill();
+    }
+
+    // Die Reserve als Linie, nicht als Zahl: Man sieht sofort, wo die
+    // gemessene Kurve auf sie zuläuft.
+    stift.beginPath();
+    stift.setLineDash([4, 4]);
+    stift.moveTo(links, y(reserve));
+    stift.lineTo(rechts, y(reserve));
+    stift.strokeStyle = "rgba(226,89,106,.6)";
+    stift.lineWidth = 1;
+    stift.stroke();
+    stift.setLineDash([]);
+    stift.fillStyle = "rgba(226,89,106,.75)";
+    stift.font = "10px system-ui, sans-serif";
+    stift.fillText("Reserve", links + 2, y(reserve) - 3);
+
+    // Geplante Kurve: gedämpft, sie ist der Bezug und nicht die Nachricht.
+    if (profil.length > 1) {
+      stift.beginPath();
+      profil.forEach((p, i) => {
+        const px = x(p.km), py = y(p.soc);
+        if (i === 0) stift.moveTo(px, py); else stift.lineTo(px, py);
+      });
+      stift.strokeStyle = "rgba(138,151,165,.55)";
+      stift.lineWidth = 1.5;
+      stift.stroke();
+    }
+
+    // Die Ladestopps als Marken - sie erklären die Sprünge, die gleich
+    // kommen, und zeigen, wie weit der nächste noch weg ist.
+    for (const stopp of (plan && plan.stopps) || []) {
+      const px = x(stopp.km_auf_route);
+      stift.beginPath();
+      stift.moveTo(px, oben);
+      stift.lineTo(px, unten);
+      stift.strokeStyle = "rgba(255,201,60,.35)";
+      stift.lineWidth = 1;
+      stift.stroke();
+    }
+
+    // Die gemessene Kurve. Sie ist die Nachricht, also kräftig.
+    if (verlauf.length > 1) {
+      stift.beginPath();
+      verlauf.forEach((v, i) => {
+        const px = x(v.km), py = y(v.soc);
+        if (i === 0) stift.moveTo(px, py); else stift.lineTo(px, py);
+      });
+      stift.strokeStyle = "#ffc93c";
+      stift.lineWidth = 2.5;
+      stift.lineJoin = "round";
+      stift.stroke();
+    }
+
+    // Wo das Auto gerade ist. Ein gerechneter Ladestand bekommt einen
+    // hohlen Punkt - man soll ihm ansehen, dass er nicht gemessen ist.
+    const jetzt = verlauf[verlauf.length - 1];
+    if (jetzt) {
+      stift.beginPath();
+      stift.arc(x(jetzt.km), y(jetzt.soc), 4.5, 0, Math.PI * 2);
+      if (jetzt.gemeldet) { stift.fillStyle = "#ffc93c"; stift.fill(); }
+      else { stift.strokeStyle = "#ffc93c"; stift.lineWidth = 2; stift.stroke(); }
+    }
+
+    stift.fillStyle = "rgba(138,151,165,.8)";
+    stift.fillText("0", links, hoehe - 4);
+    const beschriftung = K.zahl(maxKm) + " km";
+    stift.fillText(beschriftung, rechts - stift.measureText(beschriftung).width,
+                   hoehe - 4);
   }
 
   /* ---------- Der Ladeplan unterwegs ---------- */
@@ -455,7 +616,14 @@ window.joltLive = (function () {
     }
   }
 
-  function autoKacheln(z) {
+  /* Was das Auto misst - als **Zeile**, nicht als Kachelreihe.
+   *
+   * Sechs weitere Kacheln hätten dieselbe Grösse gehabt wie die vier
+   * darüber, und damit hätte alles gleich wichtig ausgesehen. Diese Werte
+   * braucht man aber nur gelegentlich: Man sieht hin, wenn man wissen will,
+   * *warum* der Verbrauch hoch ist - nicht, um zu erfahren, dass er es ist.
+   */
+  function autoZeile(z) {
     const block = document.getElementById("live-auto");
     const roh = letzteRohwerte;
     if (!block) return;
@@ -464,61 +632,40 @@ window.joltLive = (function () {
 
     const kw = leistungKw(roh);
     const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
-    // Der Momentanverbrauch ist die Zahl, die eine Entscheidung ändert:
-    // Er sagt, ob der Fuss vom Gas etwas bringt. Unter 5 km/h ist er
-    // sinnlos (Division durch fast null), dort steht der Strich.
     const momentan = (kw !== null && tempo !== null && tempo >= 5)
       ? Math.abs(kw) / tempo * 100 : null;
 
-    const alter = nebenverbrauch
-      ? Math.round((Date.now() - nebenverbrauch.zeit) / 60000) : null;
-
-    const kacheln = [];
-    if (kw !== null) {
-      kacheln.push(K.wertKachel(kw < 0 ? "Leistung (rück)" : "Leistung",
-                                K.zahl(Math.abs(kw), 1) + " kW"));
-    }
+    const teile = [];
     if (momentan !== null) {
-      kacheln.push(K.wertKachel("Momentan", K.zahl(momentan, 1) + " kWh/100",
-        momentan > 30 ? "warnung" : ""));
+      teile.push(`<b>${K.zahl(momentan, 1)}</b> kWh/100 gerade`);
     }
-    // Gemessen schlägt geschätzt. Der Unterschied steht in der
-    // Beschriftung, damit niemand eine Näherung für eine Messung hält.
+    if (kw !== null) {
+      teile.push(`<b>${K.zahl(Math.abs(kw), 0)}</b> kW${kw < 0 ? " zurück" : ""}`);
+    }
     if (typeof roh.nebenverbrauch_kw === "number") {
-      kacheln.push(K.wertKachel("Nebenverbraucher",
-        K.zahl(roh.nebenverbrauch_kw, 1) + " kW",
-        roh.nebenverbrauch_kw > 3 ? "warnung" : ""));
+      let n = `<b>${K.zahl(roh.nebenverbrauch_kw, 1)}</b> kW Nebenverbraucher`;
+      if (typeof roh.ptc_strom_a === "number"
+          && typeof roh.spannung_v === "number") {
+        n += `, davon <b>${K.zahl(roh.ptc_strom_a * roh.spannung_v / 1000, 1)}</b> Heizung`;
+      }
+      teile.push(n);
     } else if (nebenverbrauch) {
-      kacheln.push(K.wertKachel(
-        alter > 0 ? `Nebenverbr. (Stand, vor ${alter} min)`
-                  : "Nebenverbr. (im Stand)",
-        K.zahl(nebenverbrauch.kw, 1) + " kW",
-        nebenverbrauch.kw > 3 ? "warnung" : ""));
-    }
-    /* Was davon die Heizung ist. Der grosse Verbraucher, den man selbst in
-     * der Hand hat - und im Winter der Unterschied zwischen einem
-     * Ladestopp und keinem. */
-    if (typeof roh.ptc_strom_a === "number"
-        && typeof roh.spannung_v === "number") {
-      const heizung = roh.ptc_strom_a * roh.spannung_v / 1000;
-      kacheln.push(K.wertKachel("davon Heizung", K.zahl(heizung, 1) + " kW",
-        heizung > 2 ? "warnung" : ""));
+      const alter = Math.round((Date.now() - nebenverbrauch.zeit) / 60000);
+      teile.push(`<b>${K.zahl(nebenverbrauch.kw, 1)}</b> kW Nebenverbraucher`
+                 + ` (im Stand${alter > 0 ? `, vor ${alter} min` : ""})`);
     }
     if (typeof roh.aussentemp_c === "number") {
-      kacheln.push(K.wertKachel("Aussen", K.zahl(roh.aussentemp_c, 1) + " °C",
-        roh.aussentemp_c < 5 ? "warnung" : ""));
-    }
-    if (typeof roh.innentemp_c === "number") {
-      kacheln.push(K.wertKachel("Innen", K.zahl(roh.innentemp_c, 1) + " °C"));
+      teile.push(`<b>${K.zahl(roh.aussentemp_c, 1)}</b> °C aussen`);
     }
     if (typeof roh.km_stand === "number") {
-      kacheln.push(K.wertKachel("Kilometerstand", K.zahl(roh.km_stand) + " km"));
+      teile.push(`${K.zahl(roh.km_stand)} km gesamt`);
     }
-    document.getElementById("live-auto-werte").innerHTML = kacheln.join("");
 
+    document.getElementById("live-auto-werte").innerHTML =
+      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`;
     const fehlend = (roh._fehlend || []).length;
     document.getElementById("live-auto-stand").textContent =
-      fehlend ? `${fehlend} Werte antworten nicht` : "alle Werte gelesen";
+      fehlend ? `${fehlend} Werte antworten nicht` : "";
   }
 
   async function positionMelden(coords) {
@@ -642,6 +789,7 @@ window.joltLive = (function () {
     positionAufgeben();
     dongle = false;
     spur = [];
+    verlauf = [];
     letzteRohwerte = null;
     nebenverbrauch = null;
     if (steckdose) { try { steckdose.close(); } catch (e) {} }
@@ -693,6 +841,9 @@ window.joltLive = (function () {
   }
 
   function einrichten() {
+    // Wie bei der Karte: Im versteckten Abschnitt hat das Canvas die Breite
+    // null, und nach dem Einblenden oder Drehen muss neu gezeichnet werden.
+    window.addEventListener("resize", verlaufZeichnen);
     K.reglerKoppeln("mehrverbrauch", "mehrverbrauch-wert");
     K.reglerKoppeln("stau", "stau-wert");
     K.an("live-starten", "click", starten);
@@ -707,5 +858,5 @@ window.joltLive = (function () {
   }
 
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
-           dongleNutzen };
+           dongleNutzen, verlaufZeichnen };
 })();

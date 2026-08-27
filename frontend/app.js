@@ -33,6 +33,9 @@ window.joltApp = (function () {
     // Im versteckten Abschnitt hatte das Canvas die Breite null. Nach dem
     // Einblenden muss es neu vermessen werden, sonst bleibt es ein Strich.
     if (window.joltKarte) window.joltKarte.neuZeichnen();
+    // Dasselbe für die Verlaufskurve der Live-Ansicht.
+    if (ansicht === "live" && window.joltLive
+        && window.joltLive.verlaufZeichnen) window.joltLive.verlaufZeichnen();
   }
 
   async function starten() {

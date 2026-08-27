@@ -104,6 +104,25 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+/* Die eine Zahl, die im Fahren zählt: Reicht es? Alles andere ist Beiwerk,
+   und Beiwerk gehört nicht in dieselbe Grösse wie die Antwort. */
+#live-antwort { text-align: center; padding: 6px 0 12px; }
+#live-antwort .antwort-zahl { font-size: 46px; font-weight: 700;
+  letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+#live-antwort .antwort-text { font-size: 13px; color: var(--gedaempft);
+  margin-top: 2px; }
+#live-antwort.gut .antwort-zahl { color: var(--gut); }
+#live-antwort.warnung .antwort-zahl { color: var(--warnung); }
+#live-antwort.schlecht .antwort-zahl { color: var(--schlecht); }
+#live-verlauf { width: 100%; height: 150px; display: block; margin-top: 10px;
+  border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
+/* Der Kontextstreifen: eine Zeile Text statt sechs Kacheln. Was man nur
+   gelegentlich braucht, soll nicht so aussehen wie das, was man dauernd
+   braucht. */
+#live-auto-zeile { font-size: 13px; color: var(--gedaempft); margin-top: 10px;
+  line-height: 1.6; }
+#live-auto-zeile b { color: var(--text); font-weight: 600;
+  font-variant-numeric: tabular-nums; }
 /* Das Logger-Token wird genau einmal gezeigt und muss abgetippt oder kopiert
    werden - also umbrechend, auswählbar und in gleichbreiter Schrift, damit
    sich l und 1 unterscheiden lassen. */
@@ -272,8 +291,23 @@ table.kurve input { padding: 6px 8px; }
 
     <div id="live-inhalt" hidden>
       <div class="karte-block">
-        <div class="werte" id="live-werte"></div>
+        <!-- Die Antwort zuerst, gross: nicht der Ladestand (der ist eine
+             Eingabe), sondern ob es reicht. -->
+        <div id="live-antwort">
+          <div class="antwort-zahl" id="live-antwort-zahl">–</div>
+          <div class="antwort-text" id="live-antwort-text">warte auf Messung</div>
+        </div>
         <div class="balken"><i id="live-balken" style="width:0%"></i></div>
+
+        <!-- Der Verlauf. Eine Momentaufnahme sagt nicht, ob es besser oder
+             schlechter wird; Soll und Ist nebeneinander sagt es sofort. -->
+        <canvas id="live-verlauf"></canvas>
+        <div class="karte-fuss">
+          <span id="live-verlauf-fuss">Soll und Ist über die Strecke</span>
+          <span id="live-hinweis-kurz"></span>
+        </div>
+
+        <div class="werte" id="live-werte"></div>
         <!-- Nur sichtbar, wenn ein OBD2-Dongle mitliest. Getrennt von den
              Kacheln darüber, weil es zwei verschiedene Dinge sind: oben,
              was jolt rechnet, hier, was das Auto misst. -->
