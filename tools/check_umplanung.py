@@ -598,6 +598,76 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_zustand_koordinate():
+    """Der Zustand muss sagen, **wo** gemessen wurde.
+
+    Ohne das rechnete die Oberflaeche die Position aus dem geplanten Profil
+    zurueck. Bei einer Aufzeichnung gibt es das nicht - es entsteht erst beim
+    Abschliessen -, und die Rueckrechnung lieferte stumm (0, 0): Karte im
+    Golf von Guinea, gefahrene Spur aus einem einzigen Punkt, und die
+    Verlaufskurve, die ihre x-Achse entlang dieser Spur misst, ein
+    senkrechter Strich. Ausgerechnet bei der Betriebsart, in der die Kurve
+    das Einzige ist, was es zu sehen gibt.
+    """
+    client = TestClient(app)
+    print("\nZustand trägt die Koordinate")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+    start = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": "Koordinate"}).json()
+
+    zustand = client.post(f"/api/live/{start['sitzung_id']}/punkt",
+                          json={"lat": 48.21, "lon": 11.34, "soc": 88.0}).json()
+    pruefe(abs((zustand.get("lat") or 0) - 48.21) < 1e-6
+           and abs((zustand.get("lon") or 0) - 11.34) < 1e-6,
+           "der gemeldete Punkt kommt mit seiner Koordinate zurück",
+           f"lat={zustand.get('lat')} lon={zustand.get('lon')}")
+
+    zwei = client.post(f"/api/live/{start['sitzung_id']}/punkt",
+                       json={"lat": 48.30, "lon": 11.40, "soc": 87.0}).json()
+    pruefe(zwei.get("lat") != zustand.get("lat"),
+           "und sie wandert mit - sonst bestünde die Spur aus einem Punkt",
+           f"{zustand.get('lat')} → {zwei.get('lat')}")
+
+
+def teil_import_laengen():
+    """Ein zu langes Feld darf nicht den ganzen Import kosten.
+
+    Passiert ist genau das: OCM liefert fuer Standorte mit mehreren
+    Postleitzahlen eine Semikolon-Liste, und eine davon hat einen Lauf
+    abgebrochen. Die Spalte wurde daraufhin verbreitert - was denselben
+    Fehler nur hinausschiebt, denn der naechste Standort hat eine
+    Postleitzahl mehr.
+    """
+    from app.laden import saeulen_import
+
+    print("\nImport: zu lange Felder")
+    db = SessionLocal()
+    try:
+        lang = ";".join(f"{33000 + i * 100}" for i in range(12))
+        pruefe(len(lang) > 40, "der Testwert ist länger als die Spalte",
+               f"{len(lang)} Zeichen")
+        art = saeulen_import._speichern(db, "test", "lang-1", {
+            "name": "Auchan " + "x" * 400, "betreiber": "Test",
+            "lat": 44.9, "lon": -0.6, "plz": lang, "ort": "Bordeaux",
+            "land": "FR", "anschluesse": [], "max_kw": 150.0,
+            "anzahl_punkte": 4, "steckertypen": "CCS"})
+        db.commit()
+        pruefe(art == "neu", "der Datensatz geht durch, statt den Lauf "
+               "abzubrechen", art)
+        gespeichert = (db.query(models.Ladepunkt)
+                       .filter_by(quelle="test", fremd_id="lang-1").one())
+        pruefe(len(gespeichert.plz) <= 40,
+               "die zu lange Postleitzahl ist gestutzt, nicht der Ladepunkt "
+               "verworfen - eine halbe PLZ ist ein Schönheitsfehler, ein "
+               "fehlender Ladepunkt auf der Route nicht",
+               f"{len(gespeichert.plz)} Zeichen")
+        pruefe(gespeichert.max_kw == 150.0 and gespeichert.anzahl_punkte == 4,
+               "und die Zahlen bleiben unangetastet")
+    finally:
+        db.close()
+
+
 def teil_hoehenquelle():
     """Geglättete GPS-Höhen - und eine ehrliche Auskunft, woher sie stammen.
 
@@ -1145,6 +1215,8 @@ def main() -> int:
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
     teil_hoehenquelle()
+    teil_zustand_koordinate()
+    teil_import_laengen()
     teil_aufzeichnung()
     teil_position_ohne_ladestand()
     teil_tempo_in_der_kette()

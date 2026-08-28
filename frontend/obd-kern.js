@@ -209,6 +209,9 @@ window.joltObd = (function () {
       melde(`Wiederverbinden, Versuch ${versuch} …`);
       await verbindungAufbauen(geraet);
       letzteAdresse = null;          // Adresse und Filter sind weg
+      // Was vor dem Abriss unterwegs war, kommt nicht mehr.
+      schuldigeAntworten = 0;
+      puffer = "";
       await reihe(HANDSHAKE);
       melde("Wieder verbunden, Handshake erneuert.");
     } catch (fehler) {
@@ -230,6 +233,18 @@ window.joltObd = (function () {
 
   /* ---------- Befehle ---------- */
 
+  /* Wie viele Antworten noch von aufgegebenen Befehlen unterwegs sind.
+   *
+   * Ein Zeitablauf gibt den Befehl auf, aber nicht der Dongle: Der antwortet
+   * gleich darauf trotzdem. Ohne Buchführung landete diese verspätete
+   * Antwort beim **nächsten** Befehl. Falsche Zahlen kamen dabei nicht
+   * heraus - `nutzbytes` prüft, dass die Quittung zur Datenkennung passt -,
+   * aber jede Messung danach war um eins verschoben und lieferte "keine
+   * Nutzdaten". Und weil der Ladestand pflicht ist, riss das gleich die
+   * ganze Runde ab: ein einzelner langsamer Befehl kostete mehrere
+   * Messpunkte statt einen Wert. */
+  let schuldigeAntworten = 0;
+
   function beiDaten(e) {
     puffer += new TextDecoder().decode(e.target.value);
     // Der ELM327 schliesst jede Antwort mit '>' ab. Vorher ist sie
@@ -237,6 +252,11 @@ window.joltObd = (function () {
     if (!puffer.includes(">")) return;
     const antwort = puffer.replace(/>/g, "").replace(/\r/g, "\n").trim();
     puffer = "";
+    if (schuldigeAntworten > 0) {
+      schuldigeAntworten -= 1;
+      melde(`(verspätete Antwort verworfen: ${antwort || "leer"})`);
+      return;
+    }
     melde(antwort || "(leer)", "rein");
     if (warteAuf) {
       clearTimeout(warteAuf.uhr);
@@ -261,6 +281,9 @@ function befehl(text, grenze_ms = 15000) {
         erfuellen,
         uhr: setTimeout(() => {
           warteAuf = null;
+          // Der Dongle antwortet vielleicht doch noch. Diese eine Antwort
+          // gehört zu keinem wartenden Befehl mehr und wird verworfen.
+          schuldigeAntworten += 1;
           // Ein Zeitablauf ist hier kein Absturz, sondern ein Befund: Der
           // Dongle hat nicht geantwortet, und das steht im Protokoll.
           melde(`(keine Antwort auf ${text} innerhalb ${grenze_ms / 1000} s)`);
