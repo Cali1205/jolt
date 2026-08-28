@@ -74,7 +74,36 @@ def _stabile_id(*teile) -> str:
     return hashlib.sha1(roh.encode("utf-8")).hexdigest()[:24]
 
 
+def _laengen_kuerzen(felder: dict) -> dict:
+    """Zeichenketten auf die Spaltenbreite stutzen.
+
+    Fremde Daten halten sich nicht an unsere Spalten. Ein einziger zu langer
+    Wert liess bisher den **ganzen** Import auflaufen - tausende Datensaetze
+    verloren wegen eines einzigen. Passiert ist genau das schon: OCM liefert
+    fuer Standorte mit mehreren Postleitzahlen (grosse Einkaufszentren) eine
+    Semikolon-Liste, und "33000;33100;33200;33300;33800" beim Auchan Bordeaux
+    Lac hat den Lauf abgebrochen. Die Spalte wurde daraufhin von 20 auf 40
+    Zeichen verbreitert - was denselben Fehler nur weiter hinausschiebt, denn
+    der naechste Standort hat sechs Postleitzahlen.
+
+    Gestutzt statt uebersprungen: Eine abgeschnittene Postleitzahl ist ein
+    Schoenheitsfehler, ein fehlender Ladepunkt auf der Route nicht. Die
+    Laengen kommen aus dem Modell, damit die Liste nicht neben den Spalten
+    veraltet.
+    """
+    gekuerzt = {}
+    for name, wert in felder.items():
+        spalte = models.Ladepunkt.__table__.columns.get(name)
+        laenge = getattr(getattr(spalte, "type", None), "length", None)
+        if isinstance(wert, str) and laenge and len(wert) > laenge:
+            log.info("Feld %s auf %d Zeichen gekürzt: %r", name, laenge, wert)
+            wert = wert[:laenge]
+        gekuerzt[name] = wert
+    return gekuerzt
+
+
 def _speichern(db, quelle: str, fremd_id: str, felder: dict) -> str:
+    felder = _laengen_kuerzen(felder)
     vorhanden = (db.query(models.Ladepunkt)
                  .filter_by(quelle=quelle, fremd_id=fremd_id).one_or_none())
     if vorhanden:

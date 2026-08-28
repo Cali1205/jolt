@@ -62,6 +62,21 @@ LADEN_SOC_PP = 0.5
 class Zustand:
     km_auf_route: float
     abstand_zur_route_m: float
+    # Wo der Messpunkt lag.
+    #
+    # Ohne diese beiden musste die Oberflaeche die Position aus dem
+    # *geplanten* Profil zurueckrechnen ("welcher Stuetzpunkt liegt bei
+    # km X"). Bei einer **Aufzeichnung** gibt es dieses Profil nicht - es
+    # entsteht erst beim Abschliessen -, und die Rueckrechnung lieferte
+    # stumm (0, 0). Die Karte zeigte den Golf von Guinea, die gefahrene
+    # Spur bestand aus einem einzigen Punkt, und die Verlaufskurve, die
+    # ihre x-Achse entlang dieser Spur misst, fiel zu einem senkrechten
+    # Strich zusammen - ausgerechnet bei der Betriebsart, in der die Kurve
+    # das Einzige ist, was es zu sehen gibt.
+    #
+    # Der Server weiss die Koordinate; er hat sie gerade entgegengenommen.
+    lat: float
+    lon: float
     # Der Ladestand, mit dem gerechnet wird - gemeldet oder hochgerechnet.
     # `soc_gemeldet` sagt, welches von beidem: Wer am Steuer eine Zahl sieht,
     # soll wissen, ob sie gemessen oder aus dem Profil gerechnet ist.
@@ -430,6 +445,7 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
 
     return Zustand(
         km_auf_route=round(km, 2), abstand_zur_route_m=round(abstand_m),
+        lat=punkt.lat, lon=punkt.lon,
         ist_soc=None if ist_soc is None else round(ist_soc, 2),
         soc_gemeldet=gemeldet, soll_soc=punkt.soll_soc,
         abweichung_pp=abweichung,

@@ -18,6 +18,14 @@ window.joltLive = (function () {
   let runde = 0;
   // Die gefahrene Spur einer Aufzeichnung, [[lon, lat], ...].
   let spur = [];
+  // Die entlang dieser Spur zurückgelegte Strecke. Sie wird **fortlaufend**
+  // mitgeführt und an jedem Verlaufspunkt festgehalten, statt sie beim
+  // Zeichnen aus der Spur nachzurechnen: Spur und Verlauf wachsen unter
+  // verschiedenen Bedingungen (die Spur bei jeder neuen Position, der
+  // Verlauf bei jedem neuen Ladestand), also gehört `spur[i]` nicht zu
+  // `verlauf[i]`. Beim Aufzeichnen mit Dongle ist der Unterschied gewaltig -
+  // der Ladestand ändert sich alle paar Minuten, die Position im Sekundentakt.
+  let gefahrenKm = 0;
   // Der gemessene Verlauf: [{km, soc, gemeldet}, ...] für die Kurve.
   let verlauf = [];
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
@@ -91,13 +99,49 @@ window.joltLive = (function () {
     }
   }
 
-  function verbinden(sitzungId) {
-    if (steckdose) { try { steckdose.close(); } catch (e) {} }
+  /* Die Verbindung nach einem Abriss wieder aufbauen.
+   *
+   * Ein WebSocket überlebt keinen Tunnel und keinen Wechsel von WLAN auf
+   * Mobilfunk. Ohne Wiederaufbau blieb die Live-Ansicht danach für den Rest
+   * der Fahrt stehen: Die Messpunkte gingen weiter hinaus (der POST ist ein
+   * eigener Weg), aber zurück kam nichts mehr - also keine Abweichung, keine
+   * Ankunftsprognose und vor allem keine Meldung über einen geänderten
+   * Plan. Genau die Lage, in der man sie braucht.
+   *
+   * Wachsende Abstände wie beim Dongle: Ein Tunnel dauert Sekunden, ein
+   * Funkloch auf dem Land Minuten. Beendet die Fahrt, hört es auf -
+   * `K.zustand.sitzungId` ist die Bedingung, und `beenden()` löscht sie. */
+  let neuVerbindenUhr = null;
+
+  function neuVerbinden(sitzungId, versuch) {
+    if (neuVerbindenUhr) clearTimeout(neuVerbindenUhr);
+    if (versuch > 8 || K.zustand.sitzungId !== sitzungId) return;
+    const warten = Math.min(30000, 2000 * Math.pow(2, versuch - 1));
+    verbindungAnzeigen(`getrennt – neuer Versuch in ${warten / 1000} s`,
+                       "#e8804f");
+    neuVerbindenUhr = setTimeout(() => {
+      neuVerbindenUhr = null;
+      if (K.zustand.sitzungId === sitzungId) verbinden(sitzungId, versuch);
+    }, warten);
+  }
+
+  function verbinden(sitzungId, versuch = 1) {
+    if (steckdose) {
+      // Den alten Zuhörer abhängen, bevor geschlossen wird: Sonst löst
+      // dieses Schliessen selbst einen Wiederaufbau aus.
+      try { steckdose.onclose = null; steckdose.close(); } catch (e) {}
+    }
     const schema = location.protocol === "https:" ? "wss" : "ws";
     steckdose = new WebSocket(`${schema}://${location.host}/api/live/${sitzungId}/ws`);
 
-    steckdose.onopen = () => verbindungAnzeigen("verbunden", "#57c98a");
-    steckdose.onclose = () => verbindungAnzeigen("getrennt", "#8a97a5");
+    steckdose.onopen = () => {
+      verbindungAnzeigen("verbunden", "#57c98a");
+      versuch = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
+    };
+    steckdose.onclose = () => {
+      if (K.zustand.sitzungId === sitzungId) neuVerbinden(sitzungId, versuch + 1);
+      else verbindungAnzeigen("getrennt", "#8a97a5");
+    };
     steckdose.onerror = () => verbindungAnzeigen("gestört", "#e2596a");
     steckdose.onmessage = (nachricht) => {
       let daten;
@@ -170,13 +214,30 @@ window.joltLive = (function () {
      * zurückspiegelt - und der eigene Browser ist einer davon. Ohne diese
      * Prüfung stünde jeder Punkt doppelt im Verlauf und in der Spur; über
      * eine Langstrecke wären das tausend Einträge zu viel. */
+    // Position und Strecke **vor** dem Verlauf: Der Verlaufspunkt soll
+    // wissen, wie weit gefahren wurde, als er entstand.
+    const ort = messort(z);
+    if (ort) {
+      const zuletzt = spur[spur.length - 1];
+      if (!zuletzt || zuletzt[0] !== ort[0] || zuletzt[1] !== ort[1]) {
+        if (zuletzt) gefahrenKm += abstandKm(zuletzt, ort);
+        spur.push(ort);
+      }
+    }
+
     const vorheriger = verlauf[verlauf.length - 1];
+    // Auch die gefahrene Strecke zählt beim Vergleich: Bei einer
+    // Aufzeichnung ist `km_auf_route` für jeden Punkt null (es gibt noch
+    // keine Route), und ohne diesen Teil galt jeder Punkt mit unverändertem
+    // Ladestand als Dublette. Beim Aufzeichnen mit Dongle sind das fast
+    // alle - der Ladestand ändert sich alle paar Minuten.
     const istNeu = z.ist_soc !== null && z.ist_soc !== undefined
       && !(vorheriger && vorheriger.km === (z.km_auf_route || 0)
+           && vorheriger.gefahren_km === gefahrenKm
            && vorheriger.soc === z.ist_soc);
     if (istNeu) {
-      verlauf.push({ km: z.km_auf_route || 0, soc: z.ist_soc,
-                     gemeldet: z.soc_gemeldet !== false });
+      verlauf.push({ km: z.km_auf_route || 0, gefahren_km: gefahrenKm,
+                     soc: z.ist_soc, gemeldet: z.soc_gemeldet !== false });
     }
     verlaufZeichnen();
     autoZeile(z);
@@ -202,19 +263,16 @@ window.joltLive = (function () {
      * mit dem Vorhandensein einer Route nichts zu tun.
      */
     if (window.joltKarte) {
-      const marker = [{ lat: z_lat(z), lon: z_lon(z), typ: "auto", text: "hier" }];
+      const hier = ort || [z_lon(z), z_lat(z)];
+      const marker = [{ lat: hier[1], lon: hier[0], typ: "auto", text: "hier" }];
       // Bei einer Aufzeichnung ist die gefahrene Spur das, was es zu sehen
       // gibt: Sie wächst mit und zeigt, dass wirklich mitgeschrieben wird.
-      // Dieselbe Doppelung wie beim Verlauf - siehe oben.
-      const zuletzt = spur[spur.length - 1];
-      if (!zuletzt || zuletzt[0] !== z_lon(z) || zuletzt[1] !== z_lat(z)) {
-        spur.push([z_lon(z), z_lat(z)]);
-      }
+      // Gefüllt wird sie weiter oben, zusammen mit der Strecke.
       if (!fahrt) {
         window.joltKarte.routeSetzen(spur);
         // Nur beim ersten Punkt zentrieren - danach würde die Karte bei
         // jeder Meldung springen, und niemand könnte sie verschieben.
-        if (spur.length === 1) window.joltKarte.aufPunkt(z_lat(z), z_lon(z), 12);
+        if (spur.length === 1) window.joltKarte.aufPunkt(hier[1], hier[0], 12);
       }
       if (fahrt && z.reserve_bei_km !== null && fahrt.profil) {
         const treffer = fahrt.profil.find((p) => p.km >= z.reserve_bei_km);
@@ -324,17 +382,19 @@ window.joltLive = (function () {
      * Gemessen wird dann entlang der gefahrenen Spur: Für Punkt i die
      * Summe der Abstände bis dorthin. Das ist die Strecke, die wirklich
      * zurückgelegt wurde, und damit die richtige Achse. */
+    /* Hier stand eine Schleife, die die Strecke beim Zeichnen aus der Spur
+     * nachrechnete - `abstandKm(spur[i-1], spur[i])` für jeden Verlaufs-
+     * punkt i. Das setzte voraus, dass `spur[i]` zu `verlauf[i]` gehört,
+     * und das tut es nicht: Die Spur wächst bei jeder neuen Position, der
+     * Verlauf bei jedem neuen Ladestand. Beim Aufzeichnen mit Dongle war
+     * der Verlauf um ein Vielfaches kürzer, und die Kurve rückte dadurch
+     * an den linken Rand - genau der Fehler, den diese Schleife beheben
+     * sollte. Jetzt trägt jeder Verlaufspunkt seine Strecke selbst. */
     const eigeneKm = !profil.length;
-    if (eigeneKm) {
-      let summe = 0;
-      for (let i = 0; i < verlauf.length; i++) {
-        if (i > 0) summe += abstandKm(spur[i - 1], spur[i]);
-        verlauf[i].km = summe;
-      }
-    }
+    const streckeVon = (v) => eigeneKm ? (v.gefahren_km || 0) : v.km;
     const maxKm = profil.length
       ? (profil[profil.length - 1].km || 1)
-      : Math.max(1, ...verlauf.map((v) => v.km));
+      : Math.max(1, ...verlauf.map(streckeVon));
     const links = 4, rechts = breite - 4, oben = 8, unten = hoehe - 16;
     const x = (km) => links + (km / maxKm) * (rechts - links);
     const y = (soc) => unten - (Math.max(0, Math.min(100, soc)) / 100)
@@ -398,7 +458,7 @@ window.joltLive = (function () {
     if (verlauf.length > 1) {
       stift.beginPath();
       verlauf.forEach((v, i) => {
-        const px = x(v.km), py = y(v.soc);
+        const px = x(streckeVon(v)), py = y(v.soc);
         if (i === 0) stift.moveTo(px, py); else stift.lineTo(px, py);
       });
       stift.strokeStyle = "#ffc93c";
@@ -412,7 +472,7 @@ window.joltLive = (function () {
     const jetzt = verlauf[verlauf.length - 1];
     if (jetzt) {
       stift.beginPath();
-      stift.arc(x(jetzt.km), y(jetzt.soc), 4.5, 0, Math.PI * 2);
+      stift.arc(x(streckeVon(jetzt)), y(jetzt.soc), 4.5, 0, Math.PI * 2);
       if (jetzt.gemeldet) { stift.fillStyle = "#ffc93c"; stift.fill(); }
       else { stift.strokeStyle = "#ffc93c"; stift.lineWidth = 2; stift.stroke(); }
     }
@@ -556,8 +616,27 @@ window.joltLive = (function () {
     return hilfe.innerHTML;
   }
 
-  /* Der Zustand trägt keine Koordinate, aber den Kilometerstand - und über
-   * das Profil hängt an jedem Kilometerstand eine Position. */
+  /* Wo der Messpunkt lag - [lon, lat], oder null.
+   *
+   * Der Server schickt die Koordinate mit. Vorher tat er das nicht, und die
+   * Ansicht rechnete sie aus dem *geplanten* Profil zurück (`z_lat`/`z_lon`
+   * darunter). Bei einer Aufzeichnung gibt es dieses Profil nicht - es
+   * entsteht erst beim Abschliessen -, und die Rückrechnung lieferte stumm
+   * (0, 0): Karte im Golf von Guinea, Spur aus einem einzigen Punkt.
+   *
+   * Der Rückfall bleibt für Sitzungen, die noch von einer älteren Fassung
+   * bedient werden - dort ist er richtig, weil es dann eine Route gibt. */
+  function messort(z) {
+    if (typeof z.lat === "number" && typeof z.lon === "number"
+        && (z.lat !== 0 || z.lon !== 0)) {
+      return [z.lon, z.lat];
+    }
+    const lat = z_lat(z), lon = z_lon(z);
+    return (lat === 0 && lon === 0) ? null : [lon, lat];
+  }
+
+  /* Der Rückfall: über das Profil hängt an jedem Kilometerstand eine
+   * Position. Gilt nur für geplante Fahrten. */
   function z_lat(z) { return punktBeiKm(z.km_auf_route).lat; }
   function z_lon(z) { return punktBeiKm(z.km_auf_route).lon; }
 
@@ -839,10 +918,14 @@ window.joltLive = (function () {
     positionAufgeben();
     dongle = false;
     spur = [];
+    gefahrenKm = 0;
     verlauf = [];
     letzteRohwerte = null;
     nebenverbrauch = null;
-    if (steckdose) { try { steckdose.close(); } catch (e) {} }
+    if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
+    if (steckdose) {
+      try { steckdose.onclose = null; steckdose.close(); } catch (e) {}
+    }
     K.zustand.sitzungId = null;
     plan = null;
     const kasten = document.getElementById("live-aenderung");
