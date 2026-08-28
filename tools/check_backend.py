@@ -15,7 +15,8 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+WERKZEUGE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, WERKZEUGE)
 from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
 
 anwendung_bereitstellen("backend", datenbank=False)
@@ -746,6 +747,37 @@ def main() -> int:
            "verlinkt, legt kein Symbol an")
 
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
+
+    # Die Betriebsskripte müssen auch im Container laufen. Dort liegt das
+    # Paket als /srv/app neben /srv/tools, lokal dagegen unter backend/app -
+    # wer nur ein Layout kennt, scheitert im jeweils anderen mit
+    # `ModuleNotFoundError: No module named 'app'`. Genau das war der Fall:
+    # `pruefen.py` hing auf `../backend` fest, und damit lief per
+    # `docker exec` kein einziges Prüfskript - der Weg, für den `tools/`
+    # überhaupt ins Image aufgenommen wurde.
+    werkzeuge = sorted(pfad for pfad in os.listdir(WERKZEUGE)
+                       if pfad.endswith(".py"))
+    ohne_beide = []
+    for name in werkzeuge:
+        quelle = open(os.path.join(WERKZEUGE, name), encoding="utf-8").read()
+        if "app" not in quelle:
+            continue
+        # Entweder das Skript kennt beide Layouts selbst, oder es überlässt
+        # das `pruefen.anwendung_bereitstellen`.
+        if 'os.path.join(_HIER, "..")' in quelle \
+                or 'os.path.join(HIER, "..")' in quelle \
+                or "anwendung_bereitstellen" in quelle \
+                or name == "pruefen.py":
+            continue
+        ohne_beide.append(name)
+    pruefe(not ohne_beide,
+           "jedes Werkzeug in tools/ findet das Paket in beiden Layouten - "
+           "im Repo unter backend/app, im Image daneben als app",
+           str(ohne_beide))
+    pruefe('os.path.join(hier, "..")' in
+           open(os.path.join(WERKZEUGE, "pruefen.py"), encoding="utf-8").read(),
+           "und pruefen.py selbst auch - sonst läuft per docker exec kein "
+           "einziges Prüfskript")
     pruefe("Content-Security-Policy" in seite.headers,
            "die Security-Header sitzen")
 

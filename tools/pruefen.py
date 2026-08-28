@@ -81,10 +81,21 @@ def anwendung_bereitstellen(marke: str, *, datenbank: bool = True) -> None:
     Routing, kein Login. Ein Prüfskript, dessen Ergebnis von der Umgebung
     abhängt, prüft die Umgebung.
     """
+    # Zwei Layouts, und beide müssen gehen. Lokal liegt das Paket unter
+    # `backend/app`; im Docker-Image liegt es direkt neben `tools/` als
+    # `app/`. Die vier Import-Werkzeuge in diesem Ordner können das seit
+    # jeher, `pruefen.py` konnte es nicht - es hing fest auf `../backend`.
+    # Damit lief per `docker exec jolt-app python tools/check_*.py` **kein
+    # einziges** Prüfskript, sondern jedes brach mit `ModuleNotFoundError:
+    # No module named 'app'` ab. Ausgerechnet der Weg, für den `tools/`
+    # überhaupt ins Image aufgenommen wurde.
     hier = os.path.dirname(os.path.abspath(__file__))
-    pfad = os.path.join(hier, "..", "backend")
-    if pfad not in sys.path:
-        sys.path.insert(0, pfad)
+    for kandidat in (os.path.join(hier, "..", "backend"),
+                     os.path.join(hier, "..")):
+        if os.path.isdir(os.path.join(kandidat, "app")):
+            if kandidat not in sys.path:
+                sys.path.insert(0, kandidat)
+            break
 
     if datenbank:
         ordner = tempfile.mkdtemp(prefix=f"jolt-{marke}-")

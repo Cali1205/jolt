@@ -30,8 +30,14 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
+# Lokal liegt das Paket unter backend/app, im Docker-Image direkt neben
+# tools/ als app/ - dasselbe Muster wie in den Import-Werkzeugen daneben.
+_HIER = os.path.dirname(os.path.abspath(__file__))
+for _kandidat in (os.path.join(_HIER, "..", "backend"),
+                  os.path.join(_HIER, "..")):
+    if os.path.isdir(os.path.join(_kandidat, "app")):
+        sys.path.insert(0, _kandidat)
+        break
 _db = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_db.name}"
 os.environ.pop("APP_PASSWORT", None)
