@@ -598,6 +598,72 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_ladeplan_ein_weg():
+    """`/ladeplan` und die Umplanung rechnen ueber denselben Weg.
+
+    Beide bauten den Ladeplan vorher vollstaendig fuer sich: dieselbe
+    Uebersetzung von Korridor-Kandidaten in Ladeoptionen (byteweise dieselben
+    elf Zeilen) und derselbe Aufruf des Optimierers mit dreizehn Argumenten.
+    Zweimal gepflegt heisst frueher oder later einmal vergessen - beim zuletzt
+    ergaenzten `km_versatz` ist genau das passiert.
+
+    Geprueft wird die Eigenschaft, auf die es ankommt: Eine Planung ab km 0
+    mit dem Start-Ladestand ist derselbe Vorgang wie eine Umplanung ohne
+    zurueckgelegte Strecke, also muss auch dasselbe herauskommen.
+    """
+    from app.live import umplanung as _u
+
+    client = TestClient(app)
+    route = fahrt_vorbereiten(client)
+    fahrt_id = route["fahrt_id"]
+    print("\nLadeplan und Umplanung: ein Weg")
+
+    ueber_router = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
+                               params={"min_kw": 100, "radius_km": 10}).json()
+    db = SessionLocal()
+    try:
+        fahrt = db.get(models.Fahrt, fahrt_id)
+        ueber_umplanung = _u.planen(db, fahrt, 0.0, fahrt.start_soc, {
+            "radius_km": 10.0, "min_kw": 100.0, "steckertyp": "",
+            "umweg_grenze_min": _u.VORGABEN["umweg_grenze_min"],
+            "stopp_fixkosten_min": _u.VORGABEN["stopp_fixkosten_min"],
+            "ladepark_bonus_min": _u.VORGABEN["ladepark_bonus_min"],
+            "zeitwert_eur_h": _u.VORGABEN["zeitwert_eur_h"]})
+    finally:
+        db.close()
+
+    pruefe(ueber_router.get("machbar") is True,
+           "der Endpunkt liefert weiterhin einen machbaren Plan",
+           ueber_router.get("grund", ""))
+    pruefe(bool(ueber_router.get("stopps")),
+           "mit Ladestopps", str(len(ueber_router.get("stopps") or [])))
+
+    for feld in ("machbar", "anzahl_stopps", "gesamt_minuten",
+                 "ladezeit_minuten", "kosten_eur", "soc_am_ziel"):
+        pruefe(ueber_router.get(feld) == ueber_umplanung.get(feld),
+               f"'{feld}' stimmt zwischen beiden Wegen überein",
+               f"Router {ueber_router.get(feld)} / "
+               f"Umplanung {ueber_umplanung.get(feld)}")
+
+    a = [(s["id"], s["km_auf_route"], s["abfahrt_soc"])
+         for s in ueber_router.get("stopps") or []]
+    b = [(s["id"], s["km_auf_route"], s["abfahrt_soc"])
+         for s in ueber_umplanung.get("stopps") or []]
+    pruefe(a == b, "und die Stopps selbst sind dieselben - Standort, "
+           "Kilometer und Abfahrts-Ladestand", f"{a[:2]} vs {b[:2]}")
+
+    # Die Felder, die die Oberflaeche liest, muessen weiter da sein.
+    fehlt = [f for f in ("machbar", "grund", "anzahl_stopps", "stopps",
+                         "gesamt_minuten", "ladezeit_minuten",
+                         "umwegzeit_minuten", "haltekosten_minuten",
+                         "kosten_eur", "soc_am_ziel", "fahrt_id", "demo",
+                         "steckertyp", "min_kw", "radius_km")
+             if f not in ueber_router]
+    pruefe(not fehlt,
+           "und die Antwort trägt weiter alles, was die Oberfläche liest",
+           str(fehlt))
+
+
 def teil_laden_verfaelscht_nicht():
     """Ein Ladestopp darf weder das Lernen noch die Abweichung verderben.
 
@@ -1349,6 +1415,7 @@ def main() -> int:
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
     teil_hoehenquelle()
+    teil_ladeplan_ein_weg()
     teil_laden_verfaelscht_nicht()
     teil_luecke_kilometer()
     teil_zustand_koordinate()

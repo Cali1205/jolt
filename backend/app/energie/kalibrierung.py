@@ -12,6 +12,8 @@ Modell würde sich an Rauschen anpassen.
 """
 import logging
 
+from . import ladephasen
+
 # Unterhalb dieser Strecke ist der Messfehler beim SoC (meist 1 % Auflösung)
 # grösser als das, was gemessen werden soll.
 MINDESTSTRECKE_KM = 30.0
@@ -20,9 +22,6 @@ MINDESTSTRECKE_KM = 30.0
 GLAETTUNG = 0.25
 # Ein Faktor ausserhalb dieser Grenzen bedeutet Messfehler, nicht Fahrzeug.
 UNTERGRENZE, OBERGRENZE = 0.6, 1.8
-# Ab wie viel Anstieg ein Abschnitt als Ladevorgang gilt. Darunter ist es
-# Rekuperation oder das Rauschen der SoC-Messung, und beides gehört zur Fahrt.
-LADEN_PP = 0.5
 
 log = logging.getLogger("uvicorn.error")
 
@@ -77,18 +76,9 @@ def aus_live_sitzung(sitzung, akku_netto_kwh: float) -> float | None:
     if len(punkte) < 2:
         return None
 
-    ist_pp, soll_pp, strecke_km = 0.0, 0.0, 0.0
-    for vorher, nachher in zip(punkte, punkte[1:]):
-        verbraucht = vorher.soc - nachher.soc
-        if verbraucht < -LADEN_PP:
-            # Geladen. Der Abschnitt sagt nichts ueber den Verbrauch - und
-            # seine Strecke zaehlt auch nicht mit, sonst stuende dieselbe
-            # Strecke im Nenner ohne den zugehoerigen Verbrauch.
-            continue
-        ist_pp += verbraucht
-        soll_pp += (vorher.soll_soc or 0.0) - (nachher.soll_soc or 0.0)
-        strecke_km += ((nachher.km_auf_route or 0.0)
-                       - (vorher.km_auf_route or 0.0))
+    ist_pp, strecke_km = ladephasen.verbrauch(punkte)
+    soll_pp = sum(a.von.soll_soc - a.nach.soll_soc
+                  for a in ladephasen.abschnitte(punkte) if not a.laedt)
 
     return faktor_aus_fahrt(soll_pp / 100.0 * akku_netto_kwh,
                             ist_pp / 100.0 * akku_netto_kwh, strecke_km)

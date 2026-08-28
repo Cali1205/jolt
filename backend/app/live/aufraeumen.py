@@ -39,7 +39,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .. import models
-from ..energie import kalibrierung
+from ..energie import kalibrierung, ladephasen
 from . import aufzeichnung
 
 log = logging.getLogger("uvicorn.error")
@@ -54,8 +54,10 @@ STILLE_MINUTEN = 180
 LADEPAUSE_MINUTEN = 360
 
 # Wie weit zurueck nach steigendem Ladestand gesucht wird, und um wie viel er
-# gestiegen sein muss. Ein Prozentpunkt ist mehr als das Rauschen der
-# SoC-Messung und weniger als jeder echte Ladevorgang.
+# gestiegen sein muss. Hoeher als die Schwelle in `energie.ladephasen`, weil
+# hier eine andere Frage gestellt wird: nicht "laedt dieser Abschnitt", sondern
+# "war am Ende genug, um von einer Ladepause auszugehen". Ein Prozentpunkt ist
+# mehr als das Rauschen der SoC-Messung und weniger als jeder Ladevorgang.
 LADEFENSTER_MINUTEN = 25
 LADEHUB_PROZENT = 1.0
 
@@ -122,28 +124,6 @@ def beenden_und_lernen(db, sitzung) -> dict:
     return ergebnis
 
 
-def _laedt_gerade(punkte) -> bool:
-    """Sah der Schluss der Messpunkte nach einem Ladevorgang aus?
-
-    Steigender Ladestand ist das einzige Merkmal, das jolt sicher hat: Der
-    Strom fliesst je nach Steuergeraet mit wechselndem Vorzeichen, die
-    Betriebsart meldet nicht jedes Fahrzeug, aber ein Akku, der voller wird,
-    laedt. Punkte ohne Ladestand (reine Positionsmeldungen vom Telefon)
-    bleiben aussen vor.
-    """
-    mit_soc = [p for p in punkte if p.soc is not None and p.zeit is not None]
-    if len(mit_soc) < 2:
-        return False
-    ende = mit_soc[-1].zeit
-    fenster = [p for p in mit_soc
-               if ende - p.zeit <= timedelta(minutes=LADEFENSTER_MINUTEN)]
-    if len(fenster) < 2:
-        return False
-    # Gegen das Minimum im Fenster und nicht gegen den ersten Punkt: Wer
-    # ankommt, rollt noch ein Stueck, bevor der Stecker steckt.
-    return mit_soc[-1].soc - min(p.soc for p in fenster) >= LADEHUB_PROZENT
-
-
 def verwaiste_beenden(db) -> list[dict]:
     """Alle Sitzungen beenden, die zu lange schweigen.
 
@@ -157,7 +137,8 @@ def verwaiste_beenden(db) -> list[dict]:
         letzte = punkte[-1].zeit if punkte else sitzung.gestartet
         if not punkte:
             minuten = FEHLSTART_MINUTEN
-        elif _laedt_gerade(punkte):
+        elif ladephasen.laedt_am_ende(punkte, LADEFENSTER_MINUTEN,
+                                      LADEHUB_PROZENT):
             minuten = LADEPAUSE_MINUTEN
         else:
             minuten = STILLE_MINUTEN

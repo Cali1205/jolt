@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 from .. import models
+from ..energie import ladephasen
 from ..energie.profil import minuten_bei as soll_minuten_bei
 from ..energie.profil import soc_bei as soll_soc_bei
 from ..laden import verfuegbarkeit
@@ -51,11 +52,6 @@ NEUPLANUNG_ABSTAND_KM = 10.0
 FENSTER_KM = 25.0
 # Vorher ist die SoC-Anzeige (meist 1 % Auflösung) zu grob für eine Aussage.
 MINDESTSTRECKE_KM = 5.0
-
-# Ab welchem Anstieg des Ladestands zwischen zwei Messpunkten geladen wurde -
-# und nicht nur rekuperiert oder gerundet. Die Anzeige löst je nach Fahrzeug
-# in halben oder ganzen Prozentpunkten auf; darunter ist alles Rauschen.
-LADEN_SOC_PP = 0.5
 
 
 @dataclass
@@ -139,23 +135,12 @@ def _ladepausen_minuten(punkte: list, energieprofil: list) -> float:
     der Baustelle. Die verschiebt die Ankunft wirklich, und genau das soll
     der Auslöser sehen.
     """
-    gesamt = 0.0
-    # Nur Punkte mit gemeldetem Ladestand: Ein Anstieg lässt sich an einem
-    # Punkt ohne Ladestand nicht ablesen. Die Zeitspanne dazwischen geht
-    # dadurch nicht verloren - sie liegt in einem grösseren Sprung zwischen
-    # den beiden Meldungen, und der Abzug der Fahrzeit fängt sie ab.
-    mit_soc = [p for p in punkte if p.soc is not None]
-    for vorher, nachher in zip(mit_soc, mit_soc[1:]):
-        if (nachher.soc - vorher.soc) < LADEN_SOC_PP:
-            continue
-        if not vorher.zeit or not nachher.zeit:
-            continue
-        verstrichen = (nachher.zeit - vorher.zeit).total_seconds() / 60.0
-        von = soll_minuten_bei(energieprofil, vorher.km_auf_route or 0.0)
-        bis = soll_minuten_bei(energieprofil, nachher.km_auf_route or 0.0)
-        gefahren = 0.0 if von is None or bis is None else max(0.0, bis - von)
-        gesamt += max(0.0, verstrichen - gefahren)
-    return gesamt
+    def gefahren(von_km: float, bis_km: float) -> float:
+        von = soll_minuten_bei(energieprofil, von_km)
+        bis = soll_minuten_bei(energieprofil, bis_km)
+        return 0.0 if von is None or bis is None else max(0.0, bis - von)
+
+    return ladephasen.ladepausen_minuten(punkte, gefahren)
 
 
 def _verbrauchsfaktor(punkte: list) -> float | None:
@@ -184,14 +169,27 @@ def _verbrauchsfaktor(punkte: list) -> float | None:
     if letzter.km_auf_route - erster.km_auf_route < MINDESTSTRECKE_KM:
         return None
 
-    ist_verbrauch = erster.soc - letzter.soc
-    soll_verbrauch = (erster.soll_soc or 0.0) - (letzter.soll_soc or 0.0)
+    # Ladeabschnitte fallen heraus, statt den Faktor unbrauchbar zu machen.
+    # Vorher stand hier `erster.soc - letzter.soc`, und ein Ladestopp im
+    # Fenster ergab einen negativen "Verbrauch" - abgefangen nur durch die
+    # Ausreisserschranke darunter, die den Faktor dann verwarf. Die Folge:
+    # Nach jedem Ladestopp galt für die Dauer des Fensters weiter der alte
+    # Wert, obwohl frisch gemessen wurde.
+    ist_verbrauch = 0.0
+    soll_verbrauch = 0.0
+    for abschnitt in ladephasen.abschnitte(fenster):
+        if abschnitt.laedt:
+            continue
+        ist_verbrauch += abschnitt.soc_pp
+        soll_verbrauch += ((abschnitt.von.soll_soc or 0.0)
+                           - (abschnitt.nach.soll_soc or 0.0))
     if soll_verbrauch <= 0.5:
         return None
 
     faktor = ist_verbrauch / soll_verbrauch
-    # Ausreisser abfangen: Wer zwischendurch geladen hat, produziert einen
-    # negativen "Verbrauch". Das ist kein Modellfehler, sondern ein Ladestopp.
+    # Die Schranke bleibt als Netz: Sie fängt jetzt nur noch echte
+    # Ausreisser ab - einen umgesteckten Logger, einen SoC-Sprung nach einem
+    # Neustart -, nicht mehr den Normalfall Ladestopp.
     if not 0.4 <= faktor <= 2.5:
         return None
     return round(faktor, 3)
@@ -477,15 +475,7 @@ def _geladen_pp(punkte: list, bis_punkt) -> float:
     Prognose und Reserve-Marke brauchen das nicht - die rechnen ohnehin mit
     Differenzen ab dem aktuellen Punkt und sind deshalb schon richtig.
     """
-    gesamt = 0.0
-    mit_soc = [p for p in punkte if p.soc is not None]
-    for vorher, nachher in zip(mit_soc, mit_soc[1:]):
-        zuwachs = nachher.soc - vorher.soc
-        if zuwachs >= LADEN_SOC_PP:
-            gesamt += zuwachs
-        if nachher is bis_punkt:
-            break
-    return gesamt
+    return ladephasen.geladen_pp(punkte, bis_punkt)
 
 
 def _prognose_am_ziel(profil: list, punkt, ist_soc, verbrauchsfaktor: float):
