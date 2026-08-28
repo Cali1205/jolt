@@ -258,6 +258,16 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
     fahrt.aussentemp_c = round(mittel_temp, 1)
     fahrt.start_lat, fahrt.start_lon = gewaehlt[0].lat, gewaehlt[0].lon
     fahrt.ziel_lat, fahrt.ziel_lon = gewaehlt[-1].lat, gewaehlt[-1].lon
+    # Beim Anlegen stand hier "unterwegs" - das Ziel war da noch unbekannt.
+    # Jetzt ist es bekannt, nur hat es keinen Namen: jolt kann Orte suchen,
+    # aber nicht umgekehrt aus einer Koordinate einen Ortsnamen machen. Das
+    # Platzhalterwort stehen zu lassen war die schlechteste der Möglichkeiten
+    # - in der Fahrtenliste stand danach dauerhaft "Aufzeichnung →
+    # unterwegs", also eine Behauptung über eine Fahrt, die längst zu Ende
+    # ist. Leer heisst hier ehrlich "kein Ortsname"; die Liste zeigt dann
+    # den Namen der Aufzeichnung allein.
+    if (fahrt.ziel_text or "") == "unterwegs":
+        fahrt.ziel_text = ""
     if gewaehlt[0].soc is not None:
         fahrt.start_soc = gewaehlt[0].soc
 

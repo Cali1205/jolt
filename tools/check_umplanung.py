@@ -598,6 +598,140 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_laden_verfaelscht_nicht():
+    """Ein Ladestopp darf weder das Lernen noch die Abweichung verderben.
+
+    Beide Groessen verglichen den Ladestand gegen ein Energieprofil, das
+    **keine Ladestopps kennt**: Es rechnet vom Start an ununterbrochen
+    herunter und geht auf einer Langstrecke tief ins Negative. Wer unterwegs
+    laedt, liegt danach weit ueber diesem Profil - und das schlug in beide
+    Richtungen durch:
+
+    * Die Kalibrierung nahm `erster.soc - letzter.soc`. Nachgeladene
+      Prozentpunkte fehlten in dieser Differenz, der gelernte Faktor fiel zu
+      niedrig aus, und weil er in den Plausibilitaetsgrenzen blieb, fiel es
+      nicht auf. Das Fahrzeug lernte bei jeder Fahrt mit Ladestopp, es sei
+      sparsamer als es ist.
+    * Die Abweichung verglich direkt gegen das Profil und meldete nach dem
+      ersten Ladestopp dreistellige Prozentpunkte.
+    """
+    from app.energie import kalibrierung
+
+    client = TestClient(app)
+    print("\nEin Ladestopp verfälscht weder Lernen noch Abweichung")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+    start = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 80.0, "name": "Mit Ladestopp"}).json()
+
+    # Erst fahren, dann laden, dann weiterfahren - und zwar so, dass beide
+    # Fahrtstuecke denselben Verbrauch je Kilometer haben.
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, start["sitzung_id"])
+        beginn = datetime.utcnow() - timedelta(minutes=150)
+        soc, lat = 80.0, 48.0
+        for i in range(51):
+            if 25 <= i < 35:                 # Ladepause, das Auto steht
+                soc = min(80.0, soc + 2.5)
+            else:
+                lat += 0.030
+                soc -= 1.0
+            live_sitzung.messpunkt_aufnehmen(
+                db, sitzung, lat, 11.0, soc=round(soc, 1), aussentemp_c=10.0,
+                zeit=beginn + timedelta(minutes=i * 2))
+    finally:
+        db.close()
+
+    ende = client.post(f"/api/live/{start['sitzung_id']}/ende").json()
+    gelernt = ende.get("gelernt")
+
+    # Was der naive Weg geliefert haette - aus denselben Punkten gerechnet,
+    # damit der Prüffall sich nicht an ausgerechneten Zahlen festmacht.
+    db = SessionLocal()
+    try:
+        sitzung = db.get(models.LiveSitzung, start["sitzung_id"])
+        akku = sitzung.fahrt.fahrzeug.akku_netto_kwh
+        punkte = [p for p in sitzung.punkte if p.soll_soc is not None
+                  and p.km_auf_route is not None and p.soc is not None]
+        erster, letzter = punkte[0], punkte[-1]
+        naiv_pp = erster.soc - letzter.soc
+        echt_pp = sum(max(0.0, v.soc - n.soc)
+                      for v, n in zip(punkte, punkte[1:]))
+        naiv = kalibrierung.faktor_aus_fahrt(
+            ((erster.soll_soc or 0.0) - (letzter.soll_soc or 0.0)) / 100.0 * akku,
+            naiv_pp / 100.0 * akku,
+            (letzter.km_auf_route or 0.0) - (erster.km_auf_route or 0.0))
+    finally:
+        db.close()
+
+    pruefe(echt_pp > naiv_pp * 1.5,
+           "der Aufbau prüft wirklich einen Ladestopp: tatsächlich verbraucht "
+           f"wurden {echt_pp:.0f} pp, die nackte Differenz von Anfang bis "
+           f"Ende zeigt nur {naiv_pp:.0f}",
+           f"{echt_pp:.1f} vs {naiv_pp:.1f}")
+    pruefe(gelernt is not None,
+           "aus einer Fahrt mit Ladestopp wird überhaupt gelernt",
+           str(ende.get("nicht_gelernt")))
+    if gelernt:
+        pruefe(naiv is None or gelernt["rohfaktor"] > naiv * 1.5,
+               "und der gelernte Faktor rechnet den Ladestopp heraus - der "
+               "naive Weg (Anfang minus Ende) läge deutlich darunter",
+               f"gelernt={gelernt['rohfaktor']} naiv={naiv}")
+
+    # Und die Abweichung waehrend der Fahrt.
+    zustand = client.post(f"/api/live/{start['sitzung_id']}/punkt",
+                          json={"lat": 48.5, "lon": 11.0, "soc": 50.0})
+    # Die Sitzung ist beendet; eine zweite fuer die Abweichung.
+    start2 = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 80.0, "name": "Abweichung"}).json()
+    letzte = None
+    for i in range(30):
+        soc = 80.0 - i * 0.8 if i < 15 else 80.0 - (i - 15) * 0.8
+        letzte = client.post(f"/api/live/{start2['sitzung_id']}/punkt", json={
+            "lat": 48.0 + i * 0.012, "lon": 11.0, "soc": round(soc, 1)}).json()
+    abw = letzte.get("abweichung_pp")
+    pruefe(abw is None or abs(abw) < 40.0,
+           "die Abweichung bleibt nach einem Ladesprung im lesbaren Bereich - "
+           "vorher standen dort dreistellige Prozentpunkte", f"{abw} pp")
+
+
+def teil_luecke_kilometer():
+    """Die Begründung einer Umplanung nennt Kilometer der ganzen Fahrt.
+
+    Der Optimierer rechnet unterwegs auf der **Reststrecke**, die bei null
+    beginnt. Die Stopps werden hinterher zurueckgerechnet, der Begruendungs-
+    satz aber nicht - er nannte Kilometer, die es auf der Strecke nicht gibt.
+    In einem Probelauf stand bei km 137 die Meldung "zwischen km 0 und km 44".
+    """
+    from app.laden import optimierer
+
+    print("\nBegründung nennt Kilometer der ganzen Fahrt")
+    profil = optimierer.Streckenprofil(
+        km=[0.0, 100.0, 200.0], kwh=[0.0, 40.0, 80.0],
+        minuten=[0.0, 60.0, 120.0])
+
+    class FZ:
+        akku_netto_kwh = 50.0
+        reserve_soc = 10.0
+
+    # Ein einziger Ladepunkt weit hinten - von vorn nicht erreichbar.
+    optionen = [optimierer.Ladeoption(
+        id=1, km_auf_route=180.0, umweg_minuten=1.0, max_kw=150.0,
+        anzahl_punkte=4, name="Weit weg", betreiber="X", ort="", lat=0.0,
+        lon=0.0)]
+    plan = optimierer.planen(profil, optionen, FZ(), [(0.0, 150.0), (100.0, 20.0)],
+                             start_soc=30.0, km_versatz=250.0)
+    pruefe(not plan.machbar, "der Plan geht nicht auf", plan.grund)
+    zahlen = [int(t) for t in plan.grund.replace(".", " ").split()
+              if t.isdigit()]
+    pruefe(zahlen and min(zahlen) >= 250,
+           "und die genannten Kilometer liegen hinter dem Versatz, nicht bei "
+           "null - sonst sucht man am Steuer eine Stelle, die es nicht gibt",
+           plan.grund)
+
+
 def teil_zustand_koordinate():
     """Der Zustand muss sagen, **wo** gemessen wurde.
 
@@ -1215,6 +1349,8 @@ def main() -> int:
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
     teil_hoehenquelle()
+    teil_laden_verfaelscht_nicht()
+    teil_luecke_kilometer()
     teil_zustand_koordinate()
     teil_import_laengen()
     teil_aufzeichnung()
