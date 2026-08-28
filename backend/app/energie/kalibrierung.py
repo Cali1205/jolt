@@ -20,6 +20,9 @@ MINDESTSTRECKE_KM = 30.0
 GLAETTUNG = 0.25
 # Ein Faktor ausserhalb dieser Grenzen bedeutet Messfehler, nicht Fahrzeug.
 UNTERGRENZE, OBERGRENZE = 0.6, 1.8
+# Ab wie viel Anstieg ein Abschnitt als Ladevorgang gilt. Darunter ist es
+# Rekuperation oder das Rauschen der SoC-Messung, und beides gehört zur Fahrt.
+LADEN_PP = 0.5
 
 log = logging.getLogger("uvicorn.error")
 
@@ -55,14 +58,37 @@ def aus_live_sitzung(sitzung, akku_netto_kwh: float) -> float | None:
     Modell hochgerechnet, das hier geprüft werden soll - sie mitzunehmen
     hiesse, das Modell gegen sich selbst zu messen und dabei zuverlässig
     einen Faktor von 1,0 zu erhalten.
+
+    **Abschnittsweise gerechnet, und Ladeabschnitte fallen heraus.** Hier
+    stand `erster.soc - letzter.soc`, also der Ladestand am Anfang minus dem
+    am Ende - und damit fiel jede Ladung dazwischen unter den Tisch. Wer
+    unterwegs 40 Prozentpunkte nachlädt, sieht am Ende einen Verlust, der um
+    diese 40 Punkte zu klein ist; der gelernte Faktor faellt entsprechend zu
+    niedrig aus, und weil er innerhalb der Plausibilitätsgrenzen bleibt,
+    faellt es nicht auf. Das Fahrzeug lernt bei jeder Fahrt mit Ladestopp,
+    es sei sparsamer als es ist - und das ist die Betriebsart, um die es
+    hier ueberhaupt geht.
+
+    Gemessen an einem Probelauf: 103 km mit einer Ladepause ergaben einen
+    Rohfaktor von 0,695 statt der gefahrenen ~1,8.
     """
     punkte = [p for p in sitzung.punkte if p.soll_soc is not None
               and p.km_auf_route is not None and p.soc is not None]
     if len(punkte) < 2:
         return None
 
-    erster, letzter = punkte[0], punkte[-1]
-    strecke_km = (letzter.km_auf_route or 0.0) - (erster.km_auf_route or 0.0)
-    ist_kwh = (erster.soc - letzter.soc) / 100.0 * akku_netto_kwh
-    soll_kwh = ((erster.soll_soc or 0.0) - (letzter.soll_soc or 0.0)) / 100.0 * akku_netto_kwh
-    return faktor_aus_fahrt(soll_kwh, ist_kwh, strecke_km)
+    ist_pp, soll_pp, strecke_km = 0.0, 0.0, 0.0
+    for vorher, nachher in zip(punkte, punkte[1:]):
+        verbraucht = vorher.soc - nachher.soc
+        if verbraucht < -LADEN_PP:
+            # Geladen. Der Abschnitt sagt nichts ueber den Verbrauch - und
+            # seine Strecke zaehlt auch nicht mit, sonst stuende dieselbe
+            # Strecke im Nenner ohne den zugehoerigen Verbrauch.
+            continue
+        ist_pp += verbraucht
+        soll_pp += (vorher.soll_soc or 0.0) - (nachher.soll_soc or 0.0)
+        strecke_km += ((nachher.km_auf_route or 0.0)
+                       - (vorher.km_auf_route or 0.0))
+
+    return faktor_aus_fahrt(soll_pp / 100.0 * akku_netto_kwh,
+                            ist_pp / 100.0 * akku_netto_kwh, strecke_km)

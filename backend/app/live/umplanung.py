@@ -255,7 +255,10 @@ def planen(db, fahrt: models.Fahrt, ab_km: float, start_soc: float,
         ladepark_bonus_min=parameter["ladepark_bonus_min"],
         preis_fuer=preise.preisfunktion(fahrzeug),
         zeitwert_eur_h=parameter["zeitwert_eur_h"],
-        bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
+        bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None,
+        # Damit die Begründung dieselben Kilometer nennt wie die Stopps
+        # darunter - der Optimierer rechnet auf der Reststrecke ab null.
+        km_versatz=km0)
 
     ergebnis = plan.als_dict()
     for stopp in ergebnis["stopps"]:

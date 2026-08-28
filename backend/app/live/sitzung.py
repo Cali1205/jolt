@@ -427,7 +427,8 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
 
     abweichung = None
     if punkt.soll_soc is not None and ist_soc is not None:
-        abweichung = round(ist_soc - punkt.soll_soc, 2)
+        abweichung = round(ist_soc - (punkt.soll_soc + _geladen_pp(
+            sitzung.punkte, punkt)), 2)
 
     prognose = _prognose_am_ziel(profil, punkt, ist_soc,
                                  sitzung.verbrauchsfaktor)
@@ -455,6 +456,36 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
         reserve_bei_km=reserve_bei, ankunft_verschiebung_min=verschiebung,
         naechster_stopp=naechster, neuplanung_noetig=noetig, grund=grund,
         dringend=dringend)
+
+
+def _geladen_pp(punkte: list, bis_punkt) -> float:
+    """Wie viele Prozentpunkte bis hierher nachgeladen wurden.
+
+    Gebraucht fuer die **Abweichung**, und nur dafuer. Das Energieprofil
+    kennt keine Ladestopps: Es rechnet den Ladestand vom Start an
+    ununterbrochen herunter und geht auf einer Langstrecke tief ins
+    Negative - auf 774 km Hamburg-Muenchen bis auf -257 %. Die Abweichung
+    verglich den gemessenen Ladestand direkt damit und meldete nach dem
+    ersten Ladestopp dreistellige Prozentpunkte. In einem Probelauf standen
+    dort 262 pp; die Kachel "Abweichung" ist damit fuer jede Fahrt mit
+    Ladestopp unbrauchbar - also fuer jede lange.
+
+    Wer 40 Punkte nachgeladen hat, soll 40 Punkte ueber dem Profil liegen.
+    Genau das rechnet diese Funktion heraus, und uebrig bleibt die Frage,
+    um die es geht: Bin ich sparsamer oder durstiger unterwegs als geplant?
+
+    Prognose und Reserve-Marke brauchen das nicht - die rechnen ohnehin mit
+    Differenzen ab dem aktuellen Punkt und sind deshalb schon richtig.
+    """
+    gesamt = 0.0
+    mit_soc = [p for p in punkte if p.soc is not None]
+    for vorher, nachher in zip(mit_soc, mit_soc[1:]):
+        zuwachs = nachher.soc - vorher.soc
+        if zuwachs >= LADEN_SOC_PP:
+            gesamt += zuwachs
+        if nachher is bis_punkt:
+            break
+    return gesamt
 
 
 def _prognose_am_ziel(profil: list, punkt, ist_soc, verbrauchsfaktor: float):

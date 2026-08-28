@@ -337,7 +337,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
            stopp_fixkosten_min: float = STOPP_FIXKOSTEN_MIN,
            ladepark_bonus_min: float = LADEPARK_BONUS_MIN,
            preis_fuer=None,
-           zeitwert_eur_h: float = ZEITWERT_EUR_H) -> Ladeplan:
+           zeitwert_eur_h: float = ZEITWERT_EUR_H,
+           km_versatz: float = 0.0) -> Ladeplan:
     """Die zeitoptimale Folge von Ladestopps.
 
     `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
@@ -366,7 +367,8 @@ def planen(profil: Streckenprofil, optionen: list[Ladeoption], fz,
     # Schritt 3: Pareto-Dijkstra.
     weg = graph.suchen(start_soc, ziel_soc)
     if weg is None:
-        plan.grund = graph.luecke_beschreiben(start_soc, gefiltert)
+        plan.grund = graph.luecke_beschreiben(start_soc, gefiltert,
+                                              km_versatz)
         return plan
     stopps, abfahrten_grob = weg
 
@@ -911,7 +913,8 @@ class _Graph:
     # ---------- Diagnose ----------
 
     def luecke_beschreiben(self, start_soc: float,
-                           kandidaten: list[Ladeoption]) -> str:
+                           kandidaten: list[Ladeoption],
+                           km_versatz: float = 0.0) -> str:
         """Warum ging es nicht? Die Antwort ist fast immer eine Lücke.
 
         Ein blosses "nicht machbar" hilft niemandem. Wer weiss, dass zwischen
@@ -919,6 +922,14 @@ class _Graph:
         kann den Radius aufziehen, die Mindestleistung senken oder langsamer
         fahren - und sieht sofort, dass nicht die Software das Problem ist,
         sondern womöglich die noch leere Ladepunkt-Tabelle.
+
+        `km_versatz` rechnet die Kilometer auf die **ganze** Fahrt um. Bei
+        einer Umplanung unterwegs rechnet der Optimierer auf der Reststrecke,
+        die bei null beginnt; die Stopps werden hinterher zurueckgerechnet,
+        dieser Satz aber nicht. Er nannte deshalb Kilometer, die es auf der
+        Strecke gar nicht gibt - in einem Probelauf stand bei km 137 die
+        Meldung "zwischen km 0 und km 44". Wer am Steuer eine Kilometerangabe
+        liest, sucht sie auf seiner Route, nicht auf einer gedachten.
         """
         if not kandidaten:
             return ("Ohne Ladestopp nicht machbar, und im Korridor liegt kein "
@@ -944,10 +955,10 @@ class _Graph:
                     offen.append(j)
                     weiteste = max(weiteste, j)
 
-        bis_km = self.km[weiteste]
+        bis_km = self.km[weiteste] + km_versatz
         naechster_km = None
         for j in range(weiteste + 1, self.ziel_index):
-            naechster_km = self.km[j]
+            naechster_km = self.km[j] + km_versatz
             break
         if naechster_km is None:
             return (f"Ab km {bis_km:.0f} liegt kein weiterer Ladepunkt im "

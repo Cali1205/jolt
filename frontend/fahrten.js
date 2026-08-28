@@ -53,13 +53,26 @@ window.joltFahrten = (function () {
    * Auf schmalen Schirmen fallen die hinteren Spalten weg (siehe CSS), und
    * zwar in der Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist
    * Datum, Strecke, Kilometer und Verbrauch. */
+  /* Start und Ziel, oder nur das, was bekannt ist.
+   *
+   * Bei einer Aufzeichnung hat das Ziel keinen Namen - jolt kann Orte
+   * suchen, aber nicht umgekehrt aus einer Koordinate einen Ortsnamen
+   * machen. Ein Pfeil ins Leere ("Dienstag 14:32 → ?") sieht aus wie ein
+   * Fehler; der Name der Aufzeichnung allein ist die ehrlichere Zeile. */
+  function strecke(fahrt) {
+    const von = (fahrt.start || "").trim();
+    const nach = (fahrt.ziel || "").trim();
+    if (von && nach) return `${von} → ${nach}`;
+    return von || nach || "ohne Namen";
+  }
+
   function zeile(fahrt) {
     const soc = (fahrt.soc_am_ziel === null || fahrt.soc_am_ziel === undefined)
       ? "" : `${zahl(fahrt.start_soc, 0)}→${zahl(fahrt.soc_am_ziel, 0)} %`;
     return `<tr data-id="${fahrt.id}">
       <td class="datum">${datum(fahrt.angelegt)}</td>
       <td class="strecke">
-        <div class="titel">${fahrt.start || "?"} → ${fahrt.ziel || "?"}</div>
+        <div class="titel">${strecke(fahrt)}</div>
         <div class="unter">${fahrt.fahrzeug || ""} ${marken(fahrt)}</div>
       </td>
       <td class="num">${zahl(fahrt.strecke_km, 0)}</td>
