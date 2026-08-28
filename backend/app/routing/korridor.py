@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from sqlalchemy import and_, or_
 
 from .. import models
-from ..energie.modell import haversine_m
+from ..geo import haversine_m
 
 KM_JE_GRAD_LAT = 111.32
 # Zufahrt und Rückweg laufen nicht über die Autobahn. 45 km/h ist grosszügig

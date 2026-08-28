@@ -23,7 +23,8 @@ import logging
 
 from .. import models
 from ..energie import modell, wetter
-from ..energie.modell import Fahrzeugwerte, Umgebung, haversine_m
+from ..energie.modell import Fahrzeugwerte, Umgebung
+from ..geo import haversine_m
 from ..laden import kurven, optimierer, preise, verfuegbarkeit
 from ..routing import korridor
 

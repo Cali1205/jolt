@@ -19,6 +19,7 @@ als Aussage über eine reale Fahrt taugt sie nicht.
 """
 import math
 
+from ..geo import haversine_m
 from .provider import Ort, Route
 
 # Grobe Koordinaten einiger Städte, damit die Ortssuche offline etwas
@@ -88,7 +89,6 @@ class DemoRouting:
 
     @staticmethod
     def _abstand_m(lat1, lon1, lat2, lon2) -> float:
-        from ..energie.modell import haversine_m
         return haversine_m(lat1, lon1, lat2, lon2)
 
     def _abschnitt(self, a, b, erster: bool):

@@ -879,7 +879,7 @@ def teil_hoehenquelle():
     """
     import random
 
-    from app.energie.modell import haversine_m as _haversine
+    from app.geo import haversine_m as _haversine
     from app.live import aufzeichnung as auf
 
     print("\nHöhen: Quelle und Glättung")

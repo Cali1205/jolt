@@ -77,7 +77,7 @@ window.joltRoute = (function () {
     try {
       // Eine gerechnete Route wird als Fahrt abgelegt - die Liste im Reiter
       // "Fahrten" ist damit nicht mehr aktuell.
-      if (window.joltFahrten) window.joltFahrten.veraltet();
+      K.zustand.fahrtenVeraltet = true;
       const antwort = await K.api("/api/route", { method: "POST", body: {
         fahrzeug_id: fahrzeugId,
         start: { lat: gewaehlt.start.lat, lon: gewaehlt.start.lon,

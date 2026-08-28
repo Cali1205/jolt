@@ -20,10 +20,12 @@ tools/check_modell.py sie direkt durchrechnen kann.
 import math
 from dataclasses import dataclass, field
 
+# Geometrie liegt unter allem und kennt nichts - siehe app/geo.py.
+from ..geo import haversine_m, peilung_grad
+
 G = 9.80665
 R_LUFT = 287.058          # spezifische Gaskonstante trockener Luft, J/(kg·K)
 P0 = 101325.0             # Normdruck auf Meereshöhe, Pa
-ERDRADIUS_M = 6371008.8
 
 
 @dataclass
@@ -121,24 +123,6 @@ class Profil:
     reserve_bei_km: float | None = None
     soc_am_ziel: float = 0.0
     verbrauch_kwh_100km: float = 0.0
-
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Entfernung zweier Punkte auf der Erdkugel in Metern."""
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * ERDRADIUS_M * math.asin(min(1.0, math.sqrt(a)))
-
-
-def peilung_grad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Fahrtrichtung von Punkt 1 nach Punkt 2, 0 = Norden."""
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dl = math.radians(lon2 - lon1)
-    y = math.sin(dl) * math.cos(p2)
-    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
-    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
 
 
 def luftdichte(temp_c: float, hoehe_m: float) -> float:

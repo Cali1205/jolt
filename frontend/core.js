@@ -12,6 +12,17 @@ window.jolt = (function () {
     fahrzeuge: [],
     sitzungId: null,    // laufende Live-Sitzung
     serviceWorker: null, // Registrierung, für das Push-Abo gebraucht
+    /* Ob die Fahrtenliste neu geholt werden muss.
+     *
+     * Sie wird zwischengespeichert - wer nie auf den Reiter tippt, soll sie
+     * nicht bezahlen. Nur weiss der, der eine Fahrt anlegt, nicht, dass es
+     * eine Liste gibt, und der, der die Liste zeigt, nicht, wann eine Fahrt
+     * entsteht. Vorher riefen deshalb zwei Module `joltFahrten.veraltet()`
+     * und `fahrten.js` in beide zurück - zwei Zyklen für eine Marke.
+     *
+     * Hier ist sie richtig aufgehoben: Wer eine Fahrt anlegt, setzt sie;
+     * wer die Liste zeigt, liest sie. Keiner muss vom anderen wissen. */
+    fahrtenVeraltet: false,
   };
 
   const TOKEN_SCHLUESSEL = "jolt-token";

@@ -9,7 +9,8 @@ import logging
 
 import requests
 
-from .modell import Umgebung, haversine_m
+from ..geo import haversine_m
+from .modell import Umgebung
 
 API = "https://api.open-meteo.com/v1/forecast"
 STUETZPUNKTE = 6

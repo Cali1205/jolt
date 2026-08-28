@@ -32,7 +32,8 @@ import logging
 
 from .. import models, routing
 from ..energie import modell, wetter
-from ..energie.modell import Fahrzeugwerte, Umgebung, haversine_m
+from ..energie.modell import Fahrzeugwerte, Umgebung
+from ..geo import haversine_m
 from ..routing.korridor import punkt_auf_route
 
 log = logging.getLogger("uvicorn.error")

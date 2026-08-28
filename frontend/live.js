@@ -914,7 +914,7 @@ window.joltLive = (function () {
     } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
     // Die Fahrten-Ansicht hat die Liste zwischengespeichert; eine gerade
     // beendete Fahrt gehört hinein.
-    if (window.joltFahrten) window.joltFahrten.veraltet();
+    K.zustand.fahrtenVeraltet = true;
     positionAufgeben();
     dongle = false;
     spur = [];

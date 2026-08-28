@@ -242,7 +242,8 @@ window.joltFahrten = (function () {
                 name: document.getElementById("aufz-name").value },
       });
       K.zustand.sitzungId = antwort.sitzung_id;
-      veraltet();   // die neue Aufzeichnung gehört in die Liste
+      // Die neue Aufzeichnung gehört in die Liste.
+      K.zustand.fahrtenVeraltet = true;
       window.joltApp.ansichtZeigen("live");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
@@ -302,19 +303,18 @@ window.joltFahrten = (function () {
   // Beim Wechsel in die Ansicht laden, nicht beim Start: Wer nie auf den
   // Reiter tippt, soll die Liste auch nicht bezahlen.
   //
-  // Aber `geladen` wurde nirgends zurückgesetzt, und damit war die Liste nach
-  // dem ersten Öffnen eingefroren: Wer eine Route plante oder eine
-  // Aufzeichnung beendete und dann hierher wechselte, sah sie nicht - bis er
-  // die Seite neu lud. Das Zwischenspeichern soll den zweiten Blick sparen,
-  // nicht neue Fahrten verstecken; deshalb hält `veraltet()` fest, dass sich
-  // etwas geändert hat, und die Ansicht lädt beim nächsten Mal neu.
+  // Zwischengespeichert wird nur so lange, wie sich nichts geändert hat.
+  // `geladen` wurde ursprünglich nirgends zurückgesetzt - die Liste war nach
+  // dem ersten Öffnen eingefroren, und eine frisch geplante oder gerade
+  // beendete Fahrt tauchte erst nach einem Neuladen der Seite auf. Wer eine
+  // Fahrt anlegt, setzt jetzt `K.zustand.fahrtenVeraltet`; hier wird die
+  // Marke gelesen und wieder gelöscht.
   function anzeigen() {
-    if (!geladen) laden();
+    if (!geladen || K.zustand.fahrtenVeraltet) {
+      K.zustand.fahrtenVeraltet = false;
+      laden();
+    }
   }
 
-  function veraltet() {
-    geladen = false;
-  }
-
-  return { einrichten, laden, anzeigen, veraltet };
+  return { einrichten, laden, anzeigen };
 })();

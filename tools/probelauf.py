@@ -50,7 +50,7 @@ from fastapi.testclient import TestClient          # noqa: E402
 
 from app import models                             # noqa: E402
 from app.database import SessionLocal              # noqa: E402
-from app.energie.modell import haversine_m         # noqa: E402
+from app.geo import haversine_m                    # noqa: E402
 from app.main import app                           # noqa: E402
 
 BEFUNDE = []
