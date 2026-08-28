@@ -30,9 +30,10 @@ from sqlalchemy.orm import Session
 from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
-from ..laden import kurven, optimierer, preise, verfuegbarkeit
+# Nur noch für die Vorgabewerte der Regler - gerechnet wird über
+# `umplanung.planen`, das den Optimierer selbst aufruft.
+from ..laden import optimierer
 from ..live import umplanung
-from ..routing import korridor
 from ..routing.provider import RoutingFehler
 
 # Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
@@ -359,6 +360,19 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
     Etappe hängt nicht vom Ladestand ab, deshalb genügt der eine Durchlauf des
     Verbrauchsmodells aus `/route`. Ein zweiter Aufruf mit anderem Radius
     kostet damit weder Routing- noch Wetterabfragen.
+
+    **Über `umplanung.planen` und nicht am Optimierer vorbei.** Hier stand
+    dieselbe Kette noch einmal ausgeschrieben: Kandidaten im Korridor suchen,
+    sie in Ladeoptionen übersetzen, den Optimierer mit dreizehn Argumenten
+    aufrufen. Der Block, der Kandidaten übersetzt, war byteweise derselbe wie
+    in `live/umplanung.py`, und der Aufruf musste zweimal gepflegt werden -
+    beim zuletzt ergänzten `km_versatz` ist das prompt schiefgegangen, er
+    stand nur in einer der beiden Fassungen.
+
+    Dass es eine Doppelung war und keine Absicht, zeigte dieser Router selbst:
+    Für die Bewertung der Routenvarianten rief er `umplanung.planen` schon
+    vorher auf. Eine Planung ab km 0 mit dem Start-Ladestand ist derselbe
+    Vorgang wie eine Umplanung unterwegs, nur ohne zurückgelegte Strecke.
     """
     fahrt = db.get(models.Fahrt, fahrt_id)
     if not fahrt:
@@ -366,50 +380,16 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
     if not fahrt.energieprofil or len(fahrt.energieprofil) < 2:
         raise HTTPException(409, "Zu dieser Fahrt liegt kein Energieprofil vor.")
 
-    fahrzeug = fahrt.fahrzeug
-    typ = steckertyp or fahrzeug.steckertyp
-    kandidaten = korridor.suchen(db, fahrt.geometrie or [], radius_km=radius_km,
-                                 min_kw=min_kw, steckertyp=typ)
-
-    optionen = []
-    for kandidat in kandidaten:
-        lp = kandidat.ladepunkt
-        zustand = verfuegbarkeit.MELDUNGEN.zustand(lp)
-        optionen.append(optimierer.Ladeoption(
-            id=lp.id, km_auf_route=kandidat.km_auf_route,
-            umweg_minuten=kandidat.umweg_minuten, max_kw=lp.max_kw or 0.0,
-            anzahl_punkte=lp.anzahl_punkte or 1, name=lp.name or "",
-            betreiber=lp.betreiber or "", ort=lp.ort or "",
-            lat=lp.lat, lon=lp.lon,
-            gesperrt=zustand.quelle == "meldung"))
-
-    werte = modell.Fahrzeugwerte.aus_fahrt(fahrt)
-
-    plan = optimierer.planen(
-        optimierer.Streckenprofil.aus_dicts(fahrt.energieprofil),
-        optionen, werte,
-        kurven.als_paare(fahrzeug.ladekurve), start_soc=fahrt.start_soc,
-        ziel_soc=fahrzeug.ziel_soc,
-        max_fahrzeug_kw=fahrzeug.max_ladeleistung_kw,
-        # Die Batterietemperatur wird nicht gemessen; die Aussentemperatur der
-        # Fahrt ist die beste verfügbare Näherung. Sie unterschätzt die Kälte
-        # der Batterie nach einer Nacht im Freien - die Ladezeit im Winter ist
-        # also eher zu kurz gerechnet als zu lang.
-        temperatur_faktor=kurven.temperatur_faktor(
-            fahrt.aussentemp_c if fahrt.aussentemp_c is not None else 15.0),
-        umweg_grenze_min=umweg_grenze_min,
-        stopp_fixkosten_min=stopp_fixkosten_min,
-        ladepark_bonus_min=ladepark_bonus_min,
-        preis_fuer=preise.preisfunktion(fahrzeug),
-        zeitwert_eur_h=zeitwert_eur_h,
-        bevorzugte_betreiber=fahrzeug.bevorzugte_betreiber or None)
-
-    return {"fahrt_id": fahrt.id, "demo": routing.ist_demo(),
-            "steckertyp": typ, "min_kw": min_kw, "radius_km": radius_km,
-            "stopp_fixkosten_min": stopp_fixkosten_min,
-            "ladepark_bonus_min": ladepark_bonus_min,
-            "zeitwert_eur_h": zeitwert_eur_h,
-            **plan.als_dict()}
+    plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc, {
+        "radius_km": radius_km, "min_kw": min_kw, "steckertyp": steckertyp,
+        "umweg_grenze_min": umweg_grenze_min,
+        "stopp_fixkosten_min": stopp_fixkosten_min,
+        "ladepark_bonus_min": ladepark_bonus_min,
+        "zeitwert_eur_h": zeitwert_eur_h})
+    # `steckertyp` aufgelöst zurückgeben: Leer heisst "der des Fahrzeugs",
+    # und die Oberfläche soll anzeigen können, wonach gesucht wurde.
+    return {**plan, "fahrt_id": fahrt.id, "demo": routing.ist_demo(),
+            "steckertyp": steckertyp or fahrt.fahrzeug.steckertyp}
 
 
 @router.get("/fahrten")

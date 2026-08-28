@@ -361,12 +361,14 @@ for minute in range(0, 200, 2):
 print(f"  {punkte_ok} Punkte angenommen, {punkte_fehler} abgelehnt")
 
 # Erkennt das Aufräumen die Ladepause? Der letzte Punkt ist 200 min alt.
+from app.energie import ladephasen                 # noqa: E402
 from app.live import aufraeumen                    # noqa: E402
 
 db = SessionLocal()
 try:
     s = db.get(models.LiveSitzung, auf_id)
-    laedt = aufraeumen._laedt_gerade(s.punkte)
+    laedt = ladephasen.laedt_am_ende(s.punkte, aufraeumen.LADEFENSTER_MINUTEN,
+                                     aufraeumen.LADEHUB_PROZENT)
     print(f"  Aufräumen sieht Ladevorgang am Ende: {laedt} "
           f"(letzter Punkt war 'fahrt2', also erwartet: False)")
     if laedt:
@@ -407,6 +409,28 @@ else:
             befund(f"Gelernter Rohfaktor {roh_faktor} ist unplausibel - die "
                    f"Ladepause wird vermutlich als Verbrauch gerechnet",
                    "FEHLER")
+
+# Die zusammengefuehrte Ladeerkennung an der echten Messreihe nachrechnen.
+# **Nach** dem Abschliessen: Bei einer Aufzeichnung tragen die Messpunkte
+# erst dann einen Kilometerstand - vorher gibt es keine Strecke, auf die
+# man sie legen koennte.
+db = SessionLocal()
+try:
+    s = db.get(models.LiveSitzung, auf_id)
+    alle = ladephasen.abschnitte(s.punkte)
+    lade = [a for a in alle if a.laedt]
+    verbraucht_pp, gefahren_km = ladephasen.verbrauch(s.punkte)
+    print(f"  Abschnitte: {len(alle)}, davon ladend: {len(lade)} "
+          f"({ladephasen.geladen_pp(s.punkte):.1f} pp nachgeladen)")
+    print(f"  Verbrauch ohne Ladeabschnitte: {verbraucht_pp:.1f} pp "
+          f"über {gefahren_km:.1f} km")
+    if not lade:
+        befund("Die Ladepause wird in den Abschnitten nicht erkannt", "FEHLER")
+    if verbraucht_pp <= 0:
+        befund(f"Verbrauch über die Fahrabschnitte ist {verbraucht_pp:.1f} pp "
+               f"- da stimmt das Vorzeichen nicht", "FEHLER")
+finally:
+    db.close()
 
 # Die Fahrt in der Historie
 db = SessionLocal()
