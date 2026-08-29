@@ -446,11 +446,26 @@ function befehl(text, grenze_ms = 15000) {
      * gemessener Wert schlägt jede Näherung. */
     { name: "nebenverbrauch_kw", did: "220364", adresse: FAHRZEUG,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 10 : null },
-    { name: "dcdc_strom_a", did: "22465B", adresse: DCDC, selten: 10,
-      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
+
+    /* Der Kilometerstand - jede Runde, und zwar direkt hinter dem
+     * Nebenverbrauch.
+     *
+     * Er stand vorher am Ende der Liste mit `selten: 20`, wurde also bei
+     * 30-Sekunden-Takt nur alle zehn Minuten gelesen. Bei den ersten
+     * Testfahrten kam deshalb genau **ein** Wert an - und aus einem Wert
+     * lässt sich keine Strecke bilden.
+     *
+     * Häufiger zu lesen kostet hier nichts ausser der Abfrage selbst: Er
+     * sitzt auf derselben Zieladresse wie der Nebenverbrauch, der ohnehin
+     * jede Runde drankommt. Der Adresswechsel, wegen dessen er selten
+     * gemacht wurde, fällt so gar nicht erst an.
+     *
+     * Auflösung ist ein Kilometer. Für den Streckenanteil einer einzelnen
+     * Runde ist das zu grob, für die Gesamtstrecke einer Fahrt genau
+     * richtig - und die ist es, worauf es ankommt. */
     { name: "km_stand", did: "22295A", adresse: FAHRZEUG,
-      selten: 20,
-      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
+      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },    { name: "dcdc_strom_a", did: "22465B", adresse: DCDC, selten: 10,
+      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
   ];
 
 

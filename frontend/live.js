@@ -45,11 +45,25 @@ window.joltLive = (function () {
    * Wert, der immer von jetzt ist. */
   let nebenverbrauch = null;   // {kw, zeit}
 
-  // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
-  // und braucht mindestens 5 km, bevor sie überhaupt etwas sagt - alle
-  // dreissig Sekunden ist bei Landstrassentempo rund ein halber Kilometer und
-  // damit dicht genug. Häufiger kostet Akku und Mobilfunk, ohne etwas zu sagen.
-  const MELDEABSTAND_MS = 30000;
+  /* Wie oft die Position gemeldet wird.
+   *
+   * Hier standen dreissig Sekunden, mit der Begründung, die Nachführung
+   * mittle ohnehin über Kilometer. Für die **Nachführung** stimmt das; für
+   * die **Aufzeichnung** nicht, und die war damals noch nicht gebaut. Dort
+   * ist jeder Messpunkt ein Stützpunkt der Strecke, die hinterher aus ihnen
+   * entsteht - bei Landstrassentempo lagen vierhundert Meter dazwischen, und
+   * die Luftlinie schneidet jede Kurve ab. Die erste echte Testfahrt hat
+   * genau das gezeigt.
+   *
+   * Zwölf Sekunden sind rund hundertsechzig Meter und bringen die Kurven
+   * zurück, ohne dass Akku und Mobilfunk spürbar mehr kosten: Eine Meldung
+   * ist ein kleines JSON, und das GPS läuft ohnehin.
+   *
+   * Für die Länge der Strecke ist der Kilometerstand des Fahrzeugs die
+   * bessere Quelle (siehe `live/aufzeichnung.odometer_faktor`) - dichtere
+   * Punkte braucht es trotzdem, denn sie tragen den **Verlauf**: Höhenprofil,
+   * Tempo je Teilstück, und die Karte. */
+  const MELDEABSTAND_MS = 12000;
 
   function verbindungAnzeigen(text, farbe) {
     const el = document.getElementById("live-verbindung");
@@ -677,6 +691,7 @@ window.joltLive = (function () {
    * Energieprofil hoch. */
   function positionVerfolgen() {
     if (!navigator.geolocation || wache !== null) return;
+    bildschirmWachHalten();
     wache = navigator.geolocation.watchPosition(
       (pos) => {
         const jetzt = Date.now();
@@ -697,7 +712,61 @@ window.joltLive = (function () {
     if (wache === null) return;
     try { navigator.geolocation.clearWatch(wache); } catch (e) {}
     wache = null;
+    bildschirmFreigeben();
   }
+
+  /* ---------- Der Bildschirm muss anbleiben ---------- */
+
+  /* Ohne das schaltet iOS den Bildschirm nach einer Minute aus, und mit dem
+   * Bildschirm schläft die Seite: `watchPosition` liefert nichts mehr, die
+   * Bluetooth-Schleife steht, und beim Aufwachen fehlt das Stück dazwischen.
+   *
+   * Die Diagnoseseite unter /obd hatte das von Anfang an, diese Ansicht
+   * nicht - und aufgezeichnet wird hier. In der ersten echten Testfahrt
+   * klafft genau deshalb eine Lücke von acht Minuten mit einem einzigen
+   * Messpunkt darin.
+   *
+   * Die Sperre geht verloren, sobald die Seite in den Hintergrund gerät, und
+   * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
+   * geholt. */
+  let wachhalter = null;
+
+  async function bildschirmWachHalten() {
+    if (!("wakeLock" in navigator) || wachhalter) return;
+    try {
+      wachhalter = await navigator.wakeLock.request("screen");
+      wachhalter.addEventListener("release", () => { wachhalter = null; });
+    } catch (fehler) {
+      // Kein Grund, die Fahrt nicht aufzuzeichnen - nur einer, den
+      // Bildschirm in den Einstellungen an zu lassen.
+      console.log("[live] Bildschirm wachhalten ging nicht:", fehler.message);
+    }
+  }
+
+  function bildschirmFreigeben() {
+    if (!wachhalter) return;
+    try { wachhalter.release(); } catch (e) {}
+    wachhalter = null;
+  }
+
+  /* Zurück im Vordergrund: aufholen, was im Hintergrund liegengeblieben ist.
+   *
+   * iOS friert eine Seite im Hintergrund ein. Der Abriss der
+   * Bluetooth-Verbindung wird dann zwar gemeldet, aber der Wiederaufbau
+   * hängt an einem Zeitgeber, und der läuft erst weiter, wenn die Seite
+   * wieder sichtbar ist. Ohne dieses Nachfassen bliebe der Dongle getrennt,
+   * bis der nächste Abriss kommt - und der kommt nicht mehr. */
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !K.zustand.sitzungId) return;
+    bildschirmWachHalten();
+    if (dongle && window.joltObd && !window.joltObd.verbunden()) {
+      window.joltObd.wiederverbinden(1, () => !!K.zustand.sitzungId);
+    }
+    // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
+    // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
+    // wichtige - er schliesst die Lücke.
+    letzteMeldung = 0;
+  });
 
   /* Wenn ein Dongle mitliest, wandert der Ladestand von hier aus mit.
    *
