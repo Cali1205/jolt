@@ -406,34 +406,44 @@ function befehl(text, grenze_ms = 15000) {
   // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
   const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9" };
   const MESSWERTE = [
-    { name: "soc_roh", did: "22028C", adresse: BMS, pflicht: true,
+    { name: "soc_roh", titel: "Rohwert SoC", einheit: null, stellen: 0,
+      did: "22028C", adresse: BMS, pflicht: true,
       lesen: (b) => b[0] },
-    { name: "spannung_v", did: "221E3B", adresse: BMS,
+    { name: "spannung_v", titel: "Spannung", einheit: "V", stellen: 1,
+      did: "221E3B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 4 : null },
-    { name: "strom_a", did: "221E3D", adresse: BMS,
+    { name: "strom_a", titel: "Strom", einheit: "A", stellen: 1,
+      did: "221E3D", adresse: BMS,
       lesen: (b) => b.length >= 4
         ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
         : null },
-    { name: "energie_kwh", did: "221E32", adresse: BMS,
+    { name: "energie_kwh", titel: "Energie im Akku", einheit: "kWh", stellen: 1,
+      did: "221E32", adresse: BMS,
       lesen: (b) => b.length >= 4
         ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3]) / 8583.07
         : null },
-    { name: "ladegrenze_a", did: "221E1B", adresse: BMS,
+    { name: "ladegrenze_a", titel: "Ladegrenze", einheit: "A", stellen: 0,
+      did: "221E1B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
-    { name: "betriebsart", did: "227448", adresse: BMS, lesen: (b) => b[0] },
+    { name: "betriebsart", titel: "Betriebsart", einheit: null, stellen: 0,
+      did: "227448", adresse: BMS, lesen: (b) => b[0] },
     /* Der Strom der PTC-Heizung. Mal Packspannung ergibt das, was die
      * Heizung allein zieht - im Winter die Frage hinter der Frage, weil sie
      * der einzige grosse Verbraucher ist, den man selbst beeinflusst. */
-    { name: "ptc_strom_a", did: "221620", adresse: BMS,
+    { name: "ptc_strom_a", titel: "Heizstrom", einheit: "A", stellen: 1,
+      did: "221620", adresse: BMS,
       lesen: (b) => b.length ? b[0] / 4 : null },
-    { name: "tempo_kmh", did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
+    { name: "tempo_kmh", titel: "Tempo", einheit: "km/h", stellen: 0,
+      did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
     /* Die Aussentemperatur ist der grösste Einzelposten der Kälte und ging
      * bisher aus einer Vorhersage ins Verbrauchsmodell. Aus dem Auto ist sie
      * gemessen, von der Strecke, zur richtigen Zeit. Sie sitzt in einem
      * anderen Steuergerät als die Batterie - siehe KLIMA. */
-    { name: "aussentemp_c", did: "222609", adresse: KLIMA,
+    { name: "aussentemp_c", titel: "Aussentemperatur", einheit: "°C", stellen: 1,
+      did: "222609", adresse: KLIMA,
       lesen: (b) => b.length ? b[0] / 2 - 50 : null },
-    { name: "innentemp_c", did: "222613", adresse: KLIMA,
+    { name: "innentemp_c", titel: "Innentemperatur", einheit: "°C", stellen: 1,
+      did: "222613", adresse: KLIMA,
       lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
     /* **Nebenverbraucher als fertige Zahl.** Alles ausser dem Antrieb -
      * Heizung, Klima, Steuergeräte, 12-V-Netz - in kW, direkt aus dem
@@ -444,7 +454,8 @@ function befehl(text, grenze_ms = 15000) {
      * war eine brauchbare Näherung, aber eben eine - sie galt nur so lange,
      * wie sich an der Heizung nichts änderte, und im Fahren gar nicht. Ein
      * gemessener Wert schlägt jede Näherung. */
-    { name: "nebenverbrauch_kw", did: "220364", adresse: FAHRZEUG,
+    { name: "nebenverbrauch_kw", titel: "Nebenverbraucher", einheit: "kW", stellen: 2,
+      did: "220364", adresse: FAHRZEUG,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 10 : null },
 
     /* Der Kilometerstand - jede Runde, und zwar direkt hinter dem
@@ -463,8 +474,11 @@ function befehl(text, grenze_ms = 15000) {
      * Auflösung ist ein Kilometer. Für den Streckenanteil einer einzelnen
      * Runde ist das zu grob, für die Gesamtstrecke einer Fahrt genau
      * richtig - und die ist es, worauf es ankommt. */
-    { name: "km_stand", did: "22295A", adresse: FAHRZEUG,
-      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },    { name: "dcdc_strom_a", did: "22465B", adresse: DCDC, selten: 10,
+    { name: "km_stand", titel: "Kilometerstand", einheit: "km", stellen: 0,
+      did: "22295A", adresse: FAHRZEUG,
+      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
+    { name: "dcdc_strom_a", titel: "DC/DC-Strom", einheit: "A", stellen: 1,
+      did: "22465B", adresse: DCDC, selten: 10,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
   ];
 
@@ -614,5 +628,19 @@ function befehl(text, grenze_ms = 15000) {
     socAusRoh,
     socAusAntwort,
     NAMEN,
+    /* Was ausgelesen wird, mit Beschriftung und Einheit.
+     *
+     * Damit kann die Oberflaeche jeden Messwert anzeigen, ohne die Liste ein
+     * zweites Mal zu fuehren - eine neue Datenkennung taucht dort dann von
+     * selbst auf. Die Lesefunktion und die Zieladresse bleiben drinnen; sie
+     * gehen niemanden ausserhalb etwas an.
+     *
+     * `pflicht` wandert mit: Der Ladestand ist der einzige Wert, ohne den
+     * eine Runde verworfen wird, und das soll man ihm ansehen koennen. */
+    FELDER: MESSWERTE.map((m) => ({
+      name: m.name, titel: m.titel || m.name, einheit: m.einheit || null,
+      stellen: typeof m.stellen === "number" ? m.stellen : 1,
+      pflicht: !!m.pflicht, selten: m.selten || 0,
+    })),
   };
 })();

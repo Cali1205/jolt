@@ -31,6 +31,7 @@ window.joltLive = (function () {
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
   let letzteRohwerte = null;
+  let letzteRohwerteZeit = 0;   // wann der letzte vollständige Satz ankam
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
    * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
@@ -857,10 +858,53 @@ window.joltLive = (function () {
     }
 
     document.getElementById("live-auto-werte").innerHTML =
-      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`;
-    const fehlend = (roh._fehlend || []).length;
-    document.getElementById("live-auto-stand").textContent =
-      fehlend ? `${fehlend} Werte antworten nicht` : "";
+      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`
+      + rohwerteTabelle(roh);
+
+    /* Wie alt der letzte Satz ist - die Frage, die man am Steuer wirklich
+     * hat. "3 s" heisst, der Dongle antwortet; "4 min" heisst, er ist weg,
+     * und die Zahlen darunter sind Erinnerungen. Ohne diese Angabe sieht
+     * eine eingefrorene Anzeige genauso aus wie eine laufende. */
+    const alter = letzteRohwerteZeit
+      ? Math.round((Date.now() - letzteRohwerteZeit) / 1000) : null;
+    const stand = document.getElementById("live-auto-stand");
+    if (alter === null) {
+      stand.textContent = "";
+    } else if (alter < 90) {
+      stand.textContent = `vor ${alter} s`;
+      stand.style.color = "";
+    } else {
+      stand.textContent = `seit ${K.dauer(alter / 60)} keine Antwort`;
+      stand.style.color = "#e8804f";
+    }
+  }
+
+  /* Alles, was das Auto liefert - als Tabelle, nicht als Satz.
+   *
+   * Die Zeile darüber beantwortet "wie läuft es gerade". Diese Tabelle
+   * beantwortet die andere Frage: "kommt überhaupt an, was ankommen soll".
+   * Dafür muss auch dastehen, was **nicht** geantwortet hat - ein fehlender
+   * Wert ist beim Einrichten die interessantere Information als ein
+   * vorhandener, und ein Zähler ("3 Werte antworten nicht") sagt nicht,
+   * welche drei.
+   *
+   * Die Liste kommt aus `joltObd.FELDER`, damit eine neue Datenkennung hier
+   * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
+  function rohwerteTabelle(roh) {
+    const felder = (window.joltObd && window.joltObd.FELDER) || [];
+    if (!felder.length) return "";
+    const fehlend = new Set(roh._fehlend || []);
+    const zeilen = felder.map((f) => {
+      const wert = roh[f.name];
+      const da = typeof wert === "number";
+      const text = da
+        ? K.zahl(wert, f.stellen) + (f.einheit ? " " + f.einheit : "")
+        : (fehlend.has(f.name) ? "keine Antwort"
+           : (f.selten ? "nicht in dieser Runde" : "–"));
+      return `<tr class="${da ? "" : "leer"}"><th>${f.titel}</th>`
+        + `<td>${text}</td></tr>`;
+    });
+    return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
   }
 
   async function positionMelden(coords) {
@@ -877,6 +921,7 @@ window.joltLive = (function () {
           roh.hoehe_m = Math.round(coords.altitude);
         }
         letzteRohwerte = roh;
+        letzteRohwerteZeit = Date.now();
         nebenverbrauchMerken(roh);
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
         nutzlast.soc = Math.round(wert.hmi * 10) / 10;
@@ -990,6 +1035,7 @@ window.joltLive = (function () {
     gefahrenKm = 0;
     verlauf = [];
     letzteRohwerte = null;
+    letzteRohwerteZeit = 0;
     nebenverbrauch = null;
     if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
     if (steckdose) {

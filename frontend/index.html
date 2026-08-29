@@ -123,6 +123,26 @@ button.tat:disabled { opacity: .55; cursor: default; }
   line-height: 1.6; }
 #live-auto-zeile b { color: var(--text); font-weight: 600;
   font-variant-numeric: tabular-nums; }
+/* Alle Rohwerte, zum Nachsehen statt zum Fahren.
+ *
+ * Zwei Spalten auf breiten Schirmen, eine auf dem Telefon. Zahlen rechts und
+ * in gleichbreiten Ziffern, damit sie untereinander vergleichbar bleiben -
+ * beim Prüfen liest man diese Tabelle von oben nach unten, und ein Wert, der
+ * sich nicht ändert, soll dabei auffallen. */
+table.rohwerte { width: 100%; border-collapse: collapse; margin-top: 10px;
+  font-size: 12.5px; }
+table.rohwerte th, table.rohwerte td { padding: 4px 8px; text-align: left;
+  border-bottom: 1px solid var(--rand); }
+table.rohwerte th { color: var(--gedaempft); font-weight: 400; }
+table.rohwerte td { text-align: right; color: var(--text);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.rohwerte tr.leer td, table.rohwerte tr.leer th { color: var(--gedaempft);
+  opacity: .55; }
+@media (min-width: 560px) {
+  table.rohwerte tbody { display: grid; grid-template-columns: 1fr 1fr;
+    column-gap: 22px; }
+  table.rohwerte tr { display: grid; grid-template-columns: 1fr auto; }
+}
 /* Das Logger-Token wird genau einmal gezeigt und muss abgetippt oder kopiert
    werden - also umbrechend, auswählbar und in gleichbreiter Schrift, damit
    sich l und 1 unterscheiden lassen. */
