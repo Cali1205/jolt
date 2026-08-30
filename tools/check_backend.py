@@ -775,6 +775,26 @@ def main() -> int:
     pruefe("joltObd.FELDER" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
+    # Das Aufzeichnen braucht eine **eigene** Fahrzeugwahl. Vorher griff es
+    # auf die der Planen-Ansicht zu und fiel, wenn die leer war, auf das
+    # erste Fahrzeug der Liste zurueck - das beim ersten Start angelegte
+    # "Allgemeine E-Auto". Zwei echte Testfahrten sind so dem falschen Auto
+    # zugeschrieben worden.
+    html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
+    fahrten_js = open(os.path.join(FRONTEND, "fahrten.js"),
+                      encoding="utf-8").read()
+    pruefe('id="aufz-fahrzeug"' in html,
+           "der Aufzeichnungs-Abschnitt hat eine eigene Fahrzeugwahl")
+    pruefe("aufz-fahrzeug" in fahrten_js and "fahrzeug-wahl" not in fahrten_js,
+           "und das Aufzeichnen nimmt sie, nicht die aus der Planen-Ansicht",
+           "fahrten.js greift noch auf fahrzeug-wahl zu")
+    pruefe("K.zustand.fahrzeuge || [])[0]" not in fahrten_js,
+           "ohne Rückfall auf das erste Fahrzeug der Liste - lieber gar "
+           "nicht aufzeichnen als dem falschen Auto")
+    pruefe("aufz-fahrzeug" in open(os.path.join(FRONTEND, "fahrzeug.js"),
+                                   encoding="utf-8").read(),
+           "und sie wird mit den Fahrzeugen gefüllt")
+
     # Ein Steuergeraet auf 11-Bit-Kennung braucht ein anderes Protokoll.
     # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
     # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
