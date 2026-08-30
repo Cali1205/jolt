@@ -814,6 +814,22 @@ def main() -> int:
     pruefe("wechselGescheitert" in kern,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
 
+    pruefe("function mehrrahmen" in kern,
+           "lange Antworten werden aus mehreren CAN-Rahmen zusammengesetzt - "
+           "ohne das landen Köpfe und Steuerbytes als Nutzdaten im Ergebnis")
+    pruefe("hex.slice(3) : hex.slice(8)" in kern,
+           "und zwar für beide Rahmenbreiten: acht Kopfzeichen bei 29 Bit, "
+           "drei bei 11 - der Klimakompressor sitzt auf der 11-Bit-Seite")
+    pruefe("akku_kwh" in kern and "kwh >= 10 && kwh <= 200" in kern,
+           "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
+           "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
+    pruefe("laufenderVerbrauch" in live and "VERBRAUCH_AB_KM" in live,
+           "der Verbrauch der laufenden Fahrt wird aus Ladestand und "
+           "Kilometerstand gerechnet, erst ab einer Mindeststrecke")
+    pruefe("aufzFahrzeug" in live,
+           "und kennt dafür das Fahrzeug der Aufzeichnung - ohne Akkugrösse "
+           "wird aus einem Ladestand keine Kilowattstunde")
+
     pruefe("_leer" in kern and "roh._leer = roh._leer" in kern,
            "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "
            "vorher fiel er stumm durch, und vier von dreizehn Werten fehlten "

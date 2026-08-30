@@ -250,6 +250,8 @@ window.joltFahrten = (function () {
                 name: document.getElementById("aufz-name").value },
       });
       K.zustand.sitzungId = antwort.sitzung_id;
+      K.zustand.aufzFahrzeug =
+        (K.zustand.fahrzeuge || []).find((f) => f.id === id) || null;
       // Die neue Aufzeichnung gehört in die Liste.
       K.zustand.fahrtenVeraltet = true;
       window.joltApp.ansichtZeigen("live");

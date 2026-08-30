@@ -419,6 +419,10 @@ function befehl(text, grenze_ms = 15000) {
    * Messung. Deshalb liegt es hinter `selten` und faellt nach einem
    * Fehlschlag fuer die Sitzung aus (siehe `messwertLesen`). */
   const KLIMA = { cp: "00", sh: "746", cra: "7B0", protokoll: "6" };
+
+  /* Das Batteriemanagement auf der 11-Bit-Seite. Dieselbe Umschaltung wie
+   * beim Klimageraet - es antwortet auf 0x77A, nicht auf 0x17FE007B. */
+  const AKKU11 = { cp: "00", sh: "710", cra: "77A", protokoll: "6" };
   // Fahrzeug-Steuergerät: Kilometerstand und - der eigentliche Fund - die
   // Leistung der Nebenverbraucher als fertige Zahl.
   const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076" };
@@ -500,6 +504,30 @@ function befehl(text, grenze_ms = 15000) {
     { name: "dcdc_strom_a", titel: "DC/DC-Strom", einheit: "A", stellen: 1,
       did: "22465B", adresse: DCDC, selten: 10,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
+    /* Die nutzbare Kapazitaet des Akkus, wie das Fahrzeug sie kennt.
+     *
+     * Interessant, weil sie mit den Jahren sinkt - und weil jeder aus dem
+     * Ladestand gerechnete Verbrauch mit ihr steht und faellt. Der Wert im
+     * Fahrzeugprofil ist eine Angabe aus dem Prospekt; dieser hier ist
+     * gemessen.
+     *
+     * **Die Umrechnung ist nicht belegt.** Die MEB-Referenz fuehrt den
+     * Parameter mit "equation missing"; bekannt sind nur die Einheit (Wh),
+     * die Adresse und dass die Antwort vier Nutzbytes hat. Angenommen wird
+     * deshalb das Naheliegende - der 32-Bit-Wert in Wattstunden - und das
+     * Ergebnis gegen eine Plausibilitaetsgrenze gehalten: Ein Autoakku hat
+     * zwischen 10 und 200 kWh. Faellt der Wert heraus, stimmt die Annahme
+     * nicht, und die Zeile bleibt leer statt eine Zahl zu erfinden.
+     *
+     * Selten gelesen, weil sie sich nicht waehrend einer Fahrt aendert. */
+    { name: "akku_kwh", titel: "Akkukapazität", einheit: "kWh", stellen: 1,
+      did: "222AB2", adresse: AKKU11, selten: 40,
+      lesen: (b) => {
+        if (b.length < 4) return null;
+        const wh = (b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3];
+        const kwh = wh / 1000;
+        return (kwh >= 10 && kwh <= 200) ? kwh : null;
+      } },
     /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
      * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
      * Pflichtwerte dieser Runde laengst gelesen. */
@@ -515,8 +543,51 @@ function befehl(text, grenze_ms = 15000) {
   /* Antwort in Nutzbytes zerlegen. Die Quittung ist `62` + die zwei Bytes
    * der Datenkennung; alles davor ist Absenderkennung und ISO-TP-Kopf,
    * alles danach ist Nutzlast. */
+  /* Eine Antwort, die nicht in einen CAN-Rahmen passt, wieder zusammensetzen.
+   *
+   * Ein Rahmen fasst acht Byte. Laengere Antworten schickt das Steuergeraet
+   * als ISO-TP-Folge, und der ELM327 gibt sie zeilenweise aus - mit Kopf und
+   * einem Steuerbyte je Zeile:
+   *
+   *   000007B0 10 14 62 08 00 ..      erster Rahmen: 1L LL = Gesamtlaenge
+   *   000007B0 21 .. .. .. .. .. ..   Folgerahmen:   2N    = laufende Nummer
+   *
+   * Ohne dieses Zusammensetzen las `nutzbytes` die erste Zeile und haengte
+   * Koepfe und Steuerbytes der folgenden als Nutzdaten daran - Zahlensalat.
+   * Betroffen sind unter anderem die Leistung des Klimakompressors und der
+   * Energieinhalt des Akkus.
+   *
+   * Gibt null zurueck, wenn es keine Mehrrahmen-Antwort ist; dann gilt der
+   * einfache Weg darunter. */
+  function mehrrahmen(roh) {
+    const zeilen = roh.split("\n").map((z) => z.trim()).filter(Boolean);
+    if (zeilen.length < 2) return null;
+    const teile = [];
+    let erwartet = null;
+    for (const zeile of zeilen) {
+      const hex = zeile.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+      /* Kopf abschneiden: acht Zeichen bei 29 Bit, drei bei 11 Bit.
+       * Zu unterscheiden sind sie an der Laenge der Zeile - der Rest ist
+       * immer eine gerade Anzahl Zeichen, also entscheidet die Parität:
+       * 8 + 2n ist gerade, 3 + 2n ungerade. Das gilt auch fuer den letzten,
+       * kuerzeren Rahmen einer Folge. */
+      const ohneKopf = (hex.length % 2) ? hex.slice(3) : hex.slice(8);
+      if (ohneKopf.length < 2) continue;
+      const pci = parseInt(ohneKopf.slice(0, 2), 16);
+      if ((pci & 0xF0) === 0x10) {
+        erwartet = ((pci & 0x0F) << 8) | parseInt(ohneKopf.slice(2, 4), 16);
+        teile.push(ohneKopf.slice(4));
+      } else if ((pci & 0xF0) === 0x20) {
+        teile.push(ohneKopf.slice(2));
+      }
+    }
+    if (erwartet === null || !teile.length) return null;
+    return teile.join("").slice(0, erwartet * 2);
+  }
+
   function nutzbytes(roh, did) {
-    const hex = roh.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+    const zusammen = mehrrahmen(roh);
+    const hex = (zusammen || roh.replace(/[^0-9A-Fa-f]/g, "")).toUpperCase();
     const quittung = "62" + did.slice(2).toUpperCase();
     const marke = hex.indexOf(quittung);
     if (marke < 0) return null;
