@@ -775,6 +775,25 @@ def main() -> int:
     pruefe("joltObd.FELDER" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
+    # Ein Steuergeraet auf 11-Bit-Kennung braucht ein anderes Protokoll.
+    # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
+    # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
+    # wird im finally zurueckgenommen.
+    namen = re.findall(r'\{ name: "([a-z_]+)"', kern)
+    klima = [n for n in ("aussentemp_c", "innentemp_c") if n in namen]
+    pruefe(klima and all(namen.index(n) > namen.index("soc_roh")
+                         for n in klima),
+           "die Messwerte mit Protokollwechsel stehen hinter dem Ladestand - "
+           "ein misslungener Wechsel darf die Pflichtwerte nicht mitreissen",
+           str(namen))
+    pruefe(namen and namen[-1] in ("aussentemp_c", "innentemp_c"),
+           "und ganz am Ende der Runde", str(namen[-2:]))
+    pruefe("} finally {" in kern and 'befehl("ATSP7")' in kern,
+           "das Protokoll wird im finally zurückgesetzt - eine Sitzung, die "
+           "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
+    pruefe("wechselGescheitert" in kern,
+           "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
+
     pruefe("_leer" in kern and "roh._leer = roh._leer" in kern,
            "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "
            "vorher fiel er stumm durch, und vier von dreizehn Werten fehlten "
