@@ -75,7 +75,43 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Messung kommt, schaltet man nach zehn Minuten ab.
 - **Lernen aus gefahrenen Fahrten** — am Ende jeder Fahrt wird der
   Korrekturfaktor des Fahrzeugs fortgeschrieben, gedämpft, damit eine einzelne
-  Fahrt mit Dachbox ihn nicht dauerhaft verbiegt.
+  Fahrt mit Dachbox ihn nicht dauerhaft verbiegt. Ladeabschnitte fallen dabei
+  heraus: Wer unterwegs vierzig Prozentpunkte nachlädt, sieht am Ende einen
+  Verlust, der um diese vierzig zu klein ist.
+- **Fahrten aufzeichnen statt planen** — der Weg für den Fall, für den sich
+  Planen nicht lohnt: eine bekannte kurze Strecke, ein paarmal gefahren, ist
+  die sauberste Messung überhaupt. Strecke, Höhenprofil und Prognose entstehen
+  hinterher aus den Messpunkten. Vergisst man das Beenden, macht der Server es
+  selbst — bei einer Aufzeichnung wäre es sonst Totalverlust, denn bis dahin
+  ist die Fahrt eine Hülle mit leerer Geometrie. Eine Ladepause verlängert die
+  Frist, sonst zerschneidet das Aufräumen die Fahrt, die gleich weitergeht.
+- **Den Dongle direkt lesen** — über Web Bluetooth, ohne Zwischen-App. Auf iOS
+  braucht es dafür den Browser **Bluefy**; Safari kennt Web Bluetooth nicht.
+  Alle Messwerte stehen live im Dashboard, samt Alter je Wert: Eine
+  eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
+  und wie, steht weiter unten.
+- **Die Strecke aus dem Kilometerstand** statt aus dem GPS. Bei
+  Zwölf-Sekunden-Takt liegen bei Landstrassentempo hundertsechzig Meter
+  zwischen zwei Punkten, und die Luftlinie schneidet jede Kurve ab; ein
+  Funkloch reisst gleich ein ganzes Stück heraus. Der Zähler im Auto kennt
+  beides nicht. Weil der Verbrauch in kWh **pro hundert Kilometer** gerechnet
+  wird, wandert der Fehler sonst direkt in den Korrekturfaktor.
+- **Verbrauch aus den Energiezählern des Fahrzeugs.** Sie zählen über die
+  Lebensdauer, was in den Akku hinein- und was herausgegangen ist; ihre
+  Differenz über ein Stück Fahrt ist die verbrauchte Energie — mit 0,117 Wh
+  Auflösung statt der 339 Wh eines Ladestandsschritts. Fast dreitausendmal
+  feiner, und deshalb zeigt der Balkenplot den Verbrauch je **Minute** statt
+  je fünf.
+- **Die gemessene Akkukapazität schlägt die Prospektangabe.** Im Profil steht,
+  was der Hersteller für ein neues Fahrzeug angibt; das Auto meldet, was
+  dieser Akku heute kann — beim ID.Buzz 73,8 statt 77 kWh nach 60 000 km. An
+  dieser Zahl hängt jede Umrechnung zwischen Ladestand und Kilowattstunden.
+- **Ladezeit gegen Kosten abwägen.** Ein Zeitwert in Euro je Stunde macht
+  beides vergleichbar: Wer zehn Minuten länger lädt, dafür aber einen Stopp
+  spart und beim günstigeren Anbieter steht, fährt vielleicht besser. Dazu ein
+  Bonus für grosse Ladeparks (das Risiko, vor einer belegten Säule zu stehen,
+  sinkt mit der Anzahl) und für bevorzugte Anbieter — beides als Gewicht, nie
+  als Ausschluss.
 - **Anschluss für einen Logger im Auto** — ein Gerät, das fest im Fahrzeug
   sitzt, kann die Sitzungs-ID einer Fahrt nicht kennen; die entsteht erst beim
   Losfahren in der App und wechselt mit jeder Fahrt. Es weist sich deshalb mit
@@ -85,8 +121,9 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   unbeaufsichtigtes Gerät, das auf Fehlerantworten stösst, protokolliert Fehler
   oder schaltet sich ab.
 
-**Noch nicht da**: echte Verfügbarkeitsdaten (siehe unten) und der Übersetzer,
-der einem OBD2-Dongle den Ladestand entlockt (siehe „Nächste Schritte").
+**Noch nicht da**: Belegungsdaten der Ladepunkte (es gibt sie inzwischen, siehe
+„Nächste Schritte") und ein Puffer für Messpunkte, die während eines Funklochs
+nicht rausgehen — heute sind sie verloren.
 
 ---
 
@@ -243,7 +280,36 @@ es `POST /api/push/probe` mit einem echten Gerät.
 
 `check_backend.py` fährt eine simulierte Strecke mit 25 % Mehrverbrauch und
 prüft, dass die Reserve-Marke nach vorn rückt. Das ist der Prüfstein der
-Live-Funktion.
+Live-Funktion. Dazu hält es fest, was die Prüfskripte selbst nicht sehen
+könnten: dass jeder Verweis im HTML eine Version trägt (der Cache-Fehler war
+viermal da), dass jeder ausgelesene Messwert eine Beschriftung hat, und dass
+jedes Werkzeug in `tools/` das Paket in **beiden** Layouten findet — im Repo
+unter `backend/app`, im Image daneben als `app`.
+
+```bash
+ORS_API_KEY=… ./tools/probelauf.py   # kein Prüfskript, ein Probelauf
+```
+
+`probelauf.py` ist ein anderes Werkzeug als die sechs darüber, und der
+Unterschied ist der Zweck. Ein Prüfskript sichert, was man schon weiss; dieser
+Lauf soll finden, woran noch niemand gedacht hat. Er behauptet nichts, er
+fährt eine echte Route mit echten Ladepunkten ab, zeichnet danach eine Fahrt
+auf, wie der Dongle sie schickt — mit Ladepause, Funkloch und Werten, die
+einzeln ausfallen — und zeigt am Ende, was dabei nicht stimmt.
+
+Er hat sich gelohnt: Vier Fehler kamen dabei heraus, die keiner der sechs
+Prüfläufe gesehen hatte, weil sie alle mit kurzen Fahrten **ohne Ladestopp**
+arbeiten. Der teuerste war ein gelernter Faktor, der bei jeder Fahrt mit
+Ladestopp zu niedrig ausfiel — und weil er in den Plausibilitätsgrenzen blieb,
+fiel es nicht auf.
+
+Ohne Auto prüfen lässt sich noch mehr: Unter `/obd` liest „Alle Werte prüfen"
+einmal den vollständigen Satz und hält jeden Wert gegen das, was physikalisch
+plausibel wäre. Der schärfste Teil ist der **Kreuzvergleich** — Entladezähler
+geteilt durch Kilometerstand ergibt den Lebensdauerverbrauch, und trifft der
+12 bis 40 kWh/100 km, stimmen beide Formeln. Zwei unabhängig gelesene Werte
+prüfen sich gegenseitig, im Stand. Genau so ist ein Vorzeichenfehler
+aufgeflogen, den die Bereichsprüfung durchgelassen hatte.
 
 ---
 
@@ -252,20 +318,41 @@ Live-Funktion.
 ```
 konzept-routenplaner.md   Das Konzept mit der Begründung jeder Entscheidung
 backend/app/
+  geo.py      Haversine und Peilung - kennt nichts, wird von allen gebraucht
+  models.py   SQLAlchemy · database.py · deps.py · security.py
+  energie/    modell.py (Physik) · profil.py · wetter.py
+              kalibrierung.py · ladephasen.py (Fahrt- und Ladeabschnitte)
   routing/    provider.py (Interface) · ors.py · demo.py · korridor.py
-  energie/    modell.py · wetter.py · kalibrierung.py
-  laden/      kurven.py · optimierer.py · saeulen_import.py · verfuegbarkeit.py
-  live/       sitzung.py · umplanung.py · kanal.py (WebSocket) · simulator.py
+  laden/      optimierer.py · kurven.py · preise.py · verfuegbarkeit.py
+              saeulen_import.py
+  live/       sitzung.py · umplanung.py · aufzeichnung.py · aufraeumen.py
+              kanal.py (WebSocket) · simulator.py
               quellen/  fremde Meldeformate übersetzen (jolt.py · abrp.py)
   push.py     Web Push: Schlüssel, Abos, Versand
   routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
-frontend/     index.html · karte.js (eigene Schiebekarte) · route.js · live.js
+frontend/     index.html · core.js · app.js · karte.js (eigene Schiebekarte)
+              route.js · live.js · fahrten.js · fahrzeug.js
+              obd.html · obd-kern.js · obd.js  (Dongle, eigene Seite)
               sw.js (Offline-Gerüst und Push-Empfang)
 tools/        import_bnetza.py · import_ocm.py · import_ocm_route.py
-              push_schluessel.py
-              check_modell.py · check_optimierer.py · check_umplanung.py
-              check_push.py · check_backend.py
+              push_schluessel.py · pruefen.py (Gerüst der Prüfskripte)
+              check_modell.py · check_optimierer.py · check_quellen.py
+              check_umplanung.py · check_push.py · check_backend.py
+              probelauf.py (kein Prüfskript - siehe „Prüfen")
 ```
+
+**Die Schichten greifen nur nach unten.** `geo` ganz unten (kennt nichts),
+darüber `energie`, `routing`, `laden`, `live`, und obenauf die Router. Der
+Import-Graph ist zyklenfrei; `geo.py` liegt bewusst neben `models` und nicht
+in einer der Schichten, weil sonst `routing` für eine Entfernung in die Physik
+greifen müsste oder umgekehrt.
+
+**Der Dongle hat eine eigene Seite.** `/obd` funktioniert nur in einem Browser
+mit Web Bluetooth, und ein Bedienelement, das in Safari stumm bleibt, hat in
+der Hauptoberfläche nichts verloren. `obd-kern.js` ist der Baustein — die
+Liste der Messwerte, der Handshake, das Zusammensetzen mehrteiliger Antworten;
+`obd.js` ist die Diagnoseseite darum herum, und `live.js` nutzt denselben
+Baustein während der Fahrt.
 
 **Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
 gerechnetes Streckenprofil und eine Liste von Ladeoptionen — mehr braucht er
@@ -295,37 +382,184 @@ weil sie verlangt ist.
 
 ---
 
+## Was das Auto hergibt — die MEB-Datenkennungen
+
+Ein ELM327-Dongle liest an einem MEB-Fahrzeug (ID.3, ID.4, ID.Buzz, Enyaq,
+Q4 e-tron, Cupra Born) **nichts** über die genormten OBD2-PIDs — die sind auf
+Verbrennungsmotoren gemünzt. Alles läuft über herstellerspezifische
+UDS-Abfragen, und die Kenntnis darüber steht in drei Quellen, die einander
+teils widersprechen:
+
+* [spot2000/Volkswagen-MEB-EV-CAN-parameters](https://github.com/spot2000/Volkswagen-MEB-EV-CAN-parameters)
+  — 193 Parameter mit Adressen; bei vielen fehlt die Umrechnung
+* [meatpiHQ/wican-fw](https://github.com/meatpiHQ/wican-fw/blob/main/vehicle_profiles/vw/ev_meb.json)
+  — Fahrzeugprofil mit Formeln, nennt den ID.Buzz ausdrücklich
+* [codingABI/id3esp32obd2](https://github.com/codingABI/id3esp32obd2)
+  — ESP32-Logger, liest die CAN-Rahmen direkt
+
+Wo sie sich widersprechen, steht unten, welcher Fassung jolt folgt und warum.
+Die Liste selbst steht in `frontend/obd-kern.js`; **das ist die
+Referenz**, diese Tabelle ist ihre Erläuterung.
+
+### Zieladressen
+
+Ein Fahrzeug spricht auf **zwei Rahmenbreiten**. Das ist der Grund, warum
+Klima- und Akkuwerte anfangs gar nicht ankamen: Der Handshake stellt `ATSP7`
+ein — 29 Bit —, und auf einer 11-Bit-Kennung hört dann niemand.
+
+| Gerät | Protokoll | ATCP | ATSH | ATCRA | ATFCSH |
+|---|---|---|---|---|---|
+| Batterie (BMS) | 7 (29 Bit) | `17` | `FC007B` | `17FE007B` | `17FC007B` |
+| Fahrzeug | 7 (29 Bit) | `17` | `FC0076` | `17FE0076` | `17FC0076` |
+| DC/DC-Wandler | 7 (29 Bit) | `17` | `FC00B9` | `17FE00B9` | `17FC00B9` |
+| Klima | **6 (11 Bit)** | `00` | `746` | `7B0` | `746` |
+| Akku (Kapazität) | **6 (11 Bit)** | `00` | `710` | `77A` | `710` |
+
+`0x746` und `0x710` passen in elf Bit, `0x17FC007B` nur in 29. Für die beiden
+unteren Zeilen schaltet jolt kurz auf `ATSP6` um und im `finally` zurück.
+
+### Flusskontrolle — der Handgriff, ohne den die Hälfte fehlt
+
+```
+ATFCSH<kopf>   ATFCSD300000   ATFCSM1
+```
+
+Passt eine Antwort nicht in einen CAN-Rahmen, muss der Fragende ein
+Flow-Control-Paket zurücksenden. Der ELM327 macht das selbst — aber nur, wenn
+er den Kopf kennt, und bei den MEB-Adressen rät er falsch. **Ohne diese drei
+Befehle scheitert jede mehrteilige Antwort stumm.** Betroffen waren
+Batteriestrom, Energiezähler, Reichweite und Kompressor — vier der
+interessantesten Werte.
+
+### Die Messwerte
+
+`b[0]` ist das erste Byte **nach** der Quittung (`62` + Datenkennung), also
+`g_dataBuffer[0]` bei codingABI und `B4` bei spot2000/WiCAN.
+
+| Wert | DID | Gerät | Takt | Umrechnung | Anmerkung |
+|---|---|---|---|---|---|
+| Ladestand (roh) | `22028C` | BMS | jede | `b0/2,5` | Pflicht — ohne ihn wird die Runde verworfen |
+| Spannung | `221E3B` | BMS | jede | `[b0:b1]/4` | ~377 V bei 79 % |
+| **Strom** | `221E3D` | BMS | jede | `([b0:b3]−150000)/100` | **mehrteilig**; negativ = Entladung |
+| **Entladen gesamt** | `221E32` | BMS | jede | `\|[b12:b15]\|/8583,07` | **mehrteilig, vorzeichenbehaftet** |
+| Geladen gesamt | ↑ | BMS | jede | `[b8:b11]/8583,07` | aus derselben Antwort |
+| Ladegrenze | `221E1B` | BMS | jede | `[b0:b1]/5` | |
+| Betriebsart | `227448` | BMS | jede | `b0` | Bit 2 = lädt |
+| Heizstrom (PTC) | `221620` | BMS | jede | `b0/4` | Zuheizer der Batterie |
+| Tempo | `22F40D` | BMS | jede | `b0` | |
+| Batterietemperatur | `222A0B` | BMS | 10 | `b0/2−40` | genauer als die Aussentemperatur für die Ladekurve |
+| Nebenverbraucher | `220364` | Fahrzeug | jede | `[b0:b1]/10` | alles ausser dem Antrieb |
+| **Kilometerstand** | `22295A` | Fahrzeug | jede | `[b0:b2]` | ganze km; korrigiert die GPS-Strecke |
+| DC/DC-Strom | `22465B` | DC/DC | 10 | `[b0:b1]/16` | |
+| Akkukapazität | `222AB2` | Akku | 40 | `[b0:b3]/1310,77/1000` | gemessen, nicht Prospekt |
+| Reichweite | `222AB6` | Akku | 10 | `[b0:b1]` | **mehrteilig** |
+| Aussentemperatur | `222609` | Klima | 20 | `b0/2−50` | |
+| Innentemperatur | `222613` | Klima | 20 | `[b0:b1]/5−40` | |
+| **Klimakompressor** | `220800` | Klima | 20 | `[b5:b6]` W | **mehrteilig**; `b0` Bit 0 = an, `[b3:b4]` = Drehzahl |
+
+„Takt" ist die Rundenzahl: `jede` heisst jede Messung, `20` jede zwanzigste.
+Selten gelesen wird, was sich langsam ändert oder einen Protokollwechsel
+kostet.
+
+### Wo die Quellen sich widersprechen
+
+| Wert | jolt folgt | verworfen |
+|---|---|---|
+| **Strom** `221E3D` | spot2000 + codingABI: `([b0:b3]−150000)/100` | WiCAN: `(150000−[b1:b5])/100` — ergibt am Fahrzeug −383 731 A |
+| **Reichweite** `222AB6` | codingABI: `[b0:b1]` → 297 km | WiCAN: `[b1:b2]` → 10 497 km |
+| **Kapazität** `222AB2` | codingABI: vier Bytes | WiCAN: zwei Bytes × 50 — dieselbe Formel, gröber |
+
+### Was keine Quelle wusste
+
+Die **Kompressorleistung** steht in keiner der drei Listen; spot2000 führt
+`220800` mit „equation missing". Eine Differenzmessung am Fahrzeug hat sie
+entschieden — einmal mit und einmal ohne laufenden Kompressor:
+
+```
+          b0    b1b2   b3b4   b5b6   b7
+aus     0x10       0      0      0    0
+an      0x51    9408   9408   2618   14
+Teillast        3648   3712    935    5
+```
+
+`b5b6` ist die Leistung in Watt (0 / 935 / 2618), `b1b2` und `b3b4` laufen
+gleich und viel höher — Soll- und Ist-Drehzahl. Als Watt wären 9,4 kW für
+einen Klimakompressor zu viel. Der Werkzeugkasten dafür steht unter
+`/obd` → „Klimakompressor eingrenzen".
+
+### Nicht implementiert
+
+* `222AB8` **Energieinhalt** — mehrteilig, keine Quelle nennt eine Umrechnung.
+  Für den Verbrauch braucht es ihn nicht: Die Differenz des Entladezählers ist
+  genauer.
+* Zellspannungen und -temperaturen (spot2000 führt über hundert davon) — für
+  die Routenplanung ohne Belang.
+
+### Zwei Ladestände
+
+MEB-Fahrzeuge liefern **zwei**: den des Batteriemanagements und den der
+Anzeige. `reserve_soc` und `ziel_soc` meinen den der Anzeige.
+
+```
+brutto = b0 / 2,5
+Anzeige = brutto · 51/46 − 6,4        (auf 0…100 begrenzt)
+```
+
+Wer den falschen nimmt, rechnet dauerhaft um den verborgenen Puffer daneben —
+bei 79 % Anzeige sind das gut zwei Prozentpunkte.
+
+---
+
 ## Nächste Schritte
 
-**Echte Fahrzeugdaten** statt Handeingabe — der Weg dorthin ist offen, das
-Datenmodell (`LiveSitzung` / `LivePunkt`) nimmt sie unverändert entgegen.
-Was noch fehlt, ist der Übersetzer: Ein ELM327-Dongle liest den Ladestand
-eines MEB-Fahrzeugs nicht über die genormten OBD2-PIDs — die sind auf
-Verbrennungsmotoren gemünzt —, sondern über herstellerspezifische
-UDS-Abfragen. Diese Kenntnis kauft man sich sinnvollerweise über bestehende
-Software ein, statt sie nachzubauen.
+**Belegung der Ladepunkte.** Der Kommentar in `laden/verfuegbarkeit.py` sagt,
+echte Belegungsdaten seien für ein Privatprojekt nicht zu haben. Das stimmt
+nicht mehr — jedenfalls nicht für Deutschland. Die
+[OCPDB von MobiData BW](https://mobidata-bw.de/dataset/e-ladesaulen) liefert
+OCPI 3.0 **ohne Schlüssel und ohne Registrierung**, deutschlandweit, mit
+Live-Status für über zehntausend Standorte. Nachgemessen bewegen sich rund
+13 % der Ladepunkte pro Stunde — es sind echte Daten, keine Momentaufnahme.
 
-Die Übersetzerschicht dafür **steht**: `live/quellen/` normalisiert fremde
-Telemetrieformate auf einen `Rohpunkt`, und `POST /api/live/melden` nimmt sie
-mit `format: "…"` entgegen. Mitgeliefert sind jolts eigenes Format und das von
-Iternio (ABRP) — letzteres, weil es im Umfeld der Elektroauto-Logger so etwas
-wie ein Quasi-Standard ist: die ABRP-App selbst, ESP32-Dongles wie der WiCAN,
-OVMS und diverse Bastelskripte sprechen es. Ein Übersetzer dafür ist deshalb
-kein Adapter für einen Anbieter, sondern einer für ein halbes Ökosystem.
+Zwei Haken: Es gibt keine räumliche Filterung (`bbox` wird stillschweigend
+ignoriert), man muss den Bestand also periodisch synchronisieren statt pro
+Anfrage abzufragen. Und für **Frankreich** gibt es nichts — der nationale
+Zugangspunkt führt unter „temps réel" null IRVE-Datensätze.
 
-**Die Übersetzung kennt kein Netz** — sie bekommt ein geparstes Objekt und gibt
-einen `Rohpunkt` zurück. Deshalb läuft `check_quellen.py` ohne Netz, ohne
-Datenbank und ohne Zugangsdaten, und deshalb lässt sich ein neues Format anhand
-einer aufgezeichneten Antwort einbauen, ohne im Auto zu sitzen.
+Die vorbereitete `VerfuegbarkeitsQuelle`-Schnittstelle passt: ein Adapter, der
+`Zustand(frei=…, quelle="ocpi")` liefert statt `Unbekannt`. Der Aufwand liegt
+weniger im OCPI-Teil als im Abgleich mit dem eigenen Ladepunkt-Bestand — die
+Live-Einträge tragen eine `evse_id`, jolts OCM-Import speichert die nicht.
 
-Was noch fehlt, ist der Transport: das Stück, das die Daten tatsächlich vom
-Dongle bis zu diesem Endpunkt bringt. Für ein iPhone führt der einzige heute
-gangbare Weg über die ABRP-App als Sensortreiber (sie liest BLE-Dongles live
-aus) und deren Telemetrie-API; Car Scanner scheidet dort aus, weil es auf iOS
-nur Aufzeichnungsdateien exportiert und keine Live-Ausgabe hat.
+**Wichtig dabei:** `redundanz_bonus` bleibt. Live-Daten gibt es für etwa ein
+Zehntel der Standorte und für Frankreich gar nicht; ein Optimierer, der
+Standorte ohne Live-Daten benachteiligt, wählt auf einer Frankreichfahrt
+systematisch die falschen.
 
-Ein Detail, das dabei zählt: Fahrzeuge auf MEB-Basis liefern **zwei**
-Ladestände — den der Anzeige und den des Batteriemanagements. `reserve_soc`
-und `ziel_soc` meinen den der Anzeige, und der Adapter muss den richtigen von
-beiden nehmen; sonst rechnet das Modell dauerhaft um den verborgenen Puffer
-daneben.
+**Messpunkte puffern.** Was während eines Funklochs nicht rausgeht, ist heute
+verloren — `positionMelden` schluckt den fehlgeschlagenen POST stillschweigend,
+und einen Puffer gibt es nirgends. Für eine geplante Fahrt ist das harmlos, der
+nächste Punkt kommt. Für eine **Aufzeichnung** ist es teuer: Gemessen an einer
+echten Strecke fehlen nach zwanzig Minuten ohne Netz bis zu 13 % der Strecke,
+und der gelernte Faktor verschiebt sich um bis zu 35 % — unsichtbar, als stille
+Verschiebung in einer Zahl, die dauerhaft im Fahrzeug bleibt. Der
+Kilometerstand fängt inzwischen die Strecke wieder ein, nicht aber den Verlauf.
+
+Das ist **nicht rein im Frontend** zu machen: Das Eingabemodell `Messpunkt` hat
+kein `zeit`-Feld, nachgereichte Punkte bekämen alle den Zeitstempel des
+Nachreichens — und damit wäre der Zeitfaktor kaputt statt der Strecke.
+`messpunkt_aufnehmen` kann `zeit` bereits, es fehlt nur der Weg durch die
+Schnittstelle.
+
+**Höchstgeschwindigkeit am Fahrzeug.** Der Tempo-Regler hat keine absolute
+Obergrenze; bei 130 % rechnet das Modell mit 165 km/h, die kein Serienfahrzeug
+mit diesem Luftwiderstand fährt. Für ein **Gespann** ist 100 km/h ausserdem
+keine Vorliebe, sondern eine harte Grenze — der Regler bildet das falsch ab.
+Sauber wäre eine Höchstgeschwindigkeit am Fahrzeug und ein Anhänger als eigene
+Grösse (Masse plus Luftwiderstands-Aufschlag), statt den cw-Wert des Autos zu
+verbiegen.
+
+**Was der Kompressor sonst noch hergibt.** `220800` liefert neben der Leistung
+Soll- und Ist-Drehzahl; ein Wert steht noch ohne Deutung (`b7`, dieselbe Grösse
+wie die Leistung im Verhältnis 1:187). Und `222AB8` (Energieinhalt) wartet
+weiter auf eine Umrechnung — gebraucht wird er nicht, die Differenz des
+Entladezählers ist genauer.

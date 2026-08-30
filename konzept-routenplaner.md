@@ -91,7 +91,7 @@ gewonnen wird: prognostizierte kWh gegen tatsächlich verbrauchte kWh. Nach
 einigen Fahrten kennt jolt das konkrete Auto besser als jede Datenbank — inklusive
 der Dachbox, die seit Ostern oben ist.
 
-Genau hier docken später die vorhandenen OBD2-Logger an: Sie liefern die
+Genau hier docken die OBD2-Logger an: Sie liefern die
 Ist-Werte, aus denen der Faktor entsteht.
 
 ### 2.3 Der Plan wird während der Fahrt nachgezogen
@@ -328,7 +328,7 @@ sagt dagegen nichts über das Abo aus — wer es dabei wegwirft, schaltet die
 Benachrichtigungen bei der ersten Störung dauerhaft ab, und niemand merkt,
 warum sie nicht mehr kommen.
 
-**Stufe 4 — echte Fahrzeugdaten** *(halb)*
+**Stufe 4 — echte Fahrzeugdaten** *(steht)*
 
 Anbindung der OBD2-Logger bzw. einer Hersteller-API. Das Datenmodell
 (`LiveSitzung` / `LivePunkt`) nimmt sie unverändert entgegen — an *dieser*
@@ -346,10 +346,16 @@ Sitzung selbst.
 
 Ein ELM327 liest den Ladestand eines MEB-Fahrzeugs nicht über die genormten
 OBD2-PIDs — die sind auf Verbrennungsmotoren gemünzt —, sondern über
-herstellerspezifische UDS-Abfragen (Batteriemanagement auf Header `7E5`,
-Service `0x22`, DID `028C`, Rohwert durch 2,5). Diese Kenntnis kauft man sich
-über bestehende Software ein, statt sie nachzubauen. Damit steht aber fest,
-dass die Messpunkte in *deren* Format ankommen.
+herstellerspezifische UDS-Abfragen. Der Ladestand steht auf Service `0x22`,
+DID `028C`, Rohwert durch 2,5.
+
+Die Adresse dagegen ist **nicht** der naheliegende 11-Bit-Header `7E5`,
+sondern eine 29-Bit-Kennung: `0x17FC007B` fragen, `0x17FE007B` antwortet, und
+beim ELM327 heisst das `ATSP7` · `ATCP17` · `ATSHFC007B` · `ATCRA17FE007B`.
+Bis das feststand, kam auf jede Abfrage `NO DATA` — die Vermutung mit dem
+`7E5` hat mehrere Anläufe gekostet. Welche Werte es sonst noch gibt und
+welche Fallstricke dazugehören, steht in der README unter „Was das Auto
+hergibt".
 
 Dafür steht `live/quellen/` analog zu `routing/provider.py`: eine Datei je
 Format, die auf einen `Rohpunkt` normalisiert. Mitgeliefert sind jolts
@@ -361,20 +367,64 @@ aus einer Datei, ist eine Frage des Transports. Genau deshalb lässt sich ein
 neues Format anhand einer aufgezeichneten Antwort einbauen, ohne im Auto zu
 sitzen, und `check_quellen.py` läuft ohne alles.
 
-Was noch fehlt, ist dieser Transport. Für ein iPhone ist der einzige heute
-gangbare Weg die ABRP-App als Sensortreiber — sie liest BLE-Dongles live aus,
-und der verbreitete Vgate iCar Pro steht auf ihrer Empfehlungsliste — plus
-deren Telemetrie-API. Car Scanner scheidet auf iOS aus: dort gibt es nur
-Aufzeichnungsdateien zum Herunterladen, keine Live-Ausgabe. Ein Umweg über
-eine fremde Cloud ist das trotzdem, und die Alternative ohne sie wäre ein
-Dongle mit eigener Verbindung (ESP32, spricht dasselbe Format) — der hat dann
-aber kein GPS, und die Position müsste aus der PWA dazukommen.
+**Den Transport gibt es inzwischen, und er kommt ohne fremde Cloud aus.**
+
+Erwogen war die ABRP-App als Sensortreiber plus deren Telemetrie-API — für
+ein iPhone schien das der einzige Weg, denn Car Scanner exportiert dort nur
+Aufzeichnungsdateien. Ein Umweg über einen fremden Dienst wäre es trotzdem
+gewesen, und die Alternative — ein ESP32-Dongle mit eigener Verbindung —
+hätte kein GPS gehabt.
+
+Gebaut wurde ein dritter Weg: **Web Bluetooth**, direkt aus der PWA. Der
+Browser spricht selbst mit dem BLE-Dongle, das Telefon liefert die Position
+dazu, und niemand sonst sieht die Daten. Auf iOS braucht es dafür den Browser
+**Bluefy** — Safari kennt Web Bluetooth nicht —, und `requestDevice` verlangt
+zwingend eine Nutzergeste. Beides sind Einschränkungen, aber keine, die einen
+fremden Dienst nötig machen.
+
+Was dabei nicht vorgesehen war und doch entscheidend wurde: Das Fahrzeug
+spricht auf **zwei Rahmenbreiten** (Klima und Akku auf 11 Bit, alles andere
+auf 29), und ohne die drei Flusskontroll-Befehle scheitert jede Antwort, die
+nicht in einen CAN-Rahmen passt — stumm. Vier der interessantesten Werte
+fehlten deshalb monatelang, ohne dass irgendwo stand, dass sie fehlen.
+
+`live/quellen/` bleibt trotzdem richtig: Ein Logger, der ein fremdes Format
+spricht, meldet weiterhin über `POST /api/live/melden` — der Weg über Web
+Bluetooth ist eine Quelle mehr, nicht die einzige.
 
 **Stufe 5 — Kalibrierung aus echten Fahrten** *(steht)*
 
 Der Korrekturfaktor aus 2.2, gefüttert aus abgeschlossenen Fahrten. Er wird
 beim Beenden einer Live-Sitzung fortgeschrieben, gedämpft und nur, wenn die
 Fahrt lang genug und der gemessene Faktor plausibel war.
+
+Was dabei erst der Praxistest zeigte: **Ladeabschnitte müssen heraus.** Die
+erste Fassung nahm Ladestand am Anfang minus am Ende — wer unterwegs vierzig
+Prozentpunkte nachlädt, sieht damit einen Verlust, der um vierzig zu klein
+ist. Der gelernte Faktor fiel entsprechend zu niedrig aus, und weil er in den
+Plausibilitätsgrenzen blieb, fiel es nicht auf. Aus einer Fahrt mit
+29 kWh/100 km lernte das Fahrzeug 12.
+
+**Stufe 6 — messen statt schätzen** *(steht)*
+
+Nicht vorgesehen, aber aus der ersten echten Aufzeichnung erzwungen: An zu
+vielen Stellen stand eine Schätzung, wo das Fahrzeug die Zahl selbst kennt.
+
+- **Strecke** aus dem Kilometerstand statt aus dem GPS. Bei einer Grösse mit
+  der Strecke im Nenner ist das der Unterschied zwischen brauchbar und
+  irreführend.
+- **Energie** aus den Lebensdauerzählern statt aus dem Ladestand. Ein
+  Ladestandsschritt sind 339 Wh, ein Zählerschritt 0,117 — fast
+  dreitausendmal feiner. Erst damit ist ein Verbrauchsbalken je Minute eine
+  Messung statt Rauschen.
+- **Akkukapazität** vom Fahrzeug statt aus dem Prospekt. Beim ID.Buzz 73,8
+  statt 77 kWh nach 60 000 km; an dieser Zahl hängt jede Umrechnung zwischen
+  Prozent und Kilowattstunden.
+
+Der Grundsatz dahinter gilt über den OBD2-Teil hinaus: Wo eine gemessene und
+eine angenommene Zahl zur Wahl stehen, gewinnt die gemessene — und wo keine
+gemessene da ist, soll die Oberfläche es sagen, statt die Annahme wie eine
+Messung aussehen zu lassen.
 
 ---
 
