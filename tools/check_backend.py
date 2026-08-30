@@ -12,10 +12,15 @@ zusammenkommen - also nie beim Entwickeln.
     ./tools/check_backend.py
 """
 import os
+import re
 import sys
 import tempfile
 
 WERKZEUGE = os.path.dirname(os.path.abspath(__file__))
+# Das Frontend liegt im Repo neben backend/, im Image direkt neben tools/.
+FRONTEND = next(
+    (p for p in (os.path.join(WERKZEUGE, "..", "frontend"),)
+     if os.path.isdir(p)), os.path.join(WERKZEUGE, "..", "frontend"))
 sys.path.insert(0, WERKZEUGE)
 from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
 
@@ -747,6 +752,32 @@ def main() -> int:
            "verlinkt, legt kein Symbol an")
 
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
+
+    # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
+    # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste wird an genau
+    # einer Stelle gefuehrt (obd-kern.js) und von der Oberflaeche ueber
+    # `FELDER` bezogen - sonst taucht eine neue Datenkennung dort nie auf.
+    kern = open(os.path.join(FRONTEND, "obd-kern.js"), encoding="utf-8").read()
+    eintraege = re.findall(r'\{ name: "([a-z_]+)",(.*?)(?=\n    \{ name:|\n  \];)',
+                           kern, re.S)
+    ohne = [n for n, rest in eintraege if "titel:" not in rest]
+    pruefe(eintraege and not ohne,
+           f"alle {len(eintraege)} ausgelesenen Messwerte tragen eine "
+           f"Beschriftung fürs Dashboard", str(ohne))
+    fehlende_einheit = [n for n, rest in eintraege
+                        if "einheit:" not in rest]
+    pruefe(not fehlende_einheit,
+           "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
+           "dastehen", str(fehlende_einheit))
+    pruefe("FELDER: MESSWERTE.map" in kern,
+           "die Liste wird exportiert statt in der Oberfläche wiederholt")
+    live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
+    pruefe("joltObd.FELDER" in live,
+           "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
+           "taucht damit von selbst auf")
+    pruefe("letzteRohwerteZeit" in live,
+           "das Dashboard zeigt, wie alt der letzte Satz aus dem Auto ist - "
+           "eine eingefrorene Anzeige sieht sonst aus wie eine laufende")
 
     # Die Betriebsskripte müssen auch im Container laufen. Dort liegt das
     # Paket als /srv/app neben /srv/tools, lokal dagegen unter backend/app -

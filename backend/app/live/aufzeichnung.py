@@ -184,8 +184,70 @@ def hoehen_ergaenzen(geometrie: list, gps_hoehen: list | None = None
     return [[lon, lat, 0.0] for lon, lat in geometrie], "flach"
 
 
-def tempo_je_teilstueck(punkte: list) -> list:
+# Ab welcher Fahrstrecke der Kilometerstand des Fahrzeugs die Strecke
+# bestimmen darf. Er loest in ganzen Kilometern auf: Auf einer Fahrt von vier
+# Kilometern ist das ein Viertel Unsicherheit, auf hundert ein Prozent.
+ODOMETER_MINDESTSTRECKE_KM = 5.0
+
+# Wie weit Kilometerstand und GPS-Strecke auseinanderliegen duerfen, bevor
+# der Kilometerstand als unglaubwuerdig gilt. Unter 1.0 waere die GPS-Spur
+# laenger als die gefahrene Strecke - das kann nur Rauschen sein. Ueber 3.0
+# stimmt etwas anderes nicht (ein Ableseformat, ein Fahrzeugwechsel), und
+# eine Strecke zu verdreifachen ist zu folgenreich, um es zu raten.
+ODOMETER_GRENZEN = (1.0, 3.0)
+
+
+def odometer_faktor(punkte: list, gps_km: float) -> tuple[float, dict]:
+    """Um wie viel die GPS-Spur zu kurz ist - laut Kilometerstand des Autos.
+
+    **Warum das noetig ist.** Die Strecke einer Aufzeichnung entsteht aus den
+    Messpunkten, und die kommen alle dreissig Sekunden. Bei Landstrassentempo
+    liegen dazwischen vierhundert Meter, und die Luftlinie schneidet jede
+    Kurve ab. Bei einer Funkloch-Luecke fehlt gleich ein ganzes Stueck. Beides
+    macht die Strecke zu kurz - und weil der gemessene Verbrauch in
+    Kilowattstunden **pro hundert Kilometer** gerechnet wird, wandert der
+    Fehler direkt in den Korrekturfaktor des Fahrzeugs.
+
+    Das Auto weiss es genauer. Sein Kilometerstand zaehlt Radumdrehungen und
+    kennt weder Kurven noch Funkloecher.
+
+    Zurueckgegeben wird ein Faktor auf die **ganze** Strecke, nicht je
+    Teilstueck: Der Zaehler loest in ganzen Kilometern auf, und zwischen zwei
+    Messpunkten im Abstand von vierhundert Metern springt er um null oder
+    eins. Fuer das einzelne Teilstueck ist er damit unbrauchbar, fuer die
+    Summe ueber eine Fahrt genau richtig.
+    """
+    stand = [(p.rohwerte or {}).get("km_stand") for p in punkte]
+    stand = [k for k in stand if isinstance(k, (int, float))]
+    if len(stand) < 2:
+        return 1.0, {"grund": "weniger als zwei Ablesungen"}
+
+    gefahren = stand[-1] - stand[0]
+    if gefahren < ODOMETER_MINDESTSTRECKE_KM:
+        return 1.0, {"grund": f"nur {gefahren:g} km laut Zaehler - zu kurz "
+                              f"fuer eine Aufloesung von einem Kilometer",
+                     "odometer_km": gefahren}
+    if gps_km <= 0:
+        return 1.0, {"grund": "keine GPS-Strecke zum Vergleichen"}
+
+    faktor = gefahren / gps_km
+    if not ODOMETER_GRENZEN[0] <= faktor <= ODOMETER_GRENZEN[1]:
+        log.warning("Kilometerstand verworfen: %.0f km laut Zaehler gegen "
+                    "%.1f km aus dem GPS (Faktor %.2f).", gefahren, gps_km,
+                    faktor)
+        return 1.0, {"grund": f"Faktor {faktor:.2f} ausserhalb der Grenzen",
+                     "odometer_km": gefahren, "gps_km": round(gps_km, 1)}
+    return faktor, {"odometer_km": gefahren, "gps_km": round(gps_km, 1),
+                    "faktor": round(faktor, 3)}
+
+
+def tempo_je_teilstueck(punkte: list, strecke_faktor: float = 1.0) -> list:
     """Gefahrene Geschwindigkeit in m/s je Teilstück, aus den Zeitstempeln.
+
+    `strecke_faktor` gehört hier genauso hinein wie ins Energieprofil: Wer
+    die Strecke streckt, ohne das Tempo mitzuziehen, lässt das Modell zu
+    langsam fahren - und über v² sagt es dann deutlich zu wenig Verbrauch
+    voraus.
 
     Der eigentliche Vorzug einer Aufzeichnung: Die geplante Fahrt muss das
     Tempo annehmen, die gefahrene weiss es. Zeitsprünge und Standzeiten
@@ -195,7 +257,8 @@ def tempo_je_teilstueck(punkte: list) -> list:
     """
     tempi = []
     for vorher, nachher in zip(punkte, punkte[1:]):
-        strecke = haversine_m(vorher.lat, vorher.lon, nachher.lat, nachher.lon)
+        strecke = haversine_m(vorher.lat, vorher.lon,
+                              nachher.lat, nachher.lon) * strecke_faktor
         dauer = 0.0
         if vorher.zeit and nachher.zeit:
             dauer = (nachher.zeit - vorher.zeit).total_seconds()
@@ -241,14 +304,22 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
     gps_hoehen = [(p.rohwerte or {}).get("hoehe_m") for p in gewaehlt]
     geometrie, hoehen_quelle = hoehen_ergaenzen(flach, gps_hoehen)
 
-    fahrzeug = fahrt.fahrzeug
     hole_umgebung, mittel_temp = umgebung_bestimmen(gewaehlt, flach)
+
+    # Was das GPS hergibt - und was das Auto dazu sagt.
+    gps_km = sum(haversine_m(a.lat, a.lon, b.lat, b.lon)
+                 for a, b in zip(gewaehlt, gewaehlt[1:])) / 1000.0
+    faktor, odo = odometer_faktor(list(sitzung.punkte), gps_km)
+    if faktor != 1.0:
+        log.info("Strecke nach Kilometerstand gestreckt: %.1f km aus dem GPS "
+                 "-> %g km laut Zaehler (Faktor %.3f).",
+                 gps_km, odo.get("odometer_km"), faktor)
 
     profil = modell.profil_rechnen(
         Fahrzeugwerte.aus_fahrt(fahrt), geometrie,
-        tempo_je_teilstueck(gewaehlt),
+        tempo_je_teilstueck(gewaehlt, faktor),
         start_soc=gewaehlt[0].soc if gewaehlt[0].soc is not None else 100.0,
-        umgebung_fuer=hole_umgebung)
+        umgebung_fuer=hole_umgebung, strecke_faktor=faktor)
     if len(profil.punkte) < 2:
         return {"ok": False, "grund": "Aus der Strecke entstand kein Profil."}
 
@@ -285,7 +356,12 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
             "fahrzeit_minuten": round(profil.minuten),
             "verbrauch_kwh": round(profil.kwh_gesamt, 2),
             "aussentemp_c": fahrt.aussentemp_c,
-            "hoehen": hoehen_quelle}
+            "hoehen": hoehen_quelle,
+            # Woher die Strecke stammt - eine aus dem Kilometerstand
+            # korrigierte ist etwas anderes als eine reine GPS-Spur, und man
+            # soll es der Fahrt ansehen.
+            "strecke_quelle": "kilometerstand" if faktor != 1.0 else "gps",
+            "odometer": odo}
 
 
 def _soll_bei(energieprofil: list, km: float):

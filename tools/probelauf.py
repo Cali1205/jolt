@@ -303,6 +303,11 @@ finally:
 # wären das tausende Punkte; hier alle zwei Minuten, das reicht fürs Verhalten.
 lat, lon = 48.10, 11.50
 soc = 82.0
+# Der Kilometerstand des Fahrzeugs. Er zaehlt die **gefahrene** Strecke, also
+# 0,0135 Grad Breite je Schritt (rund 1,5 km) plus einen Zuschlag fuer die
+# Kurven, die zwischen zwei Messpunkten liegen und die kein Punkt sieht.
+km_stand = 12800.0
+KURVENZUSCHLAG = 1.25
 jetzt = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=200)
 punkte_ok, punkte_fehler = 0, 0
 phase_log = []
@@ -311,6 +316,7 @@ for minute in range(0, 200, 2):
     zeit = jetzt + timedelta(minutes=minute)
     if minute < 90:                    # fahren
         lat += 0.0135
+        km_stand += 1.5 * KURVENZUSCHLAG
         soc -= 0.55
         phase = "fahrt"
         tempo = 115.0
@@ -319,9 +325,16 @@ for minute in range(0, 200, 2):
         phase = "laden"
         tempo = 0.0
     elif minute < 150:                 # Funkloch - es kommt nichts herein
+        # Gefahren wird trotzdem: Das Auto bewegt sich, der Zaehler laeuft,
+        # nur die Meldung geht nicht raus. Genau die Luecke, die der
+        # Kilometerstand hinterher wieder schliesst.
+        lat += 0.0135
+        km_stand += 1.5 * KURVENZUSCHLAG
+        soc -= 0.55
         continue
     else:                              # weiterfahren
         lat += 0.0135
+        km_stand += 1.5 * KURVENZUSCHLAG
         soc -= 0.55
         phase = "fahrt2"
         tempo = 115.0
@@ -331,7 +344,7 @@ for minute in range(0, 200, 2):
            "tempo_kmh": tempo, "aussentemp_c": 4.0, "innentemp_c": 21.0}
     if minute % 10 == 0:               # nicht jede Runde antwortet alles
         roh["nebenverbrauch_kw"] = 2.1
-        roh["km_stand"] = 12800 + minute
+        roh["km_stand"] = round(km_stand)
     else:
         roh["_fehlend"] = ["nebenverbrauch_kw", "km_stand"]
 

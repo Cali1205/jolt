@@ -189,8 +189,18 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
             "etiketten": gruppe["etiketten"],
             "strecke_km": strecke.strecke_m / 1000.0 if strecke.strecke_m
                 else profil.strecke_km,
-            "fahrzeit_min": strecke.fahrzeit_s / 60.0 if strecke.fahrzeit_s
-                else profil.minuten,
+            # Fahrzeit: die Zahl von openrouteservice ist die realistische
+            # Grundlage - sie kennt Kreuzungen, Kreisel und Ortsdurchfahrten,
+            # die das Verbrauchsmodell nicht kennt. Nur kennt **sie** den
+            # Tempo-Regler nicht, und der verschiebt sie linear: Wer zehn
+            # Prozent schneller faehrt, braucht ein Elftel weniger Zeit.
+            #
+            # Ohne diese Teilung stand die Fahrzeit unveraendert da, egal wo
+            # der Regler stand - waehrend Verbrauch und Ladeplan darunter
+            # sich sehr wohl aenderten. Zwei verschiedene Zeiten fuer
+            # dieselbe Fahrt auf demselben Schirm.
+            "fahrzeit_min": (strecke.fahrzeit_s / 60.0 / anfrage.tempo_faktor)
+                if strecke.fahrzeit_s else profil.minuten,
             "punkte": punkte, "profil": profil, "mittel": mittel})
 
     # Die günstigste Variante bekommt zusätzlich "sparsamste" - das ist keine

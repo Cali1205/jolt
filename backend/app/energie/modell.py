@@ -218,7 +218,8 @@ def segment_wh(fz: Fahrzeugwerte, strecke_m: float, hoehe_delta_m: float,
 
 def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
                    start_soc: float, umgebung_fuer=None,
-                   tempo_faktor: float = 1.0) -> Profil:
+                   tempo_faktor: float = 1.0,
+                   strecke_faktor: float = 1.0) -> Profil:
     """Das Energieprofil über die gesamte Route.
 
     `punkte`      : [[lon, lat, hoehe], ...] aus dem Routing
@@ -227,6 +228,16 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
     `tempo_faktor`: 1.1 heisst "zehn Prozent schneller als das Routing annimmt".
                     Genau der Regler, mit dem man unterwegs einen Ladestopp
                     einsparen kann - er wirkt über v² überproportional.
+    `strecke_faktor`: Streckt jedes Teilstück. Gebraucht für **Aufzeichnungen**,
+                    deren Stützpunkte weit auseinanderliegen: Zwischen zwei
+                    GPS-Meldungen im Abstand von dreissig Sekunden liegen bei
+                    Landstrassentempo vierhundert Meter, und die Luftlinie
+                    dazwischen schneidet jede Kurve ab. Der Kilometerstand des
+                    Fahrzeugs weiss es besser; `live/aufzeichnung.py` bildet
+                    daraus den Faktor. Er wirkt auf Roll- und Luftwiderstand
+                    wie auf die Steigung - eine längere Strecke bei gleichem
+                    Höhenunterschied ist eine flachere Steigung, und genau so
+                    war sie auch gefahren.
     """
     standard = Umgebung()
     hole_umgebung = umgebung_fuer or (lambda lat, lon: standard)
@@ -252,7 +263,7 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
         h1 = punkte[i][2] if len(punkte[i]) > 2 else 0.0
         h2 = punkte[i + 1][2] if len(punkte[i + 1]) > 2 else 0.0
 
-        strecke = haversine_m(lat1, lon1, lat2, lon2)
+        strecke = haversine_m(lat1, lon1, lat2, lon2) * strecke_faktor
         if strecke <= 0:
             continue
 

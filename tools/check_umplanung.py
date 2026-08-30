@@ -17,6 +17,7 @@ Ohne Netz, ohne Postgres, ohne API-Schlüssel:
 """
 import os
 import sys
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -596,6 +597,93 @@ def teil_verwaiste_fahrt():
     pruefe(frisch_id not in [b["sitzung_id"] for b in beendet],
            "eine, die gerade gemeldet hat, bleibt in Ruhe - Aufräumen darf "
            "keine laufende Fahrt abschneiden", str(beendet))
+
+
+def teil_odometer_strecke():
+    """Der Kilometerstand des Autos bestimmt die Strecke, nicht das GPS.
+
+    Die Strecke einer Aufzeichnung entsteht aus den Messpunkten. Kommen die
+    nur alle dreissig Sekunden, liegen bei Landstrassentempo vierhundert
+    Meter dazwischen - und die Luftlinie schneidet jede Kurve ab. Bei einer
+    Funkloch-Luecke fehlt gleich ein ganzes Stueck. Beides macht die Strecke
+    zu kurz, und weil der Verbrauch in kWh **pro hundert Kilometer** gerechnet
+    wird, wandert der Fehler direkt in den Korrekturfaktor des Fahrzeugs.
+
+    Der Zaehler im Auto kennt weder Kurven noch Funkloecher.
+    """
+    import math
+
+    from app.live import aufzeichnung as auf
+
+    client = TestClient(app)
+    print("\nStrecke aus dem Kilometerstand")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+
+    def fahrt(name, mit_zaehler):
+        start = client.post("/api/live/aufzeichnung", json={
+            "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+            "soc": 90.0, "name": name}).json()
+        db = SessionLocal()
+        try:
+            sitzung = db.get(models.LiveSitzung, start["sitzung_id"])
+            beginn = datetime.utcnow() - timedelta(minutes=60)
+            # Eine Serpentinenstrasse, grob abgetastet: Die Messpunkte liegen
+            # so weit auseinander, dass die Luftlinie die Kurven abschneidet -
+            # genau wie bei dreissig Sekunden Meldeabstand.
+            for i in range(60):
+                lat = 48.0 + i * 0.004
+                lon = 11.0 + 0.02 * math.sin(i * 1.1)
+                roh = {"soc_roh": 200}
+                if mit_zaehler:
+                    # Der Zaehler laeuft mit der *wirklichen* Strecke. Die
+                    # Luftlinien zwischen den Messpunkten ergeben rund
+                    # 1,1 km je Schritt; gefahren wurden 1,55 - die Kurven
+                    # dazwischen, die kein Messpunkt gesehen hat.
+                    roh["km_stand"] = 59500 + round(i * 1.55)
+                live_sitzung.messpunkt_aufnehmen(
+                    db, sitzung, lat, lon, soc=90.0 - i * 0.4,
+                    aussentemp_c=12.0, zeit=beginn + timedelta(minutes=i),
+                    rohwerte=roh)
+        finally:
+            db.close()
+        return client.post(f"/api/live/{start['sitzung_id']}/ende").json()
+
+    ohne = (fahrt("Nur GPS", False).get("aufzeichnung") or {})
+    mit = (fahrt("Mit Zähler", True).get("aufzeichnung") or {})
+
+    pruefe(ohne.get("ok") and mit.get("ok"),
+           "beide Aufzeichnungen lassen sich abschliessen",
+           f"{ohne.get('grund')} / {mit.get('grund')}")
+    pruefe(ohne.get("strecke_quelle") == "gps",
+           "ohne Kilometerstand bleibt es bei der GPS-Spur",
+           str(ohne.get("strecke_quelle")))
+    pruefe(mit.get("strecke_quelle") == "kilometerstand",
+           "mit Kilometerstand wird der genommen",
+           f"{mit.get('strecke_quelle')} - {mit.get('odometer')}")
+    pruefe((mit.get("strecke_km") or 0) > (ohne.get("strecke_km") or 0) * 1.2,
+           "und die Strecke wird spürbar länger - die abgeschnittenen Kurven "
+           "kommen zurück",
+           f"{ohne.get('strecke_km')} km → {mit.get('strecke_km')} km")
+
+    # Der Zaehler muss auch zum Zaehlerstand passen.
+    odo = (mit.get("odometer") or {}).get("odometer_km")
+    pruefe(odo and abs((mit.get("strecke_km") or 0) - odo) < 1.5,
+           "die gebaute Strecke trifft den Zählerstand",
+           f"{mit.get('strecke_km')} km gegen {odo} km laut Zähler")
+
+    # Unsinnige Werte duerfen nicht durchschlagen.
+    faktor, grund = auf.odometer_faktor(
+        [SimpleNamespace(rohwerte={"km_stand": 1000}),
+         SimpleNamespace(rohwerte={"km_stand": 1900})], gps_km=10.0)
+    pruefe(faktor == 1.0,
+           "ein Zählerstand, der die Strecke verneunfachen würde, wird "
+           "verworfen statt geglaubt", str(grund))
+    faktor, _ = auf.odometer_faktor(
+        [SimpleNamespace(rohwerte={"km_stand": 1000}),
+         SimpleNamespace(rohwerte={"km_stand": 1002})], gps_km=2.5)
+    pruefe(faktor == 1.0,
+           "und unter fünf Kilometern gar nicht erst benutzt - bei einem "
+           "Kilometer Auflösung wäre das geraten")
 
 
 def teil_ladeplan_ein_weg():
@@ -1415,6 +1503,7 @@ def main() -> int:
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
     teil_hoehenquelle()
+    teil_odometer_strecke()
     teil_ladeplan_ein_weg()
     teil_laden_verfaelscht_nicht()
     teil_luecke_kilometer()

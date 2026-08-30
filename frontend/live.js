@@ -31,6 +31,7 @@ window.joltLive = (function () {
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
   let letzteRohwerte = null;
+  let letzteRohwerteZeit = 0;   // wann der letzte vollständige Satz ankam
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
    * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
@@ -45,11 +46,25 @@ window.joltLive = (function () {
    * Wert, der immer von jetzt ist. */
   let nebenverbrauch = null;   // {kw, zeit}
 
-  // Wie oft die Position gemeldet wird. Die Nachführung mittelt über 25 km
-  // und braucht mindestens 5 km, bevor sie überhaupt etwas sagt - alle
-  // dreissig Sekunden ist bei Landstrassentempo rund ein halber Kilometer und
-  // damit dicht genug. Häufiger kostet Akku und Mobilfunk, ohne etwas zu sagen.
-  const MELDEABSTAND_MS = 30000;
+  /* Wie oft die Position gemeldet wird.
+   *
+   * Hier standen dreissig Sekunden, mit der Begründung, die Nachführung
+   * mittle ohnehin über Kilometer. Für die **Nachführung** stimmt das; für
+   * die **Aufzeichnung** nicht, und die war damals noch nicht gebaut. Dort
+   * ist jeder Messpunkt ein Stützpunkt der Strecke, die hinterher aus ihnen
+   * entsteht - bei Landstrassentempo lagen vierhundert Meter dazwischen, und
+   * die Luftlinie schneidet jede Kurve ab. Die erste echte Testfahrt hat
+   * genau das gezeigt.
+   *
+   * Zwölf Sekunden sind rund hundertsechzig Meter und bringen die Kurven
+   * zurück, ohne dass Akku und Mobilfunk spürbar mehr kosten: Eine Meldung
+   * ist ein kleines JSON, und das GPS läuft ohnehin.
+   *
+   * Für die Länge der Strecke ist der Kilometerstand des Fahrzeugs die
+   * bessere Quelle (siehe `live/aufzeichnung.odometer_faktor`) - dichtere
+   * Punkte braucht es trotzdem, denn sie tragen den **Verlauf**: Höhenprofil,
+   * Tempo je Teilstück, und die Karte. */
+  const MELDEABSTAND_MS = 12000;
 
   function verbindungAnzeigen(text, farbe) {
     const el = document.getElementById("live-verbindung");
@@ -677,6 +692,7 @@ window.joltLive = (function () {
    * Energieprofil hoch. */
   function positionVerfolgen() {
     if (!navigator.geolocation || wache !== null) return;
+    bildschirmWachHalten();
     wache = navigator.geolocation.watchPosition(
       (pos) => {
         const jetzt = Date.now();
@@ -697,7 +713,61 @@ window.joltLive = (function () {
     if (wache === null) return;
     try { navigator.geolocation.clearWatch(wache); } catch (e) {}
     wache = null;
+    bildschirmFreigeben();
   }
+
+  /* ---------- Der Bildschirm muss anbleiben ---------- */
+
+  /* Ohne das schaltet iOS den Bildschirm nach einer Minute aus, und mit dem
+   * Bildschirm schläft die Seite: `watchPosition` liefert nichts mehr, die
+   * Bluetooth-Schleife steht, und beim Aufwachen fehlt das Stück dazwischen.
+   *
+   * Die Diagnoseseite unter /obd hatte das von Anfang an, diese Ansicht
+   * nicht - und aufgezeichnet wird hier. In der ersten echten Testfahrt
+   * klafft genau deshalb eine Lücke von acht Minuten mit einem einzigen
+   * Messpunkt darin.
+   *
+   * Die Sperre geht verloren, sobald die Seite in den Hintergrund gerät, und
+   * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
+   * geholt. */
+  let wachhalter = null;
+
+  async function bildschirmWachHalten() {
+    if (!("wakeLock" in navigator) || wachhalter) return;
+    try {
+      wachhalter = await navigator.wakeLock.request("screen");
+      wachhalter.addEventListener("release", () => { wachhalter = null; });
+    } catch (fehler) {
+      // Kein Grund, die Fahrt nicht aufzuzeichnen - nur einer, den
+      // Bildschirm in den Einstellungen an zu lassen.
+      console.log("[live] Bildschirm wachhalten ging nicht:", fehler.message);
+    }
+  }
+
+  function bildschirmFreigeben() {
+    if (!wachhalter) return;
+    try { wachhalter.release(); } catch (e) {}
+    wachhalter = null;
+  }
+
+  /* Zurück im Vordergrund: aufholen, was im Hintergrund liegengeblieben ist.
+   *
+   * iOS friert eine Seite im Hintergrund ein. Der Abriss der
+   * Bluetooth-Verbindung wird dann zwar gemeldet, aber der Wiederaufbau
+   * hängt an einem Zeitgeber, und der läuft erst weiter, wenn die Seite
+   * wieder sichtbar ist. Ohne dieses Nachfassen bliebe der Dongle getrennt,
+   * bis der nächste Abriss kommt - und der kommt nicht mehr. */
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !K.zustand.sitzungId) return;
+    bildschirmWachHalten();
+    if (dongle && window.joltObd && !window.joltObd.verbunden()) {
+      window.joltObd.wiederverbinden(1, () => !!K.zustand.sitzungId);
+    }
+    // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
+    // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
+    // wichtige - er schliesst die Lücke.
+    letzteMeldung = 0;
+  });
 
   /* Wenn ein Dongle mitliest, wandert der Ladestand von hier aus mit.
    *
@@ -788,10 +858,53 @@ window.joltLive = (function () {
     }
 
     document.getElementById("live-auto-werte").innerHTML =
-      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`;
-    const fehlend = (roh._fehlend || []).length;
-    document.getElementById("live-auto-stand").textContent =
-      fehlend ? `${fehlend} Werte antworten nicht` : "";
+      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`
+      + rohwerteTabelle(roh);
+
+    /* Wie alt der letzte Satz ist - die Frage, die man am Steuer wirklich
+     * hat. "3 s" heisst, der Dongle antwortet; "4 min" heisst, er ist weg,
+     * und die Zahlen darunter sind Erinnerungen. Ohne diese Angabe sieht
+     * eine eingefrorene Anzeige genauso aus wie eine laufende. */
+    const alter = letzteRohwerteZeit
+      ? Math.round((Date.now() - letzteRohwerteZeit) / 1000) : null;
+    const stand = document.getElementById("live-auto-stand");
+    if (alter === null) {
+      stand.textContent = "";
+    } else if (alter < 90) {
+      stand.textContent = `vor ${alter} s`;
+      stand.style.color = "";
+    } else {
+      stand.textContent = `seit ${K.dauer(alter / 60)} keine Antwort`;
+      stand.style.color = "#e8804f";
+    }
+  }
+
+  /* Alles, was das Auto liefert - als Tabelle, nicht als Satz.
+   *
+   * Die Zeile darüber beantwortet "wie läuft es gerade". Diese Tabelle
+   * beantwortet die andere Frage: "kommt überhaupt an, was ankommen soll".
+   * Dafür muss auch dastehen, was **nicht** geantwortet hat - ein fehlender
+   * Wert ist beim Einrichten die interessantere Information als ein
+   * vorhandener, und ein Zähler ("3 Werte antworten nicht") sagt nicht,
+   * welche drei.
+   *
+   * Die Liste kommt aus `joltObd.FELDER`, damit eine neue Datenkennung hier
+   * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
+  function rohwerteTabelle(roh) {
+    const felder = (window.joltObd && window.joltObd.FELDER) || [];
+    if (!felder.length) return "";
+    const fehlend = new Set(roh._fehlend || []);
+    const zeilen = felder.map((f) => {
+      const wert = roh[f.name];
+      const da = typeof wert === "number";
+      const text = da
+        ? K.zahl(wert, f.stellen) + (f.einheit ? " " + f.einheit : "")
+        : (fehlend.has(f.name) ? "keine Antwort"
+           : (f.selten ? "nicht in dieser Runde" : "–"));
+      return `<tr class="${da ? "" : "leer"}"><th>${f.titel}</th>`
+        + `<td>${text}</td></tr>`;
+    });
+    return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
   }
 
   async function positionMelden(coords) {
@@ -808,6 +921,7 @@ window.joltLive = (function () {
           roh.hoehe_m = Math.round(coords.altitude);
         }
         letzteRohwerte = roh;
+        letzteRohwerteZeit = Date.now();
         nebenverbrauchMerken(roh);
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
         nutzlast.soc = Math.round(wert.hmi * 10) / 10;
@@ -921,6 +1035,7 @@ window.joltLive = (function () {
     gefahrenKm = 0;
     verlauf = [];
     letzteRohwerte = null;
+    letzteRohwerteZeit = 0;
     nebenverbrauch = null;
     if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
     if (steckdose) {
