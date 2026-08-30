@@ -399,7 +399,7 @@ function befehl(text, grenze_ms = 15000) {
    * Klimasteuergerät (0x00000746) ist es 00. Wer cp stehen lässt, sendet an
    * eine ganz andere Kennung und bekommt NO DATA - genau der Fehler, der
    * die Suche nach dem Ladestand aufgehalten hat. */
-  const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B" };
+  const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B", fcsh: "17FC007B" };
   /* Das Klimasteuergeraet haengt an einer **11-Bit-Kennung**, nicht an einer
    * 29-Bit wie alles andere.
    *
@@ -418,16 +418,16 @@ function befehl(text, grenze_ms = 15000) {
    * Ungeprueft am Fahrzeug: Es folgt aus den Adressen, nicht aus einer
    * Messung. Deshalb liegt es hinter `selten` und faellt nach einem
    * Fehlschlag fuer die Sitzung aus (siehe `messwertLesen`). */
-  const KLIMA = { cp: "00", sh: "746", cra: "7B0", protokoll: "6" };
+  const KLIMA = { cp: "00", sh: "746", cra: "7B0", fcsh: "746", protokoll: "6" };
 
   /* Das Batteriemanagement auf der 11-Bit-Seite. Dieselbe Umschaltung wie
    * beim Klimageraet - es antwortet auf 0x77A, nicht auf 0x17FE007B. */
-  const AKKU11 = { cp: "00", sh: "710", cra: "77A", protokoll: "6" };
+  const AKKU11 = { cp: "00", sh: "710", cra: "77A", fcsh: "710", protokoll: "6" };
   // Fahrzeug-Steuergerät: Kilometerstand und - der eigentliche Fund - die
   // Leistung der Nebenverbraucher als fertige Zahl.
-  const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076" };
+  const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076", fcsh: "17FC0076" };
   // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
-  const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9" };
+  const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9", fcsh: "17FC00B9" };
   const MESSWERTE = [
     { name: "soc_roh", titel: "Rohwert SoC", einheit: null, stellen: 0,
       did: "22028C", adresse: BMS, pflicht: true,
@@ -435,11 +435,29 @@ function befehl(text, grenze_ms = 15000) {
     { name: "spannung_v", titel: "Spannung", einheit: "V", stellen: 1,
       did: "221E3B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 4 : null },
+    /* Batteriestrom. Die Umrechnung stammt aus dem WiCAN-Fahrzeugprofil,
+     * das den ID.Buzz ausdruecklich nennt:
+     *
+     *     HV_A = (150000 - [B5:B9]) / 100
+     *
+     * Zwei Unterschiede zur bisherigen Fassung. Erstens das **Vorzeichen**:
+     * 150000 minus Rohwert, nicht umgekehrt. Zweitens die **Byte-Lage** -
+     * WiCAN liest ab B5, jolt las ab B4 (dort heisst B4 unser b[0]).
+     * Fuenf Bytes bedeuten ausserdem eine Antwort ueber mehr als einen
+     * Rahmen; ohne Flusskontrolle kam sie ueberhaupt nicht an.
+     *
+     * Die Schranke steht dabei, weil zwei Quellen sich widersprechen -
+     * spot2000 rechnet mit vier Bytes ab B4 und umgekehrtem Vorzeichen.
+     * Ein Ladestrom jenseits von tausend Ampere gibt es nicht; kommt so
+     * etwas heraus, war die Annahme falsch und die Zeile bleibt leer. */
     { name: "strom_a", titel: "Strom", einheit: "A", stellen: 1,
       did: "221E3D", adresse: BMS,
-      lesen: (b) => b.length >= 4
-        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
-        : null },
+      lesen: (b) => {
+        if (b.length < 6) return null;
+        const roh = b.slice(1, 6).reduce((a, x) => a * 256 + x, 0);
+        const a = (150000 - roh) / 100;
+        return Math.abs(a) <= 1000 ? a : null;
+      } },
     /* `energie_kwh` (221E32) stand hier und wurde nie ausgewertet.
      *
      * Zwei Fehler auf einmal: Die MEB-Referenz weist die Antwort als
@@ -523,11 +541,25 @@ function befehl(text, grenze_ms = 15000) {
     { name: "akku_kwh", titel: "Akkukapazität", einheit: "kWh", stellen: 1,
       did: "222AB2", adresse: AKKU11, selten: 40,
       lesen: (b) => {
-        if (b.length < 4) return null;
-        const wh = (b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3];
-        const kwh = wh / 1000;
+        // WiCAN: HV_CAPACITY_KWH = [B4:B5] * 50, das Ergebnis in Wh.
+        // Meine erste Annahme (vier Bytes in Wh) war geraten und falsch.
+        if (b.length < 2) return null;
+        const kwh = ((b[0] * 256) + b[1]) * 50 / 1000;
         return (kwh >= 10 && kwh <= 200) ? kwh : null;
       } },
+    /* Die Reichweite, die das Auto selbst ausrechnet. Interessant als
+     * Gegenprobe zu jolts Prognose - dieselbe Frage, zwei Antworten. */
+    { name: "reichweite_km", titel: "Reichweite (Auto)", einheit: "km",
+      stellen: 0, did: "222AB6", adresse: AKKU11, selten: 10,
+      lesen: (b) => b.length >= 3 ? (b[1] * 256) + b[2] : null },
+    /* Die Batterietemperatur. Sie bestimmt die Ladeleistung, und bisher
+     * nimmt `laden/kurven.temperatur_faktor` die **Aussen**temperatur als
+     * Ersatz - der Kommentar dort sagt selbst, dass sie die Kaelte der
+     * Batterie nach einer Nacht im Freien unterschaetzt. Hier ist der
+     * richtige Wert. */
+    { name: "batterie_c", titel: "Batterietemperatur", einheit: "°C",
+      stellen: 1, did: "222A0B", adresse: BMS, selten: 10,
+      lesen: (b) => b.length ? (b[0] / 2) - 40 : null },
     /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
      * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
      * Pflichtwerte dieser Runde laengst gelesen. */
@@ -604,6 +636,31 @@ function befehl(text, grenze_ms = 15000) {
    * Umlauf dauerhaft, ohne je einen Wert zu bekommen. */
   const wechselGescheitert = new Set();
 
+  /* Flusskontrolle - der fehlende Handgriff bei langen Antworten.
+   *
+   * Passt eine Antwort nicht in einen Rahmen, muss der Fragende ein
+   * Flow-Control-Paket zuruecksenden, bevor das Steuergeraet weiterschickt.
+   * Der ELM327 macht das selbst, aber nur, wenn er weiss, **mit welchem
+   * Kopf** - bei einer Standardadresse raet er richtig, bei den
+   * MEB-Adressen nicht.
+   *
+   * jolt setzte diese drei Befehle gar nicht. Damit scheiterte jede
+   * mehrteilige Antwort stumm: Der Batteriestrom (221E3D) kam in allen 77
+   * Runden der dritten Testfahrt nicht an, und der Energieinhalt des Akkus
+   * ebenso wenig. Das WiCAN-Fahrzeugprofil setzt sie vor **jeder** Abfrage;
+   * dieselbe Reihenfolge steht hier.
+   *
+   *   ATFCSH  Kopf des Flow-Control-Pakets
+   *   ATFCSD  dessen Inhalt: 30 = weiter, 00 = ohne Pause, 00 = ohne Abstand
+   *   ATFCSM1 diese Vorgaben benutzen statt selbst zu raten
+   */
+  async function flusskontrolle(ziel) {
+    if (!ziel.fcsh) return;
+    await befehl(`ATFCSH${ziel.fcsh}`);
+    await befehl("ATFCSD300000");
+    await befehl("ATFCSM1");
+  }
+
   async function messwertLesen(eintrag) {
     const ziel = eintrag.adresse;
 
@@ -617,6 +674,7 @@ function befehl(text, grenze_ms = 15000) {
       try {
         await befehl(`ATSP${ziel.protokoll}`);
         await befehl(`ATSH${ziel.sh}`);
+        await flusskontrolle(ziel);
         await befehl(`ATCRA${ziel.cra}`);
         return auswerten(await befehl(eintrag.did, 8000), eintrag);
       } catch (fehler) {
@@ -640,6 +698,7 @@ function befehl(text, grenze_ms = 15000) {
         await befehl(`ATCP${ziel.cp}`);
       }
       await befehl(`ATSH${ziel.sh}`);
+      await flusskontrolle(ziel);
       await befehl(`ATCRA${ziel.cra}`);
       letzteAdresse = ziel;
     }

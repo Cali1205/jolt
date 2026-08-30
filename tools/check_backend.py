@@ -814,6 +814,19 @@ def main() -> int:
     pruefe("wechselGescheitert" in kern,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
 
+    # Ohne Flusskontrolle scheitert jede Antwort, die nicht in einen CAN-
+    # Rahmen passt - der ELM327 muss wissen, mit welchem Kopf er das
+    # Flow-Control-Paket schickt. Das WiCAN-Fahrzeugprofil setzt die drei
+    # Befehle vor jeder Abfrage; jolt setzte sie gar nicht, und genau
+    # deshalb kam der Batteriestrom in keiner einzigen Runde an.
+    for befehl in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
+        pruefe(befehl in kern, f"die Flusskontrolle setzt {befehl}")
+    pruefe(kern.count("await flusskontrolle(ziel)") >= 2,
+           "und zwar auf beiden Wegen - mit und ohne Protokollwechsel")
+    pruefe(all(f'fcsh: "{h}"' in kern
+               for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
+           "jede Zieladresse bringt ihren eigenen Flow-Control-Kopf mit")
+
     pruefe("function mehrrahmen" in kern,
            "lange Antworten werden aus mehreren CAN-Rahmen zusammengesetzt - "
            "ohne das landen Köpfe und Steuerbytes als Nutzdaten im Ergebnis")
