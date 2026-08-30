@@ -927,17 +927,11 @@ window.joltLive = (function () {
    * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
   function werteMerken(roh) {
     const jetzt = Date.now();
-    // Für den Verbrauchsplot: Leistung, Kilometerstand und Ladestand mit
-    // Zeitstempel. Die Leistung nur, wenn Strom **und** Spannung da sind.
-    const kw = (typeof roh.spannung_v === "number"
-                && typeof roh.strom_a === "number")
-      ? roh.spannung_v * roh.strom_a / 1000 : null;
-    if (typeof roh.km_stand === "number" || kw !== null) {
-      verbrauchsspur.push({ zeit: jetzt, kw,
-                            km: typeof roh.km_stand === "number"
-                              ? roh.km_stand : null,
-                            soc: typeof roh.soc_roh === "number"
-                              ? roh.soc_roh / 2.5 : null });
+    // Für den Verbrauchsplot: Kilometerstand und Ladestand mit Zeitstempel.
+    // Die Leistung steht bewusst nicht dabei - siehe verbrauchsabschnitte().
+    if (typeof roh.km_stand === "number" && typeof roh.soc_roh === "number") {
+      verbrauchsspur.push({ zeit: jetzt, km: roh.km_stand,
+                            soc: roh.soc_roh / 2.5 });
       if (verbrauchsspur.length > 3000) verbrauchsspur.shift();
     }
     for (const [name, wert] of Object.entries(roh)) {
@@ -994,33 +988,49 @@ window.joltLive = (function () {
 
   /* ---------- Verbrauch je Zeitabschnitt ---------- */
 
-  /* **Warum die Abschnittsbreite von der Quelle abhaengt.**
+  /* **Warum fuenf Minuten und nicht eine - und warum aus dem Ladestand.**
    *
-   * Aus der Leistung (Spannung mal Strom) laesst sich der Verbrauch einer
-   * einzelnen Minute genau bestimmen - bei einer Meldung alle zwoelf
-   * Sekunden sind das fuenf Stuetzstellen.
+   * Naheliegend waere, die Leistung (Spannung mal Strom) ueber die Zeit
+   * aufzusummieren. Das war der erste Entwurf, und er war falsch: Der
+   * Batteriestrom aendert sich im Sekundentakt, gemeldet wird alle zwoelf
+   * Sekunden. Fuenf Stichproben je Minute sind dann kein Integral, sondern
+   * eine Umfrage - und die Streuung schlaegt voll durch.
    *
-   * Aus dem **Ladestand** nicht. Der Dongle liefert ihn in Schritten von
-   * 0,4 Prozentpunkten; bei 77 kWh ist ein Schritt rund 0,31 kWh. Eine
-   * Minute bei sechzig km/h und 25 kWh/100 verbraucht 0,25 kWh - also
-   * **weniger als einen Schritt**. Ein Balken je Minute waere dann kein
-   * Verbrauch, sondern das Rauschen der Quantisierung: mal null, mal 31
-   * kWh/100. Deshalb fuenf Minuten, wenn nur der Ladestand da ist.
+   * Durchgerechnet, mittlerer relativer Fehler je Abschnitt:
+   *
+   *                        aus Strom (12 s)   aus Ladestand
+   *     Landstrasse  1 min       25 %
+   *     Landstrasse  5 min       11 %              3 %
+   *     Stadt        1 min       59 %
+   *     Stadt        5 min       27 %              3 %
+   *     Autobahn     5 min        3 %              3 %
+   *
+   * Die beiden Fehler skalieren verschieden. Der Abtastfehler faellt mit
+   * der Wurzel der Stichprobenzahl - langsam. Der Quantisierungsfehler des
+   * Ladestands ist **absolut begrenzt** (ein Schritt, 0,44 Prozentpunkte),
+   * also relativ umso kleiner, je mehr in dem Abschnitt verbraucht wurde.
+   * Ab fuenf Minuten ist der Ladestand deshalb nirgends schlechter und in
+   * der Stadt neunmal besser.
+   *
+   * Der Strom wird fuer diesen Plot damit gar nicht gebraucht - was ihn
+   * nebenbei unabhaengig davon macht, ob `strom_a` ueberhaupt antwortet.
+   *
+   * Unter fuenf Minuten waere ein Balken bei keiner Quelle eine Messung.
+   * Deshalb steht dort die Breite und nicht der Wunsch.
    */
-  const ABSCHNITT_MIT_STROM_S = 60;
-  const ABSCHNITT_AUS_SOC_S = 300;
+  const ABSCHNITT_S = 300;
   // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
   const BALKEN_MIND_KM = 0.3;
 
   function verbrauchsabschnitte() {
-    const punkte = verbrauchsspur.filter((p) => typeof p.km === "number");
+    const punkte = verbrauchsspur.filter(
+      (p) => typeof p.km === "number" && p.soc !== null);
     if (punkte.length < 2) return null;
-    const mitStrom = punkte.some((p) => p.kw !== null);
-    const breite = (mitStrom ? ABSCHNITT_MIT_STROM_S : ABSCHNITT_AUS_SOC_S) * 1000;
     const akku = (K.zustand.aufzFahrzeug
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {}).akku_netto_kwh;
-    if (!mitStrom && !akku) return null;
+    if (!akku) return null;
 
+    const breite = ABSCHNITT_S * 1000;
     const beginn = punkte[0].zeit;
     const eimer = new Map();
     for (const p of punkte) {
@@ -1034,29 +1044,12 @@ window.joltLive = (function () {
       if (gruppe.length < 2) continue;
       const erst = gruppe[0], letzt = gruppe[gruppe.length - 1];
       const km = letzt.km - erst.km;
-      const stunden = (letzt.zeit - erst.zeit) / 3600000;
-      if (km < BALKEN_MIND_KM || stunden <= 0) continue;
-
-      let kwh = null;
-      if (mitStrom) {
-        // Leistung ueber die Zeit aufsummiert - Trapeze zwischen den
-        // Stuetzstellen, damit ein Lastwechsel nicht ganz oder gar nicht
-        // zaehlt.
-        let summe = 0;
-        for (let i = 1; i < gruppe.length; i++) {
-          const a = gruppe[i - 1], b = gruppe[i];
-          if (a.kw === null || b.kw === null) continue;
-          summe += (a.kw + b.kw) / 2 * ((b.zeit - a.zeit) / 3600000);
-        }
-        kwh = summe;
-      } else if (erst.soc !== null && letzt.soc !== null) {
-        kwh = (erst.soc - letzt.soc) / 100 * akku;
-      }
-      if (kwh === null || !Number.isFinite(kwh)) continue;
-      balken.push({ n, kwh100: kwh / km * 100,
-                    minute: (erst.zeit - beginn) / 60000 });
+      if (km < BALKEN_MIND_KM) continue;
+      const kwh = (erst.soc - letzt.soc) / 100 * akku;
+      if (!Number.isFinite(kwh)) continue;
+      balken.push({ n, kwh100: kwh / km * 100, km });
     }
-    return balken.length ? { balken, mitStrom, breite } : null;
+    return balken.length ? { balken, breite } : null;
   }
 
   function verbrauchZeichnen() {
@@ -1107,8 +1100,7 @@ window.joltLive = (function () {
 
     const schnitt = werte.reduce((a, v) => a + v, 0) / werte.length;
     fuss.children[0].textContent =
-      `Verbrauch je ${daten.breite / 60000} min`
-      + (daten.mitStrom ? "" : " (aus dem Ladestand)");
+      `Verbrauch je ${daten.breite / 60000} min`;
     fuss.children[1].textContent = `Ø ${K.zahl(schnitt, 1)} kWh/100`;
   }
 

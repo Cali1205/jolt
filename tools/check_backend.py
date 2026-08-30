@@ -842,9 +842,12 @@ def main() -> int:
            "steht die Zahl minutenlang still")
     pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
-    pruefe("ABSCHNITT_MIT_STROM_S" in live and "ABSCHNITT_AUS_SOC_S" in live,
-           "und seine Abschnittsbreite haengt an der Quelle - aus dem "
-           "Ladestand allein waere eine Minute unter der Auflösung")
+    pruefe("ABSCHNITT_S = 300" in live,
+           "mit fünf Minuten je Balken - darunter ist es bei keiner Quelle "
+           "eine Messung, sondern Rauschen")
+    pruefe("spannung_v" not in live.split("verbrauchsabschnitte")[1][:2000],
+           "und aus dem Ladestand statt aus der Leistung: Der Strom ändert "
+           "sich im Sekundentakt, gemeldet wird alle zwölf Sekunden")
     html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
            "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "
