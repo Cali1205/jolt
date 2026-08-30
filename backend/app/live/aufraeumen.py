@@ -112,7 +112,10 @@ def beenden_und_lernen(db, sitzung) -> dict:
         fahrzeug = None
 
     if fahrzeug:
-        roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.akku_netto_kwh)
+        # Auch hier die gemessene Kapazitaet: Der gelernte Faktor ist der
+        # Quotient aus gemessener und vorhergesagter Energie, und die
+        # gemessene entsteht aus Prozent mal Kapazitaet.
+        roh = kalibrierung.aus_live_sitzung(sitzung, fahrzeug.kapazitaet_kwh)
         if roh is not None:
             vorher = fahrzeug.korrekturfaktor
             fahrzeug.korrekturfaktor = kalibrierung.nachfuehren(vorher, roh)

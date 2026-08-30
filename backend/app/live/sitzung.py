@@ -307,6 +307,7 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
     # Punkt zweimal in der geladenen Sammlung - einmal durch das Anhängen,
     # einmal durch die Kaskade - und die Faktoren rechnen mit einem Duplikat.
     sitzung.punkte.append(punkt)
+    kapazitaet_merken(fahrt.fahrzeug, rohwerte, punkt.zeit)
     db.flush()
 
     faktor = _verbrauchsfaktor(sitzung.punkte)
@@ -334,6 +335,49 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
     sitzung.hinweis = zustand.grund
     db.commit()
     return zustand
+
+
+# Ab welcher Abweichung ein neuer Kapazitaetswert ueberhaupt geschrieben
+# wird. Der Zaehler springt zwischen zwei Messungen um wenige Wattstunden;
+# jedes Mal zu schreiben hiesse, bei jedem Messpunkt eine Zeile zu aendern,
+# ohne dass sich etwas aendert.
+KAPAZITAET_SCHRITT_KWH = 0.2
+
+
+def kapazitaet_merken(fahrzeug, rohwerte: dict | None, zeit) -> None:
+    """Die vom Fahrzeug gemeldete Akkukapazitaet am Fahrzeug festhalten.
+
+    Sie kommt als `akku_kwh` in den Rohwerten mit - der Dongle liest sie
+    alle vierzig Runden. Aufgehoben wird sie, weil daran **jede**
+    Umrechnung zwischen Ladestand und Kilowattstunden haengt: der gemessene
+    Verbrauch, der daraus gelernte Korrekturfaktor, die Ladehuebe im
+    Ladeplan, die Restreichweite. Im Profil steht eine Prospektangabe fuer
+    ein neues Fahrzeug; hier steht, was dieser Akku heute kann.
+
+    Geprueft wird gegen den Profilwert: Mehr als der Prospekt oder weniger
+    als die Haelfte ist keine Alterung, sondern ein Lesefehler. Die
+    Plausibilitaetsschranke steht bewusst hier und nicht nur im Dongle -
+    Messwerte koennen auch von einem Logger kommen, den niemand geprueft
+    hat.
+    """
+    if not fahrzeug or not rohwerte:
+        return
+    wert = rohwerte.get("akku_kwh")
+    if not isinstance(wert, (int, float)):
+        return
+    if not (0.5 * fahrzeug.akku_netto_kwh <= wert
+            <= fahrzeug.akku_netto_kwh * 1.05):
+        log.info("Kapazitaet %s kWh verworfen - passt nicht zu %s kWh im "
+                 "Profil.", wert, fahrzeug.akku_netto_kwh)
+        return
+    bisher = fahrzeug.gemessene_kapazitaet_kwh
+    if bisher is not None and abs(bisher - wert) < KAPAZITAET_SCHRITT_KWH:
+        return
+    if bisher is None:
+        log.info("Kapazitaet von %s erstmals gemessen: %.1f kWh (Profil %.1f).",
+                 fahrzeug.name, wert, fahrzeug.akku_netto_kwh)
+    fahrzeug.gemessene_kapazitaet_kwh = round(wert, 2)
+    fahrzeug.kapazitaet_gemessen_am = zeit or datetime.utcnow()
 
 
 def tempo_faktor_gemessen(punkte: list, energieprofil: list) -> float | None:

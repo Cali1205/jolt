@@ -599,6 +599,72 @@ def teil_verwaiste_fahrt():
            "keine laufende Fahrt abschneiden", str(beendet))
 
 
+def teil_gemessene_kapazitaet():
+    """Die vom Auto gemeldete Kapazitaet schlaegt die Prospektangabe.
+
+    An dieser Zahl haengt **jede** Umrechnung zwischen Ladestand und
+    Kilowattstunden: der gemessene Verbrauch, der daraus gelernte
+    Korrekturfaktor, die Ladehuebe im Plan, die Restreichweite. Im Profil
+    steht, was der Hersteller fuer ein neues Fahrzeug angibt; am Fahrzeug
+    gemessen wurden 73,8 statt 77 kWh - vier Prozent, die sonst
+    durchgaengig in dieselbe Richtung falsch liegen.
+    """
+    from app.energie.modell import Fahrzeugwerte
+
+    client = TestClient(app)
+    print("\nGemessene Akkukapazität")
+    fahrzeug = client.get("/api/fahrzeuge").json()[0]
+    start = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 90.0, "name": "Kapazität"}).json()
+
+    db = SessionLocal()
+    try:
+        fz = db.get(models.Fahrzeug, fahrzeug["id"])
+        profil_kwh = fz.akku_netto_kwh
+        pruefe(fz.gemessene_kapazitaet_kwh is None,
+               "vor der ersten Messung gilt der Profilwert",
+               str(fz.gemessene_kapazitaet_kwh))
+        pruefe(fz.kapazitaet_kwh == profil_kwh,
+               "und `kapazitaet_kwh` gibt genau ihn zurück")
+
+        sitzung = db.get(models.LiveSitzung, start["sitzung_id"])
+        gemessen = round(profil_kwh * 0.96, 1)
+        live_sitzung.messpunkt_aufnehmen(
+            db, sitzung, 48.0, 11.0, soc=90.0,
+            rohwerte={"soc_roh": 225, "akku_kwh": gemessen})
+        db.refresh(fz)
+        pruefe(fz.gemessene_kapazitaet_kwh == gemessen,
+               "ein gemeldeter Wert wird am Fahrzeug festgehalten",
+               str(fz.gemessene_kapazitaet_kwh))
+        pruefe(fz.kapazitaet_gemessen_am is not None,
+               "mit Zeitpunkt - ohne den weiss niemand, ob er von gestern "
+               "oder von vorletztem Jahr stammt")
+        pruefe(fz.kapazitaet_kwh == gemessen,
+               "und ab jetzt wird mit ihm gerechnet")
+        pruefe(Fahrzeugwerte.aus_modell(fz).akku_netto_kwh == gemessen,
+               "auch im Verbrauchsmodell - damit zieht die ganze Kette mit")
+
+        # Unsinn darf nicht durchschlagen.
+        live_sitzung.messpunkt_aufnehmen(
+            db, sitzung, 48.01, 11.0, soc=89.5,
+            rohwerte={"soc_roh": 224, "akku_kwh": profil_kwh * 3})
+        db.refresh(fz)
+        pruefe(fz.gemessene_kapazitaet_kwh == gemessen,
+               "ein Wert weit über dem Profil wird verworfen - das ist keine "
+               "Alterung, sondern ein Lesefehler",
+               str(fz.gemessene_kapazitaet_kwh))
+        live_sitzung.messpunkt_aufnehmen(
+            db, sitzung, 48.02, 11.0, soc=89.0,
+            rohwerte={"soc_roh": 223, "akku_kwh": profil_kwh * 0.2})
+        db.refresh(fz)
+        pruefe(fz.gemessene_kapazitaet_kwh == gemessen,
+               "und einer weit darunter ebenso")
+    finally:
+        db.close()
+    client.post(f"/api/live/{start['sitzung_id']}/ende")
+
+
 def teil_odometer_strecke():
     """Der Kilometerstand des Autos bestimmt die Strecke, nicht das GPS.
 
@@ -1503,6 +1569,7 @@ def main() -> int:
     teil_verwaiste_fahrt()
     teil_abgeloeste_fahrt()
     teil_hoehenquelle()
+    teil_gemessene_kapazitaet()
     teil_odometer_strecke()
     teil_ladeplan_ein_weg()
     teil_laden_verfaelscht_nicht()

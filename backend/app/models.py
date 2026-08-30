@@ -110,6 +110,10 @@ class Fahrzeug(Base):
 
     # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
     korrekturfaktor = Column(Float, nullable=False, default=1.0)
+    # Was das Fahrzeug selbst ueber seine Kapazitaet sagt (DID 222AB2),
+    # und wann. NULL heisst "nie gemessen" - siehe Migration 0014.
+    gemessene_kapazitaet_kwh = Column(Float)
+    kapazitaet_gemessen_am = Column(DateTime)
 
     # Langlebiges Geheimnis für einen Logger im Auto - OBD2-Dongle, Kurzbefehl,
     # was auch immer. Er kann die ID der laufenden Live-Sitzung nicht kennen:
@@ -121,6 +125,25 @@ class Fahrzeug(Base):
     logger_token = Column(String(64), unique=True, index=True)
 
     angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def kapazitaet_kwh(self) -> float:
+        """Die Kapazitaet, mit der gerechnet wird - gemessen vor Prospekt.
+
+        Der Wert im Profil ist die Angabe des Herstellers fuer ein neues
+        Fahrzeug. Meldet das Auto selbst eine Zahl, ist sie besser: Sie
+        beschreibt **diesen** Akku in **diesem** Zustand. Beim ID.Buzz nach
+        knapp 60 000 km sind das 73,8 statt 77 kWh - vier Prozent, die
+        sonst durchgaengig in dieselbe Richtung falsch liegen.
+
+        Die Schranke faengt eine unsinnige Messung ab: Ein Wert ueber dem
+        Prospektwert oder unter der Haelfte davon ist keine Alterung,
+        sondern ein Lesefehler, und dann gilt das Profil.
+        """
+        gemessen = self.gemessene_kapazitaet_kwh
+        if gemessen and 0.5 * self.akku_netto_kwh <= gemessen <= self.akku_netto_kwh * 1.05:
+            return gemessen
+        return self.akku_netto_kwh
 
     ladekurve = relationship("Ladekurvenpunkt", back_populates="fahrzeug",
                              cascade="all, delete-orphan",

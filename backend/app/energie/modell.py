@@ -76,7 +76,11 @@ class Fahrzeugwerte:
                    stirnflaeche_m2=fahrzeug.stirnflaeche_m2, c_rr=fahrzeug.c_rr,
                    eta_antrieb=fahrzeug.eta_antrieb, eta_rekup=fahrzeug.eta_rekup,
                    p_neben_w=fahrzeug.p_neben_w, waermepumpe=fahrzeug.waermepumpe,
-                   akku_netto_kwh=fahrzeug.akku_netto_kwh,
+                   # Die gemessene Kapazitaet, wenn es sie gibt - siehe
+                   # `models.Fahrzeug.kapazitaet_kwh`. Damit zieht die ganze
+                   # Kette mit: Verbrauchsmodell, Ladeplan, Prognose.
+                   akku_netto_kwh=getattr(fahrzeug, "kapazitaet_kwh",
+                                          fahrzeug.akku_netto_kwh),
                    reserve_soc=fahrzeug.reserve_soc,
                    korrekturfaktor=fahrzeug.korrekturfaktor)
 
