@@ -529,8 +529,24 @@ function befehl(text, grenze_ms = 15000) {
       if (eintrag.selten && runde % eintrag.selten !== 0) continue;
       try {
         const wert = await messwertLesen(eintrag);
-        if (wert !== null) roh[eintrag.name] = Math.round(wert * 1000) / 1000;
-        else if (eintrag.pflicht) throw new Error("keine Nutzdaten");
+        if (wert !== null) {
+          roh[eintrag.name] = Math.round(wert * 1000) / 1000;
+        } else if (eintrag.pflicht) {
+          throw new Error("keine Nutzdaten");
+        } else {
+          /* Geantwortet, aber ohne brauchbaren Wert.
+           *
+           * Das ist etwas anderes als ein Zeitablauf, und der Unterschied
+           * ist der wichtigste beim Einrichten: Ein Zeitablauf heisst
+           * "gerade nicht erreicht", ein leerer Wert heisst "diese
+           * Datenkennung stimmt für dieses Fahrzeug nicht".
+           *
+           * Bisher fiel dieser Fall stumm durch - weder ein Wert noch ein
+           * Eintrag in `_fehlend`. In der ersten Aufzeichnung fehlten
+           * dadurch vier von dreizehn Messwerten bei allen 77 Runden, ohne
+           * dass irgendwo stand, dass sie fehlen. */
+          (roh._leer = roh._leer || []).push(eintrag.name);
+        }
       } catch (fehler) {
         if (eintrag.pflicht) throw fehler;
         if (!roh._fehlend) roh._fehlend = [];

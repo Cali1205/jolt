@@ -775,6 +775,16 @@ def main() -> int:
     pruefe("joltObd.FELDER" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
+    pruefe("_leer" in kern and "roh._leer = roh._leer" in kern,
+           "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "
+           "vorher fiel er stumm durch, und vier von dreizehn Werten fehlten "
+           "eine ganze Fahrt lang ohne Spur")
+    pruefe("werteStand" in live and "nieGekommen" in live,
+           "das Dashboard hält den letzten bekannten Wert je Messgrösse fest, "
+           "statt die Zeile leer zu lassen")
+    pruefe("alterText" in live and 'class="wann"' in live,
+           "und schreibt sein Alter daneben - ein alter Wert ist nützlich, "
+           "solange man ihm ansieht, dass er alt ist")
     pruefe("letzteRohwerteZeit" in live,
            "das Dashboard zeigt, wie alt der letzte Satz aus dem Auto ist - "
            "eine eingefrorene Anzeige sieht sonst aus wie eine laufende")

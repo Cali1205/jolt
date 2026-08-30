@@ -138,6 +138,13 @@ table.rohwerte td { text-align: right; color: var(--text);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.rohwerte tr.leer td, table.rohwerte tr.leer th { color: var(--gedaempft);
   opacity: .55; }
+/* Ein Wert, der nicht aus dieser Runde stammt, bleibt stehen - blasser, und
+   mit seinem Alter daneben. Ein alter Kilometerstand ist nützlicher als eine
+   leere Zeile; man muss nur sehen, dass er alt ist. */
+table.rohwerte tr.alt td { opacity: .68; }
+table.rohwerte tr.alt.sehr td { opacity: .42; }
+table.rohwerte .wann { color: var(--gedaempft); font-size: 11px;
+  margin-left: 7px; font-variant-numeric: normal; }
 @media (min-width: 560px) {
   table.rohwerte tbody { display: grid; grid-template-columns: 1fr 1fr;
     column-gap: 22px; }
