@@ -171,12 +171,29 @@ window.joltFahrzeug = (function () {
       return;
     }
 
-    for (const id of ["fahrzeug-wahl", "fahrzeug-liste"]) {
+    for (const id of ["fahrzeug-wahl", "fahrzeug-liste", "aufz-fahrzeug"]) {
       const auswahl = document.getElementById(id);
+      if (!auswahl) continue;
       const vorher = auswahl.value;
       auswahl.innerHTML = K.zustand.fahrzeuge
         .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
       if (vorher) auswahl.value = vorher;
+      // Die Wahl fuers Aufzeichnen ueberlebt den Neustart: Wer im Auto
+      // sitzt, will sie einmal treffen und nie wieder. Dieselbe Ueberlegung
+      // wie auf der /obd-Seite.
+      if (id === "aufz-fahrzeug" && !vorher) {
+        try {
+          const gemerkt = localStorage.getItem("jolt-aufz-fahrzeug");
+          if (gemerkt && K.zustand.fahrzeuge.some(
+              (f) => String(f.id) === gemerkt)) {
+            auswahl.value = gemerkt;
+          }
+        } catch (e) { /* ohne Speicher eben ohne Gedaechtnis */ }
+        auswahl.addEventListener("change", () => {
+          try { localStorage.setItem("jolt-aufz-fahrzeug", auswahl.value); }
+          catch (e) {}
+        });
+      }
     }
 
     const neu = document.createElement("option");

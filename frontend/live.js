@@ -44,6 +44,9 @@ window.joltLive = (function () {
    * von vor zwei Minuten auch. Was fehlt, ist nicht der Wert, sondern die
    * Angabe, wie alt er ist - und die steht jetzt daneben. */
   let werteStand = {};          // name -> {wert, zeit}
+  // Anfang der Fahrt für den laufenden Verbrauch: {soc, km} aus der ersten
+  // Runde, in der beides zugleich vorlag.
+  let verbrauchAnfang = null;
   let nieGekommen = new Set();  // Kennungen, die dieses Auto nicht beantwortet
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
@@ -845,6 +848,15 @@ window.joltLive = (function () {
       ? Math.abs(kw) / tempo * 100 : null;
 
     const teile = [];
+    /* Der Verbrauch der Fahrt zuerst: Das ist die Zahl, wegen der man
+     * aufzeichnet. Die momentane Leistung darunter ist Beiwerk - und beim
+     * ID.Buzz ohnehin nicht zu haben, weil der Batteriestrom nicht
+     * antwortet. */
+    const bisher = laufenderVerbrauch(roh, z && z.ist_soc);
+    if (bisher) {
+      teile.push(`<b>${K.zahl(bisher.kwh100, 1)}</b> kWh/100 auf `
+                 + `${K.zahl(bisher.km, 0)} km`);
+    }
     if (momentan !== null) {
       teile.push(`<b>${K.zahl(momentan, 1)}</b> kWh/100 gerade`);
     }
@@ -917,6 +929,44 @@ window.joltLive = (function () {
     for (const name of roh._leer || []) {
       if (!werteStand[name]) nieGekommen.add(name);
     }
+  }
+
+  /* Der Verbrauch der laufenden Fahrt in kWh/100 km.
+   *
+   * **Warum gerechnet und nicht gelesen.** Die MEB-Liste kennt keinen
+   * Parameter dafür; das Auto zeigt den Wert im Bordcomputer, gibt ihn aber
+   * nicht über die Diagnose heraus. Er entsteht hier aus zwei Grössen, die
+   * beide jede Runde ankommen:
+   *
+   *   verbrauchte kWh = (Ladestand am Anfang − jetzt) / 100 × Akku netto
+   *   gefahrene km    = Kilometerstand jetzt − am Anfang
+   *
+   * **Der Kilometerstand und nicht das GPS.** Er zählt Radumdrehungen und
+   * kennt weder abgeschnittene Kurven noch Funklöcher - für eine Grösse mit
+   * der Strecke im Nenner ist das der Unterschied zwischen brauchbar und
+   * irreführend.
+   *
+   * Er löst allerdings in ganzen Kilometern auf. Unter fünf gefahrenen
+   * Kilometern kommt deshalb nichts: Bei zwei Kilometern wäre die Angabe
+   * auf ±50 % genau und damit schlimmer als keine.
+   */
+  const VERBRAUCH_AB_KM = 5.0;
+
+  function laufenderVerbrauch(roh, soc) {
+    const fz = K.zustand.aufzFahrzeug
+      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
+    const akku = fz && fz.akku_netto_kwh;
+    const km = werteStand.km_stand && werteStand.km_stand.wert;
+    if (!akku || typeof km !== "number" || typeof soc !== "number") return null;
+
+    if (!verbrauchAnfang) {
+      verbrauchAnfang = { soc, km };
+      return null;
+    }
+    const gefahren = km - verbrauchAnfang.km;
+    if (gefahren < VERBRAUCH_AB_KM) return null;
+    const kwh = (verbrauchAnfang.soc - soc) / 100 * akku;
+    return { kwh100: kwh / gefahren * 100, kwh, km: gefahren };
   }
 
   function alterText(sekunden) {
@@ -1087,6 +1137,7 @@ window.joltLive = (function () {
     letzteRohwerteZeit = 0;
     werteStand = {};
     nieGekommen = new Set();
+    verbrauchAnfang = null;
     nebenverbrauch = null;
     if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
     if (steckdose) {

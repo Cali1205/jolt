@@ -522,6 +522,16 @@ table.kurve input { padding: 6px 8px; }
            nicht. Zwei Knöpfe dafür wären eine Frage an den Nutzer, die
            der Browser schon beantwortet hat. -->
       <p class="leer" style="padding-top:0" id="aufz-dongle-hinweis"></p>
+      <!-- Eigene Fahrzeugwahl, nicht die aus der Planen-Ansicht.
+           Bisher griff das Aufzeichnen auf `#fahrzeug-wahl` zu, und die
+           steht drei Ansichten weiter. War sie leer, fiel es auf das erste
+           Fahrzeug der Liste zurueck - das beim ersten Start angelegte
+           "Allgemeine E-Auto (60 kWh)". Zwei echte Testfahrten sind so dem
+           falschen Auto zugeschrieben worden, und weil daran Akkugroesse,
+           Masse und Luftwiderstand haengen, war der Verbrauch danach um
+           ein Drittel zu niedrig. -->
+      <label for="aufz-fahrzeug">Fahrzeug</label>
+      <select id="aufz-fahrzeug"></select>
       <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
       <button class="tat" id="aufz-start">Aufzeichnung starten</button>
       <p class="leer" id="aufz-stand"></p>

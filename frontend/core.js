@@ -11,6 +11,12 @@ window.jolt = (function () {
     fahrt: null,        // eine gewählte Variante aus POST /api/route
     fahrzeuge: [],
     sitzungId: null,    // laufende Live-Sitzung
+    /* Das Fahrzeug der laufenden Aufzeichnung.
+     *
+     * Eine Aufzeichnung hat keine geplante Fahrt, also auch kein
+     * `zustand.fahrt.fahrzeug` - und ohne die Akkugrösse lässt sich aus
+     * einem Ladestand keine Kilowattstunde machen. */
+    aufzFahrzeug: null,
     serviceWorker: null, // Registrierung, für das Push-Abo gebraucht
     /* Ob die Fahrtenliste neu geholt werden muss.
      *

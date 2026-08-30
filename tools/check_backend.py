@@ -775,6 +775,26 @@ def main() -> int:
     pruefe("joltObd.FELDER" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
+    # Das Aufzeichnen braucht eine **eigene** Fahrzeugwahl. Vorher griff es
+    # auf die der Planen-Ansicht zu und fiel, wenn die leer war, auf das
+    # erste Fahrzeug der Liste zurueck - das beim ersten Start angelegte
+    # "Allgemeine E-Auto". Zwei echte Testfahrten sind so dem falschen Auto
+    # zugeschrieben worden.
+    html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
+    fahrten_js = open(os.path.join(FRONTEND, "fahrten.js"),
+                      encoding="utf-8").read()
+    pruefe('id="aufz-fahrzeug"' in html,
+           "der Aufzeichnungs-Abschnitt hat eine eigene Fahrzeugwahl")
+    pruefe("aufz-fahrzeug" in fahrten_js and "fahrzeug-wahl" not in fahrten_js,
+           "und das Aufzeichnen nimmt sie, nicht die aus der Planen-Ansicht",
+           "fahrten.js greift noch auf fahrzeug-wahl zu")
+    pruefe("K.zustand.fahrzeuge || [])[0]" not in fahrten_js,
+           "ohne Rückfall auf das erste Fahrzeug der Liste - lieber gar "
+           "nicht aufzeichnen als dem falschen Auto")
+    pruefe("aufz-fahrzeug" in open(os.path.join(FRONTEND, "fahrzeug.js"),
+                                   encoding="utf-8").read(),
+           "und sie wird mit den Fahrzeugen gefüllt")
+
     # Ein Steuergeraet auf 11-Bit-Kennung braucht ein anderes Protokoll.
     # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
     # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
@@ -793,6 +813,35 @@ def main() -> int:
            "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
     pruefe("wechselGescheitert" in kern,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
+
+    # Ohne Flusskontrolle scheitert jede Antwort, die nicht in einen CAN-
+    # Rahmen passt - der ELM327 muss wissen, mit welchem Kopf er das
+    # Flow-Control-Paket schickt. Das WiCAN-Fahrzeugprofil setzt die drei
+    # Befehle vor jeder Abfrage; jolt setzte sie gar nicht, und genau
+    # deshalb kam der Batteriestrom in keiner einzigen Runde an.
+    for befehl in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
+        pruefe(befehl in kern, f"die Flusskontrolle setzt {befehl}")
+    pruefe(kern.count("await flusskontrolle(ziel)") >= 2,
+           "und zwar auf beiden Wegen - mit und ohne Protokollwechsel")
+    pruefe(all(f'fcsh: "{h}"' in kern
+               for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
+           "jede Zieladresse bringt ihren eigenen Flow-Control-Kopf mit")
+
+    pruefe("function mehrrahmen" in kern,
+           "lange Antworten werden aus mehreren CAN-Rahmen zusammengesetzt - "
+           "ohne das landen Köpfe und Steuerbytes als Nutzdaten im Ergebnis")
+    pruefe("hex.slice(3) : hex.slice(8)" in kern,
+           "und zwar für beide Rahmenbreiten: acht Kopfzeichen bei 29 Bit, "
+           "drei bei 11 - der Klimakompressor sitzt auf der 11-Bit-Seite")
+    pruefe("akku_kwh" in kern and "kwh >= 10 && kwh <= 200" in kern,
+           "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
+           "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
+    pruefe("laufenderVerbrauch" in live and "VERBRAUCH_AB_KM" in live,
+           "der Verbrauch der laufenden Fahrt wird aus Ladestand und "
+           "Kilometerstand gerechnet, erst ab einer Mindeststrecke")
+    pruefe("aufzFahrzeug" in live,
+           "und kennt dafür das Fahrzeug der Aufzeichnung - ohne Akkugrösse "
+           "wird aus einem Ladestand keine Kilowattstunde")
 
     pruefe("_leer" in kern and "roh._leer = roh._leer" in kern,
            "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "

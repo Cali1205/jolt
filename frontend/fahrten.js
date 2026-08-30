@@ -205,10 +205,18 @@ window.joltFahrten = (function () {
         }
       }
 
-      const wahl = document.getElementById("fahrzeug-wahl");
-      const id = wahl && wahl.value ? Number(wahl.value)
-        : ((K.zustand.fahrzeuge || [])[0] || {}).id;
-      if (!id) { K.melden("Erst ein Fahrzeug anlegen.", "fehler"); return; }
+      // Die Wahl aus diesem Abschnitt, nicht die aus der Planen-Ansicht -
+      // und **kein** Rückfall auf das erste Fahrzeug der Liste. Der war der
+      // Fehler: Er schrieb die Fahrt stillschweigend dem "Allgemeinen
+      // E-Auto" zu, und mit ihm rechnete danach alles - Akkugrösse, Masse,
+      // Luftwiderstand. Lieber gar nicht aufzeichnen als dem falschen Auto.
+      const wahl = document.getElementById("aufz-fahrzeug");
+      const id = wahl && wahl.value ? Number(wahl.value) : null;
+      if (!id) {
+        K.melden("Erst ein Fahrzeug wählen – ohne das gehört die "
+                 + "Aufzeichnung niemandem.", "fehler");
+        return;
+      }
 
       stand("Standort holen …");
       const ort = await new Promise((erfuellen, ablehnen) => {
@@ -242,6 +250,8 @@ window.joltFahrten = (function () {
                 name: document.getElementById("aufz-name").value },
       });
       K.zustand.sitzungId = antwort.sitzung_id;
+      K.zustand.aufzFahrzeug =
+        (K.zustand.fahrzeuge || []).find((f) => f.id === id) || null;
       // Die neue Aufzeichnung gehört in die Liste.
       K.zustand.fahrtenVeraltet = true;
       window.joltApp.ansichtZeigen("live");
