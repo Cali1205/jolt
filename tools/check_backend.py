@@ -769,7 +769,7 @@ def main() -> int:
     pruefe(not fehlende_einheit,
            "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
            "dastehen", str(fehlende_einheit))
-    pruefe("FELDER: MESSWERTE.map" in kern,
+    pruefe("FELDER: MESSWERTE.flatMap" in kern,
            "die Liste wird exportiert statt in der Oberfläche wiederholt")
     live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
     pruefe("joltObd.FELDER" in live,
@@ -842,12 +842,21 @@ def main() -> int:
            "steht die Zahl minutenlang still")
     pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
-    pruefe("ABSCHNITT_S = 300" in live,
-           "mit fünf Minuten je Balken - darunter ist es bei keiner Quelle "
-           "eine Messung, sondern Rauschen")
-    pruefe("spannung_v" not in live.split("verbrauchsabschnitte")[1][:2000],
-           "und aus dem Ladestand statt aus der Leistung: Der Strom ändert "
-           "sich im Sekundentakt, gemeldet wird alle zwölf Sekunden")
+    pruefe("entladen_kwh" in kern and "8583.07" in kern,
+           "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
+           "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")
+    pruefe("weitere:" in kern and "Object.assign(roh, wert.weitere)" in kern,
+           "und Lade- wie Entladezähler kommen aus **einer** Abfrage - eine "
+           "Mehrrahmen-Antwort zweimal zu holen kostet Zeit")
+    pruefe("ZUSATZ_TITEL" in kern,
+           "auch der mitgelieferte Wert steht in der Feldliste, sonst zeigt "
+           "die Tabelle weniger, als gemessen wird")
+    pruefe("ABSCHNITT_MIT_ZAEHLER_S = 60" in live
+           and "ABSCHNITT_AUS_SOC_S = 300" in live,
+           "die Balkenbreite folgt der Quelle: eine Minute mit Zähler, "
+           "fünf ohne - nicht dem Wunsch")
+    pruefe("letzt.netto - erst.netto" in live,
+           "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
     html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
            "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "

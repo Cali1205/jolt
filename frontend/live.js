@@ -929,9 +929,18 @@ window.joltLive = (function () {
     const jetzt = Date.now();
     // Für den Verbrauchsplot: Kilometerstand und Ladestand mit Zeitstempel.
     // Die Leistung steht bewusst nicht dabei - siehe verbrauchsabschnitte().
-    if (typeof roh.km_stand === "number" && typeof roh.soc_roh === "number") {
-      verbrauchsspur.push({ zeit: jetzt, km: roh.km_stand,
-                            soc: roh.soc_roh / 2.5 });
+    if (typeof roh.km_stand === "number") {
+      /* `netto` ist der Zählerstand: entladen minus geladen. Seine
+       * Differenz über ein Stück Fahrt **ist** die verbrauchte Energie -
+       * ohne Umweg über Ladestand und Akkugrösse, und mit 0,117 Wh
+       * Auflösung statt 339. */
+      const netto = (typeof roh.entladen_kwh === "number")
+        ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
+                              ? roh.geladen_kwh : 0)
+        : null;
+      verbrauchsspur.push({
+        zeit: jetzt, km: roh.km_stand, netto,
+        soc: typeof roh.soc_roh === "number" ? roh.soc_roh / 2.5 : null });
       if (verbrauchsspur.length > 3000) verbrauchsspur.shift();
     }
     for (const [name, wert] of Object.entries(roh)) {
@@ -974,63 +983,64 @@ window.joltLive = (function () {
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
     const akku = fz && fz.akku_netto_kwh;
     const km = werteStand.km_stand && werteStand.km_stand.wert;
-    if (!akku || typeof km !== "number" || typeof soc !== "number") return null;
+    if (typeof km !== "number") return null;
+    // Der Zählerstand, wenn er kommt - sonst der Ladestand.
+    const netto = (typeof roh.entladen_kwh === "number")
+      ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
+                            ? roh.geladen_kwh : 0)
+      : null;
+    if (netto === null && (!akku || typeof soc !== "number")) return null;
 
     if (!verbrauchAnfang) {
-      verbrauchAnfang = { soc, km };
+      verbrauchAnfang = { soc, km, netto };
       return null;
     }
     const gefahren = km - verbrauchAnfang.km;
     if (gefahren < VERBRAUCH_AB_KM) return null;
-    const kwh = (verbrauchAnfang.soc - soc) / 100 * akku;
+    const kwh = (netto !== null && verbrauchAnfang.netto !== null)
+      ? netto - verbrauchAnfang.netto
+      : (verbrauchAnfang.soc - soc) / 100 * akku;
     return { kwh100: kwh / gefahren * 100, kwh, km: gefahren };
   }
 
   /* ---------- Verbrauch je Zeitabschnitt ---------- */
 
-  /* **Warum fuenf Minuten und nicht eine - und warum aus dem Ladestand.**
+  /* **Woher die Energie kommt, und was das fuer die Balkenbreite heisst.**
    *
-   * Naheliegend waere, die Leistung (Spannung mal Strom) ueber die Zeit
-   * aufzusummieren. Das war der erste Entwurf, und er war falsch: Der
-   * Batteriestrom aendert sich im Sekundentakt, gemeldet wird alle zwoelf
-   * Sekunden. Fuenf Stichproben je Minute sind dann kein Integral, sondern
-   * eine Umfrage - und die Streuung schlaegt voll durch.
+   * Erster Entwurf: Leistung (Spannung mal Strom) ueber die Zeit
+   * aufsummieren. Falsch - der Strom aendert sich im Sekundentakt,
+   * gemeldet wird alle zwoelf Sekunden. Fuenf Stichproben je Minute sind
+   * kein Integral, sondern eine Umfrage; auf der Landstrasse 25 % Fehler,
+   * in der Stadt 59 %.
    *
-   * Durchgerechnet, mittlerer relativer Fehler je Abschnitt:
+   * Zweiter Entwurf: aus dem **Ladestand**. Sein Quantisierungsfehler ist
+   * absolut begrenzt (ein Schritt, 0,44 pp = 339 Wh), also relativ umso
+   * kleiner, je laenger der Abschnitt - ab fuenf Minuten ueberall unter
+   * 3 %. Aber eben erst ab fuenf Minuten.
    *
-   *                        aus Strom (12 s)   aus Ladestand
-   *     Landstrasse  1 min       25 %
-   *     Landstrasse  5 min       11 %              3 %
-   *     Stadt        1 min       59 %
-   *     Stadt        5 min       27 %              3 %
-   *     Autobahn     5 min        3 %              3 %
+   * Jetzt: die **Energiezaehler** des Fahrzeugs. Ihre Differenz ist die
+   * verbrauchte Energie, mit 0,117 Wh Auflösung - fast dreitausendmal
+   * feiner als der Ladestand. Damit ist ein Balken je Minute keine
+   * Schaetzung mehr, sondern eine Messung (0,05 % statt 136 %).
    *
-   * Die beiden Fehler skalieren verschieden. Der Abtastfehler faellt mit
-   * der Wurzel der Stichprobenzahl - langsam. Der Quantisierungsfehler des
-   * Ladestands ist **absolut begrenzt** (ein Schritt, 0,44 Prozentpunkte),
-   * also relativ umso kleiner, je mehr in dem Abschnitt verbraucht wurde.
-   * Ab fuenf Minuten ist der Ladestand deshalb nirgends schlechter und in
-   * der Stadt neunmal besser.
-   *
-   * Der Strom wird fuer diesen Plot damit gar nicht gebraucht - was ihn
-   * nebenbei unabhaengig davon macht, ob `strom_a` ueberhaupt antwortet.
-   *
-   * Unter fuenf Minuten waere ein Balken bei keiner Quelle eine Messung.
-   * Deshalb steht dort die Breite und nicht der Wunsch.
+   * Die Balkenbreite folgt deshalb der Quelle, und nicht dem Wunsch:
+   * eine Minute mit Zaehler, fuenf ohne.
    */
-  const ABSCHNITT_S = 300;
+  const ABSCHNITT_MIT_ZAEHLER_S = 60;
+  const ABSCHNITT_AUS_SOC_S = 300;
   // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
   const BALKEN_MIND_KM = 0.3;
 
   function verbrauchsabschnitte() {
-    const punkte = verbrauchsspur.filter(
-      (p) => typeof p.km === "number" && p.soc !== null);
+    const punkte = verbrauchsspur.filter((p) => typeof p.km === "number");
     if (punkte.length < 2) return null;
+    const mitZaehler = punkte.every((p) => typeof p.netto === "number");
     const akku = (K.zustand.aufzFahrzeug
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {}).akku_netto_kwh;
-    if (!akku) return null;
+    if (!mitZaehler && !akku) return null;
 
-    const breite = ABSCHNITT_S * 1000;
+    const breite = (mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S
+                               : ABSCHNITT_AUS_SOC_S) * 1000;
     const beginn = punkte[0].zeit;
     const eimer = new Map();
     for (const p of punkte) {
@@ -1045,11 +1055,13 @@ window.joltLive = (function () {
       const erst = gruppe[0], letzt = gruppe[gruppe.length - 1];
       const km = letzt.km - erst.km;
       if (km < BALKEN_MIND_KM) continue;
-      const kwh = (erst.soc - letzt.soc) / 100 * akku;
-      if (!Number.isFinite(kwh)) continue;
+      const kwh = mitZaehler ? (letzt.netto - erst.netto)
+        : ((erst.soc !== null && letzt.soc !== null)
+           ? (erst.soc - letzt.soc) / 100 * akku : null);
+      if (kwh === null || !Number.isFinite(kwh)) continue;
       balken.push({ n, kwh100: kwh / km * 100, km });
     }
-    return balken.length ? { balken, breite } : null;
+    return balken.length ? { balken, breite, mitZaehler } : null;
   }
 
   function verbrauchZeichnen() {
@@ -1100,7 +1112,8 @@ window.joltLive = (function () {
 
     const schnitt = werte.reduce((a, v) => a + v, 0) / werte.length;
     fuss.children[0].textContent =
-      `Verbrauch je ${daten.breite / 60000} min`;
+      `Verbrauch je ${daten.breite / 60000} min`
+      + (daten.mitZaehler ? "" : " (aus dem Ladestand)");
     fuss.children[1].textContent = `Ø ${K.zahl(schnitt, 1)} kWh/100`;
   }
 
