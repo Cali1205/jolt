@@ -96,7 +96,26 @@
 </div>
 
 <div class="kasten">
-  <h2>4. Selbst probieren</h2>
+  <h2>4. Werte prüfen</h2>
+  <p class="hinweis">Im Stand, ohne Fahrt: einmal alles lesen und gegen das
+    halten, was plausibel wäre. Zündung an, Auto wach.</p>
+  <button id="pruefen" class="tat" disabled>Alle Werte prüfen</button>
+  <div id="pruef-ergebnis"></div>
+</section>
+
+<section>
+  <h2>5. Klimakompressor eingrenzen</h2>
+  <p class="hinweis">Die Antwort auf <code>220800</code> enthält vier
+    16-Bit-Zahlen, und keine Quelle sagt, welche die Leistung ist. Zwei
+    Messungen mit <strong>verschiedenem Klimazustand</strong> verraten es:
+    Was sich deutlich ändert, hängt am Kompressor.</p>
+  <button id="klima-a" class="tat">1. Messen (Klima <em>aus</em>)</button>
+  <button id="klima-b" class="tat neben" disabled>2. Messen (Klima <em>an</em>)</button>
+  <div id="klima-ergebnis"></div>
+</section>
+
+<section>
+  <h2>6. Selbst probieren</h2>
   <p class="hinweis">Ein Befehl je Zeile, wird der Reihe nach gesendet.
     Damit lassen sich andere Datenkennungen durchprobieren, ohne dass
     jemand die Seite neu baut – die PID-Liste für MEB steht bei
@@ -112,7 +131,7 @@
 </div>
 
 <div class="kasten" id="fahrt-kasten">
-  <h2>5. Fahrt aufzeichnen</h2>
+  <h2>7. Fahrt aufzeichnen</h2>
   <p class="hinweis">Liest im eingestellten Takt alle Werte, holt die
     Position und meldet beides an jolt. <strong>Bildschirm an lassen und
     Bluefy im Vordergrund</strong> – ein Browser-Tab bekommt auf iOS keine
@@ -133,7 +152,7 @@
 </div>
 
 <div class="kasten">
-  <h2>6. Einzelne Meldung</h2>
+  <h2>8. Einzelne Meldung</h2>
   <p class="hinweis">Schliesst die Kette: Der gelesene Ladestand geht zusammen
     mit der Position an <code>/api/live/melden</code>. Das Token steht in der
     Fahrzeug-Ansicht unter „Logger im Auto“ (dasselbe wie oben). Ohne

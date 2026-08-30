@@ -116,6 +116,8 @@ button.tat:disabled { opacity: .55; cursor: default; }
 #live-antwort.schlecht .antwort-zahl { color: var(--schlecht); }
 #live-verlauf { width: 100%; height: 150px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
+#live-verbrauch { width: 100%; height: 110px; display: block; margin-top: 10px;
+  border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
 /* Der Kontextstreifen: eine Zeile Text statt sechs Kacheln. Was man nur
    gelegentlich braucht, soll nicht so aussehen wie das, was man dauernd
    braucht. */
@@ -429,6 +431,15 @@ table.kurve input { padding: 6px 8px; }
         <div class="karte-fuss">
           <span id="live-verlauf-fuss">Soll und Ist über die Strecke</span>
           <span id="live-hinweis-kurz"></span>
+        </div>
+
+        <!-- Der Verbrauch je Zeitabschnitt als Balken. Die Kurve darüber
+             zeigt den Ladestand - also den Vorrat. Diese hier zeigt, was
+             ihn gerade kostet: ein Balken je Minute, und ein Berg sieht
+             anders aus als eine Ortsdurchfahrt. -->
+        <canvas id="live-verbrauch" hidden></canvas>
+        <div class="karte-fuss" id="live-verbrauch-fuss" hidden>
+          <span></span><span></span>
         </div>
 
         <div class="werte" id="live-werte"></div>

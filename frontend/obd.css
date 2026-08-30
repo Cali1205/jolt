@@ -100,3 +100,16 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 .wert .zahl { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .wert .name { font-size: 10px; color: var(--gedaempft); text-transform: uppercase;
   letter-spacing: .05em; margin-top: 2px; }
+
+/* Die Prüftabellen: Wert, Erwartung, Urteil. Farbe traegt hier
+   Information - grün heisst plausibel, rot heisst nachsehen. */
+table.pruef { width: 100%; border-collapse: collapse; margin-top: 10px;
+  font-size: 13px; }
+table.pruef th, table.pruef td { padding: 5px 8px; text-align: left;
+  border-bottom: 1px solid var(--rand); vertical-align: top; }
+table.pruef th { font-weight: 400; color: var(--gedaempft); white-space: nowrap; }
+table.pruef td:first-of-type { font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+table.pruef tr.gut td:first-of-type { color: #57c98a; }
+table.pruef tr.schlecht td:first-of-type { color: #e2596a; }
+table.pruef tr.schlecht td:last-child { color: #e8804f; }

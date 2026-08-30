@@ -47,6 +47,11 @@ window.joltLive = (function () {
   // Anfang der Fahrt für den laufenden Verbrauch: {soc, km} aus der ersten
   // Runde, in der beides zugleich vorlag.
   let verbrauchAnfang = null;
+  /* Messpunkte für den Verbrauchsplot: [{zeit, kw, km, soc}, ...].
+   *
+   * Roh gesammelt und erst beim Zeichnen zu Abschnitten verrechnet - so
+   * lässt sich die Abschnittsbreite ändern, ohne die Messung zu verlieren. */
+  let verbrauchsspur = [];
   let nieGekommen = new Set();  // Kennungen, die dieses Auto nicht beantwortet
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
@@ -222,8 +227,12 @@ window.joltLive = (function () {
      * Abweichung stehen bewusst hier und nicht oben: Sie sind Beleg, nicht
      * Antwort - man liest sie, wenn man der grossen Zahl nachgehen will. */
     document.getElementById("live-werte").innerHTML = [
+      // Eine Nachkommastelle: Der Dongle liefert den Ladestand in Schritten
+      // von 0,4 Prozentpunkten (ein Byte durch 2,5). Auf ganze Prozent
+      // gerundet steht die Zahl minutenlang still, obwohl sie sich bewegt -
+      // und gerade die Bewegung will man sehen.
       K.wertKachel(z.soc_gemeldet === false ? "Ladestand (gerechnet)" : "Ladestand",
-        K.zahl(z.ist_soc) + " %"),
+        K.zahl(z.ist_soc, 1) + " %"),
       K.wertKachel("Abweichung",
         (z.abweichung_pp === null ? "–"
           : (z.abweichung_pp > 0 ? "+" : "") + K.zahl(z.abweichung_pp, 1) + " pp"),
@@ -271,6 +280,7 @@ window.joltLive = (function () {
                      soc: z.ist_soc, gemeldet: z.soc_gemeldet !== false });
     }
     verlaufZeichnen();
+    verbrauchZeichnen();
     autoZeile(z);
 
     const balken = document.getElementById("live-balken");
@@ -917,6 +927,22 @@ window.joltLive = (function () {
    * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
   function werteMerken(roh) {
     const jetzt = Date.now();
+    // Für den Verbrauchsplot: Kilometerstand und Ladestand mit Zeitstempel.
+    // Die Leistung steht bewusst nicht dabei - siehe verbrauchsabschnitte().
+    if (typeof roh.km_stand === "number") {
+      /* `netto` ist der Zählerstand: entladen minus geladen. Seine
+       * Differenz über ein Stück Fahrt **ist** die verbrauchte Energie -
+       * ohne Umweg über Ladestand und Akkugrösse, und mit 0,117 Wh
+       * Auflösung statt 339. */
+      const netto = (typeof roh.entladen_kwh === "number")
+        ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
+                              ? roh.geladen_kwh : 0)
+        : null;
+      verbrauchsspur.push({
+        zeit: jetzt, km: roh.km_stand, netto,
+        soc: typeof roh.soc_roh === "number" ? roh.soc_roh / 2.5 : null });
+      if (verbrauchsspur.length > 3000) verbrauchsspur.shift();
+    }
     for (const [name, wert] of Object.entries(roh)) {
       if (typeof wert === "number") {
         werteStand[name] = { wert, zeit: jetzt };
@@ -957,16 +983,138 @@ window.joltLive = (function () {
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
     const akku = fz && fz.akku_netto_kwh;
     const km = werteStand.km_stand && werteStand.km_stand.wert;
-    if (!akku || typeof km !== "number" || typeof soc !== "number") return null;
+    if (typeof km !== "number") return null;
+    // Der Zählerstand, wenn er kommt - sonst der Ladestand.
+    const netto = (typeof roh.entladen_kwh === "number")
+      ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
+                            ? roh.geladen_kwh : 0)
+      : null;
+    if (netto === null && (!akku || typeof soc !== "number")) return null;
 
     if (!verbrauchAnfang) {
-      verbrauchAnfang = { soc, km };
+      verbrauchAnfang = { soc, km, netto };
       return null;
     }
     const gefahren = km - verbrauchAnfang.km;
     if (gefahren < VERBRAUCH_AB_KM) return null;
-    const kwh = (verbrauchAnfang.soc - soc) / 100 * akku;
+    const kwh = (netto !== null && verbrauchAnfang.netto !== null)
+      ? netto - verbrauchAnfang.netto
+      : (verbrauchAnfang.soc - soc) / 100 * akku;
     return { kwh100: kwh / gefahren * 100, kwh, km: gefahren };
+  }
+
+  /* ---------- Verbrauch je Zeitabschnitt ---------- */
+
+  /* **Woher die Energie kommt, und was das fuer die Balkenbreite heisst.**
+   *
+   * Erster Entwurf: Leistung (Spannung mal Strom) ueber die Zeit
+   * aufsummieren. Falsch - der Strom aendert sich im Sekundentakt,
+   * gemeldet wird alle zwoelf Sekunden. Fuenf Stichproben je Minute sind
+   * kein Integral, sondern eine Umfrage; auf der Landstrasse 25 % Fehler,
+   * in der Stadt 59 %.
+   *
+   * Zweiter Entwurf: aus dem **Ladestand**. Sein Quantisierungsfehler ist
+   * absolut begrenzt (ein Schritt, 0,44 pp = 339 Wh), also relativ umso
+   * kleiner, je laenger der Abschnitt - ab fuenf Minuten ueberall unter
+   * 3 %. Aber eben erst ab fuenf Minuten.
+   *
+   * Jetzt: die **Energiezaehler** des Fahrzeugs. Ihre Differenz ist die
+   * verbrauchte Energie, mit 0,117 Wh Auflösung - fast dreitausendmal
+   * feiner als der Ladestand. Damit ist ein Balken je Minute keine
+   * Schaetzung mehr, sondern eine Messung (0,05 % statt 136 %).
+   *
+   * Die Balkenbreite folgt deshalb der Quelle, und nicht dem Wunsch:
+   * eine Minute mit Zaehler, fuenf ohne.
+   */
+  const ABSCHNITT_MIT_ZAEHLER_S = 60;
+  const ABSCHNITT_AUS_SOC_S = 300;
+  // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
+  const BALKEN_MIND_KM = 0.3;
+
+  function verbrauchsabschnitte() {
+    const punkte = verbrauchsspur.filter((p) => typeof p.km === "number");
+    if (punkte.length < 2) return null;
+    const mitZaehler = punkte.every((p) => typeof p.netto === "number");
+    const akku = (K.zustand.aufzFahrzeug
+      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {}).akku_netto_kwh;
+    if (!mitZaehler && !akku) return null;
+
+    const breite = (mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S
+                               : ABSCHNITT_AUS_SOC_S) * 1000;
+    const beginn = punkte[0].zeit;
+    const eimer = new Map();
+    for (const p of punkte) {
+      const n = Math.floor((p.zeit - beginn) / breite);
+      if (!eimer.has(n)) eimer.set(n, []);
+      eimer.get(n).push(p);
+    }
+
+    const balken = [];
+    for (const [n, gruppe] of [...eimer.entries()].sort((a, b) => a[0] - b[0])) {
+      if (gruppe.length < 2) continue;
+      const erst = gruppe[0], letzt = gruppe[gruppe.length - 1];
+      const km = letzt.km - erst.km;
+      if (km < BALKEN_MIND_KM) continue;
+      const kwh = mitZaehler ? (letzt.netto - erst.netto)
+        : ((erst.soc !== null && letzt.soc !== null)
+           ? (erst.soc - letzt.soc) / 100 * akku : null);
+      if (kwh === null || !Number.isFinite(kwh)) continue;
+      balken.push({ n, kwh100: kwh / km * 100, km });
+    }
+    return balken.length ? { balken, breite, mitZaehler } : null;
+  }
+
+  function verbrauchZeichnen() {
+    const leinwand = document.getElementById("live-verbrauch");
+    const fuss = document.getElementById("live-verbrauch-fuss");
+    if (!leinwand || !fuss) return;
+    const daten = verbrauchsabschnitte();
+    if (!daten) { leinwand.hidden = true; fuss.hidden = true; return; }
+    leinwand.hidden = false; fuss.hidden = false;
+
+    const dpr = window.devicePixelRatio || 1;
+    const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
+    if (!breite || !hoehe) return;
+    leinwand.width = breite * dpr;
+    leinwand.height = hoehe * dpr;
+    const stift = leinwand.getContext("2d");
+    stift.setTransform(dpr, 0, 0, dpr, 0, 0);
+    stift.clearRect(0, 0, breite, hoehe);
+
+    const werte = daten.balken.map((b) => b.kwh100);
+    // Die Skala nach oben grosszuegig, damit ein Ausreisser die uebrigen
+    // Balken nicht platt drueckt, und mit Nulllinie: Rekuperation geht
+    // unter null, und genau das soll man sehen.
+    const oben = Math.max(40, ...werte) * 1.1;
+    const unten = Math.min(0, ...werte) * 1.1;
+    const spanne = oben - unten || 1;
+    const rand = 6, fussHoehe = 14;
+    const flaeche = hoehe - fussHoehe - rand;
+    const y = (v) => rand + (oben - v) / spanne * flaeche;
+
+    // Nulllinie
+    stift.strokeStyle = "#2b343e";
+    stift.lineWidth = 1;
+    stift.beginPath();
+    stift.moveTo(0, y(0)); stift.lineTo(breite, y(0));
+    stift.stroke();
+
+    const b = Math.max(2, (breite - 2 * rand) / daten.balken.length - 2);
+    daten.balken.forEach((balken, i) => {
+      const x = rand + i * ((breite - 2 * rand) / daten.balken.length);
+      const hoch = y(balken.kwh100) - y(0);
+      // Farbe nach Höhe: was deutlich über dem Schnitt liegt, fällt auf.
+      stift.fillStyle = balken.kwh100 < 0 ? "#57c98a"
+        : (balken.kwh100 > 35 ? "#e8804f" : "#ffc93c");
+      stift.fillRect(x, hoch < 0 ? y(balken.kwh100) : y(0),
+                     b, Math.max(1, Math.abs(hoch)));
+    });
+
+    const schnitt = werte.reduce((a, v) => a + v, 0) / werte.length;
+    fuss.children[0].textContent =
+      `Verbrauch je ${daten.breite / 60000} min`
+      + (daten.mitZaehler ? "" : " (aus dem Ladestand)");
+    fuss.children[1].textContent = `Ø ${K.zahl(schnitt, 1)} kWh/100`;
   }
 
   function alterText(sekunden) {
@@ -1138,6 +1286,7 @@ window.joltLive = (function () {
     werteStand = {};
     nieGekommen = new Set();
     verbrauchAnfang = null;
+    verbrauchsspur = [];
     nebenverbrauch = null;
     if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
     if (steckdose) {
@@ -1215,6 +1364,7 @@ window.joltLive = (function () {
     // Wie bei der Karte: Im versteckten Abschnitt hat das Canvas die Breite
     // null, und nach dem Einblenden oder Drehen muss neu gezeichnet werden.
     window.addEventListener("resize", verlaufZeichnen);
+    window.addEventListener("resize", verbrauchZeichnen);
     K.reglerKoppeln("mehrverbrauch", "mehrverbrauch-wert");
     K.reglerKoppeln("stau", "stau-wert");
     K.an("live-starten", "click", starten);

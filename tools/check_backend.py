@@ -769,7 +769,7 @@ def main() -> int:
     pruefe(not fehlende_einheit,
            "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
            "dastehen", str(fehlende_einheit))
-    pruefe("FELDER: MESSWERTE.map" in kern,
+    pruefe("FELDER: MESSWERTE.flatMap" in kern,
            "die Liste wird exportiert statt in der Oberfläche wiederholt")
     live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
     pruefe("joltObd.FELDER" in live,
@@ -836,6 +836,68 @@ def main() -> int:
     pruefe("akku_kwh" in kern and "kwh >= 10 && kwh <= 200" in kern,
            "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
            "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
+    pruefe("K.zahl(z.ist_soc, 1)" in live,
+           "der Ladestand steht mit einer Nachkommastelle da - der Dongle "
+           "liefert ihn in Schritten von 0,4 pp, auf ganze Prozent gerundet "
+           "steht die Zahl minutenlang still")
+    pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
+           "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
+    # Die Plausibilitaetspruefung im Stand. Der Kreuzvergleich ist der
+    # schaerfere Teil: Entladezaehler geteilt durch Kilometerstand muss
+    # einen sinnvollen Lebensdauerverbrauch ergeben, und das prueft beide
+    # Byte-Lagen auf einmal - ohne eine einzige gefahrene Minute.
+    obd_js = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
+    obd_html = open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8").read()
+    pruefe('id="pruefen"' in obd_html and "werteRuefen" in obd_js,
+           "die Diagnoseseite kann alle Werte im Stand prüfen")
+    pruefe("BEREICHE" in obd_js and "Kreuzvergleich" in obd_js,
+           "gegen Bereiche und über einen Kreuzvergleich - der prüft zwei "
+           "Formeln auf einmal, ohne dass gefahren werden muss")
+    pruefe('id="klima-a"' in obd_html and 'id="klima-b"' in obd_html
+           and "klimaZeigen" in obd_js,
+           "und der Klimakompressor über eine Differenzmessung statt über "
+           "eine geratene Formel")
+    pruefe("nutzbytes," in kern,
+           "dafür gibt der Baustein die rohen Nutzbytes heraus")
+
+    pruefe("kompressor_w" in kern and "b[5] * 256) + b[6]" in kern,
+           "die Kompressorleistung steht drin - aus einer Differenzmessung "
+           "abgeleitet, weil keine der drei Quellen eine Formel nennt")
+    pruefe("i += 2" in obd_js,
+           "die Differenzanzeige richtet die Byte-Paare aus, statt ein "
+           "Fenster byteweise zu schieben - eine Mehrbyte-Zahl fängt nicht "
+           "an jedem Byte an")
+
+    pruefe("roh - 4294967296" in kern,
+           "der Entladezähler wird vorzeichenbehaftet gelesen - unsigned "
+           "ergab am Fahrzeug 482 961 statt 17 439 kWh")
+    pruefe("entladen_kwh: [100, 100000" in obd_js,
+           "und seine Plausibilitätsschranke fängt genau diesen Fehler - "
+           "die alte [1, 999999] liess ihn durch")
+    pruefe("if (drin) gut += 1; else schlecht += 1;" in obd_js,
+           "der Kreuzvergleich zählt in die Zusammenfassung - rot in der "
+           "Tabelle und \"0 auffällig\" darüber ist schlimmer als nichts")
+
+    pruefe("entladen_kwh" in kern and "8583.07" in kern,
+           "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
+           "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")
+    pruefe("weitere:" in kern and "Object.assign(roh, wert.weitere)" in kern,
+           "und Lade- wie Entladezähler kommen aus **einer** Abfrage - eine "
+           "Mehrrahmen-Antwort zweimal zu holen kostet Zeit")
+    pruefe("ZUSATZ_TITEL" in kern,
+           "auch der mitgelieferte Wert steht in der Feldliste, sonst zeigt "
+           "die Tabelle weniger, als gemessen wird")
+    pruefe("ABSCHNITT_MIT_ZAEHLER_S = 60" in live
+           and "ABSCHNITT_AUS_SOC_S = 300" in live,
+           "die Balkenbreite folgt der Quelle: eine Minute mit Zähler, "
+           "fünf ohne - nicht dem Wunsch")
+    pruefe("letzt.netto - erst.netto" in live,
+           "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
+    html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
+    pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
+           "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "
+           "sonst fällt ein zweiter Start dem ersten in den Rücken")
+
     pruefe("laufenderVerbrauch" in live and "VERBRAUCH_AB_KM" in live,
            "der Verbrauch der laufenden Fahrt wird aus Ladestand und "
            "Kilometerstand gerechnet, erst ab einer Mindeststrecke")

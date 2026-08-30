@@ -428,6 +428,15 @@ function befehl(text, grenze_ms = 15000) {
   const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076", fcsh: "17FC0076" };
   // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
   const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9", fcsh: "17FC00B9" };
+  const ZUSATZ_TITEL = {
+    geladen_kwh: "Geladen gesamt",
+    kompressor_upm: "Kompressor-Drehzahl",
+    kompressor_an: "Kompressor an",
+  };
+
+  const ZUSATZ_EINHEIT = { kompressor_upm: "/min", kompressor_an: null };
+  const ZUSATZ_STELLEN = { kompressor_upm: 0, kompressor_an: 0 };
+
   const MESSWERTE = [
     { name: "soc_roh", titel: "Rohwert SoC", einheit: null, stellen: 0,
       did: "22028C", adresse: BMS, pflicht: true,
@@ -435,41 +444,66 @@ function befehl(text, grenze_ms = 15000) {
     { name: "spannung_v", titel: "Spannung", einheit: "V", stellen: 1,
       did: "221E3B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 4 : null },
-    /* Batteriestrom. Die Umrechnung stammt aus dem WiCAN-Fahrzeugprofil,
-     * das den ID.Buzz ausdruecklich nennt:
+    /* Batteriestrom.
      *
-     *     HV_A = (150000 - [B5:B9]) / 100
+     * Ich hatte das auf die WiCAN-Formel umgestellt - fuenf Bytes ab B5 und
+     * umgekehrtes Vorzeichen. Das war falsch. Zwei unabhaengige Quellen
+     * nennen uebereinstimmend vier Bytes ab dem ersten Datenbyte und
+     * `(Rohwert - 150000)/100`: die MEB-Liste von spot2000 und der
+     * ESP32-Logger von codingABI, dessen Pufferindex nachweislich beim
+     * ersten Byte nach der Quittung beginnt - also genau bei unserem b[0].
+     * Damit steht hier wieder, was urspruenglich dastand.
      *
-     * Zwei Unterschiede zur bisherigen Fassung. Erstens das **Vorzeichen**:
-     * 150000 minus Rohwert, nicht umgekehrt. Zweitens die **Byte-Lage** -
-     * WiCAN liest ab B5, jolt las ab B4 (dort heisst B4 unser b[0]).
-     * Fuenf Bytes bedeuten ausserdem eine Antwort ueber mehr als einen
-     * Rahmen; ohne Flusskontrolle kam sie ueberhaupt nicht an.
-     *
-     * Die Schranke steht dabei, weil zwei Quellen sich widersprechen -
-     * spot2000 rechnet mit vier Bytes ab B4 und umgekehrtem Vorzeichen.
-     * Ein Ladestrom jenseits von tausend Ampere gibt es nicht; kommt so
-     * etwas heraus, war die Annahme falsch und die Zeile bleibt leer. */
+     * Warum der Wert trotzdem nicht ankam, ist damit **nicht** geklaert -
+     * die Formel war es jedenfalls nicht. */
     { name: "strom_a", titel: "Strom", einheit: "A", stellen: 1,
       did: "221E3D", adresse: BMS,
+      lesen: (b) => b.length >= 4
+        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
+        : null },
+    /* Die Energiezaehler des Fahrzeugs - der genaueste Verbrauchsmesser,
+     * den es hier gibt.
+     *
+     * Sie zaehlen ueber die Lebensdauer, was in den Akku hinein- und was
+     * herausgegangen ist. Fuer den Verbrauch zaehlt nicht ihr Stand,
+     * sondern ihre **Differenz** ueber ein Stueck Fahrt - und die ist um
+     * Groessenordnungen genauer als alles andere:
+     *
+     *     Ladestand      Schritt 0,44 pp  =  339 Wh
+     *     Entladezaehler Schritt 1/8583   =  0,117 Wh
+     *
+     * Fast dreitausendmal feiner. Damit wird ein Balken je Minute vom
+     * Rauschen zur Messung: Was eine Minute bei sechzig km/h kostet, sind
+     * rund 0,25 kWh - beim Ladestand 136 % Fehler, hier 0,05 %.
+     *
+     * Byte-Lage und Teiler stammen aus dem ESP32-Logger von codingABI
+     * (`readAndSendHVTotalChargeDischarge`); spot2000 nennt denselben
+     * Teiler. Die Antwort geht ueber mehrere Rahmen - ohne Flusskontrolle
+     * und Zusammensetzen kam sie ueberhaupt nicht an. */
+    { name: "entladen_kwh", titel: "Entladen gesamt", einheit: "kWh",
+      stellen: 2, did: "221E32", adresse: BMS,
+      /* **Vorzeichenbehaftet.** Der Entladezaehler kommt als negative Zahl -
+       * am Fahrzeug gemessen 0xF7141E0D. Als vorzeichenlose 32-Bit-Zahl
+       * gelesen sind das 4,15 Milliarden und damit 482 961 kWh; als
+       * vorzeichenbehaftete -17 438,6, und das ist der richtige Wert.
+       * codingABI castet dafuer nach `(long)`, was ich beim Uebertragen
+       * uebersehen hatte. JavaScript braucht die Umrechnung von Hand.
+       *
+       * Aufgefallen ist es dem Kreuzvergleich der Pruefseite: 810 kWh/100 km
+       * Lebensdauerverbrauch statt der erwarteten 12 bis 40. */
       lesen: (b) => {
-        if (b.length < 6) return null;
-        const roh = b.slice(1, 6).reduce((a, x) => a * 256 + x, 0);
-        const a = (150000 - roh) / 100;
-        return Math.abs(a) <= 1000 ? a : null;
+        if (b.length < 16) return null;
+        const roh = (b[12] * 16777216) + (b[13] * 65536) + (b[14] * 256) + b[15];
+        return Math.abs((roh >= 2147483648 ? roh - 4294967296 : roh) / 8583.07);
+      },
+      /* Dieselbe Antwort traegt auch den Ladezaehler. `weitere` holt ihn
+       * aus denselben Bytes, statt die Abfrage ein zweites Mal zu stellen -
+       * eine Mehrrahmen-Antwort kostet Zeit. */
+      weitere: {
+        geladen_kwh: (b) => b.length >= 12
+          ? ((b[8] * 16777216) + (b[9] * 65536) + (b[10] * 256) + b[11]) / 8583.07
+          : null,
       } },
-    /* `energie_kwh` (221E32) stand hier und wurde nie ausgewertet.
-     *
-     * Zwei Fehler auf einmal: Die MEB-Referenz weist die Antwort als
-     * **multiframe** aus und rechnet mit den Bytes 12 bis 15; jolt las die
-     * ersten vier eines einzelnen Rahmens. Und der Wert heisst dort "HV
-     * battery total discharge" - die ueber die Lebensdauer entnommene
-     * Energie, nicht der Inhalt des Akkus. Beides zusammen ergab eine
-     * Zeile, die nie einen Wert zeigte und, haette sie einen gezeigt,
-     * den falschen.
-     *
-     * Wieder aufnehmen lohnt sich erst mit Mehrrahmen-Auswertung; als
-     * Zaehler fuer den Batteriezustand waere er dann interessant. */
     { name: "ladegrenze_a", titel: "Ladegrenze", einheit: "A", stellen: 0,
       did: "221E1B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
@@ -541,17 +575,27 @@ function befehl(text, grenze_ms = 15000) {
     { name: "akku_kwh", titel: "Akkukapazität", einheit: "kWh", stellen: 1,
       did: "222AB2", adresse: AKKU11, selten: 40,
       lesen: (b) => {
-        // WiCAN: HV_CAPACITY_KWH = [B4:B5] * 50, das Ergebnis in Wh.
-        // Meine erste Annahme (vier Bytes in Wh) war geraten und falsch.
-        if (b.length < 2) return null;
-        const kwh = ((b[0] * 256) + b[1]) * 50 / 1000;
+        /* codingABI: `buffer2unsignedLong() / 1310.77 / 1000` ueber alle
+         * vier Datenbytes. WiCANs `[B4:B5] * 50` ist dieselbe Formel, nur
+         * auf die oberen zwei Bytes verkuerzt - 50/65536 entspricht
+         * 1/1310,7. Vier Bytes sind feiner. */
+        if (b.length < 4) return null;
+        const roh = (b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3];
+        const kwh = roh / 1310.77 / 1000;
         return (kwh >= 10 && kwh <= 200) ? kwh : null;
       } },
     /* Die Reichweite, die das Auto selbst ausrechnet. Interessant als
      * Gegenprobe zu jolts Prognose - dieselbe Frage, zwei Antworten. */
     { name: "reichweite_km", titel: "Reichweite (Auto)", einheit: "km",
       stellen: 0, did: "222AB6", adresse: AKKU11, selten: 10,
-      lesen: (b) => b.length >= 3 ? (b[1] * 256) + b[2] : null },
+      /* Die ersten beiden Datenbytes - so liest es codingABI. WiCAN nimmt
+       * eines weiter; welches stimmt, sagt die erste Fahrt. Die Schranke
+       * faengt den falschen Fall ab. */
+      lesen: (b) => {
+        if (b.length < 2) return null;
+        const km = (b[0] * 256) + b[1];
+        return (km >= 0 && km <= 999) ? km : null;
+      } },
     /* Die Batterietemperatur. Sie bestimmt die Ladeleistung, und bisher
      * nimmt `laden/kurven.temperatur_faktor` die **Aussen**temperatur als
      * Ersatz - der Kommentar dort sagt selbst, dass sie die Kaelte der
@@ -560,6 +604,48 @@ function befehl(text, grenze_ms = 15000) {
     { name: "batterie_c", titel: "Batterietemperatur", einheit: "°C",
       stellen: 1, did: "222A0B", adresse: BMS, selten: 10,
       lesen: (b) => b.length ? (b[0] / 2) - 40 : null },
+    /* Die Leistung des Klimakompressors - aus zwei Messungen abgeleitet,
+     * nicht aus einer Quelle abgeschrieben.
+     *
+     * Keine der drei Referenzen (spot2000, WiCAN, codingABI) nennt fuer
+     * `220800` eine Umrechnung; spot2000 fuehrt sie als "equation missing".
+     * Die Antwort traegt elf Bytes, und vier davon liegen im plausiblen
+     * Wattbereich - raten waere hier besonders verlockend und besonders
+     * falsch gewesen.
+     *
+     * Eine Differenzmessung am Fahrzeug hat es entschieden, einmal mit und
+     * einmal ohne laufenden Kompressor:
+     *
+     *              b0    b1b2   b3b4   b5b6   b7
+     *     aus    0x10       0      0      0    0
+     *     an     0x51    9408   9408   2618   14
+     *     (drittens, Teillast)  3648   3712   935    5
+     *
+     * Daraus:
+     *   - `b0` Bit 0 ist an/aus.
+     *   - `b1b2` und `b3b4` laufen gleich und viel hoeher - Soll- und
+     *     Ist-Drehzahl. Als Watt gelesen waeren 9,4 kW fuer einen
+     *     Klimakompressor zu viel.
+     *   - `b5b6` ist die **Leistung in Watt**: null wenn aus, 935 bei
+     *     Teillast, 2618 bei voller Kuehlung. Genau das Profil.
+     *   - `b7` ist dieselbe Groesse groeber - das Verhaeltnis b5b6/b7 ist
+     *     in beiden Messungen exakt 187.
+     *
+     * Die Drehzahl passt dazu: 3650 zu 9408 Umdrehungen ist Faktor 2,58,
+     * 935 zu 2618 Watt Faktor 2,80 - naeherungsweise proportional, also
+     * etwa gleiches Drehmoment. Die Schranke faengt ab, falls das an einem
+     * anderen Fahrzeug doch anders liegt. */
+    { name: "kompressor_w", titel: "Klimakompressor", einheit: "W",
+      stellen: 0, did: "220800", adresse: KLIMA, selten: 20,
+      lesen: (b) => {
+        if (b.length < 7) return null;
+        const w = (b[5] * 256) + b[6];
+        return (w >= 0 && w <= 8000) ? w : null;
+      },
+      weitere: {
+        kompressor_upm: (b) => b.length >= 5 ? (b[3] * 256) + b[4] : null,
+        kompressor_an: (b) => b.length ? (b[0] & 1) : null,
+      } },
     /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
      * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
      * Pflichtwerte dieser Runde laengst gelesen. */
@@ -708,9 +794,17 @@ function befehl(text, grenze_ms = 15000) {
   function auswerten(antwort, eintrag) {
     const bytes = nutzbytes(antwort, eintrag.did);
     if (!bytes || !bytes.length) return null;
-    const wert = eintrag.lesen(bytes);
-    return (wert === null || wert === undefined || Number.isNaN(wert))
-      ? null : wert;
+    const sauber = (wert) => (wert === null || wert === undefined
+                              || Number.isNaN(wert)) ? null : wert;
+    const wert = sauber(eintrag.lesen(bytes));
+    if (!eintrag.weitere) return wert;
+    // Mehrere Groessen aus derselben Antwort - siehe `entladen_kwh`.
+    const weitere = {};
+    for (const [name, lies] of Object.entries(eintrag.weitere)) {
+      const w = sauber(lies(bytes));
+      if (w !== null) weitere[name] = Math.round(w * 1000) / 1000;
+    }
+    return { wert, weitere };
   }
 
   /* Einen vollständigen Satz lesen. Fehler einzelner Grössen werden
@@ -721,7 +815,11 @@ function befehl(text, grenze_ms = 15000) {
     for (const eintrag of MESSWERTE) {
       if (eintrag.selten && runde % eintrag.selten !== 0) continue;
       try {
-        const wert = await messwertLesen(eintrag);
+        let wert = await messwertLesen(eintrag);
+        if (wert && typeof wert === "object") {
+          Object.assign(roh, wert.weitere);
+          wert = wert.wert;
+        }
         if (wert !== null) {
           roh[eintrag.name] = Math.round(wert * 1000) / 1000;
         } else if (eintrag.pflicht) {
@@ -836,6 +934,9 @@ function befehl(text, grenze_ms = 15000) {
     satzLesen,
     socAusRoh,
     socAusAntwort,
+    // Fuer die Diagnoseseite: rohe Nutzbytes einer Antwort, inklusive
+    // Mehrrahmen-Zusammensetzung.
+    nutzbytes,
     NAMEN,
     /* Was ausgelesen wird, mit Beschriftung und Einheit.
      *
@@ -846,10 +947,20 @@ function befehl(text, grenze_ms = 15000) {
      *
      * `pflicht` wandert mit: Der Ladestand ist der einzige Wert, ohne den
      * eine Runde verworfen wird, und das soll man ihm ansehen koennen. */
-    FELDER: MESSWERTE.map((m) => ({
-      name: m.name, titel: m.titel || m.name, einheit: m.einheit || null,
-      stellen: typeof m.stellen === "number" ? m.stellen : 1,
-      pflicht: !!m.pflicht, selten: m.selten || 0,
-    })),
+    FELDER: MESSWERTE.flatMap((m) => [
+      { name: m.name, titel: m.titel || m.name, einheit: m.einheit || null,
+        stellen: typeof m.stellen === "number" ? m.stellen : 1,
+        pflicht: !!m.pflicht, selten: m.selten || 0 },
+      // Werte, die aus derselben Antwort mitkommen, gehoeren genauso in die
+      // Tabelle - sonst zeigt sie weniger, als gemessen wird.
+      ...Object.keys(m.weitere || {}).map((n) => ({
+        name: n, titel: ZUSATZ_TITEL[n] || n,
+        // Eigene Einheit, sonst erbt die Drehzahl das Watt des Hauptwerts.
+        einheit: ZUSATZ_EINHEIT[n] !== undefined ? ZUSATZ_EINHEIT[n]
+          : (m.einheit || null),
+        stellen: ZUSATZ_STELLEN[n] !== undefined ? ZUSATZ_STELLEN[n]
+          : (typeof m.stellen === "number" ? m.stellen : 1),
+        pflicht: false, selten: m.selten || 0 })),
+    ]),
   };
 })();
