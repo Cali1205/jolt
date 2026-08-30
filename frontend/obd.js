@@ -520,11 +520,17 @@
     nebenverbrauch_kw: [-2, 20, "im Stand ein bis drei kW"],
     km_stand: [1, 999999],
     dcdc_strom_a: [-400, 400],
-    akku_kwh: [10, 200, "brutto, beim ID.Buzz rund 82"],
+    akku_kwh: [10, 200, "nutzbar - beim ID.Buzz 77 kWh neu, weniger mit "
+               + "den Jahren"],
     reichweite_km: [0, 999, "mit der Anzeige im Auto vergleichen"],
     batterie_c: [-40, 80, "nach dem Stehen nahe der Aussentemperatur"],
-    entladen_kwh: [1, 999999, "Lebensdauerzähler"],
-    geladen_kwh: [1, 999999, "Lebensdauerzähler"],
+    /* Lebensdauerzaehler. Die Schranke war [1, 999999] und liess damit
+     * 482 961 kWh durch - genau den Wert, den die fehlende
+     * Vorzeichenbehandlung erzeugte. Eine Schranke, die den Fehler nicht
+     * faengt, den sie fangen soll, ist keine. 100 000 kWh entsprechen bei
+     * 20 kWh/100 km einer halben Million Kilometer. */
+    entladen_kwh: [100, 100000, "Lebensdauerzähler"],
+    geladen_kwh: [100, 100000, "Lebensdauerzähler"],
   };
 
   function pruefzeile(titel, wert, urteil, bemerkung) {
@@ -582,6 +588,10 @@
           - (typeof roh.geladen_kwh === "number" ? roh.geladen_kwh : 0);
         const je100 = roh.entladen_kwh / roh.km_stand * 100;
         const drin = je100 >= 12 && je100 <= 40;
+        // Mitzaehlen. Vorher stand er zwar rot in der Tabelle, aber die
+        // Zeile darueber meldete trotzdem "0 auffaellig" - und die liest
+        // man zuerst.
+        if (drin) gut += 1; else schlecht += 1;
         zeilen.push(pruefzeile(
           "<strong>Kreuzvergleich</strong>",
           `${je100.toFixed(1)} kWh/100 km`,
@@ -637,30 +647,56 @@
     return bytes;
   }
 
+  /* Beide Messungen nebeneinander.
+   *
+   * Die erste Fassung schob ein Zwei-Byte-Fenster **byteweise** durch die
+   * Antwort und zeigte damit lauter ueberlappende Scheinwerte: "Byte 1-2 =
+   * 9408" neben "Byte 2-3 = 49188", wobei nur der erste eine Groesse ist.
+   * Eine Mehrbyte-Zahl faengt nicht an jedem Byte an.
+   *
+   * Jetzt beides getrennt: erst jedes Byte einzeln, dann die
+   * **ausgerichteten** Paare ab Byte 1 - so, wie das Steuergeraet sie
+   * meint. Was sich in beiden Spalten deutlich unterscheidet, ist der
+   * Kandidat. */
   function klimaZeigen() {
     const ziel = el("klima-ergebnis");
     if (!klimaA || !klimaA.b) { ziel.innerHTML = ""; return; }
     const a = klimaA.a, b = klimaA.b;
-    const zeilen = [];
-    for (let i = 0; i + 1 < Math.min(a.length, b.length); i++) {
+    const n = Math.min(a.length, b.length);
+
+    const einzeln = [];
+    for (let i = 0; i < n; i++) {
+      const d = b[i] - a[i];
+      einzeln.push(`<tr class="${d ? "gut" : ""}"><th>Byte ${i}</th>`
+        + `<td>${a[i]}</td><td>${b[i]}</td>`
+        + `<td>${d > 0 ? "+" : ""}${d || "–"}</td></tr>`);
+    }
+
+    const paare = [];
+    const kandidaten = [];
+    for (let i = 1; i + 1 < n; i += 2) {
       const va = a[i] * 256 + a[i + 1], vb = b[i] * 256 + b[i + 1];
       const d = vb - va;
       const auffaellig = Math.abs(d) >= 100;
-      zeilen.push(`<tr class="${auffaellig ? "gut" : ""}">`
+      if (auffaellig) kandidaten.push(`Byte ${i}–${i + 1}: ${va} → ${vb}`);
+      paare.push(`<tr class="${auffaellig ? "gut" : ""}">`
         + `<th>Byte ${i}–${i + 1}</th><td>${va}</td><td>${vb}</td>`
-        + `<td>${d > 0 ? "+" : ""}${d}</td></tr>`);
+        + `<td>${d > 0 ? "+" : ""}${d || "–"}</td></tr>`);
     }
-    const kandidaten = [];
-    for (let i = 0; i + 1 < Math.min(a.length, b.length); i++) {
-      const d = (b[i] * 256 + b[i + 1]) - (a[i] * 256 + a[i + 1]);
-      if (Math.abs(d) >= 100) kandidaten.push(`Byte ${i}–${i + 1} (${d > 0 ? "+" : ""}${d})`);
-    }
+
     ziel.innerHTML =
-      `<table class="pruef"><tbody><tr><th></th><td>aus</td><td>an</td>`
-      + `<td>Δ</td></tr>${zeilen.join("")}</tbody></table>`
+      `<p>Bit 0 von Byte 0: <b>${a[0] & 1}</b> → <b>${b[0] & 1}</b>`
+      + `${(a[0] & 1) !== (b[0] & 1) ? " – das ist das An/Aus-Bit." : ""}</p>`
+      + `<table class="pruef"><tbody>`
+      + `<tr><th>einzeln</th><td>aus</td><td>an</td><td>Δ</td></tr>`
+      + einzeln.join("")
+      + `<tr><th>Paare ab Byte 1</th><td>aus</td><td>an</td><td>Δ</td></tr>`
+      + paare.join("")
+      + `</tbody></table>`
       + `<p>${kandidaten.length
           ? "Deutlich verändert: <b>" + kandidaten.join(", ") + "</b>. "
-            + "Das ist der Kandidat für die Kompressorleistung."
+            + "Die kleinste dieser Zahlen ist meist die Leistung in Watt, "
+            + "die grösseren sind Soll- und Ist-Drehzahl."
           : "Nichts hat sich deutlich verändert – war der Kompressor bei "
             + "beiden Messungen im selben Zustand?"}</p>`;
   }

@@ -428,7 +428,14 @@ function befehl(text, grenze_ms = 15000) {
   const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076", fcsh: "17FC0076" };
   // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
   const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9", fcsh: "17FC00B9" };
-  const ZUSATZ_TITEL = { geladen_kwh: "Geladen gesamt" };
+  const ZUSATZ_TITEL = {
+    geladen_kwh: "Geladen gesamt",
+    kompressor_upm: "Kompressor-Drehzahl",
+    kompressor_an: "Kompressor an",
+  };
+
+  const ZUSATZ_EINHEIT = { kompressor_upm: "/min", kompressor_an: null };
+  const ZUSATZ_STELLEN = { kompressor_upm: 0, kompressor_an: 0 };
 
   const MESSWERTE = [
     { name: "soc_roh", titel: "Rohwert SoC", einheit: null, stellen: 0,
@@ -475,9 +482,20 @@ function befehl(text, grenze_ms = 15000) {
      * und Zusammensetzen kam sie ueberhaupt nicht an. */
     { name: "entladen_kwh", titel: "Entladen gesamt", einheit: "kWh",
       stellen: 2, did: "221E32", adresse: BMS,
-      lesen: (b) => b.length >= 16
-        ? Math.abs(((b[12] * 16777216) + (b[13] * 65536) + (b[14] * 256)
-                    + b[15]) / 8583.07) : null,
+      /* **Vorzeichenbehaftet.** Der Entladezaehler kommt als negative Zahl -
+       * am Fahrzeug gemessen 0xF7141E0D. Als vorzeichenlose 32-Bit-Zahl
+       * gelesen sind das 4,15 Milliarden und damit 482 961 kWh; als
+       * vorzeichenbehaftete -17 438,6, und das ist der richtige Wert.
+       * codingABI castet dafuer nach `(long)`, was ich beim Uebertragen
+       * uebersehen hatte. JavaScript braucht die Umrechnung von Hand.
+       *
+       * Aufgefallen ist es dem Kreuzvergleich der Pruefseite: 810 kWh/100 km
+       * Lebensdauerverbrauch statt der erwarteten 12 bis 40. */
+      lesen: (b) => {
+        if (b.length < 16) return null;
+        const roh = (b[12] * 16777216) + (b[13] * 65536) + (b[14] * 256) + b[15];
+        return Math.abs((roh >= 2147483648 ? roh - 4294967296 : roh) / 8583.07);
+      },
       /* Dieselbe Antwort traegt auch den Ladezaehler. `weitere` holt ihn
        * aus denselben Bytes, statt die Abfrage ein zweites Mal zu stellen -
        * eine Mehrrahmen-Antwort kostet Zeit. */
@@ -586,6 +604,48 @@ function befehl(text, grenze_ms = 15000) {
     { name: "batterie_c", titel: "Batterietemperatur", einheit: "°C",
       stellen: 1, did: "222A0B", adresse: BMS, selten: 10,
       lesen: (b) => b.length ? (b[0] / 2) - 40 : null },
+    /* Die Leistung des Klimakompressors - aus zwei Messungen abgeleitet,
+     * nicht aus einer Quelle abgeschrieben.
+     *
+     * Keine der drei Referenzen (spot2000, WiCAN, codingABI) nennt fuer
+     * `220800` eine Umrechnung; spot2000 fuehrt sie als "equation missing".
+     * Die Antwort traegt elf Bytes, und vier davon liegen im plausiblen
+     * Wattbereich - raten waere hier besonders verlockend und besonders
+     * falsch gewesen.
+     *
+     * Eine Differenzmessung am Fahrzeug hat es entschieden, einmal mit und
+     * einmal ohne laufenden Kompressor:
+     *
+     *              b0    b1b2   b3b4   b5b6   b7
+     *     aus    0x10       0      0      0    0
+     *     an     0x51    9408   9408   2618   14
+     *     (drittens, Teillast)  3648   3712   935    5
+     *
+     * Daraus:
+     *   - `b0` Bit 0 ist an/aus.
+     *   - `b1b2` und `b3b4` laufen gleich und viel hoeher - Soll- und
+     *     Ist-Drehzahl. Als Watt gelesen waeren 9,4 kW fuer einen
+     *     Klimakompressor zu viel.
+     *   - `b5b6` ist die **Leistung in Watt**: null wenn aus, 935 bei
+     *     Teillast, 2618 bei voller Kuehlung. Genau das Profil.
+     *   - `b7` ist dieselbe Groesse groeber - das Verhaeltnis b5b6/b7 ist
+     *     in beiden Messungen exakt 187.
+     *
+     * Die Drehzahl passt dazu: 3650 zu 9408 Umdrehungen ist Faktor 2,58,
+     * 935 zu 2618 Watt Faktor 2,80 - naeherungsweise proportional, also
+     * etwa gleiches Drehmoment. Die Schranke faengt ab, falls das an einem
+     * anderen Fahrzeug doch anders liegt. */
+    { name: "kompressor_w", titel: "Klimakompressor", einheit: "W",
+      stellen: 0, did: "220800", adresse: KLIMA, selten: 20,
+      lesen: (b) => {
+        if (b.length < 7) return null;
+        const w = (b[5] * 256) + b[6];
+        return (w >= 0 && w <= 8000) ? w : null;
+      },
+      weitere: {
+        kompressor_upm: (b) => b.length >= 5 ? (b[3] * 256) + b[4] : null,
+        kompressor_an: (b) => b.length ? (b[0] & 1) : null,
+      } },
     /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
      * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
      * Pflichtwerte dieser Runde laengst gelesen. */
@@ -894,8 +954,12 @@ function befehl(text, grenze_ms = 15000) {
       // Werte, die aus derselben Antwort mitkommen, gehoeren genauso in die
       // Tabelle - sonst zeigt sie weniger, als gemessen wird.
       ...Object.keys(m.weitere || {}).map((n) => ({
-        name: n, titel: ZUSATZ_TITEL[n] || n, einheit: m.einheit || null,
-        stellen: typeof m.stellen === "number" ? m.stellen : 1,
+        name: n, titel: ZUSATZ_TITEL[n] || n,
+        // Eigene Einheit, sonst erbt die Drehzahl das Watt des Hauptwerts.
+        einheit: ZUSATZ_EINHEIT[n] !== undefined ? ZUSATZ_EINHEIT[n]
+          : (m.einheit || null),
+        stellen: ZUSATZ_STELLEN[n] !== undefined ? ZUSATZ_STELLEN[n]
+          : (typeof m.stellen === "number" ? m.stellen : 1),
         pflicht: false, selten: m.selten || 0 })),
     ]),
   };

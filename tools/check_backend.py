@@ -860,6 +860,24 @@ def main() -> int:
     pruefe("nutzbytes," in kern,
            "dafür gibt der Baustein die rohen Nutzbytes heraus")
 
+    pruefe("kompressor_w" in kern and "b[5] * 256) + b[6]" in kern,
+           "die Kompressorleistung steht drin - aus einer Differenzmessung "
+           "abgeleitet, weil keine der drei Quellen eine Formel nennt")
+    pruefe("i += 2" in obd_js,
+           "die Differenzanzeige richtet die Byte-Paare aus, statt ein "
+           "Fenster byteweise zu schieben - eine Mehrbyte-Zahl fängt nicht "
+           "an jedem Byte an")
+
+    pruefe("roh - 4294967296" in kern,
+           "der Entladezähler wird vorzeichenbehaftet gelesen - unsigned "
+           "ergab am Fahrzeug 482 961 statt 17 439 kWh")
+    pruefe("entladen_kwh: [100, 100000" in obd_js,
+           "und seine Plausibilitätsschranke fängt genau diesen Fehler - "
+           "die alte [1, 999999] liess ihn durch")
+    pruefe("if (drin) gut += 1; else schlecht += 1;" in obd_js,
+           "der Kreuzvergleich zählt in die Zusammenfassung - rot in der "
+           "Tabelle und \"0 auffällig\" darüber ist schlimmer als nichts")
+
     pruefe("entladen_kwh" in kern and "8583.07" in kern,
            "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
            "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")
