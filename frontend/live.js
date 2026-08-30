@@ -32,6 +32,19 @@ window.joltLive = (function () {
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
   let letzteRohwerte = null;
   let letzteRohwerteZeit = 0;   // wann der letzte vollständige Satz ankam
+  /* Der letzte bekannte Wert je Messgrösse, mit seinem Zeitpunkt.
+   *
+   * Die Tabelle zeigte nur, was in **dieser** Runde ankam - und wurde damit
+   * löchrig: Der DC/DC-Strom wird nur jede zehnte Runde gelesen und stand
+   * neun von zehn Runden leer, und ein Wert, der einmal ausfällt,
+   * verschwand mitsamt seiner Zeile.
+   *
+   * Ein alter Wert ist aber fast immer nützlicher als gar keiner. Der
+   * Kilometerstand von vor dreissig Sekunden stimmt noch; die Innentemperatur
+   * von vor zwei Minuten auch. Was fehlt, ist nicht der Wert, sondern die
+   * Angabe, wie alt er ist - und die steht jetzt daneben. */
+  let werteStand = {};          // name -> {wert, zeit}
+  let nieGekommen = new Set();  // Kennungen, die dieses Auto nicht beantwortet
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
    * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
@@ -890,19 +903,54 @@ window.joltLive = (function () {
    *
    * Die Liste kommt aus `joltObd.FELDER`, damit eine neue Datenkennung hier
    * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
+  function werteMerken(roh) {
+    const jetzt = Date.now();
+    for (const [name, wert] of Object.entries(roh)) {
+      if (typeof wert === "number") {
+        werteStand[name] = { wert, zeit: jetzt };
+        nieGekommen.delete(name);
+      }
+    }
+    // "Geantwortet, aber ohne brauchbaren Wert" heisst: Die Datenkennung
+    // passt für dieses Fahrzeug nicht. Das bleibt so, bis doch einmal ein
+    // Wert kommt - deshalb gemerkt und nicht je Runde neu entschieden.
+    for (const name of roh._leer || []) {
+      if (!werteStand[name]) nieGekommen.add(name);
+    }
+  }
+
+  function alterText(sekunden) {
+    if (sekunden < 60) return `vor ${Math.round(sekunden)} s`;
+    return `vor ${Math.round(sekunden / 60)} min`;
+  }
+
   function rohwerteTabelle(roh) {
     const felder = (window.joltObd && window.joltObd.FELDER) || [];
     if (!felder.length) return "";
     const fehlend = new Set(roh._fehlend || []);
+    const jetzt = Date.now();
+
     const zeilen = felder.map((f) => {
-      const wert = roh[f.name];
-      const da = typeof wert === "number";
-      const text = da
-        ? K.zahl(wert, f.stellen) + (f.einheit ? " " + f.einheit : "")
-        : (fehlend.has(f.name) ? "keine Antwort"
-           : (f.selten ? "nicht in dieser Runde" : "–"));
-      return `<tr class="${da ? "" : "leer"}"><th>${f.titel}</th>`
-        + `<td>${text}</td></tr>`;
+      const stand = werteStand[f.name];
+      if (!stand) {
+        // Noch nie ein Wert. Der Grund unterscheidet sich, und der
+        // Unterschied ist beim Einrichten die eigentliche Information.
+        const grund = nieGekommen.has(f.name) ? "antwortet nicht"
+          : (fehlend.has(f.name) ? "keine Antwort" : "–");
+        return `<tr class="leer"><th>${f.titel}</th><td>${grund}</td></tr>`;
+      }
+      const alter = (jetzt - stand.zeit) / 1000;
+      const zahl = K.zahl(stand.wert, f.stellen)
+        + (f.einheit ? " " + f.einheit : "");
+      // Frisch heisst: in dieser Runde gekommen. Alles andere bekommt sein
+      // Alter danebengeschrieben und wird blasser, je älter es ist - so
+      // sieht man auf einen Blick, welche Zeile noch lebt.
+      if (typeof roh[f.name] === "number") {
+        return `<tr><th>${f.titel}</th><td>${zahl}</td></tr>`;
+      }
+      const klasse = alter > 120 ? "alt sehr" : "alt";
+      return `<tr class="${klasse}"><th>${f.titel}</th>`
+        + `<td>${zahl}<span class="wann">${alterText(alter)}</span></td></tr>`;
     });
     return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
   }
@@ -922,6 +970,7 @@ window.joltLive = (function () {
         }
         letzteRohwerte = roh;
         letzteRohwerteZeit = Date.now();
+        werteMerken(roh);
         nebenverbrauchMerken(roh);
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
         nutzlast.soc = Math.round(wert.hmi * 10) / 10;
@@ -1036,6 +1085,8 @@ window.joltLive = (function () {
     verlauf = [];
     letzteRohwerte = null;
     letzteRohwerteZeit = 0;
+    werteStand = {};
+    nieGekommen = new Set();
     nebenverbrauch = null;
     if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
     if (steckdose) {

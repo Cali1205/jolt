@@ -212,6 +212,7 @@ window.joltObd = (function () {
       // Was vor dem Abriss unterwegs war, kommt nicht mehr.
       schuldigeAntworten = 0;
       puffer = "";
+      wechselGescheitert.clear();
       await reihe(HANDSHAKE);
       melde("Wieder verbunden, Handshake erneuert.");
     } catch (fehler) {
@@ -399,7 +400,25 @@ function befehl(text, grenze_ms = 15000) {
    * eine ganz andere Kennung und bekommt NO DATA - genau der Fehler, der
    * die Suche nach dem Ladestand aufgehalten hat. */
   const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B" };
-  const KLIMA = { cp: "00", sh: "000746", cra: "000007B0" };
+  /* Das Klimasteuergeraet haengt an einer **11-Bit-Kennung**, nicht an einer
+   * 29-Bit wie alles andere.
+   *
+   * 0x746 (Anfrage) und 0x7B0 (Antwort) passen in elf Bit - das ist VWs
+   * klassisches Diagnoseschema. 0x17FC007B, wo Batterie und Fahrzeug
+   * antworten, passt nur in 29. Der Handshake stellt `ATSP7` ein, also
+   * ausschliesslich 29 Bit; eine Anfrage an 0x00000746 geht damit als
+   * 29-Bit-Rahmen hinaus, und darauf hoert das Klimageraet nicht.
+   *
+   * Das erklaert den Befund aus der dritten Testfahrt: Aussen- und
+   * Innentemperatur fehlten in **allen** 77 Runden, waehrend alles auf
+   * 0x17FC.... zu 100 % ankam. Adresse und Umrechnung stimmen mit der
+   * MEB-Referenz von spot2000 ueberein - es ist die Rahmenbreite.
+   *
+   * `protokoll` schaltet deshalb fuer diese Abfragen kurz auf ATSP6 um.
+   * Ungeprueft am Fahrzeug: Es folgt aus den Adressen, nicht aus einer
+   * Messung. Deshalb liegt es hinter `selten` und faellt nach einem
+   * Fehlschlag fuer die Sitzung aus (siehe `messwertLesen`). */
+  const KLIMA = { cp: "00", sh: "746", cra: "7B0", protokoll: "6" };
   // Fahrzeug-Steuergerät: Kilometerstand und - der eigentliche Fund - die
   // Leistung der Nebenverbraucher als fertige Zahl.
   const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076" };
@@ -417,11 +436,18 @@ function befehl(text, grenze_ms = 15000) {
       lesen: (b) => b.length >= 4
         ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
         : null },
-    { name: "energie_kwh", titel: "Energie im Akku", einheit: "kWh", stellen: 1,
-      did: "221E32", adresse: BMS,
-      lesen: (b) => b.length >= 4
-        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3]) / 8583.07
-        : null },
+    /* `energie_kwh` (221E32) stand hier und wurde nie ausgewertet.
+     *
+     * Zwei Fehler auf einmal: Die MEB-Referenz weist die Antwort als
+     * **multiframe** aus und rechnet mit den Bytes 12 bis 15; jolt las die
+     * ersten vier eines einzelnen Rahmens. Und der Wert heisst dort "HV
+     * battery total discharge" - die ueber die Lebensdauer entnommene
+     * Energie, nicht der Inhalt des Akkus. Beides zusammen ergab eine
+     * Zeile, die nie einen Wert zeigte und, haette sie einen gezeigt,
+     * den falschen.
+     *
+     * Wieder aufnehmen lohnt sich erst mit Mehrrahmen-Auswertung; als
+     * Zaehler fuer den Batteriezustand waere er dann interessant. */
     { name: "ladegrenze_a", titel: "Ladegrenze", einheit: "A", stellen: 0,
       did: "221E1B", adresse: BMS,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
@@ -439,12 +465,6 @@ function befehl(text, grenze_ms = 15000) {
      * bisher aus einer Vorhersage ins Verbrauchsmodell. Aus dem Auto ist sie
      * gemessen, von der Strecke, zur richtigen Zeit. Sie sitzt in einem
      * anderen Steuergerät als die Batterie - siehe KLIMA. */
-    { name: "aussentemp_c", titel: "Aussentemperatur", einheit: "°C", stellen: 1,
-      did: "222609", adresse: KLIMA,
-      lesen: (b) => b.length ? b[0] / 2 - 50 : null },
-    { name: "innentemp_c", titel: "Innentemperatur", einheit: "°C", stellen: 1,
-      did: "222613", adresse: KLIMA,
-      lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
     /* **Nebenverbraucher als fertige Zahl.** Alles ausser dem Antrieb -
      * Heizung, Klima, Steuergeräte, 12-V-Netz - in kW, direkt aus dem
      * Steuergerät.
@@ -480,6 +500,15 @@ function befehl(text, grenze_ms = 15000) {
     { name: "dcdc_strom_a", titel: "DC/DC-Strom", einheit: "A", stellen: 1,
       did: "22465B", adresse: DCDC, selten: 10,
       lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
+    /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
+     * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
+     * Pflichtwerte dieser Runde laengst gelesen. */
+    { name: "aussentemp_c", titel: "Aussentemperatur", einheit: "°C", stellen: 1,
+      did: "222609", adresse: KLIMA, selten: 20,
+      lesen: (b) => b.length ? b[0] / 2 - 50 : null },
+    { name: "innentemp_c", titel: "Innentemperatur", einheit: "°C", stellen: 1,
+      did: "222613", adresse: KLIMA, selten: 20,
+      lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
   ];
 
 
@@ -499,12 +528,43 @@ function befehl(text, grenze_ms = 15000) {
     return bytes;
   }
 
+  /* Adressen, deren Protokollwechsel schiefging. Einmal reicht: Wer bei
+   * jeder zwanzigsten Runde erneut umschaltet und scheitert, zahlt den
+   * Umlauf dauerhaft, ohne je einen Wert zu bekommen. */
+  const wechselGescheitert = new Set();
+
   async function messwertLesen(eintrag) {
     const ziel = eintrag.adresse;
+
+    /* Steuergeraete auf einer 11-Bit-Kennung brauchen ein anderes Protokoll
+     * als der Rest (siehe KLIMA). Umgeschaltet wird nur fuer die Dauer
+     * dieser einen Abfrage und im `finally` wieder zurueck - der Ladestand
+     * ist Pflicht, und eine Sitzung, die im falschen Protokoll haengen
+     * bleibt, kostet jede weitere Runde. */
+    if (ziel.protokoll) {
+      if (wechselGescheitert.has(ziel.sh)) return null;
+      try {
+        await befehl(`ATSP${ziel.protokoll}`);
+        await befehl(`ATSH${ziel.sh}`);
+        await befehl(`ATCRA${ziel.cra}`);
+        return auswerten(await befehl(eintrag.did, 8000), eintrag);
+      } catch (fehler) {
+        melde(`Protokollwechsel auf ATSP${ziel.protokoll} fehlgeschlagen - `
+              + `${ziel.sh} wird in dieser Sitzung nicht mehr versucht.`);
+        wechselGescheitert.add(ziel.sh);
+        return null;
+      } finally {
+        // Zurueck ins 29-Bit-Protokoll, und die gemerkte Adresse verwerfen:
+        // Der naechste Wert setzt ATCP, ATSH und ATCRA vollstaendig neu.
+        try { await befehl("ATSP7"); } catch (e) { /* siehe naechste Runde */ }
+        letzteAdresse = null;
+      }
+    }
+
     if (!letzteAdresse || letzteAdresse.sh !== ziel.sh) {
       // Die Prioritätsbits gehören dazu: Zwischen Batterie (0x17…) und
-      // Klima (0x00…) unterscheiden sie sich, und ohne Umschalten geht die
-      // Anfrage an eine Kennung, auf der niemand hört.
+      // Fahrzeug (0x17…FC0076) unterscheiden sich die unteren Bits, und ohne
+      // Umschalten geht die Anfrage an eine Kennung, auf der niemand hört.
       if (!letzteAdresse || letzteAdresse.cp !== ziel.cp) {
         await befehl(`ATCP${ziel.cp}`);
       }
@@ -512,7 +572,10 @@ function befehl(text, grenze_ms = 15000) {
       await befehl(`ATCRA${ziel.cra}`);
       letzteAdresse = ziel;
     }
-    const antwort = await befehl(eintrag.did, 8000);
+    return auswerten(await befehl(eintrag.did, 8000), eintrag);
+  }
+
+  function auswerten(antwort, eintrag) {
     const bytes = nutzbytes(antwort, eintrag.did);
     if (!bytes || !bytes.length) return null;
     const wert = eintrag.lesen(bytes);
@@ -529,8 +592,24 @@ function befehl(text, grenze_ms = 15000) {
       if (eintrag.selten && runde % eintrag.selten !== 0) continue;
       try {
         const wert = await messwertLesen(eintrag);
-        if (wert !== null) roh[eintrag.name] = Math.round(wert * 1000) / 1000;
-        else if (eintrag.pflicht) throw new Error("keine Nutzdaten");
+        if (wert !== null) {
+          roh[eintrag.name] = Math.round(wert * 1000) / 1000;
+        } else if (eintrag.pflicht) {
+          throw new Error("keine Nutzdaten");
+        } else {
+          /* Geantwortet, aber ohne brauchbaren Wert.
+           *
+           * Das ist etwas anderes als ein Zeitablauf, und der Unterschied
+           * ist der wichtigste beim Einrichten: Ein Zeitablauf heisst
+           * "gerade nicht erreicht", ein leerer Wert heisst "diese
+           * Datenkennung stimmt für dieses Fahrzeug nicht".
+           *
+           * Bisher fiel dieser Fall stumm durch - weder ein Wert noch ein
+           * Eintrag in `_fehlend`. In der ersten Aufzeichnung fehlten
+           * dadurch vier von dreizehn Messwerten bei allen 77 Runden, ohne
+           * dass irgendwo stand, dass sie fehlen. */
+          (roh._leer = roh._leer || []).push(eintrag.name);
+        }
       } catch (fehler) {
         if (eintrag.pflicht) throw fehler;
         if (!roh._fehlend) roh._fehlend = [];
