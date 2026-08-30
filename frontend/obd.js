@@ -558,7 +558,25 @@
     if (await O.handshake()) log("Handshake durch.");
   });
   el("soc").addEventListener("click", socLesen);
-  el("senden").addEventListener("click", () => O.reihe(el("frei").value.split("\n")));
+  /* Der Knopf sperrt sich, solange die Reihe laeuft.
+   *
+   * Eine Mehrrahmen-Antwort braucht ueber eine Sekunde. Wer in der Zeit noch
+   * einmal tippt, startet eine zweite Reihe, und die faellt dem ersten
+   * Befehl in den Ruecken: "es laeuft noch ein Befehl". Im Protokoll sah es
+   * danach aus, als haette das Steuergeraet nicht geantwortet - dabei war es
+   * die Oberflaeche. */
+  el("senden").addEventListener("click", async () => {
+    const knopf = el("senden");
+    knopf.disabled = true;
+    const vorher = knopf.textContent;
+    knopf.textContent = "läuft …";
+    try {
+      await O.reihe(el("frei").value.split("\n"));
+    } finally {
+      knopf.disabled = false;
+      knopf.textContent = vorher;
+    }
+  });
   el("melden").addEventListener("click", melden);
   el("log-leeren").addEventListener("click", () => { el("log").textContent = ""; });
   /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,

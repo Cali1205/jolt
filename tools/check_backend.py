@@ -836,6 +836,20 @@ def main() -> int:
     pruefe("akku_kwh" in kern and "kwh >= 10 && kwh <= 200" in kern,
            "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
            "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
+    pruefe("K.zahl(z.ist_soc, 1)" in live,
+           "der Ladestand steht mit einer Nachkommastelle da - der Dongle "
+           "liefert ihn in Schritten von 0,4 pp, auf ganze Prozent gerundet "
+           "steht die Zahl minutenlang still")
+    pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
+           "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
+    pruefe("ABSCHNITT_MIT_STROM_S" in live and "ABSCHNITT_AUS_SOC_S" in live,
+           "und seine Abschnittsbreite haengt an der Quelle - aus dem "
+           "Ladestand allein waere eine Minute unter der Auflösung")
+    html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
+    pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
+           "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "
+           "sonst fällt ein zweiter Start dem ersten in den Rücken")
+
     pruefe("laufenderVerbrauch" in live and "VERBRAUCH_AB_KM" in live,
            "der Verbrauch der laufenden Fahrt wird aus Ladestand und "
            "Kilometerstand gerechnet, erst ab einer Mindeststrecke")
