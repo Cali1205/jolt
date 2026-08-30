@@ -981,7 +981,11 @@ window.joltLive = (function () {
   function laufenderVerbrauch(roh, soc) {
     const fz = K.zustand.aufzFahrzeug
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
-    const akku = fz && fz.akku_netto_kwh;
+    // Was das Auto gerade meldet, schlägt beides: Profilwert und der zuletzt
+    // gespeicherte. `kapazitaet_kwh` ist der Rückfall - er trägt bereits die
+    // Entscheidung "gemessen vor Prospekt" aus dem Backend.
+    const akku = (typeof roh.akku_kwh === "number") ? roh.akku_kwh
+      : (fz && (fz.kapazitaet_kwh || fz.akku_netto_kwh));
     const km = werteStand.km_stand && werteStand.km_stand.wert;
     if (typeof km !== "number") return null;
     // Der Zählerstand, wenn er kommt - sonst der Ladestand.
@@ -1035,8 +1039,9 @@ window.joltLive = (function () {
     const punkte = verbrauchsspur.filter((p) => typeof p.km === "number");
     if (punkte.length < 2) return null;
     const mitZaehler = punkte.every((p) => typeof p.netto === "number");
-    const akku = (K.zustand.aufzFahrzeug
-      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {}).akku_netto_kwh;
+    const fz = K.zustand.aufzFahrzeug
+      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {};
+    const akku = fz.kapazitaet_kwh || fz.akku_netto_kwh;
     if (!mitZaehler && !akku) return null;
 
     const breite = (mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S

@@ -57,6 +57,13 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "strompreis_eur_kwh": fahrzeug.strompreis_eur_kwh,
             "strompreise": fahrzeug.strompreise or [],
             "korrekturfaktor": fahrzeug.korrekturfaktor,
+            # Was das Fahrzeug selbst ueber seinen Akku sagt, und wann.
+            # Beides null, solange nie gemessen wurde.
+            "gemessene_kapazitaet_kwh": fahrzeug.gemessene_kapazitaet_kwh,
+            "kapazitaet_gemessen_am": (fahrzeug.kapazitaet_gemessen_am.isoformat()
+                                       if fahrzeug.kapazitaet_gemessen_am else None),
+            # Womit tatsaechlich gerechnet wird - gemessen, sonst Profil.
+            "kapazitaet_kwh": fahrzeug.kapazitaet_kwh,
             # Nur ob eines eingerichtet ist, nicht welches. Das Token steht
             # genau einmal in einer Antwort - der, mit der es entsteht.
             "logger_aktiv": bool(fahrzeug.logger_token),
