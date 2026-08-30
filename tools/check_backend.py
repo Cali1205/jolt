@@ -842,6 +842,24 @@ def main() -> int:
            "steht die Zahl minutenlang still")
     pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
+    # Die Plausibilitaetspruefung im Stand. Der Kreuzvergleich ist der
+    # schaerfere Teil: Entladezaehler geteilt durch Kilometerstand muss
+    # einen sinnvollen Lebensdauerverbrauch ergeben, und das prueft beide
+    # Byte-Lagen auf einmal - ohne eine einzige gefahrene Minute.
+    obd_js = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
+    obd_html = open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8").read()
+    pruefe('id="pruefen"' in obd_html and "werteRuefen" in obd_js,
+           "die Diagnoseseite kann alle Werte im Stand prüfen")
+    pruefe("BEREICHE" in obd_js and "Kreuzvergleich" in obd_js,
+           "gegen Bereiche und über einen Kreuzvergleich - der prüft zwei "
+           "Formeln auf einmal, ohne dass gefahren werden muss")
+    pruefe('id="klima-a"' in obd_html and 'id="klima-b"' in obd_html
+           and "klimaZeigen" in obd_js,
+           "und der Klimakompressor über eine Differenzmessung statt über "
+           "eine geratene Formel")
+    pruefe("nutzbytes," in kern,
+           "dafür gibt der Baustein die rohen Nutzbytes heraus")
+
     pruefe("entladen_kwh" in kern and "8583.07" in kern,
            "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
            "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")

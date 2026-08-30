@@ -45,7 +45,7 @@
   }
 
   function knoepfe(an) {
-    for (const id of ["init", "soc", "senden", "melden", "fahrt-start"]) el(id).disabled = !an;
+    for (const id of ["init", "soc", "senden", "melden", "fahrt-start", "pruefen"]) el(id).disabled = !an;
   }
 
   /* ---------- Ladestand ---------- */
@@ -496,6 +496,175 @@
     log("Aufzeichnung beendet.");
   }
 
+  /* ---------- Werte prüfen, ohne zu fahren ---------- */
+
+  /* Was plausibel waere. Zwei Sorten Pruefung:
+   *
+   *  - **Bereich**: Liegt der Wert dort, wo er physikalisch liegen muss?
+   *    Faengt Formelfehler ab - eine Akkukapazitaet von 3 kWh oder 8000.
+   *  - **Kreuzvergleich**: Passen zwei unabhaengig gelesene Werte
+   *    zueinander? Das ist der schaerfere Test. Entladezaehler geteilt
+   *    durch Kilometerstand muss den Lebensdauerverbrauch ergeben - trifft
+   *    er 15 bis 35 kWh/100 km, stimmen **beide** Formeln, und zwar ohne
+   *    dass man je gefahren waere.
+   */
+  const BEREICHE = {
+    soc_roh: [0, 255, "Rohwert, geteilt durch 2,5 ergibt Prozent"],
+    spannung_v: [250, 450, "Packspannung eines 400-V-Systems"],
+    strom_a: [-600, 600, "im Stand nahe null"],
+    ladegrenze_a: [0, 600],
+    ptc_strom_a: [-5, 100, "im Stand meist null"],
+    tempo_kmh: [0, 260, "im Stand null"],
+    aussentemp_c: [-40, 60],
+    innentemp_c: [-40, 80],
+    nebenverbrauch_kw: [-2, 20, "im Stand ein bis drei kW"],
+    km_stand: [1, 999999],
+    dcdc_strom_a: [-400, 400],
+    akku_kwh: [10, 200, "brutto, beim ID.Buzz rund 82"],
+    reichweite_km: [0, 999, "mit der Anzeige im Auto vergleichen"],
+    batterie_c: [-40, 80, "nach dem Stehen nahe der Aussentemperatur"],
+    entladen_kwh: [1, 999999, "Lebensdauerzähler"],
+    geladen_kwh: [1, 999999, "Lebensdauerzähler"],
+  };
+
+  function pruefzeile(titel, wert, urteil, bemerkung) {
+    const farbe = urteil === "ok" ? "gut"
+      : (urteil === "fehlt" ? "" : "schlecht");
+    return `<tr class="${farbe}"><th>${titel}</th><td>${wert}</td>`
+      + `<td>${bemerkung || ""}</td></tr>`;
+  }
+
+  async function werteRuefen() {
+    const knopf = el("pruefen");
+    knopf.disabled = true;
+    const ziel = el("pruef-ergebnis");
+    ziel.innerHTML = "<p>lese …</p>";
+    try {
+      if (!O.verbunden()) {
+        await O.anschliessen();
+        if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+        if (!(await O.handshake())) throw new Error("Handshake unvollständig");
+      }
+      // Runde 0 - damit auch die selten gelesenen Werte drankommen.
+      const roh = await O.satzLesen(0);
+      const felder = O.FELDER;
+      const leer = new Set(roh._leer || []);
+      const fehlt = new Set(roh._fehlend || []);
+
+      const zeilen = [];
+      let gut = 0, schlecht = 0, ohne = 0;
+      for (const f of felder) {
+        const w = roh[f.name];
+        if (typeof w !== "number") {
+          ohne += 1;
+          zeilen.push(pruefzeile(f.titel, "–",
+            "fehlt", leer.has(f.name) ? "antwortet nicht"
+              : (fehlt.has(f.name) ? "keine Antwort" : "nicht gelesen")));
+          continue;
+        }
+        const b = BEREICHE[f.name];
+        const text = `${Math.round(w * 100) / 100}${f.einheit ? " " + f.einheit : ""}`;
+        if (!b) { zeilen.push(pruefzeile(f.titel, text, "ok", "")); gut += 1; continue; }
+        const drin = w >= b[0] && w <= b[1];
+        if (drin) gut += 1; else schlecht += 1;
+        zeilen.push(pruefzeile(f.titel, text, drin ? "ok" : "schlecht",
+          drin ? (b[2] || "") : `erwartet ${b[0]} bis ${b[1]}`));
+      }
+
+      /* Der Kreuzvergleich. Er braucht keine Fahrt und prueft zwei Formeln
+       * auf einmal: Wenn Entladezaehler und Kilometerstand zusammen einen
+       * sinnvollen Lebensdauerverbrauch ergeben, koennen beide kaum falsch
+       * sein - ein Fehler in einer der beiden Byte-Lagen wuerde das
+       * Ergebnis um Zehnerpotenzen verschieben. */
+      if (typeof roh.entladen_kwh === "number"
+          && typeof roh.km_stand === "number" && roh.km_stand > 100) {
+        const netto = roh.entladen_kwh
+          - (typeof roh.geladen_kwh === "number" ? roh.geladen_kwh : 0);
+        const je100 = roh.entladen_kwh / roh.km_stand * 100;
+        const drin = je100 >= 12 && je100 <= 40;
+        zeilen.push(pruefzeile(
+          "<strong>Kreuzvergleich</strong>",
+          `${je100.toFixed(1)} kWh/100 km`,
+          drin ? "ok" : "schlecht",
+          drin ? `${roh.entladen_kwh.toFixed(0)} kWh entladen auf `
+                 + `${roh.km_stand} km – das passt zusammen`
+               : "erwartet 12 bis 40 – eine der beiden Formeln stimmt nicht"));
+        zeilen.push(pruefzeile("Zähler netto",
+          `${netto.toFixed(1)} kWh`, "ok",
+          "entladen minus geladen, über die Lebensdauer"));
+      }
+
+      ziel.innerHTML =
+        `<p><b>${gut}</b> plausibel, <b>${schlecht}</b> auffällig, `
+        + `<b>${ohne}</b> ohne Wert</p>`
+        + `<table class="pruef"><tbody>${zeilen.join("")}</tbody></table>`;
+      log(`Prüfung: ${gut} plausibel, ${schlecht} auffällig, ${ohne} ohne Wert`);
+    } catch (fehler) {
+      ziel.innerHTML = `<p class="stand schlecht">${fehler.message}</p>`;
+      log("Prüfung: " + fehler.message);
+    } finally {
+      knopf.disabled = false;
+    }
+  }
+
+  /* ---------- Klimakompressor eingrenzen ---------- */
+
+  /* Die Antwort auf 220800 traegt vier 16-Bit-Zahlen, und keine der drei
+   * Quellen (spot2000, WiCAN, codingABI) nennt eine Umrechnung. Raten
+   * waere hier besonders verlockend und besonders falsch - vier Kandidaten,
+   * alle im plausiblen Wattbereich.
+   *
+   * Eine Differenzmessung entscheidet es ohne jede Annahme: zweimal lesen,
+   * einmal mit laufendem Kompressor und einmal ohne. Was sich um
+   * Hunderte aendert, ist die Leistung; was gleich bleibt, ist etwas
+   * anderes. */
+  let klimaA = null;
+
+  async function klimaLesen() {
+    if (!O.verbunden()) {
+      await O.anschliessen();
+      if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+      if (!(await O.handshake())) throw new Error("Handshake unvollständig");
+    }
+    await O.reihe(["ATSP6", "ATSH746", "ATFCSH746", "ATFCSD300000",
+                   "ATFCSM1", "ATCRA7B0"]);
+    const antwort = await O.befehl("220800", 8000);
+    await O.befehl("ATSP7").catch(() => {});
+    const bytes = O.nutzbytes(antwort, "220800");
+    if (!bytes || bytes.length < 8) {
+      throw new Error("keine brauchbare Antwort auf 220800");
+    }
+    return bytes;
+  }
+
+  function klimaZeigen() {
+    const ziel = el("klima-ergebnis");
+    if (!klimaA || !klimaA.b) { ziel.innerHTML = ""; return; }
+    const a = klimaA.a, b = klimaA.b;
+    const zeilen = [];
+    for (let i = 0; i + 1 < Math.min(a.length, b.length); i++) {
+      const va = a[i] * 256 + a[i + 1], vb = b[i] * 256 + b[i + 1];
+      const d = vb - va;
+      const auffaellig = Math.abs(d) >= 100;
+      zeilen.push(`<tr class="${auffaellig ? "gut" : ""}">`
+        + `<th>Byte ${i}–${i + 1}</th><td>${va}</td><td>${vb}</td>`
+        + `<td>${d > 0 ? "+" : ""}${d}</td></tr>`);
+    }
+    const kandidaten = [];
+    for (let i = 0; i + 1 < Math.min(a.length, b.length); i++) {
+      const d = (b[i] * 256 + b[i + 1]) - (a[i] * 256 + a[i + 1]);
+      if (Math.abs(d) >= 100) kandidaten.push(`Byte ${i}–${i + 1} (${d > 0 ? "+" : ""}${d})`);
+    }
+    ziel.innerHTML =
+      `<table class="pruef"><tbody><tr><th></th><td>aus</td><td>an</td>`
+      + `<td>Δ</td></tr>${zeilen.join("")}</tbody></table>`
+      + `<p>${kandidaten.length
+          ? "Deutlich verändert: <b>" + kandidaten.join(", ") + "</b>. "
+            + "Das ist der Kandidat für die Kompressorleistung."
+          : "Nichts hat sich deutlich verändert – war der Kompressor bei "
+            + "beiden Messungen im selben Zustand?"}</p>`;
+  }
+
   /* ---------- An jolt melden ---------- */
 
   function ort() {
@@ -578,6 +747,41 @@
     }
   });
   el("melden").addEventListener("click", melden);
+  el("pruefen").addEventListener("click", werteRuefen);
+  el("klima-a").addEventListener("click", async () => {
+    const k = el("klima-a");
+    k.disabled = true;
+    try {
+      klimaA = { a: await klimaLesen(), b: null };
+      log("Klima-Messung 1 (aus): " + klimaA.a.join(" "));
+      el("klima-ergebnis").innerHTML =
+        "<p>Erste Messung steht. Jetzt die Klimaanlage <strong>kräftig "
+        + "einschalten</strong> (kalt, hohe Gebläsestufe), eine halbe Minute "
+        + "warten und dann die zweite Messung.</p>";
+      el("klima-b").disabled = false;
+    } catch (fehler) {
+      el("klima-ergebnis").innerHTML =
+        `<p class="stand schlecht">${fehler.message}</p>`;
+      log("Klima-Messung 1: " + fehler.message);
+    } finally {
+      k.disabled = false;
+    }
+  });
+  el("klima-b").addEventListener("click", async () => {
+    const k = el("klima-b");
+    k.disabled = true;
+    try {
+      klimaA.b = await klimaLesen();
+      log("Klima-Messung 2 (an): " + klimaA.b.join(" "));
+      klimaZeigen();
+    } catch (fehler) {
+      el("klima-ergebnis").innerHTML =
+        `<p class="stand schlecht">${fehler.message}</p>`;
+      log("Klima-Messung 2: " + fehler.message);
+    } finally {
+      k.disabled = false;
+    }
+  });
   el("log-leeren").addEventListener("click", () => { el("log").textContent = ""; });
   /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
    * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die

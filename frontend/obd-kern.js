@@ -874,6 +874,9 @@ function befehl(text, grenze_ms = 15000) {
     satzLesen,
     socAusRoh,
     socAusAntwort,
+    // Fuer die Diagnoseseite: rohe Nutzbytes einer Antwort, inklusive
+    // Mehrrahmen-Zusammensetzung.
+    nutzbytes,
     NAMEN,
     /* Was ausgelesen wird, mit Beschriftung und Einheit.
      *
