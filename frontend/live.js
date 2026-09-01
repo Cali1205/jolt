@@ -855,7 +855,12 @@ window.joltLive = (function () {
     const block = document.getElementById("live-auto");
     const roh = letzteRohwerte;
     if (!block) return;
-    if (!roh) { block.hidden = true; return; }
+    if (!roh) {
+      block.hidden = true;
+      const zu = document.getElementById("live-roh");
+      if (zu) zu.hidden = true;
+      return;
+    }
     block.hidden = false;
 
     const kw = leistungKw(roh);
@@ -891,16 +896,20 @@ window.joltLive = (function () {
       teile.push(`<b>${K.zahl(nebenverbrauch.kw, 1)}</b> kW Nebenverbraucher`
                  + ` (im Stand${alter > 0 ? `, vor ${alter} min` : ""})`);
     }
-    if (typeof roh.aussentemp_c === "number") {
-      teile.push(`<b>${K.zahl(roh.aussentemp_c, 1)}</b> °C aussen`);
-    }
-    if (typeof roh.km_stand === "number") {
-      teile.push(`${K.zahl(roh.km_stand)} km gesamt`);
-    }
+    /* Aussentemperatur und Kilometerstand standen hier auch. Sie sind
+     * richtig und interessant, aber nicht **im Fahren** - und eine Zeile
+     * mit sechs Angaben liest man gar nicht mehr. Beide stehen in der
+     * Tabelle unter der Klappe, wo man sie sucht, wenn man sie sucht. */
 
-    document.getElementById("live-auto-werte").innerHTML =
-      `<div id="live-auto-zeile">${teile.join(" · ")}</div>`
-      + rohwerteTabelle(roh);
+    // Zeile und Tabelle stehen jetzt an verschiedenen Stellen: die Zeile
+    // oben bei den Kacheln, die Tabelle unten hinter der Klappe.
+    document.getElementById("live-auto-zeile").innerHTML = teile.join(" · ");
+    const klappe = document.getElementById("live-roh");
+    if (klappe) {
+      klappe.hidden = false;
+      document.getElementById("live-auto-werte").innerHTML =
+        rohwerteTabelle(roh);
+    }
 
     /* Wie alt der letzte Satz ist - die Frage, die man am Steuer wirklich
      * hat. "3 s" heisst, der Dongle antwortet; "4 min" heisst, er ist weg,
