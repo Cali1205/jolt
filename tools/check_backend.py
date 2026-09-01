@@ -897,6 +897,18 @@ def main() -> int:
            "die Strecke je Balken kommt dagegen aus dem GPS - der "
            "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
            "sind rund 1,2 km")
+    # Die Rohwerte gehoeren hinter eine Klappe: siebzehn Zeilen mitten im
+    # Fahrbild sind Laerm. Und die Kacheln, die man liest, gehoeren ueber
+    # die Diagramme, nicht darunter.
+    pruefe('<details id="live-roh"' in html,
+           "die Rohwerte stehen hinter einer Klappe, nicht im Fahrbild")
+    pruefe(html.index('id="live-werte"') < html.index('id="live-verlauf"'),
+           "und die Kacheln über den Diagrammen - was man im Fahren liest, "
+           "steht oben")
+    pruefe('id="live-auto-stand"' in html.split("<summary>")[1].split("</summary>")[0],
+           "das Alter steht in der zugeklappten Zeile - man soll ohne "
+           "Aufklappen sehen, ob es lebt")
+
     pruefe('fillText("kWh/100"' in live,
            "der Balkenplot hat eine beschriftete Achse - ohne sie sieht man "
            "Unterschiede, aber keine Grössenordnung")

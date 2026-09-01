@@ -118,10 +118,24 @@ button.tat:disabled { opacity: .55; cursor: default; }
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
 #live-verbrauch { width: 100%; height: 110px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
+/* Die Rohwerte hinter einer Klappe. Zugeklappt eine Zeile, aufgeklappt die
+   ganze Tabelle - so steht die Diagnose zur Verfügung, ohne im Fahrbild zu
+   stehen. */
+#live-roh { margin-top: 14px; border-top: 1px solid var(--rand);
+  padding-top: 10px; }
+#live-roh > summary { cursor: pointer; font-size: 13px;
+  color: var(--gedaempft); display: flex; justify-content: space-between;
+  gap: 12px; list-style: none; }
+#live-roh > summary::-webkit-details-marker { display: none; }
+#live-roh > summary::after { content: "▸"; }
+#live-roh[open] > summary::after { content: "▾"; }
+#live-roh > summary:hover { color: var(--text); }
+#live-auto-zeile { margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--rand); }
 /* Der Kontextstreifen: eine Zeile Text statt sechs Kacheln. Was man nur
    gelegentlich braucht, soll nicht so aussehen wie das, was man dauernd
    braucht. */
-#live-auto-zeile { font-size: 13px; color: var(--gedaempft); margin-top: 10px;
+#live-auto-zeile { font-size: 13px; color: var(--gedaempft);
   line-height: 1.6; }
 #live-auto-zeile b { color: var(--text); font-weight: 600;
   font-variant-numeric: tabular-nums; }
@@ -425,38 +439,47 @@ table.kurve input { padding: 6px 8px; }
         </div>
         <div class="balken"><i id="live-balken" style="width:0%"></i></div>
 
-        <!-- Der Verlauf. Eine Momentaufnahme sagt nicht, ob es besser oder
-             schlechter wird; Soll und Ist nebeneinander sagt es sofort. -->
+        <!-- Die Zahlen, die man liest, direkt unter der Antwort - nicht
+             unter zwei Diagrammen. Was man im Fahren braucht, steht oben;
+             was man ansieht, wenn man Zeit hat, darunter. -->
+        <div class="werte" id="live-werte"></div>
+
+        <!-- Eine Zeile aus dem Auto: Verbrauch, Leistung, Nebenverbraucher.
+             Getrennt von den Kacheln darüber, weil es zwei verschiedene
+             Dinge sind - oben, was jolt rechnet, hier, was das Auto misst. -->
+        <div id="live-auto" hidden>
+          <div id="live-auto-zeile"></div>
+        </div>
+
+        <div class="karte-fuss">
+          <span id="live-hinweis">–</span>
+          <span id="live-verbindung">getrennt</span>
+        </div>
+      </div>
+
+      <!-- Die Kurven. Sie beantworten eine andere Frage als die Zahlen oben:
+           nicht "wie steht es", sondern "wird es besser oder schlechter" -
+           und dafür schaut man hin, statt im Vorbeifahren zu blicken. -->
+      <div class="karte-block">
         <canvas id="live-verlauf"></canvas>
         <div class="karte-fuss">
           <span id="live-verlauf-fuss">Soll und Ist über die Strecke</span>
           <span id="live-hinweis-kurz"></span>
         </div>
-
-        <!-- Der Verbrauch je Zeitabschnitt als Balken. Die Kurve darüber
-             zeigt den Ladestand - also den Vorrat. Diese hier zeigt, was
-             ihn gerade kostet: ein Balken je Minute, und ein Berg sieht
-             anders aus als eine Ortsdurchfahrt. -->
         <canvas id="live-verbrauch" hidden></canvas>
         <div class="karte-fuss" id="live-verbrauch-fuss" hidden>
           <span></span><span></span>
         </div>
 
-        <div class="werte" id="live-werte"></div>
-        <!-- Nur sichtbar, wenn ein OBD2-Dongle mitliest. Getrennt von den
-             Kacheln darüber, weil es zwei verschiedene Dinge sind: oben,
-             was jolt rechnet, hier, was das Auto misst. -->
-        <div id="live-auto" hidden>
-          <div class="karte-fuss" style="margin:12px 0 6px">
-            <span>Aus dem Auto</span>
-            <span id="live-auto-stand"></span>
-          </div>
-          <div class="werte" id="live-auto-werte"></div>
-        </div>
-        <div class="karte-fuss">
-          <span id="live-hinweis">–</span>
-          <span id="live-verbindung">getrennt</span>
-        </div>
+        <!-- Alle Rohwerte - zugeklappt. Sie sind zum **Prüfen** da, nicht
+             zum Fahren: siebzehn Zeilen mitten im Fahrbild sind Lärm, und
+             wer nachsehen will, tippt einmal. Das Alter steht schon in der
+             Zeile darüber, damit man ohne Aufklappen sieht, ob es lebt. -->
+        <details id="live-roh" hidden>
+          <summary>Alle Werte aus dem Auto
+            <span id="live-auto-stand"></span></summary>
+          <div id="live-auto-werte"></div>
+        </details>
       </div>
 
       <!-- Ganz oben, direkt unter den Werten: Der Ladestand wird an der Säule
