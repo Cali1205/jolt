@@ -820,6 +820,16 @@ def main() -> int:
            "beendet ihn, wenn die Fahrt endet")
     pruefe("WIEDER_HOECHSTABSTAND_MS" in kern,
            "stattdessen ist nur der Abstand gedeckelt")
+    # Was eine **lange** Fahrt anders macht.
+    pruefe("BREITEN_MIN" in live and "BALKEN_HOECHSTENS" in live,
+           "die Balkenbreite wächst mit der Fahrt - sechs Stunden wären "
+           "sonst 360 Balken auf 340 Pixeln")
+    pruefe("LADEN_STAND_KWH" in live,
+           "und der Verbrauch der Fahrt wird abschnittsweise summiert, "
+           "damit ein Ladestopp ihn nicht auf null zieht")
+    pruefe("verbrauchsspur.length > 20000" in live,
+           "die Messreihe reicht für mehr als zehn Stunden")
+
     pruefe("stilleGemeldet" in live and "alter > 180" in live,
            "und das Dashboard sagt einmal deutlich, wenn nichts mehr aus dem "
            "Auto kommt - eine Aufzeichnung ohne Ladestand taugt nicht zum "
