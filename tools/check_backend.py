@@ -893,6 +893,13 @@ def main() -> int:
            "fünf ohne - nicht dem Wunsch")
     pruefe("letzt.netto - erst.netto" in live,
            "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
+    pruefe("letzt.gps - erst.gps" in live,
+           "die Strecke je Balken kommt dagegen aus dem GPS - der "
+           "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
+           "sind rund 1,2 km")
+    pruefe('fillText("kWh/100"' in live,
+           "der Balkenplot hat eine beschriftete Achse - ohne sie sieht man "
+           "Unterschiede, aber keine Grössenordnung")
     html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
            "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "

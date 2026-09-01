@@ -265,6 +265,12 @@ window.joltLive = (function () {
       }
     }
 
+    // Den letzten Verbrauchspunkt mit der jetzt bekannten GPS-Strecke
+    // versehen. Er entstand beim Auslesen des Dongles, also bevor die
+    // Position durch war.
+    const letzterV = verbrauchsspur[verbrauchsspur.length - 1];
+    if (letzterV && letzterV.gps === null) letzterV.gps = gefahrenKm;
+
     const vorheriger = verlauf[verlauf.length - 1];
     // Auch die gefahrene Strecke zählt beim Vergleich: Bei einer
     // Aufzeichnung ist `km_auf_route` für jeden Punkt null (es gibt noch
@@ -940,6 +946,9 @@ window.joltLive = (function () {
         : null;
       verbrauchsspur.push({
         zeit: jetzt, km: roh.km_stand, netto,
+        // Die GPS-Strecke wird in `zustandAnzeigen` nachgetragen, sobald
+        // die Position dieses Punktes bekannt ist.
+        gps: null,
         soc: typeof roh.soc_roh === "number" ? roh.soc_roh / 2.5 : null });
       if (verbrauchsspur.length > 3000) verbrauchsspur.shift();
     }
@@ -1035,8 +1044,24 @@ window.joltLive = (function () {
   // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
   const BALKEN_MIND_KM = 0.3;
 
+  /* **Die Strecke je Balken kommt aus dem GPS, die Energie aus den Zählern.**
+   *
+   * Das klingt nach einem Rückschritt - für die **Gesamtstrecke** einer
+   * Aufzeichnung ist der Kilometerstand ja gerade die bessere Quelle, weil
+   * er weder Kurven abschneidet noch Funklöcher kennt. Über eine einzelne
+   * Minute kehrt sich das um: Er löst in ganzen Kilometern auf, und eine
+   * Minute bei siebzig km/h sind 1,2 km. Gemessen wird dann 1 oder 2 -
+   * vierzig Prozent Fehler auf den Nenner. Die GPS-Spur schneidet bei einer
+   * Meldung alle zwölf Sekunden nur wenige Prozent ab.
+   *
+   * Aufgefallen an einer echten Fahrt: Die Kilometerspalte je Minute stand
+   * durchgehend auf 0 oder 1, und die Balken schwankten entsprechend.
+   *
+   * Die Energie bleibt bei den Zählern - dort ist die Auflösung 0,117 Wh
+   * und damit kein Thema. Jede Grösse aus der Quelle, die sie am besten
+   * kennt. */
   function verbrauchsabschnitte() {
-    const punkte = verbrauchsspur.filter((p) => typeof p.km === "number");
+    const punkte = verbrauchsspur.filter((p) => typeof p.gps === "number");
     if (punkte.length < 2) return null;
     const mitZaehler = punkte.every((p) => typeof p.netto === "number");
     const fz = K.zustand.aufzFahrzeug
@@ -1058,7 +1083,7 @@ window.joltLive = (function () {
     for (const [n, gruppe] of [...eimer.entries()].sort((a, b) => a[0] - b[0])) {
       if (gruppe.length < 2) continue;
       const erst = gruppe[0], letzt = gruppe[gruppe.length - 1];
-      const km = letzt.km - erst.km;
+      const km = letzt.gps - erst.gps;
       if (km < BALKEN_MIND_KM) continue;
       const kwh = mitZaehler ? (letzt.netto - erst.netto)
         : ((erst.soc !== null && letzt.soc !== null)
@@ -1093,20 +1118,46 @@ window.joltLive = (function () {
     const oben = Math.max(40, ...werte) * 1.1;
     const unten = Math.min(0, ...werte) * 1.1;
     const spanne = oben - unten || 1;
-    const rand = 6, fussHoehe = 14;
+    const rand = 6, fussHoehe = 16;
     const flaeche = hoehe - fussHoehe - rand;
     const y = (v) => rand + (oben - v) / spanne * flaeche;
 
-    // Nulllinie
-    stift.strokeStyle = "#2b343e";
-    stift.lineWidth = 1;
-    stift.beginPath();
-    stift.moveTo(0, y(0)); stift.lineTo(breite, y(0));
-    stift.stroke();
+    /* Beschriftete Achse. Ohne sie ist ein Balkendiagramm eine Form ohne
+     * Aussage - man sieht, dass eine Minute teurer war als die andere, aber
+     * nicht, ob es um zwanzig oder um vierzig kWh/100 km geht. Und genau
+     * das ist die Zahl, die man mit dem eigenen Gefühl vergleicht.
+     *
+     * Beschriftet wird links, in die Fläche hinein: Eine eigene Spalte
+     * dafür wäre auf dem Telefon zu teuer. Drei Linien reichen - null, ein
+     * runder Wert dazwischen und das Maximum. */
+    const achse = 30;
+    const teilung = [0];
+    const schritt = oben > 60 ? 25 : (oben > 25 ? 10 : 5);
+    for (let w = schritt; w < oben; w += schritt) teilung.push(w);
+    for (let w = -schritt; w > unten; w -= schritt) teilung.push(w);
 
-    const b = Math.max(2, (breite - 2 * rand) / daten.balken.length - 2);
+    stift.font = "10px system-ui, sans-serif";
+    stift.textBaseline = "middle";
+    for (const w of teilung) {
+      const yy = y(w);
+      stift.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
+      stift.lineWidth = 1;
+      stift.beginPath();
+      stift.moveTo(achse, yy); stift.lineTo(breite - rand, yy);
+      stift.stroke();
+      stift.fillStyle = "#8a97a5";
+      stift.textAlign = "right";
+      stift.fillText(String(w), achse - 4, yy);
+    }
+    // Die Einheit einmal oben links, nicht an jeden Strich.
+    stift.fillStyle = "#8a97a5";
+    stift.textAlign = "left";
+    stift.fillText("kWh/100", achse + 3, rand + 4);
+
+    const feld = breite - rand - achse;
+    const b = Math.max(2, feld / daten.balken.length - 2);
     daten.balken.forEach((balken, i) => {
-      const x = rand + i * ((breite - 2 * rand) / daten.balken.length);
+      const x = achse + i * (feld / daten.balken.length);
       const hoch = y(balken.kwh100) - y(0);
       // Farbe nach Höhe: was deutlich über dem Schnitt liegt, fällt auf.
       stift.fillStyle = balken.kwh100 < 0 ? "#57c98a"
