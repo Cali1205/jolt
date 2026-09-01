@@ -195,9 +195,27 @@ window.joltObd = (function () {
    * es. Erst wenn beides scheitert, muss jemand tippen - und dann steht das
    * auch gross da statt nur im Protokoll.
    */
+  /* **Solange die Fahrt läuft, wird weiter versucht.**
+   *
+   * Hier stand `grenze = 6`. Mit den wachsenden Abständen (3, 6, 12, 24, 48,
+   * 60 Sekunden) war die Serie nach rund zweieinhalb Minuten aufgebraucht,
+   * und danach versuchte es jolt **nie wieder**.
+   *
+   * Gemessen an einer echten Fahrt: Fünf Minuten mit der Seite im
+   * Hintergrund haben alle sechs Versuche verbraucht. Die restlichen
+   * vierzehn Minuten kamen nur noch GPS-Punkte an - zwanzig Kilometer
+   * aufgezeichnet, ohne einen einzigen Fahrzeugwert, und ohne dass jolt es
+   * noch einmal probiert hätte.
+   *
+   * Eine Obergrenze war für den Fall gedacht, dass der Dongle gezogen wurde.
+   * Genau dafür ist aber `weiter` da - es endet, wenn die Fahrt endet. Statt
+   * aufzugeben wird der Abstand nur gedeckelt: alle sechzig Sekunden
+   * anklopfen kostet fast nichts und holt eine Verbindung zurück, sobald sie
+   * wieder möglich ist. */
+  const WIEDER_HOECHSTABSTAND_MS = 60000;
+
   async function wiederverbinden(versuch = 1, weiter = () => true) {
     if (!weiter()) return;
-    const grenze = 6;
     try {
       let geraet = geraetGemerkt;
       if (!geraet && navigator.bluetooth.getDevices) {
@@ -216,14 +234,17 @@ window.joltObd = (function () {
       await reihe(HANDSHAKE);
       melde("Wieder verbunden, Handshake erneuert.");
     } catch (fehler) {
-      melde(`Wiederverbinden fehlgeschlagen: ${fehler.message}`);
-      if (versuch >= grenze) {
-        return;
+      // Nur jeden zehnten Fehlversuch protokollieren, sonst füllt sich das
+      // Protokoll auf einer langen Fahrt mit derselben Zeile.
+      if (versuch <= 6 || versuch % 10 === 0) {
+        melde(`Wiederverbinden fehlgeschlagen (Versuch ${versuch}): `
+              + fehler.message);
       }
-      // Wachsende Abstände: Ein Tunnel dauert Sekunden, ein eingeschlafener
-      // Dongle Minuten. Alle zwei Sekunden zu klopfen hilft in keinem der
-      // beiden Fälle und kostet Akku.
-      const warten = Math.min(60000, 3000 * Math.pow(2, versuch - 1));
+      // Wachsende Abstände bis zur Obergrenze: Ein Tunnel dauert Sekunden,
+      // ein eingeschlafener Dongle Minuten. Alle zwei Sekunden zu klopfen
+      // hilft in keinem der beiden Fälle und kostet Akku.
+      const warten = Math.min(WIEDER_HOECHSTABSTAND_MS,
+                              3000 * Math.pow(2, versuch - 1));
       // `weiter` muss mitgereicht werden. Ohne das galt beim zweiten
       // Versuch wieder die Vorgabe `() => true`, und die Kette lief nach dem
       // Ende der Fahrt einfach weiter - sie verband einen Dongle neu, den

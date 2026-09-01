@@ -47,6 +47,9 @@ window.joltLive = (function () {
   // Anfang der Fahrt für den laufenden Verbrauch: {soc, km} aus der ersten
   // Runde, in der beides zugleich vorlag.
   let verbrauchAnfang = null;
+  // Ob wegen der Stille schon gewarnt wurde. Einmal genügt: Eine Meldung,
+  // die alle zwölf Sekunden kommt, schaltet man ab.
+  let stilleGemeldet = false;
   /* Messpunkte für den Verbrauchsplot: [{zeit, kw, km, soc}, ...].
    *
    * Roh gesammelt und erst beim Zeichnen zu Abschnitten verrechnet - so
@@ -926,6 +929,24 @@ window.joltLive = (function () {
     } else {
       stand.textContent = `seit ${K.dauer(alter / 60)} keine Antwort`;
       stand.style.color = "#e8804f";
+      /* Einmal deutlich sagen, dass nichts mehr aus dem Auto kommt.
+       *
+       * Die blasse Zeile hinter der Klappe reicht dafür nicht. Auf einer
+       * echten Fahrt sind so zwanzig Kilometer ohne einen einzigen
+       * Fahrzeugwert aufgezeichnet worden - GPS lief weiter, der Dongle
+       * war weg, und gemerkt hat es niemand. Eine Aufzeichnung ohne
+       * Ladestand ist für das Lernen wertlos, und das erfährt man sonst
+       * erst hinterher.
+       *
+       * Drei Minuten, nicht neunzig Sekunden: Ein Tunnel oder eine kurze
+       * Sperre soll nicht melden, ein abgerissener Dongle schon. */
+      if (!stilleGemeldet && alter > 180) {
+        stilleGemeldet = true;
+        K.melden("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
+          + "zeichnet die Strecke weiter auf, aber ohne Ladestand – zum "
+          + "Lernen taugt sie dann nicht. jolt in den Vordergrund holen, "
+          + "dann verbindet sich der Dongle von selbst wieder.", "fehler");
+      }
     }
   }
 
@@ -1233,6 +1254,7 @@ window.joltLive = (function () {
         }
         letzteRohwerte = roh;
         letzteRohwerteZeit = Date.now();
+        stilleGemeldet = false;
         werteMerken(roh);
         nebenverbrauchMerken(roh);
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
@@ -1348,6 +1370,7 @@ window.joltLive = (function () {
     verlauf = [];
     letzteRohwerte = null;
     letzteRohwerteZeit = 0;
+    stilleGemeldet = false;
     werteStand = {};
     nieGekommen = new Set();
     verbrauchAnfang = null;

@@ -811,6 +811,20 @@ def main() -> int:
     pruefe("} finally {" in kern and 'befehl("ATSP7")' in kern,
            "das Protokoll wird im finally zurückgesetzt - eine Sitzung, die "
            "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
+    # Der Wiederaufbau darf nicht aufgeben, solange die Fahrt laeuft. Mit
+    # der alten Obergrenze von sechs Versuchen war nach zweieinhalb Minuten
+    # Schluss - fuenf Minuten mit der Seite im Hintergrund haben auf einer
+    # echten Fahrt zwanzig Kilometer ohne einen Fahrzeugwert gekostet.
+    pruefe("versuch >= grenze" not in kern,
+           "der Wiederaufbau gibt nicht nach sechs Versuchen auf - `weiter` "
+           "beendet ihn, wenn die Fahrt endet")
+    pruefe("WIEDER_HOECHSTABSTAND_MS" in kern,
+           "stattdessen ist nur der Abstand gedeckelt")
+    pruefe("stilleGemeldet" in live and "alter > 180" in live,
+           "und das Dashboard sagt einmal deutlich, wenn nichts mehr aus dem "
+           "Auto kommt - eine Aufzeichnung ohne Ladestand taugt nicht zum "
+           "Lernen, und das erfährt man sonst erst hinterher")
+
     pruefe("wechselGescheitert" in kern,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
 
