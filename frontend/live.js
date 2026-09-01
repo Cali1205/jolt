@@ -980,7 +980,10 @@ window.joltLive = (function () {
         // die Position dieses Punktes bekannt ist.
         gps: null,
         soc: typeof roh.soc_roh === "number" ? roh.soc_roh / 2.5 : null });
-      if (verbrauchsspur.length > 3000) verbrauchsspur.shift();
+      // Grosszuegig: 20 000 Punkte sind bei Zwoelf-Sekunden-Takt rund
+      // 66 Stunden. Bei 3000 waeren nach zehn Stunden die ersten Punkte
+      // herausgefallen - und mit ihnen der Anfang der Fahrt.
+      if (verbrauchsspur.length > 20000) verbrauchsspur.shift();
     }
     for (const [name, wert] of Object.entries(roh)) {
       if (typeof wert === "number") {
@@ -1016,34 +1019,45 @@ window.joltLive = (function () {
    * auf ±50 % genau und damit schlimmer als keine.
    */
   const VERBRAUCH_AB_KM = 5.0;
+  /* Ab wie viel Energie **hinein** bei stehendem Auto es ein Ladevorgang
+   * ist. Rekuperation gibt es nur in Fahrt; wer steht und trotzdem Energie
+   * aufnimmt, hängt am Kabel. */
+  const LADEN_STAND_KWH = 0.05;
 
   function laufenderVerbrauch(roh, soc) {
     const fz = K.zustand.aufzFahrzeug
       || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
-    // Was das Auto gerade meldet, schlägt beides: Profilwert und der zuletzt
-    // gespeicherte. `kapazitaet_kwh` ist der Rückfall - er trägt bereits die
-    // Entscheidung "gemessen vor Prospekt" aus dem Backend.
-    const akku = (typeof roh.akku_kwh === "number") ? roh.akku_kwh
-      : (fz && (fz.kapazitaet_kwh || fz.akku_netto_kwh));
-    const km = werteStand.km_stand && werteStand.km_stand.wert;
-    if (typeof km !== "number") return null;
-    // Der Zählerstand, wenn er kommt - sonst der Ladestand.
-    const netto = (typeof roh.entladen_kwh === "number")
-      ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
-                            ? roh.geladen_kwh : 0)
-      : null;
-    if (netto === null && (!akku || typeof soc !== "number")) return null;
+    const akku = fz && (fz.kapazitaet_kwh || fz.akku_netto_kwh);
+    if (verbrauchsspur.length < 2) return null;
 
-    if (!verbrauchAnfang) {
-      verbrauchAnfang = { soc, km, netto };
-      return null;
+    /* **Aufsummiert statt Anfang gegen Ende.**
+     *
+     * Hier stand `netto - anfang.netto`, und das ist auf einer kurzen Fahrt
+     * richtig. Auf einer **langen** nicht: Der Zähler `geladen` wächst auch
+     * an der Ladesäule. Wer vierzig Kilowattstunden nachlädt, dessen
+     * Nettozähler fällt um vierzig - der angezeigte Verbrauch der Fahrt
+     * wäre danach nahe null oder negativ.
+     *
+     * Also abschnittsweise, und Ladevorgänge fallen heraus: Energie hinein
+     * bei stehendem Auto ist keine Rekuperation, sondern das Kabel. Alles
+     * andere zählt mit, auch der Verbrauch im Stand - der ist echt.
+     */
+    let kwh = 0, km = 0;
+    for (let i = 1; i < verbrauchsspur.length; i++) {
+      const a = verbrauchsspur[i - 1], b = verbrauchsspur[i];
+      const dkm = (b.km ?? 0) - (a.km ?? 0);
+      let d = null;
+      if (a.netto !== null && b.netto !== null) d = b.netto - a.netto;
+      else if (akku && a.soc !== null && b.soc !== null) {
+        d = (a.soc - b.soc) / 100 * akku;
+      }
+      if (d === null) continue;
+      if (dkm <= 0 && d < -LADEN_STAND_KWH) continue;   // an der Säule
+      kwh += d;
+      km += Math.max(0, dkm);
     }
-    const gefahren = km - verbrauchAnfang.km;
-    if (gefahren < VERBRAUCH_AB_KM) return null;
-    const kwh = (netto !== null && verbrauchAnfang.netto !== null)
-      ? netto - verbrauchAnfang.netto
-      : (verbrauchAnfang.soc - soc) / 100 * akku;
-    return { kwh100: kwh / gefahren * 100, kwh, km: gefahren };
+    if (km < VERBRAUCH_AB_KM) return null;
+    return { kwh100: kwh / km * 100, kwh, km };
   }
 
   /* ---------- Verbrauch je Zeitabschnitt ---------- */
@@ -1071,6 +1085,26 @@ window.joltLive = (function () {
    */
   const ABSCHNITT_MIT_ZAEHLER_S = 60;
   const ABSCHNITT_AUS_SOC_S = 300;
+  /* Bei einer langen Fahrt wird die Minute zu fein.
+   *
+   * Ein Balken je Minute ist auf einer halben Stunde genau richtig - auf
+   * sechs Stunden waeren es 360 Balken auf rund 340 Pixeln, also 0,9 Pixel
+   * je Balken. Das ist kein Diagramm mehr, sondern eine Textur.
+   *
+   * Deshalb waechst die Abschnittsbreite mit der Fahrt, aber nur auf runde
+   * Werte: zwei Minuten liest man noch als zwei Minuten, 87 Sekunden nicht.
+   * Die Genauigkeit leidet dabei nicht - mit den Zaehlern ist schon die
+   * Minute weit ueber der Aufloesungsgrenze, breiter wird nur besser. */
+  const BREITEN_MIN = [1, 2, 5, 10, 15, 30, 60];
+  const BALKEN_HOECHSTENS = 60;
+
+  function breiteWaehlen(dauer_ms, mindest_s) {
+    for (const min of BREITEN_MIN) {
+      if (min * 60 < mindest_s) continue;
+      if (dauer_ms / (min * 60000) <= BALKEN_HOECHSTENS) return min * 60000;
+    }
+    return BREITEN_MIN[BREITEN_MIN.length - 1] * 60000;
+  }
   // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
   const BALKEN_MIND_KM = 0.3;
 
@@ -1099,9 +1133,10 @@ window.joltLive = (function () {
     const akku = fz.kapazitaet_kwh || fz.akku_netto_kwh;
     if (!mitZaehler && !akku) return null;
 
-    const breite = (mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S
-                               : ABSCHNITT_AUS_SOC_S) * 1000;
     const beginn = punkte[0].zeit;
+    const breite = breiteWaehlen(
+      punkte[punkte.length - 1].zeit - beginn,
+      mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S : ABSCHNITT_AUS_SOC_S);
     const eimer = new Map();
     for (const p of punkte) {
       const n = Math.floor((p.zeit - beginn) / breite);
