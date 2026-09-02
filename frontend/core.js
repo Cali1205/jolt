@@ -32,6 +32,33 @@ window.jolt = (function () {
   };
 
   const TOKEN_SCHLUESSEL = "jolt-token";
+  const SITZUNG_SCHLUESSEL = "jolt-sitzung";
+
+  /* Die laufende Sitzung überlebt ein Neuladen.
+   *
+   * Sie stand nur im Speicher. Wer die Seite versehentlich neu lud - auf
+   * dem Telefon ein Wisch zu viel -, verlor die Verbindung zur laufenden
+   * Fahrt und begann eine neue Sitzung. Auf einer echten Langstrecke ist
+   * das viermal passiert: 623 Messpunkte, verteilt auf vier Sitzungen.
+   *
+   * Die Punkte gehen dabei nicht verloren, sie hängen an der Fahrt. Aber
+   * alles, was **über** die Sitzung läuft, beginnt von vorn: der laufende
+   * Verbrauchsfaktor, der Zeitfaktor, die Kurve - und beim Beenden lernt
+   * jolt nur aus der letzten Sitzung statt aus der ganzen Fahrt.
+   */
+  function sitzungMerken(id) {
+    try {
+      if (id) localStorage.setItem(SITZUNG_SCHLUESSEL, String(id));
+      else localStorage.removeItem(SITZUNG_SCHLUESSEL);
+    } catch (e) { /* ohne Speicher eben ohne Gedächtnis */ }
+  }
+
+  function gemerkteSitzung() {
+    try {
+      const roh = localStorage.getItem(SITZUNG_SCHLUESSEL);
+      return roh ? Number(roh) : null;
+    } catch (e) { return null; }
+  }
 
   function token() {
     try { return localStorage.getItem(TOKEN_SCHLUESSEL) || ""; }
@@ -133,5 +160,6 @@ window.jolt = (function () {
   }
 
   return { zustand, api, token, tokenSetzen, melden, meldungenLeeren,
+           sitzungMerken, gemerkteSitzung,
            zahl, dauer, wertKachel, an, reglerKoppeln };
 })();
