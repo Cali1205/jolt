@@ -100,6 +100,9 @@ window.joltLive = (function () {
   async function starten() {
     const fahrt = K.zustand.fahrt;
     if (!fahrt) { K.melden("Erst eine Route rechnen.", "fehler"); return; }
+    // Zuerst der Dongle, dann die Sitzung - siehe dongleAnbieten(). Wer
+    // keinen auswählt, fährt ohne: Die Fahrt startet in jedem Fall.
+    const mitDongle = await dongleAnbieten();
     try {
       // Mit denselben Filtern wie in der Planen-Ansicht: Ein Ladeplan, der
       // unterwegs plötzlich andere Säulen zulässt als beim Planen, wäre
@@ -132,8 +135,12 @@ window.joltLive = (function () {
       // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
       // beim ersten geänderten Plan, wo sie im Weg steht.
       benachrichtigungenEinrichten();
-      K.melden("Live-Fahrt läuft. Über „Simulation starten“ lässt sie sich "
-        + "ohne Auto durchspielen.", "hinweis");
+      dongleAnzeigen();
+      K.melden(mitDongle
+        ? "Live-Fahrt läuft – Ladestand und Zähler kommen aus dem Auto."
+        : "Live-Fahrt läuft ohne Dongle – der Ladestand kommt von Hand. "
+          + "Über „Dongle verbinden“ geht es jederzeit nachträglich.",
+        "hinweis");
     } catch (fehler) {
       K.melden("Live: " + fehler.message, "fehler");
     }
@@ -841,6 +848,36 @@ window.joltLive = (function () {
     K.melden("Dongle getrennt. Das Auto kann jetzt abgeschlossen werden – "
       + "jolt fragt nichts mehr über CAN. Die Fahrt läuft weiter, die "
       + "Position kommt vom Telefon.", "hinweis");
+  }
+
+  /* Den Dongle anbieten, bevor sonst irgendetwas läuft.
+   *
+   * Die Reihenfolge ist nicht beliebig: `requestDevice` darf nur in
+   * unmittelbarer Folge einer Nutzergeste laufen. Wer vorher auf GPS oder
+   * eine API-Antwort wartet, hat die Geste verbraucht und bekommt ein
+   * `SecurityError`. Deshalb steht der Dongle **zuerst** - noch vor dem
+   * Anlegen der Sitzung.
+   *
+   * Kommt keiner zustande - kein Bluetooth im Browser, kein Dongle im
+   * Auto, Dialog weggetippt -, ist das kein Grund abzubrechen, sondern
+   * einer, ohne weiterzufahren: Eine Fahrt mit von Hand gemeldetem
+   * Ladestand ist besser als keine Fahrt. Entschieden wird hier nichts,
+   * die Rückgabe sagt nur, was daraus geworden ist. */
+  async function dongleAnbieten() {
+    if (!window.joltObd || !window.joltObd.verfuegbar()) return false;
+    try {
+      dongleNutzen();
+      // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt worden,
+      // verbindet er ohne Berührung.
+      await window.joltObd.anschliessen();
+      if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
+        return true;
+      }
+    } catch (fehler) {
+      console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
+    }
+    dongle = false;
+    return false;
   }
 
   async function dongleVerbinden() {
