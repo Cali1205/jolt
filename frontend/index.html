@@ -451,6 +451,18 @@ table.kurve input { padding: 6px 8px; }
           <div id="live-auto-zeile"></div>
         </div>
 
+        <!-- Der Dongle, auch auf einer **geplanten** Fahrt.
+             Bisher wurde er nur beim Aufzeichnen verbunden. Auf einer
+             Langstrecke ist er aber am nützlichsten - und dort lief jolt
+             blind. `requestDevice` braucht eine Nutzergeste, also ein Knopf.
+
+             Pausieren ist kein Luxus: Wer an der Säule abschliesst,
+             während jolt weiter über CAN fragt, löst die Alarmanlage aus. -->
+        <div class="karte-fuss" style="margin-top:12px">
+          <button class="tat neben" id="dongle-an" style="margin:0">Dongle verbinden</button>
+          <button class="tat neben" id="dongle-pause" style="margin:0" hidden>Pause</button>
+        </div>
+
         <div class="karte-fuss">
           <span id="live-hinweis">–</span>
           <span id="live-verbindung">getrennt</span>

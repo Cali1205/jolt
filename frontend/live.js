@@ -118,6 +118,7 @@ window.joltLive = (function () {
           })(),
         { method: "POST" });
       K.zustand.sitzungId = antwort.sitzung_id;
+      K.sitzungMerken(antwort.sitzung_id);
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       plan = antwort.plan || null;
@@ -291,6 +292,7 @@ window.joltLive = (function () {
     verlaufZeichnen();
     verbrauchZeichnen();
     autoZeile(z);
+    dongleAnzeigen();
 
     const balken = document.getElementById("live-balken");
     balken.style.width = Math.max(0, Math.min(100, z.ist_soc)) + "%";
@@ -811,15 +813,77 @@ window.joltLive = (function () {
    * Sekunde. Zwei Schleifen ergäben Punkte, die sich abwechseln - einer mit
    * Position, einer mit Ladestand -, und die Nachführung müsste beides
    * wieder zusammensuchen. */
+  /* Pausiert der Dongle gerade?
+   *
+   * An der Ladesäule wird abgeschlossen, und ein verriegeltes Auto, das
+   * weiter über CAN gefragt wird, löst die Alarmanlage aus. Ein blosses
+   * "nicht mehr lesen" genügt dabei nicht - der Wiederaufbau würde die
+   * Verbindung von selbst zurückholen. Pause heisst deshalb: trennen und
+   * nicht wieder aufbauen, bis jemand es sagt. */
+  let donglePause = false;
+
+  function dongleAnzeigen() {
+    const an = document.getElementById("dongle-an");
+    const pause = document.getElementById("dongle-pause");
+    if (!an || !pause) return;
+    const verbunden = dongle && window.joltObd && window.joltObd.verbunden();
+    an.hidden = verbunden && !donglePause;
+    an.textContent = donglePause ? "Dongle wieder verbinden"
+                                 : "Dongle verbinden";
+    pause.hidden = !verbunden || donglePause;
+  }
+
+  async function donglePausieren() {
+    donglePause = true;
+    dongle = false;
+    try { window.joltObd.trennen(); } catch (e) {}
+    dongleAnzeigen();
+    K.melden("Dongle getrennt. Das Auto kann jetzt abgeschlossen werden – "
+      + "jolt fragt nichts mehr über CAN. Die Fahrt läuft weiter, die "
+      + "Position kommt vom Telefon.", "hinweis");
+  }
+
+  async function dongleVerbinden() {
+    const knopf = document.getElementById("dongle-an");
+    if (knopf) knopf.disabled = true;
+    try {
+      if (!window.joltObd || !window.joltObd.verfuegbar()) {
+        K.melden("Dieser Browser kann kein Bluetooth. Mit Dongle: dieselbe "
+          + "Adresse in Bluefy öffnen.", "fehler");
+        return;
+      }
+      donglePause = false;
+      dongleNutzen();
+      await window.joltObd.anschliessen();
+      if (!window.joltObd.verbunden()) throw new Error("keine Verbindung");
+      if (!(await window.joltObd.handshake())) {
+        throw new Error("Handshake unvollständig");
+      }
+      K.melden("Dongle verbunden – ab jetzt kommen die Werte aus dem Auto.",
+               "hinweis");
+    } catch (fehler) {
+      dongle = false;
+      K.melden("Dongle: " + fehler.message, "fehler");
+    } finally {
+      if (knopf) knopf.disabled = false;
+      dongleAnzeigen();
+    }
+  }
+
   function dongleNutzen() {
     dongle = true;
+    donglePause = false;
     if (window.joltObd) {
       window.joltObd.einrichten(
         (t) => console.log("[obd]", t),
         // Ein Abriss im Tunnel ist kein Grund aufzuhören, solange die Fahrt
         // läuft: Der Baustein baut selbst wieder auf.
-        () => { if (K.zustand.sitzungId) window.joltObd.wiederverbinden(
-          1, () => !!K.zustand.sitzungId); });
+        () => {
+          if (K.zustand.sitzungId && !donglePause) {
+            window.joltObd.wiederverbinden(
+              1, () => !!K.zustand.sitzungId && !donglePause);
+          }
+        });
     }
   }
 
@@ -1281,7 +1345,8 @@ window.joltLive = (function () {
       tempo_kmh: coords.speed === null ? null : coords.speed * 3.6,
     };
 
-    if (dongle && window.joltObd && window.joltObd.verbunden()) {
+    if (dongle && !donglePause && window.joltObd
+        && window.joltObd.verbunden()) {
       try {
         const roh = await window.joltObd.satzLesen(runde++);
         if (typeof roh.hoehe_m !== "number" && typeof coords.altitude === "number") {
@@ -1416,6 +1481,7 @@ window.joltLive = (function () {
       try { steckdose.onclose = null; steckdose.close(); } catch (e) {}
     }
     K.zustand.sitzungId = null;
+    K.sitzungMerken(null);
     plan = null;
     const kasten = document.getElementById("live-aenderung");
     if (kasten) kasten.hidden = true;
@@ -1483,6 +1549,48 @@ window.joltLive = (function () {
       + `Planungen rechnen also ${richtung}.`, "hinweis");
   }
 
+  /* Nach einem Neuladen dort weitermachen, wo es aufhörte.
+   *
+   * Der Server weiss, ob die Sitzung noch läuft - er ist die Wahrheit, nicht
+   * der Browser. Läuft sie, wird die Ansicht wiederhergestellt und weiter
+   * gemeldet; ist sie beendet, wird die Marke stillschweigend verworfen.
+   *
+   * Ohne Rückfrage: Wer versehentlich neu lädt, will nicht gefragt werden,
+   * ob er weitermachen möchte - er will, dass es weitergeht. */
+  async function sitzungFortsetzen() {
+    const id = K.gemerkteSitzung();
+    if (!id || K.zustand.sitzungId) return;
+    let zustand;
+    try {
+      zustand = await K.api(`/api/live/${id}`);
+    } catch (fehler) {
+      K.sitzungMerken(null);
+      return;
+    }
+    if (!zustand || zustand.laeuft === false) { K.sitzungMerken(null); return; }
+
+    K.zustand.sitzungId = id;
+    /* Die Fahrt dazuholen. Die Live-Ansicht braucht sie fuer das
+     * Energieprofil, die Reserve-Marke und die Soll-Kurve; ohne sie zeigt
+     * sie nur die halbe Wahrheit. Bei einer Aufzeichnung gibt es sie noch
+     * nicht - dann bleibt es bei null, und die Ansicht kommt damit zurecht. */
+    if (!K.zustand.fahrt && zustand.fahrt_id && window.joltRoute) {
+      try { await window.joltRoute.fahrtLaden(zustand.fahrt_id); }
+      catch (fehler) { /* eine Aufzeichnung hat noch keine Geometrie */ }
+    }
+    const leer = document.getElementById("live-leer");
+    const inhalt = document.getElementById("live-inhalt");
+    if (leer) leer.hidden = true;
+    if (inhalt) inhalt.hidden = false;
+    if (zustand.plan) { plan = zustand.plan; planZeichnen(); }
+    verbinden(id);
+    positionVerfolgen();
+    dongleAnzeigen();
+    K.melden("Die laufende Fahrt geht weiter – die Messpunkte von vorher "
+      + "sind erhalten. Falls der Dongle mitlas, einmal neu verbinden.",
+      "hinweis");
+  }
+
   function einrichten() {
     // Wie bei der Karte: Im versteckten Abschnitt hat das Canvas die Breite
     // null, und nach dem Einblenden oder Drehen muss neu gezeichnet werden.
@@ -1494,6 +1602,10 @@ window.joltLive = (function () {
     K.an("simulieren", "click", simulieren);
     K.an("live-beenden", "click", beenden);
     K.an("soc-melden", "click", socMelden);
+    K.an("dongle-an", "click", dongleVerbinden);
+    // Erst wenn die Fahrzeugliste steht - sonst fehlt die Akkugrösse.
+    setTimeout(sitzungFortsetzen, 800);
+    K.an("dongle-pause", "click", donglePausieren);
     // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
     // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
     K.an("ist-soc", "keydown", (e) => {

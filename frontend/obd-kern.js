@@ -253,6 +253,31 @@ window.joltObd = (function () {
     }
   }
 
+  /* Die Verbindung absichtlich beenden.
+   *
+   * Gebraucht an der Ladesaeule: Ein verriegeltes Fahrzeug, das weiter ueber
+   * CAN gefragt wird, loest die Alarmanlage aus. "Nicht mehr lesen" genuegt
+   * dafuer nicht - der Dongle bleibt verbunden, und schon der Handshake nach
+   * einem Abriss spricht wieder mit dem Bus.
+   *
+   * `geraetGemerkt` bleibt stehen: Das Geraet ist weiter erlaubt, und der
+   * naechste Aufbau kommt ohne Auswahldialog aus. */
+  function trennen() {
+    try {
+      if (geraetGemerkt && geraetGemerkt.gatt && geraetGemerkt.gatt.connected) {
+        geraetGemerkt.gatt.disconnect();
+      }
+    } catch (fehler) {
+      melde("Trennen: " + fehler.message);
+    }
+    schreiben = null;
+    letzteAdresse = null;
+    warteAuf = null;
+    puffer = "";
+    schuldigeAntworten = 0;
+    melde("Verbindung absichtlich getrennt.");
+  }
+
   /* ---------- Befehle ---------- */
 
   /* Wie viele Antworten noch von aufgegebenen Befehlen unterwegs sind.
@@ -950,6 +975,7 @@ function befehl(text, grenze_ms = 15000) {
     anschliessen,
     wiederverbinden,
     handshake: () => reihe(HANDSHAKE),
+    trennen,
     befehl,
     reihe,
     satzLesen,

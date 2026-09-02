@@ -821,6 +821,19 @@ def main() -> int:
     pruefe("WIEDER_HOECHSTABSTAND_MS" in kern,
            "stattdessen ist nur der Abstand gedeckelt")
     # Was eine **lange** Fahrt anders macht.
+    kern_js = open(os.path.join(FRONTEND, "core.js"), encoding="utf-8").read()
+    pruefe("sitzungMerken" in kern_js and "gemerkteSitzung" in kern_js,
+           "die laufende Sitzung überlebt ein Neuladen - sonst beginnt jeder "
+           "versehentliche Wisch eine neue")
+    pruefe("sitzungFortsetzen" in live,
+           "und die Live-Ansicht nimmt sie beim Start wieder auf")
+    pruefe("donglePause" in live and "function trennen" in kern,
+           "der Dongle lässt sich trennen und pausieren - ein verriegeltes "
+           "Auto, das weiter über CAN gefragt wird, löst die Alarmanlage aus")
+    pruefe('id="dongle-an"' in html,
+           "und er lässt sich auch auf einer geplanten Fahrt verbinden, "
+           "nicht nur beim Aufzeichnen")
+
     pruefe("BREITEN_MIN" in live and "BALKEN_HOECHSTENS" in live,
            "die Balkenbreite wächst mit der Fahrt - sechs Stunden wären "
            "sonst 360 Balken auf 340 Pixeln")
