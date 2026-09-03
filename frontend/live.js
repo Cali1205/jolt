@@ -804,8 +804,15 @@ window.joltLive = (function () {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !K.zustand.sitzungId) return;
     bildschirmWachHalten();
-    if (dongle && window.joltObd && !window.joltObd.verbunden()) {
-      window.joltObd.wiederverbinden(1, () => !!K.zustand.sitzungId);
+    // `donglePause` gehört mit in beide Bedingungen: An der Ladesäule ist
+    // das Auto verriegelt, und eine Verbindung, die jolt hier von selbst
+    // zurückholt, löst die Alarmanlage aus. Heute deckt `dongle` den Fall
+    // schon ab - aber diese Bedingung darf nicht davon abhängen, dass eine
+    // zweite Variable anderswo richtig gesetzt wurde.
+    if (dongle && !donglePause && window.joltObd
+        && !window.joltObd.verbunden()) {
+      window.joltObd.wiederverbinden(
+        1, () => !!K.zustand.sitzungId && !donglePause);
     }
     // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
     // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
@@ -848,6 +855,51 @@ window.joltLive = (function () {
     K.melden("Dongle getrennt. Das Auto kann jetzt abgeschlossen werden – "
       + "jolt fragt nichts mehr über CAN. Die Fahrt läuft weiter, die "
       + "Position kommt vom Telefon.", "hinweis");
+  }
+
+  /* Der Dongle, der verbunden ist und trotzdem schweigt.
+   *
+   * Beide Rettungswege - das Ereignis `gattserverdisconnected` und das
+   * Nachfassen beim Zurückkommen in den Vordergrund - fragen `verbunden()`
+   * und werden nur tätig, wenn die Verbindung **weg** ist. Der häufigere
+   * Fall sieht anders aus: GATT meldet weiter "verbunden", der Dongle
+   * antwortet aber auf nichts mehr. Dann fällt jede Leserunde still in
+   * ihren `catch`, der Messpunkt geht ohne Fahrzeugwerte hinaus - und
+   * ausgelöst wird nie etwas, weil formal alles in Ordnung ist.
+   *
+   * Am 2. September hat das zwei Fahrten halbiert: In Sitzung 28 kamen
+   * nach 16:45 Uhr 51 von 110 Minuten ohne einen einzigen Wert an, in
+   * Sitzung 26 die letzten 27 Minuten. Beide Male blieb die Verbindung
+   * bestehen, und beide Male hat niemand es gemerkt.
+   *
+   * Das Gegenmittel ist, den Abriss selbst herbeizuführen: `trennen()`
+   * löst `gattserverdisconnected` aus, und daran hängt der Wiederaufbau,
+   * den es längst gibt. Bleibt das Ereignis aus, wird nachgefasst.
+   *
+   * An der Ladesäule gilt das alles nicht: Dort ist Schweigen gewollt, und
+   * ein verriegeltes Auto, das wieder über CAN gefragt wird, löst die
+   * Alarmanlage aus. Daher die Bedingung auf `donglePause`. */
+  const STILLE_NEUSTART_MS = 120000;
+
+  function stilleUeberwachen() {
+    if (donglePause || !window.joltObd || !window.joltObd.verbunden()) return;
+    // Kam noch nie etwas, läuft die Uhr ab jetzt - sonst wartet die
+    // Überwachung auf einen Wert, der nie kommt, und greift nie ein.
+    if (!letzteRohwerteZeit) { letzteRohwerteZeit = Date.now(); return; }
+    if (Date.now() - letzteRohwerteZeit < STILLE_NEUSTART_MS) return;
+    // Die Uhr sofort weiterstellen, sonst stösst die nächste Runde
+    // denselben Neuaufbau noch einmal an, während der erste läuft.
+    letzteRohwerteZeit = Date.now();
+    K.melden("Der Dongle antwortet seit zwei Minuten nicht mehr – jolt baut "
+      + "die Verbindung neu auf.", "hinweis");
+    try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
+    setTimeout(() => {
+      if (!donglePause && K.zustand.sitzungId && window.joltObd
+          && !window.joltObd.verbunden()) {
+        window.joltObd.wiederverbinden(
+          1, () => !!K.zustand.sitzungId && !donglePause);
+      }
+    }, 3000);
   }
 
   /* Den Dongle anbieten, bevor sonst irgendetwas läuft.
@@ -1407,6 +1459,7 @@ window.joltLive = (function () {
         // und die trägt Zeitfaktor und Ankunftsprognose weiter.
         console.log("[obd] Runde übersprungen:", fehler);
       }
+      stilleUeberwachen();
     }
 
     try {
@@ -1594,14 +1647,38 @@ window.joltLive = (function () {
    *
    * Ohne Rückfrage: Wer versehentlich neu lädt, will nicht gefragt werden,
    * ob er weitermachen möchte - er will, dass es weitergeht. */
-  async function sitzungFortsetzen() {
+  /* Wieviel Anläufe das Fortsetzen nimmt, bevor es aufgibt.
+   *
+   * Der Auslöser stand früher an einem Zeitgeber von 800 ms, mit dem
+   * Kommentar "erst wenn die Fahrzeugliste steht". Eine geratene Zahl: Auf
+   * einem kalt gestarteten Telefon im französischen Funkloch ist sie zu
+   * kurz, und es gab keinen zweiten Versuch. */
+  const FORTSETZEN_VERSUCHE = 6;
+
+  async function sitzungFortsetzen(versuch = 1) {
     const id = K.gemerkteSitzung();
     if (!id || K.zustand.sitzungId) return;
     let zustand;
     try {
       zustand = await K.api(`/api/live/${id}`);
     } catch (fehler) {
-      K.sitzungMerken(null);
+      /* Vergessen darf jolt eine laufende Fahrt nur, wenn der Server
+       * eindeutig sagt, dass es sie nicht gibt.
+       *
+       * Vorher löschte **jeder** Fehler die gemerkte Nummer - und `api()`
+       * wirft "Server nicht erreichbar." auch dann, wenn nur das Netz weg
+       * ist. Wer die Seite im Tunnel neu lud, verlor die Fahrt endgültig:
+       * Sie lief auf dem Server weiter, aber das Telefon bot sie nie
+       * wieder an. Am 2. September ist genau das den ganzen Tag passiert -
+       * eine Reise von 654 km zerfiel in neun Fahrten, weil nach jedem
+       * Neuladen von Hand eine neue geplant werden musste. */
+      if (/nicht gefunden|404/i.test(fehler.message)) {
+        K.sitzungMerken(null);
+        return;
+      }
+      if (versuch < FORTSETZEN_VERSUCHE) {
+        setTimeout(() => sitzungFortsetzen(versuch + 1), 4000 * versuch);
+      }
       return;
     }
     if (!zustand || zustand.laeuft === false) { K.sitzungMerken(null); return; }
@@ -1623,6 +1700,13 @@ window.joltLive = (function () {
     verbinden(id);
     positionVerfolgen();
     dongleAnzeigen();
+    /* In die Live-Ansicht wechseln, wie es `starten()` auch tut.
+     *
+     * Ohne das blieb man nach dem Neuladen in der Planen-Ansicht stehen:
+     * Die Fahrt lief zwar weiter, war aber nirgends zu sehen. Wer nicht
+     * wusste, dass er auf "Live" tippen muss, hielt sie für verloren und
+     * plante eine neue - und die beendete dann die laufende. */
+    if (window.joltApp) window.joltApp.ansichtZeigen("live");
     K.melden("Die laufende Fahrt geht weiter – die Messpunkte von vorher "
       + "sind erhalten. Falls der Dongle mitlas, einmal neu verbinden.",
       "hinweis");
