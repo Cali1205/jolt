@@ -26,6 +26,14 @@ header {
 }
 header .marke { font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
 header .marke b { color: var(--akzent); }
+/* Ganz nach rechts, klein und blass: Die Fassung soll ablesbar sein, ohne
+   dass sie im Weg steht. Ziffern in Tabellenbreite, damit die Zeile bei
+   jedem Neuladen dieselbe Breite hat und nicht zappelt. */
+header .stand {
+  margin-left: auto; font-size: 11px; color: var(--gedaempft);
+  font-variant-numeric: tabular-nums; text-align: right; line-height: 1.25;
+  white-space: nowrap;
+}
 .plakette {
   font-size: 11px; padding: 3px 8px; border-radius: 99px;
   background: #3a2d12; color: var(--akzent); border: 1px solid #56421a;
@@ -238,6 +246,19 @@ table.kurve input { padding: 6px 8px; }
 <header>
   <span class="marke"><b>jolt</b></span>
   <span id="demo-plakette" class="plakette" hidden>Demo-Routen</span>
+  <!-- Rechts aussen und unaufdringlich: Die Zeile beantwortet genau eine
+       Frage - "läuft hier wirklich die neue Fassung?". Sie wird beim
+       Ausliefern eingesetzt (siehe _stand_zeile in main.py); bleibt der
+       Platzhalter stehen, ist die Seite an FastAPI vorbeigekommen. -->
+  <!-- Die Zeitpunkte stehen als Sekunden drin, nicht als fertiger Text:
+       Der Container läuft in UTC, das Telefon in seiner eigenen Zone. Wer
+       hier serverseitig formatiert, zeigt im Sommer eine Uhrzeit zwei
+       Stunden neben der Uhr des Betrachters - und das ausgerechnet bei
+       einer Anzeige, die Zweifel ausräumen soll. Formatiert wird deshalb
+       im Browser (app.js); der Text hier ist nur der Rückfall, falls das
+       JavaScript nicht läuft. -->
+  <span class="stand" id="stand" title="Code-Stand · Start des Servers"
+        data-stand="{{STAND_S}}" data-start="{{START_S}}">{{STAND}}</span>
 </header>
 
 <nav>

@@ -99,10 +99,68 @@ INDEX_DATEIEN = ("obd-kern.js", "core.js", "karte.js", "route.js", "live.js",
                  "fahrten.js", "fahrzeug.js", "app.js")
 
 
+def _code_stand() -> int:
+    """Wann der Code entstanden ist, den dieser Prozess ausliefert.
+
+    Nicht der Zeitpunkt des Bauens, sondern die juengste Aenderungszeit
+    unter `frontend/` und `app/` - `COPY` uebernimmt sie ins Image. Der
+    Umweg ist Absicht: Ein beim Bauen eingestempeltes Datum haengt daran,
+    dass jeder Bauweg es mitgibt, und genau das haelt nicht. Die Dateien
+    liegen ohnehin da und luegen nicht.
+
+    Einmal beim Start bestimmt: In einem laufenden Container aendert sich
+    keine dieser Dateien mehr, und die Zeile soll jede Anfrage billig sein.
+    """
+    neueste = 0
+    for ordner in (FRONTEND, os.path.dirname(__file__)):
+        for wurzel, _, dateien in os.walk(ordner):
+            for name in dateien:
+                if not name.endswith((".py", ".js", ".html", ".css")):
+                    continue
+                try:
+                    neueste = max(neueste,
+                                  int(os.path.getmtime(os.path.join(wurzel, name))))
+                except OSError:
+                    pass
+    return neueste
+
+
+CODE_STAND = _code_stand()
+PROZESS_START = int(time.time())
+
+
+def _stand_zeile(html: str) -> str:
+    """Die Fassung in die Kopfzeile setzen.
+
+    Zwei Zahlen, weil sie zwei verschiedene Fragen beantworten: Der
+    Code-Stand sagt, **was** laeuft, der Serverstart sagt, **seit wann**.
+    Steht nach einem Deploy der alte Code-Stand da, ist das Image nicht neu
+    gebaut worden; steht der neue da und das Telefon zeigt trotzdem den
+    alten, hat der Browser die Seite aus dem Cache.
+
+    Genau diese Unterscheidung hat mich am 2. September zwei falsche
+    Schluesse gekostet - ein Fix lag eine Woche undeployt herum, weil von
+    aussen nicht zu sehen war, welche Fassung lief.
+
+    Die Zahlen gehen als Sekunden hinaus, nicht als fertiger Text: Der
+    Container laeuft in UTC, das Telefon in seiner eigenen Zone, und eine
+    Anzeige, die Zweifel ausraeumen soll, darf nicht zwei Stunden neben der
+    Uhr des Betrachters liegen. Formatiert wird in app.js; der Text hier
+    ist nur der Rueckfall ohne JavaScript und deshalb als UTC benannt.
+    """
+    return (html
+            .replace("{{STAND_S}}", str(CODE_STAND))
+            .replace("{{START_S}}", str(PROZESS_START))
+            .replace("{{STAND}}",
+                     time.strftime("%d.%m. %H:%M UTC",
+                                   time.gmtime(CODE_STAND))))
+
+
 @app.get("/")
 def index():
     with open(os.path.join(FRONTEND, "index.html"), encoding="utf-8") as datei:
-        return HTMLResponse(_mit_version(datei.read(), INDEX_DATEIEN),
+        return HTMLResponse(_stand_zeile(_mit_version(datei.read(),
+                                                      INDEX_DATEIEN)),
                             headers=OHNE_CACHE)
 
 

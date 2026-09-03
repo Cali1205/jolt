@@ -133,7 +133,38 @@ window.joltApp = (function () {
     });
   }
 
-  document.addEventListener("DOMContentLoaded", starten);
+  /* Die Fassung in der Kopfzeile in Ortszeit setzen.
+   *
+   * Der Server schickt Sekunden, weil er in UTC läuft und das Telefon in
+   * seiner eigenen Zone; formatiert wird deshalb hier. Zwei Zahlen, zwei
+   * Fragen: Der Code-Stand sagt, **was** läuft - steht dort nach einem
+   * Deploy noch das alte Datum, ist entweder das Image nicht neu gebaut
+   * oder die Seite kommt aus dem Cache. "seit" sagt, wann der Server
+   * zuletzt gestartet ist. */
+  function standZeigen() {
+    const feld = document.getElementById("stand");
+    if (!feld) return;
+    const stand = Number(feld.dataset.stand);
+    const start = Number(feld.dataset.start);
+    if (!stand) return;                    // Platzhalter nicht ersetzt
+    // Von Hand statt über `toLocaleString`: Das deutsche Format schiebt
+    // zwischen Datum und Uhrzeit ein Komma, und die Zeile ist zu kurz, um
+    // sich das leisten zu können.
+    const zwei = (n) => String(n).padStart(2, "0");
+    const datum = (s, mitTag) => {
+      const d = new Date(s * 1000);
+      const uhr = zwei(d.getHours()) + ":" + zwei(d.getMinutes());
+      return mitTag
+        ? zwei(d.getDate()) + "." + zwei(d.getMonth() + 1) + ". " + uhr : uhr;
+    };
+    feld.textContent = datum(stand, true)
+      + (start ? " · seit " + datum(start, false) : "");
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    starten();
+    standZeigen();
+  });
 
   return { ansichtZeigen };
 })();
