@@ -1655,6 +1655,85 @@ window.joltLive = (function () {
    * kurz, und es gab keinen zweiten Versuch. */
   const FORTSETZEN_VERSUCHE = 6;
 
+  /* Spur, Ladestandskurve und Verbrauchsbalken aus den gespeicherten
+   * Messpunkten wieder aufbauen.
+   *
+   * Der Zustand kennt nur den letzten Punkt. Ohne dieses Nachladen fing
+   * nach einem Neuladen alles bei null an: leere Karte, leeres
+   * Balkendiagramm, eine Kurve ab dem aktuellen Kilometer. Die Fahrt lief
+   * weiter, sah aber aus wie neu - und wer sie für verloren hielt, plante
+   * eine neue, die dann die laufende beendete.
+   *
+   * Bewusst nicht über `zustandAnzeigen()`: Das würde je Punkt die Karte
+   * neu setzen, Kacheln schreiben und Meldungen auslösen. Hier wird nur
+   * der Zustand aufgebaut, gezeichnet wird einmal am Ende. */
+  async function verlaufNachladen(id) {
+    let daten;
+    try {
+      daten = await K.api(`/api/live/${id}/punkte`);
+    } catch (fehler) {
+      // Kein Grund, das Fortsetzen scheitern zu lassen - die Fahrt läuft
+      // auch ohne die Vorgeschichte weiter, sie sieht nur ärmer aus.
+      console.log("[live] Verlauf nicht nachgeladen:", fehler);
+      return;
+    }
+    const punkte = (daten && daten.punkte) || [];
+    if (!punkte.length) return;
+
+    spur = [];
+    verlauf = [];
+    verbrauchsspur = [];
+    gefahrenKm = 0;
+
+    for (const p of punkte) {
+      if (typeof p.lat === "number" && typeof p.lon === "number") {
+        // `spur` hält [lon, lat] - dieselbe Reihenfolge wie `messort()`,
+        // und `abstandKm` rechnet damit.
+        const ort = [p.lon, p.lat];
+        const zuletzt = spur[spur.length - 1];
+        if (!zuletzt || zuletzt[0] !== ort[0] || zuletzt[1] !== ort[1]) {
+          if (zuletzt) gefahrenKm += abstandKm(zuletzt, ort);
+          spur.push(ort);
+        }
+      }
+      if (typeof p.km_stand === "number") {
+        const netto = (typeof p.entladen_kwh === "number")
+          ? p.entladen_kwh - (typeof p.geladen_kwh === "number"
+                              ? p.geladen_kwh : 0)
+          : null;
+        verbrauchsspur.push({
+          zeit: new Date(p.zeit).getTime(), km: p.km_stand, netto,
+          // Die GPS-Strecke ist hier schon bekannt - anders als im Betrieb,
+          // wo sie erst mit der Position nachgetragen wird.
+          gps: gefahrenKm,
+          soc: typeof p.soc_roh === "number" ? p.soc_roh / 2.5 : null });
+      }
+      if (p.soc !== null && p.soc !== undefined) {
+        verlauf.push({
+          km: p.km_auf_route || 0, gefahren_km: gefahrenKm, soc: p.soc,
+          /* Ob ein Ladestand gemeldet oder gerechnet war, steht nicht in
+           * der Datenbank. Ein Punkt mit Rohwert kam aus dem Auto, das ist
+           * sicher eine Messung; ein von Hand eingetippter Wert erscheint
+           * hier faelschlich als gerechnet. Lieber so herum: Der Fehler
+           * behauptet weniger, als er weiss. */
+          gemeldet: p.soc_roh !== null && p.soc_roh !== undefined });
+      }
+    }
+    // Dieselbe Obergrenze wie im Betrieb.
+    while (verbrauchsspur.length > 20000) verbrauchsspur.shift();
+    while (spur.length > 20000) spur.shift();
+
+    const letzter = punkte[punkte.length - 1];
+    if (typeof letzter.km_stand === "number") {
+      letzteRohwerteZeit = new Date(letzter.zeit).getTime();
+    }
+    verlaufZeichnen();
+    verbrauchZeichnen();
+    if (!K.zustand.fahrt && window.joltKarte) {
+      window.joltKarte.routeSetzen(spur);
+    }
+  }
+
   async function sitzungFortsetzen(versuch = 1) {
     const id = K.gemerkteSitzung();
     if (!id || K.zustand.sitzungId) return;
@@ -1697,6 +1776,9 @@ window.joltLive = (function () {
     if (leer) leer.hidden = true;
     if (inhalt) inhalt.hidden = false;
     if (zustand.plan) { plan = zustand.plan; planZeichnen(); }
+    // Vor dem Verbinden: Kommt über den WebSocket sofort ein neuer Punkt,
+    // soll er auf den nachgeladenen Verlauf treffen und nicht auf nichts.
+    await verlaufNachladen(id);
     verbinden(id);
     positionVerfolgen();
     dongleAnzeigen();

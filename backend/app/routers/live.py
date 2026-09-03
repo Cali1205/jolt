@@ -290,6 +290,38 @@ def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
                 "zeit": letzter.zeit.isoformat()}}
 
 
+@router.get("/{sitzung_id}/punkte")
+def punkte_lesen(sitzung_id: int, db: Session = Depends(get_db)):
+    """Die Messpunkte einer Sitzung - fuer ein Geraet, das neu dazukommt.
+
+    Der Zustand allein reicht dafuer nicht: Er kennt nur den *letzten*
+    Punkt. Wer die Seite neu laedt, bekam bisher eine leere Spur, ein leeres
+    Balkendiagramm und eine Ladestandskurve, die bei null anfing - die Fahrt
+    lief weiter, sah aber aus wie neu. Genau das hat am 2. September dazu
+    gefuehrt, dass eine laufende Fahrt fuer verloren gehalten und eine neue
+    geplant wurde.
+
+    Aus `rohwerte` kommen nur die vier Zahlen mit, aus denen die Oberflaeche
+    den Verbrauch zurueckrechnet. Der ganze Satz waere je Punkt siebzehnmal
+    so gross, und auf einer Langstrecke mit ein paar tausend Punkten laedt
+    das niemand ueber Mobilfunk.
+    """
+    sitzung = _sitzung_holen(db, sitzung_id)
+    aus = []
+    for punkt in sitzung.punkte:
+        roh = punkt.rohwerte if isinstance(punkt.rohwerte, dict) else {}
+        aus.append({
+            "zeit": punkt.zeit.isoformat(),
+            "lat": punkt.lat, "lon": punkt.lon,
+            "soc": punkt.soc, "km_auf_route": punkt.km_auf_route,
+            "km_stand": roh.get("km_stand"),
+            "entladen_kwh": roh.get("entladen_kwh"),
+            "geladen_kwh": roh.get("geladen_kwh"),
+            "soc_roh": roh.get("soc_roh"),
+        })
+    return {"sitzung_id": sitzung.id, "punkte": aus}
+
+
 @router.post("/{sitzung_id}/ende", dependencies=[Depends(deps.aktuelle_sitzung)])
 def beenden(sitzung_id: int, db: Session = Depends(get_db)):
     """Fahrt abschliessen - und aus ihr lernen.
