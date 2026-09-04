@@ -156,6 +156,13 @@ window.joltObd = (function () {
       melde(`Gerät gewählt: ${geraet.name || "(ohne Namen)"}`);
       geraet.addEventListener("gattserverdisconnected", () => {
         melde("Verbindung getrennt.");
+        // Ohne das hier hielte `verbunden_()` einen Abriss für eine
+        // bestehende Verbindung - `schreiben` wurde bisher nur beim
+        // absichtlichen `trennen()` geloescht. `anschliessen()` verlässt
+        // sich inzwischen auf `verbunden_()`, um einen unnötigen zweiten
+        // Aufbau zu vermeiden - genau das hätte nach einem echten Abriss
+        // jeden weiteren Verbindungsversuch übersprungen.
+        schreiben = null;
         // Im Tunnel oder wenn der Dongle einschläft reisst die Verbindung
         // ab. Während einer laufenden Aufzeichnung ist das kein Grund
         // aufzuhören - wer dann erst eine Berührung braucht, verliert die
@@ -970,6 +977,7 @@ function befehl(text, grenze_ms = 15000) {
       geraetGemerkt = geraet;
       geraet.addEventListener("gattserverdisconnected", () => {
         melde("Verbindung getrennt.");
+        schreiben = null;   // siehe Begründung beim anderen Listener oben
         if (beiAbriss) beiAbriss();
       });
       await gesperrt(() => verbindungAufbauen(geraet));
