@@ -823,6 +823,11 @@ window.joltLive = (function () {
     + "bWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAA"
     + "ABBliIQAFf/+98nvwKbr29+B";
 
+  /* Ausserhalb des sichtbaren Bereichs positioniert (negative Koordinaten)
+   * hat es nicht gehalten - vermutlich zaehlt ein Video, das gar nicht im
+   * sichtbaren Bereich liegt, für iOS nicht als echte Wiedergabe. Jetzt
+   * steht es tatsächlich in der oberen linken Ecke, nur eben ein einzelnes,
+   * fast durchsichtiges Pixel gross - das fällt nicht auf, zählt aber. */
   function videoWachhalterHolen() {
     if (wachhalterVideo) return wachhalterVideo;
     const video = document.createElement("video");
@@ -831,29 +836,39 @@ window.joltLive = (function () {
     video.playsInline = true;
     video.setAttribute("playsinline", "");
     video.setAttribute("webkit-playsinline", "");
-    video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;"
-      + "pointer-events:none;top:-100px;left:-100px;";
+    video.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;"
+      + "opacity:0.01;pointer-events:none;z-index:-1;";
     video.src = WACHHALTER_MP4;
     document.body.appendChild(video);
     wachhalterVideo = video;
     return video;
   }
 
+  /* Beide Wege melden zurück, statt nur ins unsichtbare Konsolenprotokoll zu
+   * schreiben - am Steuer kommt niemand an die Konsole heran, und ohne eine
+   * sichtbare Rückmeldung liesse sich ein Fehlschlag nur raten statt sehen. */
   async function bildschirmWachHalten() {
+    let hinweis = "";
     if (!wachhalter && "wakeLock" in navigator) {
       try {
         wachhalter = await navigator.wakeLock.request("screen");
         wachhalter.addEventListener("release", () => { wachhalter = null; });
       } catch (fehler) {
-        // Kein Grund, die Fahrt nicht aufzuzeichnen - das Video unten fängt
-        // den Fall ohnehin auf.
-        console.log("[live] Wake Lock ging nicht:", fehler.message);
+        hinweis = "Wake Lock: " + fehler.message;
       }
+    } else if (!("wakeLock" in navigator)) {
+      hinweis = "Wake Lock: vom Browser nicht unterstützt";
     }
     try {
       await videoWachhalterHolen().play();
     } catch (fehler) {
-      console.log("[live] Video-Wachhalter ging nicht:", fehler.message);
+      hinweis += (hinweis ? " / " : "") + "Video: " + fehler.message;
+    }
+    if (hinweis) {
+      console.log("[live] Bildschirm wachhalten:", hinweis);
+      K.melden("Bildschirm bleibt evtl. nicht an (" + hinweis + ") - "
+        + "sicherheitshalber Automatische Sperre in den iOS-Einstellungen "
+        + "auf „Nie” stellen.", "warnung");
     }
   }
 
