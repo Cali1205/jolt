@@ -107,6 +107,24 @@ window.joltObd = (function () {
   let puffer = "";
   let warteAuf = null;       // {erfuellen, ablehnen, uhr}
   let letzteAdresse = null;
+  let notifyAktuell = null;  // aktuell abonnierte Charakteristik
+
+  /* Ohne diese Sperre konnten zwei Verbindungsversuche gleichzeitig laufen -
+   * etwa das automatische Wiederverbinden im Hintergrund und ein manuelles
+   * Antippen von "Dongle verbinden" zur selben Zeit. Beide bauen dieselbe
+   * GATT-Verbindung neu auf und schicken danach dieselbe Handshake-Reihe;
+   * `befehl()` lässt aber nur einen wartenden Befehl gleichzeitig zu und
+   * lehnt den zweiten mit "es läuft noch ein Befehl" ab. Die Reihe, die das
+   * trifft, gilt dann als unvollständig - obwohl beide Versuche für sich
+   * genommen funktioniert hätten. Alles, was verbindet oder den Handshake
+   * schickt, läuft deshalb nacheinander über `gesperrt()`. */
+  let verbindungSperre = Promise.resolve();
+
+  function gesperrt(aufgabe) {
+    const eigene = verbindungSperre.catch(() => {}).then(aufgabe);
+    verbindungSperre = eigene.catch(() => {});
+    return eigene;
+  }
 
   /* ---------- Verbinden ---------- */
 
@@ -144,7 +162,7 @@ window.joltObd = (function () {
         // halbe Fahrt, weil niemand am Steuer auf den Bildschirm sieht.
         if (beiAbriss) beiAbriss();
       });
-      await verbindungAufbauen(geraet);
+      await gesperrt(() => verbindungAufbauen(geraet));
     } catch (fehler) {
       melde("FEHLER " + fehler.message);
     }
@@ -178,8 +196,18 @@ window.joltObd = (function () {
                         + "Protokoll - sie gehört in die Liste DIENSTE.");
       }
 
+      // Ohne das Abmelden hier bekäme ein zweiter Aufbau auf dasselbe Gerät
+      // (z.B. weil ein automatischer und ein manueller Versuch ineinander
+      // liefen) einen zweiten Listener dazu - jede Antwort käme doppelt bei
+      // `beiDaten` an und würde den Puffer durcheinanderbringen.
+      if (notifyAktuell) {
+        try {
+          notifyAktuell.removeEventListener("characteristicvaluechanged", beiDaten);
+        } catch (fehler) { /* Charakteristik schon weg - nichts zu tun */ }
+      }
       await notify.startNotifications();
       notify.addEventListener("characteristicvaluechanged", beiDaten);
+      notifyAktuell = notify;
       melde(`Bereit. Schreiben auf ${schreiben.uuid}, Lesen auf ${notify.uuid}`);
   }
 
@@ -225,13 +253,15 @@ window.joltObd = (function () {
       }
       if (!geraet) throw new Error("kein gemerktes Gerät");
       melde(`Wiederverbinden, Versuch ${versuch} …`);
-      await verbindungAufbauen(geraet);
-      letzteAdresse = null;          // Adresse und Filter sind weg
-      // Was vor dem Abriss unterwegs war, kommt nicht mehr.
-      schuldigeAntworten = 0;
-      puffer = "";
-      wechselGescheitert.clear();
-      await reihe(HANDSHAKE);
+      await gesperrt(async () => {
+        await verbindungAufbauen(geraet);
+        letzteAdresse = null;        // Adresse und Filter sind weg
+        // Was vor dem Abriss unterwegs war, kommt nicht mehr.
+        schuldigeAntworten = 0;
+        puffer = "";
+        wechselGescheitert.clear();
+        await reihe(HANDSHAKE);
+      });
       melde("Wieder verbunden, Handshake erneuert.");
     } catch (fehler) {
       // Nur jeden zehnten Fehlversuch protokollieren, sonst füllt sich das
@@ -942,7 +972,7 @@ function befehl(text, grenze_ms = 15000) {
         melde("Verbindung getrennt.");
         if (beiAbriss) beiAbriss();
       });
-      await verbindungAufbauen(geraet);
+      await gesperrt(() => verbindungAufbauen(geraet));
       return geraet;
     } catch (fehler) {
       // Das Gerät ist bekannt, aber nicht da - ausgeschaltet, ausser
@@ -955,6 +985,10 @@ function befehl(text, grenze_ms = 15000) {
   /* Erst ohne Dialog, dann mit. Das ist der Weg, den Aufrufer nehmen
    * sollten - er kostet beim zweiten Mal keine Berührung mehr. */
   async function anschliessen() {
+    // Schon verbunden - z.B. weil das automatische Wiederverbinden gerade
+    // erst durchkam: nichts tun, statt eine zweite Verbindung aufzubauen,
+    // die der ersten nur in die Quere käme.
+    if (verbunden_()) return true;
     if (await verbindenOhneDialog()) return true;
     await verbinden();
     return verbunden_();
@@ -974,7 +1008,7 @@ function befehl(text, grenze_ms = 15000) {
     verbinden,
     anschliessen,
     wiederverbinden,
-    handshake: () => reihe(HANDSHAKE),
+    handshake: () => gesperrt(() => reihe(HANDSHAKE)),
     trennen,
     befehl,
     reihe,

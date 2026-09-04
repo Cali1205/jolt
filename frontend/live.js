@@ -775,23 +775,61 @@ window.joltLive = (function () {
    * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
    * geholt. */
   let wachhalter = null;
+  let wachhalterVideo = null;
+
+  /* Auf iOS bleibt die Wake-Lock-API in einer als App vom Homescreen
+   * gestarteten Seite ("standalone", siehe manifest.json) unzuverlässig -
+   * mal wird die Sperre gar nicht erst erteilt, mal fällt sie nach kurzer
+   * Zeit von selbst weg, ohne ein "release"-Ereignis auszulösen. Ein
+   * stummes, unsichtbares Video, das in einer Dauerschleife läuft, hält den
+   * Bildschirm dagegen zuverlässig wach - dieselbe Technik, die NoSleep.js
+   * verwendet. Es kostet keine Datei: Der Strom kommt aus einem 1x1-Canvas.
+   * Beide Wege laufen parallel, keiner schadet dem anderen. */
+  function videoWachhalterHolen() {
+    if (wachhalterVideo) return wachhalterVideo;
+    const leinwand = document.createElement("canvas");
+    leinwand.width = 1;
+    leinwand.height = 1;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;"
+      + "pointer-events:none;top:-100px;left:-100px;";
+    video.srcObject = leinwand.captureStream(1);
+    document.body.appendChild(video);
+    wachhalterVideo = video;
+    return video;
+  }
 
   async function bildschirmWachHalten() {
-    if (!("wakeLock" in navigator) || wachhalter) return;
+    if (!wachhalter && "wakeLock" in navigator) {
+      try {
+        wachhalter = await navigator.wakeLock.request("screen");
+        wachhalter.addEventListener("release", () => { wachhalter = null; });
+      } catch (fehler) {
+        // Kein Grund, die Fahrt nicht aufzuzeichnen - das Video unten fängt
+        // den Fall ohnehin auf.
+        console.log("[live] Wake Lock ging nicht:", fehler.message);
+      }
+    }
     try {
-      wachhalter = await navigator.wakeLock.request("screen");
-      wachhalter.addEventListener("release", () => { wachhalter = null; });
+      await videoWachhalterHolen().play();
     } catch (fehler) {
-      // Kein Grund, die Fahrt nicht aufzuzeichnen - nur einer, den
-      // Bildschirm in den Einstellungen an zu lassen.
-      console.log("[live] Bildschirm wachhalten ging nicht:", fehler.message);
+      console.log("[live] Video-Wachhalter ging nicht:", fehler.message);
     }
   }
 
   function bildschirmFreigeben() {
-    if (!wachhalter) return;
-    try { wachhalter.release(); } catch (e) {}
-    wachhalter = null;
+    if (wachhalter) {
+      try { wachhalter.release(); } catch (e) {}
+      wachhalter = null;
+    }
+    if (wachhalterVideo) {
+      try { wachhalterVideo.pause(); } catch (e) {}
+    }
   }
 
   /* Zurück im Vordergrund: aufholen, was im Hintergrund liegengeblieben ist.
