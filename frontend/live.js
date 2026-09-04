@@ -783,13 +783,48 @@ window.joltLive = (function () {
    * Zeit von selbst weg, ohne ein "release"-Ereignis auszulösen. Ein
    * stummes, unsichtbares Video, das in einer Dauerschleife läuft, hält den
    * Bildschirm dagegen zuverlässig wach - dieselbe Technik, die NoSleep.js
-   * verwendet. Es kostet keine Datei: Der Strom kommt aus einem 1x1-Canvas.
-   * Beide Wege laufen parallel, keiner schadet dem anderen. */
+   * verwendet. Beide Wege laufen parallel, keiner schadet dem anderen.
+   *
+   * Ein leeres Canvas als Quelle (`captureStream()`) reichte nicht: iOS hat
+   * das offenbar nicht durchgehend als echte Wiedergabe gewertet, der
+   * Bildschirm ging trotzdem aus. Ein tatsächliches, wenn auch winziges
+   * Video (1 Sekunde, 2x2 Pixel, schwarz, ohne Ton - 1,5 kB) läuft
+   * zuverlässiger. Eingebettet statt als eigene Datei, damit nichts vom
+   * Netz nachgeladen werden muss, bevor die Sperre greift. */
+  const WACHHALTER_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMXbW9vdgAAAGxtdmhkAAAA"
+    + "AAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAB"
+    + "AAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkF0"
+    + "cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAA"
+    + "AAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0"
+    + "cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAG5bWRpYQAAACBtZGhkAAAAAAAA"
+    + "AAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABW"
+    + "aWRlb0hhbmRsZXIAAAABZG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAA"
+    + "HGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASRzdGJsAAAAwHN0c2QAAAAAAAAAAQAA"
+    + "ALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAIAAgBIAAAASAAAAAAAAAABFUxh"
+    + "dmM1OS4zNy4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdk"
+    + "AAqs2V+IiMBEAAADAAQAAAMACDxIllgBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAA"
+    + "AQAAABRidHJ0AAAAAAAAFigAABYoAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0"
+    + "c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAsUAAAABAAAAFHN0Y28A"
+    + "AAAAAAAAAQAAA0cAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGly"
+    + "YXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU5"
+    + "LjI3LjEwMAAAAAhmcmVlAAACzW1kYXQAAAKtBgX//6ncRem95tlIt5Ys2CDZI+7veDI2"
+    + "NCAtIGNvcmUgMTY0IHIzMDk1IGJhZWU0MDAgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVj"
+    + "IC0gQ29weWxlZnQgMjAwMy0yMDIyIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2"
+    + "NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5"
+    + "c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAg"
+    + "bWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRj"
+    + "dD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zm"
+    + "c2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRz"
+    + "PTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29u"
+    + "c3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIgYl9hZGFwdD0xIGJf"
+    + "Ymlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9MiBrZXlp"
+    + "bnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNf"
+    + "bG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFw"
+    + "bWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAA"
+    + "ABBliIQAFf/+98nvwKbr29+B";
+
   function videoWachhalterHolen() {
     if (wachhalterVideo) return wachhalterVideo;
-    const leinwand = document.createElement("canvas");
-    leinwand.width = 1;
-    leinwand.height = 1;
     const video = document.createElement("video");
     video.muted = true;
     video.loop = true;
@@ -798,7 +833,7 @@ window.joltLive = (function () {
     video.setAttribute("webkit-playsinline", "");
     video.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;"
       + "pointer-events:none;top:-100px;left:-100px;";
-    video.srcObject = leinwand.captureStream(1);
+    video.src = WACHHALTER_MP4;
     document.body.appendChild(video);
     wachhalterVideo = video;
     return video;
