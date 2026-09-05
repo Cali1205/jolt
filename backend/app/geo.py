@@ -38,3 +38,28 @@ def peilung_grad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     y = math.sin(dl) * math.cos(p2)
     x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
     return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def punkt_versetzen(lat: float, lon: float, peilung: float,
+                    strecke_m: float) -> tuple[float, float]:
+    """Der Punkt, der `strecke_m` weit in Richtung `peilung` liegt.
+
+    Die Umkehrung von `haversine_m` und `peilung_grad` zusammen. Gebraucht
+    von `routing/varianten.py`, um Ausweichpunkte neben eine Route zu legen -
+    dafür genügt die Kugelnäherung ebenso wie für die Entfernung.
+
+    Bewusst nicht "ein Grad Breite sind 111,32 km": Das stimmt nur für die
+    Breite. Bei der Länge hängt es vom Breitengrad ab, und wer es dort
+    vergisst, versetzt einen Punkt in Südfrankreich um ein Drittel zu weit.
+    """
+    d = strecke_m / ERDRADIUS_M
+    b = math.radians(peilung)
+    p1 = math.radians(lat)
+    p2 = math.asin(math.sin(p1) * math.cos(d)
+                   + math.cos(p1) * math.sin(d) * math.cos(b))
+    dl = math.atan2(math.sin(b) * math.sin(d) * math.cos(p1),
+                    math.cos(d) - math.sin(p1) * math.sin(p2))
+    # Auf -180..180 normieren, damit ein Versatz über den Datumswechsel
+    # hinweg keine Länge von 190 Grad ergibt.
+    neue_lon = (lon + math.degrees(dl) + 540.0) % 360.0 - 180.0
+    return math.degrees(p2), neue_lon

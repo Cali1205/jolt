@@ -4,16 +4,21 @@ Der Endpunkt, der alles zusammenführt: die Strecke aus dem Routing, den
 Energiebedarf aus dem Verbrauchsmodell und - über `/ladeplan` - die zeitoptimale
 Folge von Ladestopps aus dem Optimierer.
 
-`/route` rechnet dabei nicht eine, sondern bis zu drei Varianten - schnellste,
-kürzeste, und die, die openrouteservice ohne weitere Vorgabe empfiehlt. Für
-"verbrauchsoptimal" gibt es keine vierte Anfrage: openrouteservice kennt
-Energie nicht als Kantengewicht, das könnte nur ein eigener Routing-Layer
-(siehe konzept-routenplaner.md). Stattdessen rechnet jolts eigenes
-Verbrauchsmodell - mit dem echten Höhenprofil - für jede der drei Varianten
-den tatsächlichen Energiebedarf, und die günstigste bekommt zusätzlich das
-Etikett "sparsamste". Das kann mit einer der anderen beiden zusammenfallen -
-und genau das ist dann die ehrliche Antwort auf "welche Route spart am
-meisten", nicht eine erfundene vierte Strecke.
+`/route` rechnet dabei nicht eine, sondern mehrere Varianten: die schnellste
+Strasse, auf Wunsch eine mautfreie, und bis zu vier Ausweichrouten über
+Zwischenpunkte neben der Strecke (`routing/varianten.py`).
+
+Die Zwischenpunkte sind kein Selbstzweck. openrouteservice kennt Energie
+nicht als Kantengewicht - "verbrauchsoptimal" kann man dort nicht bestellen,
+das könnte nur ein eigener Routing-Layer (siehe konzept-routenplaner.md).
+Und sein eingebautes `alternative_routes` lehnt jede Route über 100 km ab,
+also genau die, bei denen eine Alternative etwas ändern würde. Bleibt: selbst
+Kandidaten erzeugen und sie mit jolts eigenem Verbrauchsmodell bewerten.
+
+Bewertet wird am **fertigen Ladeplan** und nicht an der Fahrzeit - siehe
+`_varianten_bewerten`. Eine Route, die länger *und* langsamer ist als die
+schnellste, wird schon vorher verworfen: Sie kann keinen Ladeplan haben, der
+sie rettet, und das Rechnen kostet mehr als das Aussortieren.
 
 Der Ladeplan hängt bewusst an einer bereits gerechneten Fahrt und nicht an der
 Routenanfrage: Radius, Mindestleistung und Steckertyp will man durchprobieren,
@@ -34,6 +39,7 @@ from ..energie import modell, wetter
 # `umplanung.planen`, das den Optimierer selbst aufruft.
 from ..laden import optimierer
 from ..live import umplanung
+from ..routing import varianten
 from ..routing.provider import RoutingFehler
 
 # Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
@@ -82,6 +88,18 @@ class Routenanfrage(BaseModel):
     # nie gewählt wird, macht die Auswahl nur unübersichtlich. Sie kostet
     # ausserdem ein Drittel des ORS-Tageskontingents.
     alternative: bool = False
+    # Ausweichrouten über Zwischenpunkte mitrechnen (routing/varianten.py).
+    #
+    # Vorgabe aus, und das ist ein Messergebnis und keine Vorsicht: Auf der
+    # Teststrecke verlor jeder der zwölf durchgerechneten geometrischen
+    # Kandidaten gegen die schnellste Route. Vier zusätzliche
+    # Routing-Anfragen je Planung für einen Vorschlag, der zuverlässig
+    # schlechter ist, wäre ein schlechtes Geschäft.
+    #
+    # An: für Versuche mit anderen Abgriffstellen und Versatzweiten. Die
+    # Mechanik dahinter stimmt - sie wartet nur auf einen
+    # Kandidatenlieferanten, der etwas taugt.
+    umwege_pruefen: bool = False
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
     # einmal voll beladen geplant wird: Masse geht linear in Roll- und
@@ -108,14 +126,23 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
     anbieter = routing.provider()
-    # Jede Vorgabe ist eine eigene ORS-Anfrage, und davon gibt es 2.500 am
-    # Tag. Eine statt dreier ist deshalb nicht nur übersichtlicher.
-    # (Vorgabe, mautfrei) - die zweite nur auf Wunsch. `recommended` wäre
-    # die naheliegende Alternative, liefert auf Autobahnstrecken aber
-    # dieselbe Strasse wie `fastest` und damit keine.
-    wege = [("fastest", False)]
+    start = (anfrage.start.lat, anfrage.start.lon)
+    ziel = (anfrage.ziel.lat, anfrage.ziel.lon)
+    # Jede Anfrage kostet vom Tageskontingent (2.500). Die erste ist die
+    # schnellste Strasse und zugleich der Massstab; alles Weitere muss sich
+    # an ihr messen lassen.
+    #
+    # `recommended` und `shortest` stehen bewusst nicht dabei: Ersteres
+    # liefert auf Autobahnstrecken dieselbe Strasse wie `fastest`, letzteres
+    # eine, die niemand fährt (477 km in 10,7 Stunden gegen 598 km in 5,6).
+    # Beides gemessen, siehe routing/varianten.py.
+    wege = [{"zwischen": [], "mautfrei": False, "etikett": ETIKETT["fastest"]}]
     if anfrage.alternative:
-        wege.append(("fastest", True))
+        wege.append({"zwischen": [], "mautfrei": True, "etikett": "mautfrei"})
+    if anfrage.umwege_pruefen:
+        wege += [{"zwischen": [k["punkt"]], "mautfrei": False,
+                  "etikett": k["etikett"]}
+                 for k in varianten.ausweichpunkte(start, ziel)]
     # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
     # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
     # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht hier
@@ -132,18 +159,35 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     # derselben Route.
     gruppen: list[dict] = []
     letzter_fehler: RoutingFehler | None = None
-    for praeferenz, mautfrei in wege:
+    basis = None
+    for weg in wege:
         try:
-            strecke = anbieter.route((anfrage.start.lat, anfrage.start.lon),
-                                     (anfrage.ziel.lat, anfrage.ziel.lon),
-                                     praeferenz=praeferenz, mautfrei=mautfrei)
+            strecke = anbieter.route(start, ziel,
+                                     zwischenstopps=weg["zwischen"] or None,
+                                     praeferenz="fastest",
+                                     mautfrei=weg["mautfrei"])
         except RoutingFehler as fehler:
-            # Eine Vorgabe, die scheitert, darf die anderen nicht mitreissen -
-            # nur wenn am Ende keine einzige übrig ist, ist die Anfrage
-            # gescheitert.
+            # Ein Weg, der scheitert, darf die anderen nicht mitreissen - nur
+            # wenn am Ende keiner übrig ist, ist die Anfrage gescheitert. Ein
+            # Zwischenpunkt kann durchaus im Wasser oder im Sperrgebiet
+            # landen; das ist kein Grund, die Route nicht zu liefern.
             letzter_fehler = fehler
             continue
         if len(strecke.punkte) < 2:
+            continue
+
+        if basis is None:
+            basis = strecke
+        elif varianten.ist_dominiert(strecke.strecke_m, strecke.fahrzeit_s,
+                                     basis.strecke_m, basis.fahrzeit_s):
+            # Länger *und* langsamer als die schnellste Route: Der Kandidat
+            # kann keinen Ladeplan haben, der ihn rettet. Hier auszusortieren
+            # spart Wetterabfrage, Verbrauchsprofil und Ladeplanung - den
+            # teuren Teil. Die Routing-Anfrage ist da schon bezahlt.
+            log.info("Ausweichroute '%s' verworfen: %.0f km/%.0f min gegen "
+                     "%.0f km/%.0f min der schnellsten.", weg["etikett"],
+                     strecke.strecke_m / 1000, strecke.fahrzeit_s / 60,
+                     basis.strecke_m / 1000, basis.fahrzeit_s / 60)
             continue
 
         passend = next((g for g in gruppen
@@ -152,13 +196,10 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
                         and abs(g["strecke"].fahrzeit_s - strecke.fahrzeit_s)
                         <= GLEICH_MIN * 60), None)
         if passend:
-            etikett = "mautfrei" if mautfrei else ETIKETT[praeferenz]
-            if etikett not in passend["etiketten"]:
-                passend["etiketten"].append(etikett)
+            if weg["etikett"] not in passend["etiketten"]:
+                passend["etiketten"].append(weg["etikett"])
             continue
-        gruppen.append({"etiketten": ["mautfrei" if mautfrei
-                                      else ETIKETT[praeferenz]],
-                        "strecke": strecke})
+        gruppen.append({"etiketten": [weg["etikett"]], "strecke": strecke})
 
     if not gruppen:
         if letzter_fehler:

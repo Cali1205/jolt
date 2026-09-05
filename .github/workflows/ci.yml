@@ -21,6 +21,7 @@ jobs:
       - run: pip install -r backend/requirements.txt
 
       - run: ./tools/check_modell.py
+      - run: ./tools/check_identifikation.py
       - run: ./tools/check_optimierer.py
       - run: ./tools/check_umplanung.py
       - run: ./tools/check_push.py
