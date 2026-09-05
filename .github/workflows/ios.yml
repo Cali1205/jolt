@@ -1,0 +1,116 @@
+name: iOS
+
+# Nur bei Aenderungen unter ios/. Zwei Gruende:
+#
+# Erstens gibt es das Verzeichnis noch nicht - siehe konzept-ios-app.md. Ohne
+# Pfadfilter waere dieser Ablauf ab dem Tag seiner Einfuehrung bei jedem
+# Backend-Commit rot, und ein Ablauf, der immer rot ist, wird nicht mehr
+# gelesen.
+#
+# Zweitens kostet er. macos-Laeufer zaehlen bei privaten Repositories mit dem
+# **Faktor 10** gegen das Minutenkontingent: Fuenf Minuten Bauen sind fuenfzig
+# verbrauchte Minuten. Das ist vertretbar, wenn es die App betrifft, und
+# Verschwendung, wenn jemand eine Zeile in modell.py geaendert hat.
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
+  # Aenderung erfinden zu muessen.
+  workflow_dispatch:
+
+jobs:
+  bauen:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ios
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Der Laeufer bringt mehrere Xcode-Fassungen mit und waehlt nicht
+      # unbedingt die neueste. Festlegen statt hoffen: Sonst aendert sich die
+      # Werkzeugkette unter dem Projekt weg, sobald GitHub sein Abbild
+      # aktualisiert - und der Fehler sieht dann nach einem Codefehler aus.
+      - name: Xcode festlegen
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Fassungen protokollieren
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes | head -20
+
+      # Auf GitHubs macOS-Abbild ist xcbeautify normalerweise vorhanden. Das
+      # "normalerweise" ist der Grund fuer diese Zeile: Faellt es einmal aus
+      # dem Abbild, scheitert sonst die ganze Pipe, und der Fehler sieht nach
+      # einem Baufehler aus statt nach einem fehlenden Werkzeug.
+      - name: xcbeautify sicherstellen
+        run: command -v xcbeautify >/dev/null || brew install xcbeautify
+
+      # Gebaut wird gegen den **Simulator** und ohne Signatur. Ein
+      # Geraetebau braeuchte Zertifikat und Bereitstellungsprofil als
+      # Geheimnisse im Repository; das ist fuer die Frage "compiliert es
+      # ueberhaupt noch" ein hoher Preis. Fuers Ausliefern gibt es
+      # TestFlight, und das laeuft ueber Xcode auf dem Mac.
+      # `set -o pipefail` ist hier nicht Kosmetik: Ohne sie liefert die Pipe
+      # den Rueckgabewert von xcbeautify, und der ist null, auch wenn
+      # xcodebuild davor gescheitert ist. Der Ablauf waere gruen und der Bau
+      # kaputt - der unangenehmste Zustand, den eine Pruefung haben kann.
+      #
+      # `generic/platform=iOS Simulator` statt eines Geraetenamens: Welche
+      # Simulatoren im Abbild liegen, aendert GitHub ohne Ankuendigung, und
+      # ein fest verdrahtetes "iPhone 16" faellt dann aus.
+      - name: Bauen
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Jolt.xcodeproj \
+            -scheme Jolt \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+        shell: bash
+
+      # Die Protokolltests sind der eigentliche Grund fuer diesen Ablauf. Der
+      # OBD2-Teil wird aus frontend/obd-kern.js nach Swift uebertragen, und
+      # bei so einer Uebertragung gehen Vorzeichen, Skalierung und
+      # Bytereihenfolge still daneben: `soc_roh` ist ein Byte geteilt durch
+      # 2,5, der Batteriestrom `(Rohwert - 150000)/100` ueber vier Bytes -
+      # beide saehen auch falsch noch plausibel aus. Geprueft wird deshalb
+      # gegen aufgezeichnete Rohantworten mit bekanntem Ergebnis.
+      # Tests brauchen einen *konkreten* Simulator, `generic` genuegt hier
+      # nicht. Statt einen Geraetenamen zu raten, wird der erste verfuegbare
+      # iPhone-Simulator des Abbilds genommen - das ueberlebt jede
+      # Abbild-Aktualisierung.
+      - name: Tests
+        run: |
+          set -o pipefail
+          GERAET=$(xcrun simctl list devices available --json | python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)["devices"]
+# Numerisch sortieren, nicht als Zeichenkette: "iOS-9-0" steht lexikalisch
+# hinter "iOS-18-0", und dann faenden wir die aelteste Laufzeit statt der
+# neuesten.
+def fassung(kennung):
+    return [int(x) for x in re.findall(r"\d+", kennung.rsplit(".", 1)[-1])]
+for laufzeit in sorted(d, key=fassung, reverse=True):
+    for g in d[laufzeit]:
+        if g["name"].startswith("iPhone"):
+            print(g["udid"]); raise SystemExit
+')
+          test -n "$GERAET" || { echo 'Kein iPhone-Simulator im Abbild.'; exit 1; }
+          echo "Simulator: $GERAET"
+          xcodebuild test \
+            -project Jolt.xcodeproj \
+            -scheme Jolt \
+            -destination "id=$GERAET" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify --renderer github-actions
+        shell: bash
