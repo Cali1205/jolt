@@ -476,284 +476,120 @@ function befehl(text, grenze_ms = 15000) {
 
   /* ---------- Was ausgelesen wird ---------- */
 
-  /* Die Datenkennungen stammen aus der MEB-Liste von spot2000 und aus dem
-   * eigenen Android-Logger; bestätigt am Fahrzeug ist bisher nur `028C`.
-   * Die übrigen stehen mit `pflicht: false` drin - schlägt eine fehl, läuft
-   * die Aufzeichnung weiter, statt an einer Nebensache zu scheitern.
+  /* Die Messwerte stehen in `messwerte.js` - Datenkennung, Zieladresse,
+   * Byte-Lage und Umrechnung als Tabelle mit benannten Feldern.
    *
-   * `adresse` schaltet die Zieladresse um: Der Kilometerstand sitzt in einem
-   * anderen Steuergerät als die Batterie. Umgeschaltet wird nur, wenn nötig -
-   * jedes ATSH kostet einen Umlauf über die serielle Strecke.
+   * Vorher stand hier jede Umrechnung als eigene Funktion. Das las sich
+   * gut, hiess aber: Wer eine Datenkennung ergaenzen wollte, schrieb Code
+   * mitten in den Baustein, der die Verbindung zum Auto haelt. Die
+   * Tabelle trennt beides - dort das Wissen ueber das Fahrzeug, hier der
+   * Weg zum Dongle.
    *
-   * Warum überhaupt mehr als der Ladestand: Die Aussentemperatur geht direkt
-   * ins Verbrauchsmodell (bisher kommt sie von Open-Meteo, also aus einer
-   * Vorhersage statt aus dem Auto). Spannung mal Strom ergibt die
-   * tatsächliche Leistung, an der sich die Prognose nachprüfen lässt. Und
-   * der Rohwert des Ladestands ist der einzige Weg, die Umrechnung auf den
-   * Anzeigewert später zu berichtigen, ohne ein zweites Mal loszufahren. */
-  /* Eine Adresse besteht aus drei Teilen, und der dritte wird gern
-   * vergessen: `cp` sind die oberen fünf Bit der 29-bit-Kennung, `sh` die
-   * unteren 24. Beim Batteriemanagement (0x17FC007B) ist cp = 17; beim
-   * Klimasteuergerät (0x00000746) ist es 00. Wer cp stehen lässt, sendet an
-   * eine ganz andere Kennung und bekommt NO DATA - genau der Fehler, der
-   * die Suche nach dem Ladestand aufgehalten hat. */
-  const BMS = { cp: "17", sh: "FC007B", cra: "17FE007B", fcsh: "17FC007B" };
-  /* Das Klimasteuergeraet haengt an einer **11-Bit-Kennung**, nicht an einer
-   * 29-Bit wie alles andere.
-   *
-   * 0x746 (Anfrage) und 0x7B0 (Antwort) passen in elf Bit - das ist VWs
-   * klassisches Diagnoseschema. 0x17FC007B, wo Batterie und Fahrzeug
-   * antworten, passt nur in 29. Der Handshake stellt `ATSP7` ein, also
-   * ausschliesslich 29 Bit; eine Anfrage an 0x00000746 geht damit als
-   * 29-Bit-Rahmen hinaus, und darauf hoert das Klimageraet nicht.
-   *
-   * Das erklaert den Befund aus der dritten Testfahrt: Aussen- und
-   * Innentemperatur fehlten in **allen** 77 Runden, waehrend alles auf
-   * 0x17FC.... zu 100 % ankam. Adresse und Umrechnung stimmen mit der
-   * MEB-Referenz von spot2000 ueberein - es ist die Rahmenbreite.
-   *
-   * `protokoll` schaltet deshalb fuer diese Abfragen kurz auf ATSP6 um.
-   * Ungeprueft am Fahrzeug: Es folgt aus den Adressen, nicht aus einer
-   * Messung. Deshalb liegt es hinter `selten` und faellt nach einem
-   * Fehlschlag fuer die Sitzung aus (siehe `messwertLesen`). */
-  const KLIMA = { cp: "00", sh: "746", cra: "7B0", fcsh: "746", protokoll: "6" };
+   * Aufgeloest wird die Tabelle genau einmal, beim Laden. Was dabei
+   * auffaellt - ein Tippfehler im Adressnamen, eine fehlende Byte-Lage -
+   * landet in `TABELLE_FEHLER` und wird auf der Diagnoseseite sichtbar,
+   * statt spaeter als "keine Nutzdaten" am Auto aufzutauchen. */
+  const TABELLE = window.joltMesswerte || { adressen: {}, werte: [] };
+  const TABELLE_FEHLER = [];
 
-  /* Das Batteriemanagement auf der 11-Bit-Seite. Dieselbe Umschaltung wie
-   * beim Klimageraet - es antwortet auf 0x77A, nicht auf 0x17FE007B. */
-  const AKKU11 = { cp: "00", sh: "710", cra: "77A", fcsh: "710", protokoll: "6" };
-  // Fahrzeug-Steuergerät: Kilometerstand und - der eigentliche Fund - die
-  // Leistung der Nebenverbraucher als fertige Zahl.
-  const FAHRZEUG = { cp: "17", sh: "FC0076", cra: "17FE0076", fcsh: "17FC0076" };
-  // Der DC/DC-Wandler speist das 12-V-Netz aus der Hochvoltbatterie.
-  const DCDC = { cp: "17", sh: "FC00B9", cra: "17FE00B9", fcsh: "17FC00B9" };
-  const ZUSATZ_TITEL = {
-    geladen_kwh: "Geladen gesamt",
-    kompressor_upm: "Kompressor-Drehzahl",
-    kompressor_an: "Kompressor an",
-  };
+  /* Aus einer Tabellenzeile die Lesefunktion bauen.
+   *
+   * Die Reihenfolge der Rechenschritte ist die Stelle, an der eine
+   * Portierung still danebengeht, deshalb steht sie hier genau einmal und
+   * nicht zwanzigmal:
+   *
+   *     roh   = Bytes `ab` bis `ab + laenge - 1`, hoechstwertiges zuerst
+   *     roh  &= maske
+   *     wert  = (roh + vorversatz) / teiler * faktor + versatz
+   *
+   * `vorversatz` und `versatz` sind zwei Felder, weil beide Reihenfolgen
+   * vorkommen: Der Batteriestrom ist `(roh - 150000) / 100`, die
+   * Batterietemperatur `roh / 2 - 40`. */
+  function formel(zeile) {
+    const ab = zeile.ab | 0;
+    const laenge = zeile.laenge || 1;
+    const teiler = typeof zeile.teiler === "number" ? zeile.teiler : 1;
+    const faktor = typeof zeile.faktor === "number" ? zeile.faktor : 1;
+    const versatz = zeile.versatz || 0;
+    const vorversatz = zeile.vorversatz || 0;
 
-  const ZUSATZ_EINHEIT = { kompressor_upm: "/min", kompressor_an: null };
-  const ZUSATZ_STELLEN = { kompressor_upm: 0, kompressor_an: 0 };
+    return (bytes) => {
+      // Reichen die Bytes nicht, bleibt die Zeile leer - eine zu kurze
+      // Antwort ist ein Befund, keine Zahl.
+      if (!bytes || bytes.length < ab + laenge) return null;
+      let roh = 0;
+      for (let i = 0; i < laenge; i += 1) roh = roh * 256 + bytes[ab + i];
+      if (zeile.vorzeichen) {
+        // Zweierkomplement. Ohne das las sich der Entladezaehler als
+        // 4,15 Milliarden statt als -17 438 - und beides sieht als Zahl
+        // erst einmal gleich unverdaechtig aus.
+        const grenze = Math.pow(2, laenge * 8 - 1);
+        if (roh >= grenze) roh -= grenze * 2;
+      }
+      if (typeof zeile.maske === "number") roh &= zeile.maske;
+      let wert = (roh + vorversatz) / teiler * faktor + versatz;
+      if (zeile.betrag) wert = Math.abs(wert);
+      // Plausibilitaetsgrenzen: Faellt der Wert heraus, stimmt die
+      // angenommene Umrechnung nicht. Dann lieber nichts als etwas
+      // Falsches, das plausibel aussieht.
+      if (typeof zeile.min === "number" && wert < zeile.min) return null;
+      if (typeof zeile.max === "number" && wert > zeile.max) return null;
+      return wert;
+    };
+  }
 
-  const MESSWERTE = [
-    { name: "soc_roh", titel: "Rohwert SoC", einheit: null, stellen: 0,
-      did: "22028C", adresse: BMS, pflicht: true,
-      lesen: (b) => b[0] },
-    { name: "spannung_v", titel: "Spannung", einheit: "V", stellen: 1,
-      did: "221E3B", adresse: BMS,
-      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 4 : null },
-    /* Batteriestrom.
-     *
-     * Ich hatte das auf die WiCAN-Formel umgestellt - fuenf Bytes ab B5 und
-     * umgekehrtes Vorzeichen. Das war falsch. Zwei unabhaengige Quellen
-     * nennen uebereinstimmend vier Bytes ab dem ersten Datenbyte und
-     * `(Rohwert - 150000)/100`: die MEB-Liste von spot2000 und der
-     * ESP32-Logger von codingABI, dessen Pufferindex nachweislich beim
-     * ersten Byte nach der Quittung beginnt - also genau bei unserem b[0].
-     * Damit steht hier wieder, was urspruenglich dastand.
-     *
-     * Warum der Wert trotzdem nicht ankam, ist damit **nicht** geklaert -
-     * die Formel war es jedenfalls nicht. */
-    { name: "strom_a", titel: "Strom", einheit: "A", stellen: 1,
-      did: "221E3D", adresse: BMS,
-      lesen: (b) => b.length >= 4
-        ? ((b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3] - 150000) / 100
-        : null },
-    /* Die Energiezaehler des Fahrzeugs - der genaueste Verbrauchsmesser,
-     * den es hier gibt.
-     *
-     * Sie zaehlen ueber die Lebensdauer, was in den Akku hinein- und was
-     * herausgegangen ist. Fuer den Verbrauch zaehlt nicht ihr Stand,
-     * sondern ihre **Differenz** ueber ein Stueck Fahrt - und die ist um
-     * Groessenordnungen genauer als alles andere:
-     *
-     *     Ladestand      Schritt 0,44 pp  =  339 Wh
-     *     Entladezaehler Schritt 1/8583   =  0,117 Wh
-     *
-     * Fast dreitausendmal feiner. Damit wird ein Balken je Minute vom
-     * Rauschen zur Messung: Was eine Minute bei sechzig km/h kostet, sind
-     * rund 0,25 kWh - beim Ladestand 136 % Fehler, hier 0,05 %.
-     *
-     * Byte-Lage und Teiler stammen aus dem ESP32-Logger von codingABI
-     * (`readAndSendHVTotalChargeDischarge`); spot2000 nennt denselben
-     * Teiler. Die Antwort geht ueber mehrere Rahmen - ohne Flusskontrolle
-     * und Zusammensetzen kam sie ueberhaupt nicht an. */
-    { name: "entladen_kwh", titel: "Entladen gesamt", einheit: "kWh",
-      stellen: 2, did: "221E32", adresse: BMS,
-      /* **Vorzeichenbehaftet.** Der Entladezaehler kommt als negative Zahl -
-       * am Fahrzeug gemessen 0xF7141E0D. Als vorzeichenlose 32-Bit-Zahl
-       * gelesen sind das 4,15 Milliarden und damit 482 961 kWh; als
-       * vorzeichenbehaftete -17 438,6, und das ist der richtige Wert.
-       * codingABI castet dafuer nach `(long)`, was ich beim Uebertragen
-       * uebersehen hatte. JavaScript braucht die Umrechnung von Hand.
-       *
-       * Aufgefallen ist es dem Kreuzvergleich der Pruefseite: 810 kWh/100 km
-       * Lebensdauerverbrauch statt der erwarteten 12 bis 40. */
-      lesen: (b) => {
-        if (b.length < 16) return null;
-        const roh = (b[12] * 16777216) + (b[13] * 65536) + (b[14] * 256) + b[15];
-        return Math.abs((roh >= 2147483648 ? roh - 4294967296 : roh) / 8583.07);
-      },
-      /* Dieselbe Antwort traegt auch den Ladezaehler. `weitere` holt ihn
-       * aus denselben Bytes, statt die Abfrage ein zweites Mal zu stellen -
-       * eine Mehrrahmen-Antwort kostet Zeit. */
-      weitere: {
-        geladen_kwh: (b) => b.length >= 12
-          ? ((b[8] * 16777216) + (b[9] * 65536) + (b[10] * 256) + b[11]) / 8583.07
-          : null,
-      } },
-    { name: "ladegrenze_a", titel: "Ladegrenze", einheit: "A", stellen: 0,
-      did: "221E1B", adresse: BMS,
-      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null },
-    { name: "betriebsart", titel: "Betriebsart", einheit: null, stellen: 0,
-      did: "227448", adresse: BMS, lesen: (b) => b[0] },
-    /* Der Strom der PTC-Heizung. Mal Packspannung ergibt das, was die
-     * Heizung allein zieht - im Winter die Frage hinter der Frage, weil sie
-     * der einzige grosse Verbraucher ist, den man selbst beeinflusst. */
-    { name: "ptc_strom_a", titel: "Heizstrom", einheit: "A", stellen: 1,
-      did: "221620", adresse: BMS,
-      lesen: (b) => b.length ? b[0] / 4 : null },
-    { name: "tempo_kmh", titel: "Tempo", einheit: "km/h", stellen: 0,
-      did: "22F40D", adresse: BMS, lesen: (b) => b[0] },
-    /* Die Aussentemperatur ist der grösste Einzelposten der Kälte und ging
-     * bisher aus einer Vorhersage ins Verbrauchsmodell. Aus dem Auto ist sie
-     * gemessen, von der Strecke, zur richtigen Zeit. Sie sitzt in einem
-     * anderen Steuergerät als die Batterie - siehe KLIMA. */
-    /* **Nebenverbraucher als fertige Zahl.** Alles ausser dem Antrieb -
-     * Heizung, Klima, Steuergeräte, 12-V-Netz - in kW, direkt aus dem
-     * Steuergerät.
-     *
-     * Vorher wurde das im Stand gemessen und dazwischen fortgeschrieben:
-     * Steht das Auto, ist die Packleistung die der Nebenverbraucher. Das
-     * war eine brauchbare Näherung, aber eben eine - sie galt nur so lange,
-     * wie sich an der Heizung nichts änderte, und im Fahren gar nicht. Ein
-     * gemessener Wert schlägt jede Näherung. */
-    { name: "nebenverbrauch_kw", titel: "Nebenverbraucher", einheit: "kW", stellen: 2,
-      did: "220364", adresse: FAHRZEUG,
-      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 10 : null },
+  /* Was eine Zeile mindestens braucht, damit daraus eine Abfrage wird. */
+  function zeilePruefen(zeile, adressen, istZusatz) {
+    const wo = zeile.name || "(ohne Namen)";
+    if (!zeile.name) TABELLE_FEHLER.push("Eintrag ohne `name`.");
+    if (typeof zeile.laenge !== "number" || zeile.laenge < 1) {
+      TABELLE_FEHLER.push(`${wo}: 'laenge' fehlt oder ist kleiner als 1.`);
+    }
+    if (typeof zeile.ab !== "number" || zeile.ab < 0) {
+      TABELLE_FEHLER.push(`${wo}: 'ab' fehlt oder ist negativ.`);
+    }
+    if (istZusatz) return;
+    if (!zeile.did) TABELLE_FEHLER.push(`${wo}: 'did' fehlt.`);
+    if (!adressen[zeile.adresse]) {
+      TABELLE_FEHLER.push(`${wo}: Adresse "${zeile.adresse}" steht nicht `
+                          + `in 'adressen'.`);
+    }
+  }
 
-    /* Der Kilometerstand - jede Runde, und zwar direkt hinter dem
-     * Nebenverbrauch.
-     *
-     * Er stand vorher am Ende der Liste mit `selten: 20`, wurde also bei
-     * 30-Sekunden-Takt nur alle zehn Minuten gelesen. Bei den ersten
-     * Testfahrten kam deshalb genau **ein** Wert an - und aus einem Wert
-     * lässt sich keine Strecke bilden.
-     *
-     * Häufiger zu lesen kostet hier nichts ausser der Abfrage selbst: Er
-     * sitzt auf derselben Zieladresse wie der Nebenverbrauch, der ohnehin
-     * jede Runde drankommt. Der Adresswechsel, wegen dessen er selten
-     * gemacht wurde, fällt so gar nicht erst an.
-     *
-     * Auflösung ist ein Kilometer. Für den Streckenanteil einer einzelnen
-     * Runde ist das zu grob, für die Gesamtstrecke einer Fahrt genau
-     * richtig - und die ist es, worauf es ankommt. */
-    { name: "km_stand", titel: "Kilometerstand", einheit: "km", stellen: 0,
-      did: "22295A", adresse: FAHRZEUG,
-      lesen: (b) => b.length >= 3 ? (b[0] * 65536) + (b[1] * 256) + b[2] : null },
-    { name: "dcdc_strom_a", titel: "DC/DC-Strom", einheit: "A", stellen: 1,
-      did: "22465B", adresse: DCDC, selten: 10,
-      lesen: (b) => b.length >= 2 ? (b[0] * 256 + b[1]) / 16 : null },
-    /* Die nutzbare Kapazitaet des Akkus, wie das Fahrzeug sie kennt.
-     *
-     * Interessant, weil sie mit den Jahren sinkt - und weil jeder aus dem
-     * Ladestand gerechnete Verbrauch mit ihr steht und faellt. Der Wert im
-     * Fahrzeugprofil ist eine Angabe aus dem Prospekt; dieser hier ist
-     * gemessen.
-     *
-     * **Die Umrechnung ist nicht belegt.** Die MEB-Referenz fuehrt den
-     * Parameter mit "equation missing"; bekannt sind nur die Einheit (Wh),
-     * die Adresse und dass die Antwort vier Nutzbytes hat. Angenommen wird
-     * deshalb das Naheliegende - der 32-Bit-Wert in Wattstunden - und das
-     * Ergebnis gegen eine Plausibilitaetsgrenze gehalten: Ein Autoakku hat
-     * zwischen 10 und 200 kWh. Faellt der Wert heraus, stimmt die Annahme
-     * nicht, und die Zeile bleibt leer statt eine Zahl zu erfinden.
-     *
-     * Selten gelesen, weil sie sich nicht waehrend einer Fahrt aendert. */
-    { name: "akku_kwh", titel: "Akkukapazität", einheit: "kWh", stellen: 1,
-      did: "222AB2", adresse: AKKU11, selten: 40,
-      lesen: (b) => {
-        /* codingABI: `buffer2unsignedLong() / 1310.77 / 1000` ueber alle
-         * vier Datenbytes. WiCANs `[B4:B5] * 50` ist dieselbe Formel, nur
-         * auf die oberen zwei Bytes verkuerzt - 50/65536 entspricht
-         * 1/1310,7. Vier Bytes sind feiner. */
-        if (b.length < 4) return null;
-        const roh = (b[0] * 16777216) + (b[1] * 65536) + (b[2] * 256) + b[3];
-        const kwh = roh / 1310.77 / 1000;
-        return (kwh >= 10 && kwh <= 200) ? kwh : null;
-      } },
-    /* Die Reichweite, die das Auto selbst ausrechnet. Interessant als
-     * Gegenprobe zu jolts Prognose - dieselbe Frage, zwei Antworten. */
-    { name: "reichweite_km", titel: "Reichweite (Auto)", einheit: "km",
-      stellen: 0, did: "222AB6", adresse: AKKU11, selten: 10,
-      /* Die ersten beiden Datenbytes - so liest es codingABI. WiCAN nimmt
-       * eines weiter; welches stimmt, sagt die erste Fahrt. Die Schranke
-       * faengt den falschen Fall ab. */
-      lesen: (b) => {
-        if (b.length < 2) return null;
-        const km = (b[0] * 256) + b[1];
-        return (km >= 0 && km <= 999) ? km : null;
-      } },
-    /* Die Batterietemperatur. Sie bestimmt die Ladeleistung, und bisher
-     * nimmt `laden/kurven.temperatur_faktor` die **Aussen**temperatur als
-     * Ersatz - der Kommentar dort sagt selbst, dass sie die Kaelte der
-     * Batterie nach einer Nacht im Freien unterschaetzt. Hier ist der
-     * richtige Wert. */
-    { name: "batterie_c", titel: "Batterietemperatur", einheit: "°C",
-      stellen: 1, did: "222A0B", adresse: BMS, selten: 10,
-      lesen: (b) => b.length ? (b[0] / 2) - 40 : null },
-    /* Die Leistung des Klimakompressors - aus zwei Messungen abgeleitet,
-     * nicht aus einer Quelle abgeschrieben.
-     *
-     * Keine der drei Referenzen (spot2000, WiCAN, codingABI) nennt fuer
-     * `220800` eine Umrechnung; spot2000 fuehrt sie als "equation missing".
-     * Die Antwort traegt elf Bytes, und vier davon liegen im plausiblen
-     * Wattbereich - raten waere hier besonders verlockend und besonders
-     * falsch gewesen.
-     *
-     * Eine Differenzmessung am Fahrzeug hat es entschieden, einmal mit und
-     * einmal ohne laufenden Kompressor:
-     *
-     *              b0    b1b2   b3b4   b5b6   b7
-     *     aus    0x10       0      0      0    0
-     *     an     0x51    9408   9408   2618   14
-     *     (drittens, Teillast)  3648   3712   935    5
-     *
-     * Daraus:
-     *   - `b0` Bit 0 ist an/aus.
-     *   - `b1b2` und `b3b4` laufen gleich und viel hoeher - Soll- und
-     *     Ist-Drehzahl. Als Watt gelesen waeren 9,4 kW fuer einen
-     *     Klimakompressor zu viel.
-     *   - `b5b6` ist die **Leistung in Watt**: null wenn aus, 935 bei
-     *     Teillast, 2618 bei voller Kuehlung. Genau das Profil.
-     *   - `b7` ist dieselbe Groesse groeber - das Verhaeltnis b5b6/b7 ist
-     *     in beiden Messungen exakt 187.
-     *
-     * Die Drehzahl passt dazu: 3650 zu 9408 Umdrehungen ist Faktor 2,58,
-     * 935 zu 2618 Watt Faktor 2,80 - naeherungsweise proportional, also
-     * etwa gleiches Drehmoment. Die Schranke faengt ab, falls das an einem
-     * anderen Fahrzeug doch anders liegt. */
-    { name: "kompressor_w", titel: "Klimakompressor", einheit: "W",
-      stellen: 0, did: "220800", adresse: KLIMA, selten: 20,
-      lesen: (b) => {
-        if (b.length < 7) return null;
-        const w = (b[5] * 256) + b[6];
-        return (w >= 0 && w <= 8000) ? w : null;
-      },
-      weitere: {
-        kompressor_upm: (b) => b.length >= 5 ? (b[3] * 256) + b[4] : null,
-        kompressor_an: (b) => b.length ? (b[0] & 1) : null,
-      } },
-    /* Ganz zum Schluss und nur selten: Diese beiden brauchen einen
-     * Protokollwechsel (siehe KLIMA). Geht der schief, sind die
-     * Pflichtwerte dieser Runde laengst gelesen. */
-    { name: "aussentemp_c", titel: "Aussentemperatur", einheit: "°C", stellen: 1,
-      did: "222609", adresse: KLIMA, selten: 20,
-      lesen: (b) => b.length ? b[0] / 2 - 50 : null },
-    { name: "innentemp_c", titel: "Innentemperatur", einheit: "°C", stellen: 1,
-      did: "222613", adresse: KLIMA, selten: 20,
-      lesen: (b) => b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null },
-  ];
+  const MESSWERTE = (TABELLE.werte || []).map((zeile) => {
+    zeilePruefen(zeile, TABELLE.adressen || {}, false);
+    const zusatz = zeile.auch || [];
+    for (const w of zusatz) zeilePruefen(w, TABELLE.adressen || {}, true);
+
+    // `weitere` bleibt null statt leer: `auswerten` unterscheidet daran,
+    // ob ein einzelner Wert oder ein Paar zurueckkommt.
+    let weitere = null;
+    if (zusatz.length) {
+      weitere = {};
+      for (const w of zusatz) weitere[w.name] = formel(w);
+    }
+
+    return {
+      name: zeile.name,
+      titel: zeile.titel || zeile.name,
+      einheit: zeile.einheit === undefined ? null : zeile.einheit,
+      stellen: typeof zeile.stellen === "number" ? zeile.stellen : 1,
+      did: zeile.did,
+      adresse: (TABELLE.adressen || {})[zeile.adresse],
+      pflicht: !!zeile.pflicht,
+      selten: zeile.selten || 0,
+      lesen: formel(zeile),
+      weitere,
+      auch: zusatz,
+    };
+  });
+
+  if (TABELLE_FEHLER.length) {
+    // Beim Laden, nicht erst beim Fahren: Ein Tippfehler in der Tabelle
+    // soll auffallen, solange noch jemand am Rechner sitzt.
+    console.warn("[obd] Fehler in messwerte.js:\n  "
+                 + TABELLE_FEHLER.join("\n  "));
+  }
 
 
   /* Antwort in Nutzbytes zerlegen. Die Quittung ist `62` + die zwei Bytes
@@ -1052,19 +888,42 @@ function befehl(text, grenze_ms = 15000) {
      * `pflicht` wandert mit: Der Ladestand ist der einzige Wert, ohne den
      * eine Runde verworfen wird, und das soll man ihm ansehen koennen. */
     FELDER: MESSWERTE.flatMap((m) => [
-      { name: m.name, titel: m.titel || m.name, einheit: m.einheit || null,
-        stellen: typeof m.stellen === "number" ? m.stellen : 1,
-        pflicht: !!m.pflicht, selten: m.selten || 0 },
+      { name: m.name, titel: m.titel, einheit: m.einheit,
+        stellen: m.stellen, pflicht: m.pflicht, selten: m.selten },
       // Werte, die aus derselben Antwort mitkommen, gehoeren genauso in die
-      // Tabelle - sonst zeigt sie weniger, als gemessen wird.
-      ...Object.keys(m.weitere || {}).map((n) => ({
-        name: n, titel: ZUSATZ_TITEL[n] || n,
-        // Eigene Einheit, sonst erbt die Drehzahl das Watt des Hauptwerts.
-        einheit: ZUSATZ_EINHEIT[n] !== undefined ? ZUSATZ_EINHEIT[n]
-          : (m.einheit || null),
-        stellen: ZUSATZ_STELLEN[n] !== undefined ? ZUSATZ_STELLEN[n]
-          : (typeof m.stellen === "number" ? m.stellen : 1),
-        pflicht: false, selten: m.selten || 0 })),
+      // Tabelle - sonst zeigt sie weniger, als gemessen wird. Titel,
+      // Einheit und Stellen stehen bei ihnen in der Tabelle selbst; fehlen
+      // sie dort, erben sie vom Hauptwert. Das ist der Grund, warum die
+      // Drehzahl des Kompressors nicht in Watt erscheint.
+      ...(m.auch || []).map((w) => ({
+        name: w.name,
+        titel: w.titel || w.name,
+        einheit: w.einheit === undefined ? m.einheit : w.einheit,
+        stellen: typeof w.stellen === "number" ? w.stellen : m.stellen,
+        pflicht: false, selten: m.selten })),
     ]),
+
+    /* Was beim Aufloesen der Tabelle auffiel - leer, wenn alles stimmt.
+     * Die Diagnoseseite zeigt es an: Ein Tippfehler im Adressnamen sieht
+     * am Auto sonst aus wie ein schweigendes Steuergeraet. */
+    TABELLE_FEHLER,
+
+    /* Die aufgeloeste Lesefunktion eines Messwerts - **fuer
+     * tools/check_messwerte.js**.
+     *
+     * Sonst bleiben die Lesefunktionen drinnen; sie gehen niemanden
+     * ausserhalb etwas an. Hier ist die Ausnahme begruendet: Die
+     * Umrechnungen sind aus handgeschriebenen Funktionen zu Tabellenzeilen
+     * geworden, und dass dabei kein Vorzeichen und kein Teiler verrutscht
+     * ist, laesst sich nur pruefen, wenn die Pruefung an sie herankommt.
+     * Ohne diesen Zugang muesste sie den Interpreter nachbauen - und
+     * verglichen wuerde dann Nachbau gegen Nachbau. */
+    lesenFuer(name) {
+      for (const m of MESSWERTE) {
+        if (m.name === name) return m.lesen;
+        if (m.weitere && m.weitere[name]) return m.weitere[name];
+      }
+      return null;
+    },
   };
 })();

@@ -746,9 +746,27 @@
 
   /* ---------- Aufbau ---------- */
 
-  if (!navigator.bluetooth) {
+  // `O.verfuegbar()` statt `navigator.bluetooth`: In der iOS-App gibt es die
+  // Web-API nicht, wohl aber Bluetooth - es kommt dort ueber CoreBluetooth
+  // (siehe obd-ble-nativ.js). Wer hier direkt auf die Web-API prueft,
+  // erklaert die Seite ausgerechnet dort fuer untauglich, wo sie am besten
+  // funktioniert.
+  if (!O.verfuegbar()) {
     el("untauglich").hidden = false;
     el("verbinden").disabled = true;
+  }
+
+  /* Fehler in messwerte.js gehoeren auf die Seite, nicht nur in die
+   * Konsole. Ein vertippter Adressname sieht am Auto aus wie ein
+   * schweigendes Steuergeraet - und danach sucht man an der falschen
+   * Stelle. */
+  if (O.TABELLE_FEHLER && O.TABELLE_FEHLER.length) {
+    const kasten = el("untauglich");
+    kasten.hidden = false;
+    kasten.innerHTML = "<strong>Fehler in der Messwert-Tabelle "
+      + "(messwerte.js):</strong><ul><li>"
+      + O.TABELLE_FEHLER.map((t) => t.replace(/[<&]/g, "")).join("</li><li>")
+      + "</li></ul>";
   }
   // Der Baustein meldet alles hierher, und ein Abriss ist während einer
   // Aufzeichnung ein Grund zum Wiederverbinden - sonst nicht.

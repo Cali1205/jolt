@@ -95,7 +95,8 @@ def _mit_version(html: str, dateien) -> str:
 # Die Dateien, die index.html einbindet. Ausdrücklich aufgezählt und nicht
 # aus dem HTML geraten: Ein Suchausdruck über fremden Text ist genau die
 # Sorte Findigkeit, die beim nächsten Umbau still danebenliegt.
-INDEX_DATEIEN = ("ble-plugin.js", "obd-ble-nativ.js", "obd-kern.js",
+INDEX_DATEIEN = ("ble-plugin.js", "obd-ble-nativ.js", "messwerte.js",
+                 "obd-kern.js",
                  "core.js", "karte.js", "route.js", "live.js",
                  "fahrten.js", "fahrzeug.js", "app.js")
 
@@ -185,13 +186,14 @@ def obd_seite():
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
         html = _mit_version(datei.read(), ("ble-plugin.js", "obd-ble-nativ.js",
-                                           "obd-kern.js", "obd.js", "obd.css"))
+                                           "messwerte.js", "obd-kern.js",
+                                           "obd.js", "obd.css"))
     # Dieselbe Marke sichtbar auf der Seite: Zweimal war "welche Fassung ist
     # das eigentlich" die Antwort auf einen vermeintlichen Bluetooth-Fehler,
     # und beide Male liess sich das nur mühsam von aussen feststellen.
     neueste = 0
     for name in ("obd.html", "ble-plugin.js", "obd-ble-nativ.js",
-                 "obd-kern.js", "obd.js", "obd.css"):
+                 "messwerte.js", "obd-kern.js", "obd.js", "obd.css"):
         try:
             neueste = max(neueste,
                           int(os.path.getmtime(os.path.join(FRONTEND, name))))

@@ -80,3 +80,11 @@ jobs:
       # Rueckfall auf echtes Web Bluetooth ohne Capacitor.
       - name: Bluetooth-Bruecke pruefen
         run: node tools/check_ble_bruecke.js
+
+      # Die Umrechnungen sind aus handgeschriebenen Funktionen zu
+      # Tabellenzeilen geworden. Diese Pruefung haelt die alten Funktionen
+      # als Vorgabe daneben und vergleicht ueber mehrere hundert
+      # Bytefolgen - genau dort gehen Vorzeichen, Teiler und Bytelage bei
+      # so einem Umbau still daneben.
+      - name: Messwert-Tabelle gegen die alten Formeln pruefen
+        run: node tools/check_messwerte.js
