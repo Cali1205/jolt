@@ -128,6 +128,21 @@ window.joltObd = (function () {
 
   /* ---------- Verbinden ---------- */
 
+  /* Woher das Bluetooth kommt, entscheidet sich zur Laufzeit.
+   *
+   * Im Browser ist es `navigator.bluetooth` - auf iOS heisst das: in
+   * Bluefy, denn Safari kennt die API nicht. In der iOS-App gibt es sie
+   * ebenso wenig, dort liefert `obd-ble-nativ.js` dieselbe Gestalt über
+   * CoreBluetooth nach. Alles unterhalb dieser Zeile merkt davon nichts,
+   * und das ist der Zweck: Die Messwerte, Adressblöcke und Byte-Formeln in
+   * dieser Datei sind am Fahrzeug erarbeitet und sollen nicht ein zweites
+   * Mal entstehen, nur weil der Weg zum Dongle ein anderer ist. */
+  function bt() {
+    const nativ = window.joltBleNativ;
+    if (nativ && nativ.verfuegbar()) return nativ.bluetooth;
+    return navigator.bluetooth || null;
+  }
+
   async function verbinden() {
     try {
       // Der Reihe nach durchprobieren, statt auf eine Form zu setzen: Welche
@@ -139,7 +154,7 @@ window.joltObd = (function () {
       for (const [name, bauen] of VARIANTEN) {
         try {
           melde(`Versuch: ${name}`);
-          geraet = await navigator.bluetooth.requestDevice(bauen());
+          geraet = await bt().requestDevice(bauen());
           break;
         } catch (fehler) {
           letzterFehler = fehler;
@@ -253,8 +268,8 @@ window.joltObd = (function () {
     if (!weiter()) return;
     try {
       let geraet = geraetGemerkt;
-      if (!geraet && navigator.bluetooth.getDevices) {
-        const bekannt = await navigator.bluetooth.getDevices();
+      if (!geraet && bt() && bt().getDevices) {
+        const bekannt = await bt().getDevices();
         geraet = bekannt.find((g) => NAMEN.some((n) => (g.name || "").startsWith(n)))
                  || bekannt[0];
       }
@@ -952,14 +967,14 @@ function befehl(text, grenze_ms = 15000) {
    * sagen kann statt es zu verschweigen.
    */
   async function verbindenOhneDialog() {
-    if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
+    if (!bt() || !bt().getDevices) {
       melde("Dieser Browser kann bekannte Geräte nicht wiederfinden "
             + "(getDevices fehlt) - der Auswahldialog kommt.");
       return null;
     }
     let bekannt = [];
     try {
-      bekannt = await navigator.bluetooth.getDevices();
+      bekannt = await bt().getDevices();
     } catch (fehler) {
       melde("Bekannte Geräte nicht abrufbar: " + fehler.message);
       return null;
@@ -1007,7 +1022,7 @@ function befehl(text, grenze_ms = 15000) {
   /* ---------- Nach aussen ---------- */
 
   return {
-    verfuegbar: () => !!navigator.bluetooth,
+    verfuegbar: () => !!bt(),
     verbunden: () => !!schreiben,
     /* `melder` bekommt jede Zeile, die sonst im Protokoll stünde; `abriss`
      * wird gerufen, wenn die Verbindung stirbt - ob das ein Grund zum

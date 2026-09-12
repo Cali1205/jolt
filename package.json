@@ -1,0 +1,21 @@
+{
+  "name": "jolt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "jolt als iOS-App: Capacitor-Huelle um die bestehende Oberflaeche, damit Bluetooth ueber CoreBluetooth statt ueber Bluefy laeuft.",
+  "scripts": {
+    "huelle": "esbuild tools/ble-huelle-eintrag.js --bundle --format=iife --minify --target=es2019 --outfile=frontend/ble-plugin.js",
+    "ios:anlegen": "cap add ios",
+    "ios:abgleichen": "cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor-community/bluetooth-le": "^8.3.0",
+    "@capacitor-community/keep-awake": "^8.0.1",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "esbuild": "^0.28.2"
+  }
+}

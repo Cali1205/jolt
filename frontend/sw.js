@@ -10,14 +10,15 @@
  */
 // Bei jeder Änderung am Gerüst hochzählen: Der Name ist der einzige Hebel,
 // mit dem ein alter Cache verworfen wird (siehe "activate").
-const CACHE = "jolt-v9";
+const CACHE = "jolt-v10";
 const GERUEST = [
   "/", "/static/core.js", "/static/karte.js", "/static/route.js",
   "/static/live.js", "/static/fahrten.js", "/static/fahrzeug.js",
   "/static/app.js",
   // Die OBD2-Diagnoseseite: Bluetooth braucht kein Netz, und
   // eine Tiefgarage ist genau der Ort, an dem man sie aufruft.
-  "/obd", "/static/obd-kern.js", "/static/obd.js", "/static/obd.css",
+  "/obd", "/static/ble-plugin.js", "/static/obd-ble-nativ.js",
+  "/static/obd-kern.js", "/static/obd.js", "/static/obd.css",
   "/manifest.json",
 ];
 

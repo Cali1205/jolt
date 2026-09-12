@@ -1,0 +1,13 @@
+{
+  "appId": "de.the-smarthome.jolt",
+  "appName": "jolt",
+  "webDir": "frontend",
+  "server": {
+    "url": "https://jolt.the-smarthome.de",
+    "allowNavigation": ["jolt.the-smarthome.de"]
+  },
+  "ios": {
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  }
+}

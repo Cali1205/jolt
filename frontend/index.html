@@ -662,6 +662,13 @@ table.kurve input { padding: 6px 8px; }
   </div>
 </main>
 
+<!-- Die Reihenfolge ist hier Bedingung, nicht Geschmack: ble-plugin.js legt
+     window.joltBlePlugin an, obd-ble-nativ.js baut darauf die
+     Web-Bluetooth-Gestalt, und erst obd-kern.js greift danach. Im Browser
+     melden sich die beiden ersten als "nicht nativ" und der Kern nimmt
+     navigator.bluetooth - sie kosten dort nur den Ladevorgang. -->
+<script src="/static/ble-plugin.js"></script>
+<script src="/static/obd-ble-nativ.js"></script>
 <script src="/static/obd-kern.js"></script>
 <script src="/static/core.js"></script>
 <script src="/static/karte.js"></script>

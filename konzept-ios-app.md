@@ -32,10 +32,49 @@ der Tasche liegt, geht nur mit `CLLocationManager` und
 **CarPlay.** Gibt es für Web-Inhalte nicht, in keiner Form. Apple erlaubt dort
 ausschliesslich eigene Vorlagen über eine `CPTemplateApplicationSceneDelegate`.
 
-Ein WebView-Wrapper (Capacitor) löst davon **nichts** von selbst: Er benutzt
-dasselbe WebKit und hat dieselbe fehlende Bluetooth-API. Er würde für jeden
-der drei Punkte ein natives Plugin brauchen — und dann ist der Weg zum
-richtigen nativen Client kürzer als der Umweg.
+## Der Weg dorthin führt über Capacitor
+
+Hier stand zuerst, ein WebView-Wrapper löse davon nichts: Er benutze dasselbe
+WebKit und habe dieselbe fehlende Bluetooth-API. Der erste Halbsatz stimmt,
+der Schluss daraus nicht. Der Zugriff läuft bei Capacitor nicht über die
+Web-API, sondern über Plugins, die nativen Code ausführen — es ist ein echtes
+Xcode-Projekt, in dem beliebiges Swift liegen darf.
+
+| Grenze | Weg über Capacitor |
+|---|---|
+| Bluetooth | `@capacitor-community/bluetooth-le` über CoreBluetooth |
+| Bildschirm wachhalten | `@capacitor-community/keep-awake`, setzt `isIdleTimerDisabled` |
+| Standort im Hintergrund | Plugin über `CLLocationManager` |
+| CarPlay | eigener `CPTemplateApplicationSceneDelegate`, echte Swift-Arbeit |
+
+**Den Ausschlag gibt `obd-kern.js`.** Dieses Dokument nennt die Datei weiter
+unten das wertvollste Stück des Frontends und Schritt 3 den Prüfstein des
+ganzen Umbaus — zu Recht: Bei einer Übersetzung gehen Vorzeichen, Skalierung
+und Bytereihenfolge still daneben, und ein falscher Wert sieht plausibel aus.
+Genau dieses Risiko entfällt, wenn die Datei weiterläuft statt übersetzt zu
+werden. Sie ist 1055 Zeilen lang, und davon fassen **vierzehn** die
+Web-Bluetooth-API an, gebündelt in `verbinden`, `verbindungAufbauen`,
+`trennen`, `befehl` und `verbindenOhneDialog`. Der Rest ist Rechnerei ohne
+Browser-Bezug.
+
+Getauscht wird deshalb nur der Transport: `frontend/obd-ble-nativ.js` bildet
+die benutzte Teilmenge von Web Bluetooth nach und beantwortet sie über das
+Plugin. Im Kern steht dafür eine einzige neue Funktion, `bt()`, die zur
+Laufzeit entscheidet, woher das Bluetooth kommt. Die Zahlen bleiben damit
+gleich, weil es dieselbe Rechnung ist.
+
+**Was Capacitor nicht kann.** Sobald iOS die App suspendiert, steht das
+JavaScript. Die BLE-Verbindung überlebt und ein Standort-Plugin sammelt
+nativ weiter, aber die Ableseschleife für die CAN-Werte läuft nicht mehr.
+„Fahrt mit dem Telefon in der Tasche" gibt es damit für GPS, nicht für die
+Fahrzeugdaten. Mit Telefon in der Halterung und wachgehaltenem Bildschirm
+ist der Fall gegenstandslos — und das ist der Alltag.
+
+**SwiftUI bleibt die Option dahinter, nicht davor.** Wenn die App im Alltag
+trägt und CarPlay dazukommen soll, ist der Weg dorthin offen, und er ist
+dann besser begehbar als heute: Die übersetzten Byte-Formeln liessen sich
+gegen eine laufende native App auf echten Fahrten prüfen statt gegen Bluefy.
+Der ehrliche Vorbehalt dazu ist, dass Zwischenlösungen oft dauerhaft werden.
 
 ## Was ausdrücklich bleibt
 
@@ -187,37 +226,54 @@ Navigationsanzeige — ein weiterer Grund, klein anzufangen.
 
 Jeder Schritt endet mit etwas, das läuft.
 
-| # | Schritt | Ergebnis |
-|---|---|---|
-| 0 | CarPlay-Entitlement beantragen | läuft im Hintergrund weiter |
-| 1 | Xcode-Projekt, Netz-Schicht, Anmeldung | App zeigt die Fahrtenliste |
-| 2 | Planungsansicht | Route rechnen und speichern geht |
-| 3 | OBD über CoreBluetooth + Protokolltests | Ladestand aus dem Auto, ohne Bluefy |
-| 4 | Live-Aufzeichnung mit Hintergrund-Standort | Fahrt mit Telefon in der Tasche |
-| 5 | Warteschlange gegen Funklöcher | keine Lücken mehr |
-| 6 | CarPlay-Statusvorlage | sobald das Entitlement da ist |
+Die Schritte 1 bis 6 oben beschreiben den SwiftUI-Weg. Gebaut wird zuerst
+die Capacitor-Stufe, weil sie dieselben drei Grenzen nimmt, ohne die
+Byte-Formeln anzufassen.
 
-Schritt 3 ist der Prüfstein: Ist der Ladestand aus dem Auto einmal nativ
-gelesen und stimmt er mit dem überein, was die PWA über Bluefy liefert, ist
-das grösste Risiko des Umbaus erledigt.
+| # | Schritt | Ergebnis | Stand |
+|---|---|---|---|
+| 1 | Capacitor-Gerüst, Plugin-Hülle, `bt()` im Kern | Bluetooth läuft nativ statt über Bluefy | erledigt |
+| 2 | `keep-awake` statt Video-Behelf | Bildschirm bleibt an | erledigt |
+| 3 | CI erzeugt und baut das iOS-Projekt | „compiliert es" ohne Mac beantwortbar | erledigt |
+| 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | offen, siehe unten |
+| 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | offen |
+| 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | offen |
+| 7 | SwiftUI, falls CarPlay dazukommt | siehe oben | zurückgestellt |
+
+**Schritt 4 ist der Engpass, nicht der Code.** Alles bis einschliesslich 3
+läuft ohne Apple-Konto und ohne Mac. Ab 4 geht nichts mehr ohne das
+Developer-Programm: Ohne Signatur gibt es keinen Weg auf ein Gerät, und ohne
+Mac oder hinterlegte Zertifikate keinen signierten Bau.
+
+CarPlay ist bewusst ans Ende gerückt — es war der einzige Punkt, der
+zwingend nach SwiftUI führt, und es wird vorerst nicht gebraucht.
 
 ---
 
 ## Bauen und Ausliefern
 
-**Entwicklung** auf dem MacBook Air (2018+, Intel, 16 GB). Reicht für dieses
-Projekt — Intel ist bei Builds und SwiftUI-Vorschauen spürbar langsamer als
-Apple Silicon, aber es ist kein Hindernis. Fernzugriff vom Windows-Rechner
-über die eingebaute Bildschirmfreigabe; ein eigenes macOS-Benutzerkonto für
-die Entwicklung verhindert, dass sich zwei Leute eine Sitzung teilen.
+**Es gibt kein Xcode und keinen Mac.** Das ist die Bedingung, unter der
+alles hier steht, und der Capacitor-Weg kommt damit zurecht: Das
+iOS-Projekt wird nicht von Hand gepflegt, sondern bei jedem Lauf aus
+`package.json` und `capacitor.config.json` erzeugt. Deshalb ist `ios/` auch
+nicht eingecheckt — es wäre eine zweite Wahrheit neben der Konfiguration,
+und die beiden liefen unbemerkt auseinander.
 
-**Der CarPlay-Simulator läuft in Xcode**, ein echtes Auto-Display braucht es
-zum Entwickeln nicht.
+**Automatisch bauen** über GitHub Actions: `.github/workflows/ios.yml` legt
+das Projekt mit `cap add ios` an, ergänzt die `Info.plist` über
+`tools/ios_info_plist.sh` und baut gegen den Simulator, ohne Signatur.
 
-**Automatisch bauen** über GitHub Actions:
-`.github/workflows/ios.yml` baut bei jeder Änderung unter `ios/` gegen den
-Simulator und lässt die Protokolltests laufen. Der Ablauf ist mit einem
-Pfadfilter versehen und rührt sich nicht, solange es `ios/` noch nicht gibt.
+Der Pfadfilter ist eng: `frontend/**` steht **nicht** darin. Die App lädt
+ihre Oberfläche zur Laufzeit vom Server (`server.url` in
+`capacitor.config.json`), eine geänderte Zeile in `live.js` braucht also
+keinen neuen App-Bau, sondern geht den gewohnten Weg über den Container.
+Genau dafür ist der Aufbau so gewählt — der schnelle Deploy-Weg bleibt.
+
+Die JavaScript-seitigen Prüfungen laufen dagegen bei jedem Commit in
+`ci.yml`, auf einem Linux-Läufer und damit ohne Minutenfaktor:
+`tools/check_ble_bruecke.js` spielt den Weg einer Runde am Auto gegen einen
+nachgebildeten Dongle durch, und ein Vergleich stellt sicher, dass
+`frontend/ble-plugin.js` noch zu seinem Eintrag passt.
 
 Läuft auf `macos-latest`, und dafür gilt bei privaten Repositories ein
 **Minutenfaktor von 10** — eine Minute auf einem Mac-Läufer zählt wie zehn
@@ -226,14 +282,25 @@ signiert nicht: Ein Simulatorbau braucht weder Zertifikat noch
 Bereitstellungsprofil und ist der billigste Weg, „compiliert überhaupt noch"
 zu beantworten.
 
-**Auf Geräte kommt die App über TestFlight.** Damit braucht kein fremdes
-iPhone je ein Kabel zum Mac. Einmal muss das eigene Entwicklungsgerät per
-Kabel angeschlossen werden, damit Xcode ihm vertraut; danach geht auch das
-über WLAN.
+**Auf Geräte kommt die App über TestFlight**, und ohne Mac führt daran kein
+Weg vorbei: Der übliche Ersatz — Gerät ans Kabel, Xcode vertraut ihm, App
+läuft sieben Tage — setzt genau das Xcode voraus, das hier fehlt.
 
-**Ein Apple-Developer-Programm für 99 $/Jahr ist Pflicht** — ohne läuft eine
-selbst gebaute App nur sieben Tage auf dem Gerät, und weder TestFlight noch
-CarPlay-Entitlements gibt es. Das ist der Punkt, an dem der Umbau Geld kostet.
+**Ein Apple-Developer-Programm für 99 $/Jahr ist damit Pflicht**, und zwar
+früher als auf dem SwiftUI-Weg. Was danach zu tun ist, lässt sich
+vollständig ohne Mac erledigen, aber es ist Handarbeit beim ersten Mal:
+
+1. Im Developer-Portal ein Distributionszertifikat anlegen. Die dafür nötige
+   Signieranfrage (CSR) erzeugt `openssl` auf jedem Rechner, ein Mac ist
+   dafür nicht nötig.
+2. In App Store Connect eine App-ID `de.the-smarthome.jolt` und einen
+   API-Schlüssel für den Upload anlegen.
+3. Zertifikat, Profil und API-Schlüssel als Repository-Geheimnisse
+   hinterlegen und den Ablauf um einen signierten Archivbau mit
+   anschliessendem Upload ergänzen.
+
+Erst danach ist die App auf dem Telefon. Bis dahin beantwortet die CI nur,
+ob sie sich bauen lässt — was nicht wenig ist, aber eben noch nichts fährt.
 
 ---
 

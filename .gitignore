@@ -11,3 +11,10 @@ daten/
 .idea/
 .vscode/
 .claude/
+
+# Capacitor: node_modules und das erzeugte Xcode-Projekt.
+# ios/ entsteht bei jedem CI-Lauf neu aus package.json und
+# capacitor.config.json - eingecheckt waere es eine zweite Wahrheit, die
+# still von der ersten abweicht.
+node_modules/
+ios/

@@ -39,3 +39,44 @@ jobs:
           python -m alembic upgrade head
           python -m alembic downgrade base
           python -m alembic upgrade head
+
+  # frontend/ble-plugin.js ist erzeugt, liegt aber im Repository: Die
+  # Oberflaeche wird ohne Bauschritt ausgeliefert, also muss die gebuendelte
+  # Plugin-Huelle als fertige Datei danebenliegen. Genau daraus entsteht die
+  # Gefahr, gegen die dieser Auftrag laeuft - jemand aendert
+  # tools/ble-huelle-eintrag.js oder hebt eine Plugin-Fassung an und vergisst
+  # `npm run huelle`. Die App zoege dann weiter die alte Huelle, und der
+  # Fehler zeigte sich erst am Auto.
+  huelle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, nicht 20: @capacitor/cli verlangt es ausdruecklich
+      # ("Unsupported engine" bei 20), und esbuild soll aus derselben
+      # Umgebung kommen wie beim Erzeugen.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Huelle neu bauen und vergleichen
+        run: |
+          cp frontend/ble-plugin.js /tmp/ble-plugin.eingecheckt.js
+          npm run huelle
+          if ! cmp -s /tmp/ble-plugin.eingecheckt.js frontend/ble-plugin.js; then
+            echo "::error::frontend/ble-plugin.js ist nicht mehr aktuell." \
+                 "Bitte 'npm run huelle' laufen lassen und das Ergebnis einchecken."
+            exit 1
+          fi
+          echo "Huelle ist aktuell."
+
+      # Die Bruecke laesst sich vollstaendig nur am Auto pruefen. Was sich
+      # vorher feststellen laesst, soll aber auch vorher auffallen: Der Weg
+      # anschliessen -> Dienste -> Benachrichtigungen -> Befehl -> Antwort
+      # wird hier gegen einen nachgebildeten Dongle durchgespielt, samt dem
+      # Rueckfall auf echtes Web Bluetooth ohne Capacitor.
+      - name: Bluetooth-Bruecke pruefen
+        run: node tools/check_ble_bruecke.js

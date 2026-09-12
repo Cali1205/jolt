@@ -847,7 +847,27 @@ window.joltLive = (function () {
   /* Beide Wege melden zurück, statt nur ins unsichtbare Konsolenprotokoll zu
    * schreiben - am Steuer kommt niemand an die Konsole heran, und ohne eine
    * sichtbare Rückmeldung liesse sich ein Fehlschlag nur raten statt sehen. */
+  /* In der iOS-App ist das eine Zeile, und sie hält.
+   *
+   * `isIdleTimerDisabled` sagt dem System schlicht, den Sperrtimer nicht
+   * laufen zu lassen - kein Wake Lock, der widerrufen wird, kein Video, das
+   * als Wiedergabe gelten muss. Der Weg darunter bleibt trotzdem stehen:
+   * Die Oberfläche läuft weiter auch im Browser, und dort gibt es nichts
+   * Besseres als Wake Lock und den Videobehelf. */
+  async function nativWachHalten() {
+    const h = window.joltBlePlugin;
+    if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()) return false;
+    try {
+      await h.KeepAwake.keepAwake();
+      return true;
+    } catch (fehler) {
+      console.log("[live] KeepAwake ging nicht:", fehler.message);
+      return false;
+    }
+  }
+
   async function bildschirmWachHalten() {
+    if (await nativWachHalten()) return;
     let hinweis = "";
     if (!wachhalter && "wakeLock" in navigator) {
       try {
@@ -873,6 +893,13 @@ window.joltLive = (function () {
   }
 
   function bildschirmFreigeben() {
+    // Nach der Fahrt soll sich das Telefon wieder normal sperren. Der
+    // native Weg wird zuerst zurückgenommen; die beiden darunter schaden
+    // nicht, wenn sie gar nicht erst gegriffen haben.
+    const h = window.joltBlePlugin;
+    if (h && h.Capacitor && h.Capacitor.isNativePlatform()) {
+      h.KeepAwake.allowSleep().catch(() => {});
+    }
     if (wachhalter) {
       try { wachhalter.release(); } catch (e) {}
       wachhalter = null;

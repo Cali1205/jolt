@@ -1,23 +1,38 @@
 name: iOS
 
-# Nur bei Aenderungen unter ios/. Zwei Gruende:
+# Der Ablauf beantwortet genau eine Frage: Laesst sich aus package.json und
+# capacitor.config.json ein iOS-Projekt erzeugen, das compiliert?
 #
-# Erstens gibt es das Verzeichnis noch nicht - siehe konzept-ios-app.md. Ohne
-# Pfadfilter waere dieser Ablauf ab dem Tag seiner Einfuehrung bei jedem
-# Backend-Commit rot, und ein Ablauf, der immer rot ist, wird nicht mehr
-# gelesen.
+# **Der Pfadfilter ist eng, und das ist Absicht.** macos-Laeufer zaehlen bei
+# privaten Repositories mit dem Faktor 10 gegen das Minutenkontingent: Fuenf
+# Minuten Bauen sind fuenfzig verbrauchte Minuten. Eine Aenderung an
+# frontend/ steht bewusst **nicht** in der Liste - die App laedt ihre
+# Oberflaeche zur Laufzeit vom Server (siehe server.url in
+# capacitor.config.json), eine geaenderte Zeile in live.js braucht also
+# keinen neuen App-Bau. Genau deshalb ist der Capacitor-Weg gewaehlt: Der
+# schnelle Deploy-Weg ueber den Container bleibt erhalten.
 #
-# Zweitens kostet er. macos-Laeufer zaehlen bei privaten Repositories mit dem
-# **Faktor 10** gegen das Minutenkontingent: Fuenf Minuten Bauen sind fuenfzig
-# verbrauchte Minuten. Das ist vertretbar, wenn es die App betrifft, und
-# Verschwendung, wenn jemand eine Zeile in modell.py geaendert hat.
+# Was hier fehlt, ist ein Geraetebau. Der braeuchte Zertifikat und
+# Bereitstellungsprofil als Geheimnisse; fuer "compiliert es ueberhaupt" ist
+# das ein hoher Preis. Ausgeliefert wird ueber TestFlight, sobald ein
+# Apple-Developer-Programm vorliegt - siehe konzept-ios-app.md.
 on:
   push:
     branches: [main]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "capacitor.config.json"
+      - "tools/ios_info_plist.sh"
+      - ".github/workflows/ios.yml"
   pull_request:
     branches: [main]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "capacitor.config.json"
+      - "tools/ios_info_plist.sh"
+      - ".github/workflows/ios.yml"
   # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
   # Aenderung erfinden zu muessen.
   workflow_dispatch:
@@ -25,12 +40,16 @@ on:
 jobs:
   bauen:
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: ios
 
     steps:
       - uses: actions/checkout@v4
+
+      # Node 22 ist Bedingung, nicht Vorliebe: @capacitor/cli gibt bei 20
+      # "Unsupported engine" aus.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
 
       # Der Laeufer bringt mehrere Xcode-Fassungen mit und waehlt nicht
       # unbedingt die neueste. Festlegen statt hoffen: Sonst aendert sich die
@@ -44,7 +63,26 @@ jobs:
       - name: Fassungen protokollieren
         run: |
           xcodebuild -version
-          xcrun simctl list runtimes | head -20
+          node --version
+          pod --version
+
+      - run: npm ci --no-audit --no-fund
+
+      # ios/ ist nicht eingecheckt und entsteht hier neu. Ein eingechecktes
+      # Xcode-Projekt waere eine zweite Wahrheit neben capacitor.config.json,
+      # und die beiden liefen unbemerkt auseinander.
+      - name: iOS-Projekt erzeugen
+        run: npx cap add ios
+
+      # Muss **nach** `cap add` und **vor** dem Bauen laufen: Die Vorlage
+      # kennt weder die Bluetooth-Verwendungszwecke noch die
+      # Hintergrundmodi. Ohne NSBluetoothAlwaysUsageDescription raeumt iOS
+      # die App beim ersten CoreBluetooth-Zugriff ab.
+      - name: Info.plist ergaenzen
+        run: bash tools/ios_info_plist.sh ios/App/App/Info.plist
+
+      - name: Abgleichen
+        run: npx cap sync ios
 
       # Auf GitHubs macOS-Abbild ist xcbeautify normalerweise vorhanden. Das
       # "normalerweise" ist der Grund fuer diese Zeile: Faellt es einmal aus
@@ -53,11 +91,6 @@ jobs:
       - name: xcbeautify sicherstellen
         run: command -v xcbeautify >/dev/null || brew install xcbeautify
 
-      # Gebaut wird gegen den **Simulator** und ohne Signatur. Ein
-      # Geraetebau braeuchte Zertifikat und Bereitstellungsprofil als
-      # Geheimnisse im Repository; das ist fuer die Frage "compiliert es
-      # ueberhaupt noch" ein hoher Preis. Fuers Ausliefern gibt es
-      # TestFlight, und das laeuft ueber Xcode auf dem Mac.
       # `set -o pipefail` ist hier nicht Kosmetik: Ohne sie liefert die Pipe
       # den Rueckgabewert von xcbeautify, und der ist null, auch wenn
       # xcodebuild davor gescheitert ist. Der Ablauf waere gruen und der Bau
@@ -66,51 +99,27 @@ jobs:
       # `generic/platform=iOS Simulator` statt eines Geraetenamens: Welche
       # Simulatoren im Abbild liegen, aendert GitHub ohne Ankuendigung, und
       # ein fest verdrahtetes "iPhone 16" faellt dann aus.
+      #
+      # Capacitor erzeugt eine Workspace mit CocoaPods; gebaut wird deshalb
+      # `-workspace`, nicht `-project`. Das Schema heisst "App".
       - name: Bauen
         run: |
           set -o pipefail
           xcodebuild build \
-            -project Jolt.xcodeproj \
-            -scheme Jolt \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             | xcbeautify --renderer github-actions
         shell: bash
 
-      # Die Protokolltests sind der eigentliche Grund fuer diesen Ablauf. Der
-      # OBD2-Teil wird aus frontend/obd-kern.js nach Swift uebertragen, und
-      # bei so einer Uebertragung gehen Vorzeichen, Skalierung und
-      # Bytereihenfolge still daneben: `soc_roh` ist ein Byte geteilt durch
-      # 2,5, der Batteriestrom `(Rohwert - 150000)/100` ueber vier Bytes -
-      # beide saehen auch falsch noch plausibel aus. Geprueft wird deshalb
-      # gegen aufgezeichnete Rohantworten mit bekanntem Ergebnis.
-      # Tests brauchen einen *konkreten* Simulator, `generic` genuegt hier
-      # nicht. Statt einen Geraetenamen zu raten, wird der erste verfuegbare
-      # iPhone-Simulator des Abbilds genommen - das ueberlebt jede
-      # Abbild-Aktualisierung.
-      - name: Tests
-        run: |
-          set -o pipefail
-          GERAET=$(xcrun simctl list devices available --json | python3 -c '
-import json, re, sys
-d = json.load(sys.stdin)["devices"]
-# Numerisch sortieren, nicht als Zeichenkette: "iOS-9-0" steht lexikalisch
-# hinter "iOS-18-0", und dann faenden wir die aelteste Laufzeit statt der
-# neuesten.
-def fassung(kennung):
-    return [int(x) for x in re.findall(r"\d+", kennung.rsplit(".", 1)[-1])]
-for laufzeit in sorted(d, key=fassung, reverse=True):
-    for g in d[laufzeit]:
-        if g["name"].startswith("iPhone"):
-            print(g["udid"]); raise SystemExit
-')
-          test -n "$GERAET" || { echo 'Kein iPhone-Simulator im Abbild.'; exit 1; }
-          echo "Simulator: $GERAET"
-          xcodebuild test \
-            -project Jolt.xcodeproj \
-            -scheme Jolt \
-            -destination "id=$GERAET" \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcbeautify --renderer github-actions
-        shell: bash
+      # Nach einem gescheiterten Bau ist die erzeugte Plist das Erste, was
+      # man sehen will - und sie existiert nur auf dem Laeufer.
+      - name: Info.plist sichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Info.plist
+          path: ios/App/App/Info.plist
+          if-no-files-found: warn
