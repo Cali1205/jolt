@@ -173,6 +173,10 @@ def teil_workflows() -> None:
            and "-allowProvisioningUpdates" in fliegen,
            "und wählt danach: ohne Zertifikat und Profil signiert Apple "
            "selbst, mit beiden die mitgelieferten")
+    pruefe("CODE_SIGNING_ALLOWED=NO" in fliegen,
+           "im automatischen Modus wird unsigniert archiviert - beim "
+           "Archivieren verlangt Xcode sonst ein Entwicklungsprofil und damit "
+           "ein registriertes Gerät (der erste echte Lauf scheiterte daran)")
     pruefe("EXTRA[@]+" in fliegen,
            "leere Arrays werden mit set -u auf dem alten bash des Mac-Läufers "
            "sicher aufgelöst - sonst bricht der Export im manuellen Modus ab")

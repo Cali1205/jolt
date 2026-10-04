@@ -212,7 +212,7 @@ in 2 hinzufügen. Bis 100 interne Tester, ohne Prüfung.
 | `Es fehlen Repository-Geheimnisse: …` | Schritt 7 nicht vollständig; der Name muss genau stimmen. |
 | `Von IOS_CERT_P12_BASE64, … sind nur 1 von 3 gesetzt` | Manueller Rückfall halb eingerichtet: alle drei Geheimnisse setzen oder alle löschen. |
 | `No signing certificate … found` / `Communication with Apple failed` im automatischen Modus | Schlüsselrolle ist nicht **Admin** (Schritt 6), oder Key-ID/Issuer-ID sind vertauscht. |
-| `Your team has no devices from which to generate a provisioning profile` | Der automatische Weg braucht beim Archivieren ein Entwicklungsprofil und damit ein registriertes Gerät. Entweder das iPhone unter [Geräte](https://developer.apple.com/account/resources/devices/list) eintragen (UDID) oder auf den manuellen Rückfall (Schritt 3, 4, 7) wechseln. |
+| `Your team has no devices from which to generate a provisioning profile` | Tritt beim Export auf, obwohl der Workflow das Archiv unsigniert baut: dann das iPhone unter [Geräte](https://developer.apple.com/account/resources/devices/list) eintragen (UDID) oder auf den manuellen Rückfall (Schritt 3, 4, 7) wechseln. |
 | `MAC verification failed` beim Import (manuell) | `.p12` ohne `-legacy` erzeugt (Schritt 3). |
 | `Das Profil ist für … die App heisst …` | Profil gehört zu einer anderen Bundle-ID als `capacitor.config.json`. |
 | `Das Profil enthält eine Geräteliste` | Development-/Ad-hoc-Profil statt App Store (Schritt 4). |
