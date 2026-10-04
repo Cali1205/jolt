@@ -200,17 +200,15 @@ jobs:
         run: |
           set -o pipefail
           command -v xcbeautify >/dev/null || brew install xcbeautify
-          # Im automatischen Modus muss xcodebuild Zertifikat und Profil bei
-          # Apple anlegen duerfen. Das Team steht dann auf der Kommandozeile,
-          # weil die Vorlage keines kennt; im manuellen steht es schon im
-          # Projekt (tools/ios_signatur.sh).
+          # Im automatischen Modus wird das Archiv **unsigniert** gebaut und
+          # erst beim Export signiert. Der erste Lauf scheiterte sonst an
+          # "Your team has no devices": Beim Archivieren verlangt Xcode ein
+          # Entwicklungsprofil, und das gibt es nur fuer registrierte Geraete.
+          # Das App-Store-Profil beim Export braucht keines. Im manuellen
+          # Modus steht Team und Profil schon im Projekt (ios_signatur.sh).
           EXTRA=()
           if [ "$MODUS" = "automatisch" ]; then
-            EXTRA=(-allowProvisioningUpdates
-                   -authenticationKeyPath "$SCHLUESSEL"
-                   -authenticationKeyID "$APPSTORE_KEY_ID"
-                   -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
-                   DEVELOPMENT_TEAM="$APPLE_TEAM_ID")
+            EXTRA=(CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM="$APPLE_TEAM_ID")
           fi
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
@@ -219,7 +217,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/jolt.xcarchive" \
             CURRENT_PROJECT_VERSION="$(( ${{ github.run_number }} * 10 + ${{ github.run_attempt }} ))" \
-            "${EXTRA[@]}" \
+            ${EXTRA[@]+"${EXTRA[@]}"} \
             | xcbeautify --renderer github-actions
 
       # `destination: upload` laesst xcodebuild den Bau gleich nach App Store
