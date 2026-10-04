@@ -14,8 +14,8 @@ name: iOS
 #
 # Was hier fehlt, ist ein Geraetebau. Der braeuchte Zertifikat und
 # Bereitstellungsprofil als Geheimnisse; fuer "compiliert es ueberhaupt" ist
-# das ein hoher Preis. Ausgeliefert wird ueber TestFlight, sobald ein
-# Apple-Developer-Programm vorliegt - siehe konzept-ios-app.md.
+# das ein hoher Preis. Der signierte Bau samt TestFlight-Upload liegt in
+# ios-testflight.yml, einrichten laesst er sich nach ios-einrichten.md.
 on:
   push:
     branches: [main]
@@ -24,6 +24,8 @@ on:
       - "package-lock.json"
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
+      - "tools/ios_symbol.sh"
+      - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   pull_request:
     branches: [main]
@@ -32,6 +34,8 @@ on:
       - "package-lock.json"
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
+      - "tools/ios_symbol.sh"
+      - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
   # Aenderung erfinden zu muessen.
@@ -64,7 +68,6 @@ jobs:
         run: |
           xcodebuild -version
           node --version
-          pod --version
 
       - run: npm ci --no-audit --no-fund
 
@@ -80,6 +83,10 @@ jobs:
       # die App beim ersten CoreBluetooth-Zugriff ab.
       - name: Info.plist ergaenzen
         run: bash tools/ios_info_plist.sh ios/App/App/Info.plist
+
+      # Das Symbol der Vorlage ist das Capacitor-Logo.
+      - name: App-Symbol ersetzen
+        run: bash tools/ios_symbol.sh
 
       - name: Abgleichen
         run: npx cap sync ios
@@ -100,13 +107,15 @@ jobs:
       # Simulatoren im Abbild liegen, aendert GitHub ohne Ankuendigung, und
       # ein fest verdrahtetes "iPhone 16" faellt dann aus.
       #
-      # Capacitor erzeugt eine Workspace mit CocoaPods; gebaut wird deshalb
-      # `-workspace`, nicht `-project`. Das Schema heisst "App".
+      # Capacitor 8 bindet Plugins ueber den Swift Package Manager ein, nicht
+      # ueber CocoaPods. Es gibt deshalb **keine** .xcworkspace, und gebaut
+      # wird `-project`; die Pakete loest xcodebuild beim ersten Aufruf selbst
+      # auf. Das Schema heisst "App".
       - name: Bauen
         run: |
           set -o pipefail
           xcodebuild build \
-            -workspace ios/App/App.xcworkspace \
+            -project ios/App/App.xcodeproj \
             -scheme App \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \

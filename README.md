@@ -86,7 +86,9 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   ist die Fahrt eine Hülle mit leerer Geometrie. Eine Ladepause verlängert die
   Frist, sonst zerschneidet das Aufräumen die Fahrt, die gleich weitergeht.
 - **Den Dongle direkt lesen** — über Web Bluetooth, ohne Zwischen-App. Auf iOS
-  braucht es dafür den Browser **Bluefy**; Safari kennt Web Bluetooth nicht.
+  braucht es dafür den Browser **Bluefy**; Safari kennt Web Bluetooth nicht —
+  oder die native App über TestFlight, die ohne Mac per GitHub Actions gebaut
+  wird ([`ios-einrichten.md`](ios-einrichten.md)).
   Alle Messwerte stehen live im Dashboard, samt Alter je Wert: Eine
   eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
   und wie, steht weiter unten.
