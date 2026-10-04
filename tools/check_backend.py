@@ -754,12 +754,26 @@ def main() -> int:
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
 
     # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
-    # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste wird an genau
-    # einer Stelle gefuehrt (obd-kern.js) und von der Oberflaeche ueber
-    # `FELDER` bezogen - sonst taucht eine neue Datenkennung dort nie auf.
+    # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste steht als Tabelle
+    # in messwerte.js, der Interpreter in obd-kern.js, und die Oberflaeche
+    # bezieht sie ueber `FELDER` - sonst taucht eine neue Datenkennung dort
+    # nie auf. Kommentare fallen vorher weg, damit ein Wort darin nicht als
+    # Feld zaehlt.
     kern = open(os.path.join(FRONTEND, "obd-kern.js"), encoding="utf-8").read()
-    eintraege = re.findall(r'\{ name: "([a-z_]+)",(.*?)(?=\n    \{ name:|\n  \];)',
-                           kern, re.S)
+    tabelle = open(os.path.join(FRONTEND, "messwerte.js"),
+                   encoding="utf-8").read()
+    tabelle = re.sub(r"/\*.*?\*/", "", tabelle, flags=re.S)
+    tabelle = re.sub(r"^\s*//.*$", "", tabelle, flags=re.M)
+    # Hauptwerte (4 Leerzeichen) und die Werte aus `auch` (8) gleichermassen.
+    eintraege = re.findall(
+        r'\{ name: "([a-z_]+)",(.*?)(?=\{ name:|\n  \],\n\};)', tabelle, re.S)
+
+    def eintrag(name: str) -> str:
+        """Der Tabellentext eines Hauptwerts, samt seiner `auch`-Werte."""
+        treffer = re.search(r'\n    \{ name: "%s",(.*?)(?=\n    \{ name:|\n  \],\n\};)'
+                            % name, tabelle, re.S)
+        return treffer.group(1) if treffer else ""
+
     ohne = [n for n, rest in eintraege if "titel:" not in rest]
     pruefe(eintraege and not ohne,
            f"alle {len(eintraege)} ausgelesenen Messwerte tragen eine "
@@ -799,7 +813,7 @@ def main() -> int:
     # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
     # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
     # wird im finally zurueckgenommen.
-    namen = re.findall(r'\{ name: "([a-z_]+)"', kern)
+    namen = re.findall(r'\n    \{ name: "([a-z_]+)"', tabelle)
     klima = [n for n in ("aussentemp_c", "innentemp_c") if n in namen]
     pruefe(klima and all(namen.index(n) > namen.index("soc_roh")
                          for n in klima),
@@ -860,7 +874,7 @@ def main() -> int:
         pruefe(befehl in kern, f"die Flusskontrolle setzt {befehl}")
     pruefe(kern.count("await flusskontrolle(ziel)") >= 2,
            "und zwar auf beiden Wegen - mit und ohne Protokollwechsel")
-    pruefe(all(f'fcsh: "{h}"' in kern
+    pruefe(all(f'fcsh: "{h}"' in tabelle
                for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
            "jede Zieladresse bringt ihren eigenen Flow-Control-Kopf mit")
 
@@ -870,7 +884,7 @@ def main() -> int:
     pruefe("hex.slice(3) : hex.slice(8)" in kern,
            "und zwar für beide Rahmenbreiten: acht Kopfzeichen bei 29 Bit, "
            "drei bei 11 - der Klimakompressor sitzt auf der 11-Bit-Seite")
-    pruefe("akku_kwh" in kern and "kwh >= 10 && kwh <= 200" in kern,
+    pruefe("min: 10, max: 200" in eintrag("akku_kwh"),
            "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
            "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
     pruefe("K.zahl(z.ist_soc, 1)" in live,
@@ -897,7 +911,7 @@ def main() -> int:
     pruefe("nutzbytes," in kern,
            "dafür gibt der Baustein die rohen Nutzbytes heraus")
 
-    pruefe("kompressor_w" in kern and "b[5] * 256) + b[6]" in kern,
+    pruefe("ab: 5, laenge: 2" in eintrag("kompressor_w"),
            "die Kompressorleistung steht drin - aus einer Differenzmessung "
            "abgeleitet, weil keine der drei Quellen eine Formel nennt")
     pruefe("i += 2" in obd_js,
@@ -905,7 +919,8 @@ def main() -> int:
            "Fenster byteweise zu schieben - eine Mehrbyte-Zahl fängt nicht "
            "an jedem Byte an")
 
-    pruefe("roh - 4294967296" in kern,
+    pruefe("vorzeichen: true" in eintrag("entladen_kwh")
+           and "Math.pow(2, laenge * 8 - 1)" in kern,
            "der Entladezähler wird vorzeichenbehaftet gelesen - unsigned "
            "ergab am Fahrzeug 482 961 statt 17 439 kWh")
     pruefe("entladen_kwh: [100, 100000" in obd_js,
@@ -915,13 +930,15 @@ def main() -> int:
            "der Kreuzvergleich zählt in die Zusammenfassung - rot in der "
            "Tabelle und \"0 auffällig\" darüber ist schlimmer als nichts")
 
-    pruefe("entladen_kwh" in kern and "8583.07" in kern,
+    pruefe("teiler: 8583.07" in eintrag("entladen_kwh")
+           and "teiler: 8583.07" in eintrag("entladen_kwh").split("auch:")[-1],
            "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
            "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")
-    pruefe("weitere:" in kern and "Object.assign(roh, wert.weitere)" in kern,
+    pruefe('name: "geladen_kwh"' in eintrag("entladen_kwh")
+           and "Object.assign(roh, wert.weitere)" in kern,
            "und Lade- wie Entladezähler kommen aus **einer** Abfrage - eine "
            "Mehrrahmen-Antwort zweimal zu holen kostet Zeit")
-    pruefe("ZUSATZ_TITEL" in kern,
+    pruefe("...(m.auch || []).map" in kern,
            "auch der mitgelieferte Wert steht in der Feldliste, sonst zeigt "
            "die Tabelle weniger, als gemessen wird")
     pruefe("ABSCHNITT_MIT_ZAEHLER_S = 60" in live
@@ -991,8 +1008,7 @@ def main() -> int:
             continue
         # Entweder das Skript kennt beide Layouts selbst, oder es überlässt
         # das `pruefen.anwendung_bereitstellen`.
-        if 'os.path.join(_HIER, "..")' in quelle \
-                or 'os.path.join(HIER, "..")' in quelle \
+        if re.search(r'os\.path\.join\(_?(?:HIER|hier|_hier), "\.\."\)', quelle) \
                 or "anwendung_bereitstellen" in quelle \
                 or name == "pruefen.py":
             continue

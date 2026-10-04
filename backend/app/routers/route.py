@@ -125,17 +125,33 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     if not fahrzeug:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
-    anbieter = routing.provider()
-    start = (anfrage.start.lat, anfrage.start.lon)
-    ziel = (anfrage.ziel.lat, anfrage.ziel.lon)
-    # Jede Anfrage kostet vom Tageskontingent (2.500). Die erste ist die
-    # schnellste Strasse und zugleich der Massstab; alles Weitere muss sich
-    # an ihr messen lassen.
-    #
-    # `recommended` und `shortest` stehen bewusst nicht dabei: Ersteres
-    # liefert auf Autobahnstrecken dieselbe Strasse wie `fastest`, letzteres
-    # eine, die niemand fährt (477 km in 10,7 Stunden gegen 598 km in 5,6).
-    # Beides gemessen, siehe routing/varianten.py.
+    # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
+    # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
+    # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht erst
+    # in `_fahrten_speichern`, deshalb ein leichtgewichtiger Platzhalter.
+    werte = modell.Fahrzeugwerte.aus_fahrt(SimpleNamespace(
+        fahrzeug=fahrzeug, zuladung_kg=anfrage.zuladung_kg,
+        luftwiderstand_faktor=anfrage.luftwiderstand_faktor))
+
+    gruppen = _strecken_sammeln(anfrage)
+    kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen)
+    ergebnisse = _fahrten_speichern(db, anfrage, fahrzeug, kandidaten)
+
+    _varianten_bewerten(db, ergebnisse, fahrzeug)
+    return {"varianten": ergebnisse}
+
+
+def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple) -> list[dict]:
+    """Welche Routing-Anfragen gestellt werden - jede kostet vom Tageskontingent.
+
+    Die erste ist die schnellste Strasse und zugleich der Massstab; alles
+    Weitere muss sich an ihr messen lassen.
+
+    `recommended` und `shortest` stehen bewusst nicht dabei: Ersteres liefert
+    auf Autobahnstrecken dieselbe Strasse wie `fastest`, letzteres eine, die
+    niemand fährt (477 km in 10,7 Stunden gegen 598 km in 5,6). Beides
+    gemessen, siehe routing/varianten.py.
+    """
     wege = [{"zwischen": [], "mautfrei": False, "etikett": ETIKETT["fastest"]}]
     if anfrage.alternative:
         wege.append({"zwischen": [], "mautfrei": True, "etikett": "mautfrei"})
@@ -143,24 +159,27 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         wege += [{"zwischen": [k["punkt"]], "mautfrei": False,
                   "etikett": k["etikett"]}
                  for k in varianten.ausweichpunkte(start, ziel)]
-    # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
-    # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
-    # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht hier
-    # erst weiter unten, deshalb ein leichtgewichtiger Platzhalter.
-    werte = modell.Fahrzeugwerte.aus_fahrt(SimpleNamespace(
-        fahrzeug=fahrzeug, zuladung_kg=anfrage.zuladung_kg,
-        luftwiderstand_faktor=anfrage.luftwiderstand_faktor))
+    return wege
 
-    # Schritt 1: alle drei Vorgaben abfragen und anhand der reinen Routing-
-    # Antwort (Strecke, Fahrzeit) zusammenlegen, was dieselbe Strasse ist.
-    # Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und
-    # im Demo-Modus wie oft auch in echt (kürzere Strecken haben meist nur
-    # einen sinnvollen Weg) landen zwei oder drei Vorgaben ohnehin auf
-    # derselben Route.
+
+def _strecken_sammeln(anfrage: Routenanfrage) -> list[dict]:
+    """Schritt 1: die Wege abfragen und zusammenlegen, was dieselbe Strasse ist.
+
+    Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und im
+    Demo-Modus wie oft auch in echt (kürzere Strecken haben meist nur einen
+    sinnvollen Weg) landen mehrere Vorgaben ohnehin auf derselben Route.
+
+    Rückgabe: je tatsächlich verschiedener Route ein Eintrag mit den
+    Etiketten aller Wege, die auf sie führten, und der Strecke selbst.
+    """
+    anbieter = routing.provider()
+    start = (anfrage.start.lat, anfrage.start.lon)
+    ziel = (anfrage.ziel.lat, anfrage.ziel.lon)
+
     gruppen: list[dict] = []
     letzter_fehler: RoutingFehler | None = None
     basis = None
-    for weg in wege:
+    for weg in _wege_planen(anfrage, start, ziel):
         try:
             strecke = anbieter.route(start, ziel,
                                      zwischenstopps=weg["zwischen"] or None,
@@ -178,8 +197,25 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
 
         if basis is None:
             basis = strecke
-        elif varianten.ist_dominiert(strecke.strecke_m, strecke.fahrzeit_s,
-                                     basis.strecke_m, basis.fahrzeit_s):
+
+        # Zusammenlegen vor Aussortieren: `ist_dominiert` zählt eine gleich
+        # lange und gleich schnelle Route mit, und die würde sonst verworfen,
+        # bevor ihr Etikett an der schon vorhandenen Route landet - die
+        # mautfreie Route verschwände dann ohne Spur, obwohl sie genau
+        # dieselbe Strasse ist.
+        passend = next((g for g in gruppen
+                        if abs(g["strecke"].strecke_m - strecke.strecke_m)
+                        <= GLEICH_KM * 1000
+                        and abs(g["strecke"].fahrzeit_s - strecke.fahrzeit_s)
+                        <= GLEICH_MIN * 60), None)
+        if passend:
+            if weg["etikett"] not in passend["etiketten"]:
+                passend["etiketten"].append(weg["etikett"])
+            continue
+
+        if strecke is not basis and varianten.ist_dominiert(
+                strecke.strecke_m, strecke.fahrzeit_s,
+                basis.strecke_m, basis.fahrzeit_s):
             # Länger *und* langsamer als die schnellste Route: Der Kandidat
             # kann keinen Ladeplan haben, der ihn rettet. Hier auszusortieren
             # spart Wetterabfrage, Verbrauchsprofil und Ladeplanung - den
@@ -190,24 +226,18 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
                      basis.strecke_m / 1000, basis.fahrzeit_s / 60)
             continue
 
-        passend = next((g for g in gruppen
-                        if abs(g["strecke"].strecke_m - strecke.strecke_m)
-                        <= GLEICH_KM * 1000
-                        and abs(g["strecke"].fahrzeit_s - strecke.fahrzeit_s)
-                        <= GLEICH_MIN * 60), None)
-        if passend:
-            if weg["etikett"] not in passend["etiketten"]:
-                passend["etiketten"].append(weg["etikett"])
-            continue
         gruppen.append({"etiketten": [weg["etikett"]], "strecke": strecke})
 
     if not gruppen:
         if letzter_fehler:
             raise HTTPException(502, str(letzter_fehler)) from letzter_fehler
         raise HTTPException(502, "Route enthält zu wenige Punkte.")
+    return gruppen
 
-    # Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
-    # die - Wetter und Verbrauchsmodell rechnen.
+
+def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict]) -> list[dict]:
+    """Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
+    die - Wetter und Verbrauchsmodell rechnen."""
     kandidaten: list[dict] = []
     for gruppe in gruppen:
         strecke = gruppe["strecke"]
@@ -243,13 +273,13 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
             "fahrzeit_min": (strecke.fahrzeit_s / 60.0 / anfrage.tempo_faktor)
                 if strecke.fahrzeit_s else profil.minuten,
             "punkte": punkte, "profil": profil, "mittel": mittel})
+    return kandidaten
 
-    # Die günstigste Variante bekommt zusätzlich "sparsamste" - das ist keine
-    # vierte Anfrage, sondern jolts eigenes Verbrauchsmodell, angewandt auf
-    # die schon vorliegenden Kandidaten. Bei nur einem Kandidaten (Demo-Modus,
-    # oder wenn zwei Vorgaben dieselbe Strecke ergeben) landet das Etikett
-    # zwangsläufig dort, wo die anderen auch schon stehen.
-    varianten = []
+
+def _fahrten_speichern(db: Session, anfrage: Routenanfrage, fahrzeug,
+                       kandidaten: list[dict]) -> list[dict]:
+    """Schritt 3: je Kandidat eine Fahrt anlegen und die Antwort bauen."""
+    ergebnisse = []
     for kandidat in kandidaten:
         fahrt = models.Fahrt(
             fahrzeug_id=fahrzeug.id,
@@ -266,16 +296,15 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
             energieprofil=[p.als_dict() for p in kandidat["profil"].punkte])
         db.add(fahrt)
         db.flush()      # braucht fahrt.id, ohne schon endgültig zu committen
-        varianten.append({"fahrt_id": fahrt.id, "etiketten": kandidat["etiketten"],
-                          **_antwort(fahrt, kandidat["profil"], kandidat["mittel"],
-                                    fahrzeug)})
+        ergebnisse.append({"fahrt_id": fahrt.id,
+                           "etiketten": kandidat["etiketten"],
+                           **_antwort(fahrt, kandidat["profil"],
+                                      kandidat["mittel"], fahrzeug)})
     db.commit()
-
-    _varianten_bewerten(db, varianten, fahrzeug)
-    return {"varianten": varianten}
+    return ergebnisse
 
 
-def _varianten_bewerten(db, varianten: list, fahrzeug) -> None:
+def _varianten_bewerten(db, ergebnisse: list, fahrzeug) -> None:
     """Die Varianten am **fertigen Ladeplan** messen, nicht an der Fahrzeit.
 
     Das ist die Frage, die für ein Elektroauto zählt und die sonst niemand
@@ -295,10 +324,10 @@ def _varianten_bewerten(db, varianten: list, fahrzeug) -> None:
     unschädlich, weil **alle** Varianten dieselbe Behandlung bekommen: Für
     einen Vergleich zählt der Massstab, nicht sein Nullpunkt.
     """
-    if len(varianten) < 2:
+    if len(ergebnisse) < 2:
         return
     parameter = dict(umplanung.VORGABEN)
-    for variante in varianten:
+    for variante in ergebnisse:
         fahrt = db.get(models.Fahrt, variante["fahrt_id"])
         try:
             plan = umplanung.planen(db, fahrt, 0.0, fahrt.start_soc, parameter)
@@ -318,7 +347,7 @@ def _varianten_bewerten(db, varianten: list, fahrzeug) -> None:
             "plan_gesamt_minuten": plan.get("gesamt_minuten"),
             "plan_kosten_eur": plan.get("kosten_eur")})
 
-    bewertet = [v for v in varianten if v.get("plan_machbar")]
+    bewertet = [v for v in ergebnisse if v.get("plan_machbar")]
     if bewertet:
         min(bewertet, key=lambda v: v["plan_gesamt_minuten"])["etiketten"] \
             .append("insgesamt schnellste")
@@ -328,7 +357,7 @@ def _varianten_bewerten(db, varianten: list, fahrzeug) -> None:
 
     # Reihenfolge fürs Auge: die insgesamt schnellste zuerst - sie ist die
     # Antwort auf die Frage, die jolt beantworten soll.
-    varianten.sort(key=lambda v: "insgesamt schnellste" not in v["etiketten"])
+    ergebnisse.sort(key=lambda v: "insgesamt schnellste" not in v["etiketten"])
 
 
 @router.get("/fahrten/{fahrt_id}")
