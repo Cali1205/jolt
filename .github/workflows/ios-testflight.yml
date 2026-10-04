@@ -13,6 +13,17 @@ name: iOS TestFlight
 #   - Actions -> "iOS TestFlight" -> Run workflow, oder
 #   - git tag ios-1 && git push origin ios-1
 #
+# **Zwei Arten zu signieren, gewaehlt nach den vorhandenen Geheimnissen:**
+#
+#   - automatisch (Vorgabe): Nur der App-Store-Connect-API-Schluessel
+#     (Rolle Admin) und die Team-ID. Apple legt Zertifikat und Profil selbst
+#     an ("Cloud Managed Signing"), xcodebuild holt sie mit
+#     -allowProvisioningUpdates.
+#   - manuell: Sind zusaetzlich IOS_CERT_P12_BASE64, IOS_CERT_PASSWORD und
+#     IOS_PROFILE_BASE64 gesetzt, wird damit signiert, ganz ohne
+#     Provisioning-Magie. Der Rueckfall, falls der automatische Weg an
+#     etwas scheitert, das sich aus der Ferne nicht klaeren laesst.
+#
 # Fehlt ein Geheimnis, bricht der erste Schritt ab und nennt alle, die
 # fehlen. Das ist Absicht: Lieber hier mit einem Satz scheitern als nach vier
 # Minuten Mac-Zeit mit einer Xcode-Meldung ueber ein fehlendes Zertifikat.
@@ -48,13 +59,30 @@ jobs:
         shell: bash
         run: |
           fehlt=""
-          for name in APPLE_TEAM_ID IOS_CERT_P12_BASE64 IOS_CERT_PASSWORD \
-                      IOS_PROFILE_BASE64 APPSTORE_KEY_ID APPSTORE_ISSUER_ID \
+          for name in APPLE_TEAM_ID APPSTORE_KEY_ID APPSTORE_ISSUER_ID \
                       APPSTORE_KEY_P8_BASE64; do
             if [ -z "${!name}" ]; then fehlt="$fehlt $name"; fi
           done
           if [ -n "$fehlt" ]; then
             echo "::error::Es fehlen Repository-Geheimnisse:$fehlt - siehe ios-einrichten.md, Abschnitt 'Geheimnisse'."
+            exit 1
+          fi
+
+          # Entweder alle drei manuellen Geheimnisse oder keines: Ein halber
+          # Satz ist fast immer ein vergessener Eintrag, und stillschweigend
+          # automatisch zu signieren wuerde das verdecken.
+          manuell=0
+          for name in IOS_CERT_P12_BASE64 IOS_CERT_PASSWORD IOS_PROFILE_BASE64; do
+            if [ -n "${!name}" ]; then manuell=$((manuell + 1)); fi
+          done
+          if [ "$manuell" = "3" ]; then
+            echo "MODUS=manuell" >> "$GITHUB_ENV"
+            echo "Signatur: manuell (Zertifikat und Profil aus den Geheimnissen)."
+          elif [ "$manuell" = "0" ]; then
+            echo "MODUS=automatisch" >> "$GITHUB_ENV"
+            echo "Signatur: automatisch (Apple verwaltet Zertifikat und Profil)."
+          else
+            echo "::error::Von IOS_CERT_P12_BASE64, IOS_CERT_PASSWORD und IOS_PROFILE_BASE64 sind nur $manuell von 3 gesetzt. Entweder alle drei oder keines."
             exit 1
           fi
 
@@ -87,6 +115,7 @@ jobs:
       # im Hintergrund auf eine Passwortabfrage wartet, die niemand
       # beantwortet - und der Bau haengt bis zum Zeitlimit.
       - name: Zertifikat und Profil einrichten
+        if: env.MODUS == 'manuell'
         shell: bash
         run: |
           set -euo pipefail
@@ -144,7 +173,21 @@ jobs:
           echo "Profil: $PROFIL_NAME ($PROFIL_UUID) fuer $BUNDLE_ID"
 
       - name: Signatur im Projekt setzen
+        if: env.MODUS == 'manuell'
         run: bash tools/ios_signatur.sh ios/App/App.xcodeproj/project.pbxproj "$APPLE_TEAM_ID" "$PROFIL_NAME"
+
+      # Der API-Schluessel liegt dort, wo xcodebuild ihn erwartet. Er wird in
+      # beiden Betriebsarten gebraucht: zum Hochladen immer, zum Anlegen von
+      # Zertifikat und Profil im automatischen Modus.
+      - name: API-Schluessel ablegen
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          SCHLUESSEL="$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8"
+          echo "$APPSTORE_KEY_P8_BASE64" | base64 --decode > "$SCHLUESSEL"
+          chmod 600 "$SCHLUESSEL"
+          echo "SCHLUESSEL=$SCHLUESSEL" >> "$GITHUB_ENV"
 
       # Die Build-Nummer muss bei jedem Upload steigen, sonst weist App Store
       # Connect ihn ab. Die laufende Nummer des Workflows tut das von selbst
@@ -157,6 +200,18 @@ jobs:
         run: |
           set -o pipefail
           command -v xcbeautify >/dev/null || brew install xcbeautify
+          # Im automatischen Modus muss xcodebuild Zertifikat und Profil bei
+          # Apple anlegen duerfen. Das Team steht dann auf der Kommandozeile,
+          # weil die Vorlage keines kennt; im manuellen steht es schon im
+          # Projekt (tools/ios_signatur.sh).
+          EXTRA=()
+          if [ "$MODUS" = "automatisch" ]; then
+            EXTRA=(-allowProvisioningUpdates
+                   -authenticationKeyPath "$SCHLUESSEL"
+                   -authenticationKeyID "$APPSTORE_KEY_ID"
+                   -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+                   DEVELOPMENT_TEAM="$APPLE_TEAM_ID")
+          fi
           xcodebuild archive \
             -project ios/App/App.xcodeproj \
             -scheme App \
@@ -164,6 +219,7 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/jolt.xcarchive" \
             CURRENT_PROJECT_VERSION="$(( ${{ github.run_number }} * 10 + ${{ github.run_attempt }} ))" \
+            "${EXTRA[@]}" \
             | xcbeautify --renderer github-actions
 
       # `destination: upload` laesst xcodebuild den Bau gleich nach App Store
@@ -175,9 +231,16 @@ jobs:
         run: |
           set -euo pipefail
           set -o pipefail
-          mkdir -p "$HOME/.appstoreconnect/private_keys"
-          SCHLUESSEL="$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8"
-          echo "$APPSTORE_KEY_P8_BASE64" | base64 --decode > "$SCHLUESSEL"
+          if [ "$MODUS" = "manuell" ]; then
+            SIGNATUR="<key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict><key>${BUNDLE_ID}</key><string>${PROFIL_NAME}</string></dict>"
+            EXTRA=()
+          else
+            SIGNATUR="<key>signingStyle</key><string>automatic</string>"
+            EXTRA=(-allowProvisioningUpdates)
+          fi
 
           cat > "$RUNNER_TEMP/export.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -187,10 +250,7 @@ jobs:
             <key>method</key><string>app-store-connect</string>
             <key>destination</key><string>upload</string>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>manual</string>
-            <key>signingCertificate</key><string>Apple Distribution</string>
-            <key>provisioningProfiles</key>
-            <dict><key>${BUNDLE_ID}</key><string>${PROFIL_NAME}</string></dict>
+            ${SIGNATUR}
             <key>uploadSymbols</key><true/>
           </dict>
           </plist>
@@ -202,7 +262,8 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" \
             -authenticationKeyPath "$SCHLUESSEL" \
             -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            ${EXTRA[@]+"${EXTRA[@]}"}
 
       # Das Archiv ist das Erste, was man nach einem gescheiterten Export
       # sehen will - und es liegt nur auf dem Laeufer. Bewusst nur die

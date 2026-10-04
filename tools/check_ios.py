@@ -166,8 +166,16 @@ def teil_workflows() -> None:
     # steht in der Fehlermeldung ein Name, den niemand erklärt.
     doku = lesen("ios-einrichten.md")
     geheimnisse = sorted(set(re.findall(r"secrets\.([A-Z0-9_]+)", fliegen)))
-    pruefe(len(geheimnisse) == 7, "der Ablauf braucht sieben Geheimnisse",
-           str(geheimnisse))
+    pruefe(len(geheimnisse) == 7,
+           "der Ablauf kennt sieben Geheimnisse: vier für den automatischen "
+           "Weg, drei weitere für den manuellen", str(geheimnisse))
+    pruefe("MODUS=automatisch" in fliegen and "MODUS=manuell" in fliegen
+           and "-allowProvisioningUpdates" in fliegen,
+           "und wählt danach: ohne Zertifikat und Profil signiert Apple "
+           "selbst, mit beiden die mitgelieferten")
+    pruefe("EXTRA[@]+" in fliegen,
+           "leere Arrays werden mit set -u auf dem alten bash des Mac-Läufers "
+           "sicher aufgelöst - sonst bricht der Export im manuellen Modus ab")
     fehlen = [g for g in geheimnisse if f"`{g}`" not in doku]
     pruefe(not fehlen,
            "und die Anleitung erklärt jedes davon", str(fehlen))
