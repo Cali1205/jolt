@@ -294,10 +294,12 @@ vollständig ohne Mac erledigen; die Schritte stehen mit Befehlen in
 1. Distributionszertifikat — die Signieranfrage (CSR) erzeugt `openssl`.
 2. App-ID `de.thesmarthome.jolt` (ohne Bindestrich: Capacitor lehnt ihn ab),
    die App in App Store Connect und ein API-Schlüssel für den Upload.
-3. Zertifikat, Profil und API-Schlüssel als sieben Repository-Geheimnisse.
+3. API-Schlüssel (Rolle Admin) und Team-ID als vier Repository-Geheimnisse;
+   Zertifikat und Profil legt Apple selbst an. Wer manuell signieren will,
+   ergänzt drei weitere.
 
 Der Ablauf dahinter ist fertig: `.github/workflows/ios-testflight.yml`
-archiviert mit manueller Signatur und lädt direkt nach TestFlight hoch,
+archiviert (automatisch signiert, manuell als Rückfall) und lädt direkt nach TestFlight hoch,
 ausgelöst von Hand oder per Tag `ios-*`. `tools/ios_signatur.sh` stellt dafür
 nur das App-Ziel um (eine Kommandozeilen-Einstellung träfe auch die
 Swift-Pakete, die keine Profile kennen), `tools/ios_symbol.sh` setzt das

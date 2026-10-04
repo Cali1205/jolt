@@ -51,7 +51,16 @@ Danach merken: die **Team-ID** (10 Zeichen, Großbuchstaben und Ziffern) unter
 - Capabilities: **keine** ankreuzen. Bluetooth und Standort stehen in der
   `Info.plist` (`tools/ios_info_plist.sh`), nicht als Berechtigung hier.
 
-## 3. Distributionszertifikat — mit `openssl`
+## 3. und 4. nur für den manuellen Weg
+
+**Standard ist der automatische Weg: Du brauchst weder Zertifikat noch Profil.**
+Der Workflow meldet sich mit dem API-Schlüssel aus Schritt 6 bei Apple an, und
+Apple legt beides selbst an („Cloud Managed Signing"). Springe dann direkt
+zu Schritt 5 und 6. Die Abschnitte 3 und 4 sind der **Rückfall**, falls der
+automatische Weg scheitert (siehe Fehlertabelle): Sind die drei zusätzlichen
+Geheimnisse aus Schritt 7 gesetzt, signiert der Workflow damit.
+
+### 3. Distributionszertifikat — mit `openssl`
 
 Das Zertifikat belegt gegenüber Apple, dass der Bau von dir stammt. Den
 privaten Schlüssel dazu erzeugst du selbst; er verlässt deinen Rechner nur
@@ -86,7 +95,7 @@ openssl pkcs12 -export -legacy -inkey jolt.key -in distribution.pem \
 Pro Konto sind nur wenige Distributionszertifikate möglich, und es läuft nach
 einem Jahr ab. Nach Ablauf diesen Schritt und Schritt 4 wiederholen.
 
-## 4. Bereitstellungsprofil
+### 4. Bereitstellungsprofil
 
 <https://developer.apple.com/account/resources/profiles/add> → *Distribution*
 → **App Store Connect** → App-ID `de.thesmarthome.jolt` → das Zertifikat aus
@@ -110,7 +119,8 @@ Ohne diesen Eintrag lehnt App Store Connect den Upload ab.
 ## 6. API-Schlüssel für den Upload
 
 <https://appstoreconnect.apple.com/access/integrations/api> → *Team Keys* →
-**+** → Name `github-ci`, Zugriff **App Manager**.
+**+** → Name `github-ci`, Zugriff **Admin**. Nur mit Admin darf Apple für den
+automatischen Weg Zertifikate anlegen; App Manager reicht fürs bloße Hochladen.
 
 Die `.p8`-Datei lässt sich **nur einmal** herunterladen. Dazu merken: die
 **Key-ID** (Spalte in der Liste) und die **Issuer-ID** (oben auf der Seite).
@@ -121,23 +131,35 @@ der Lauf hochladen, ohne dass jemand einen Code eintippt.
 ## 7. Geheimnisse im Repository
 
 GitHub → Repository → *Settings → Secrets and variables → Actions → New
-repository secret*. Sieben Stück:
+repository secret*.
+
+**Automatischer Weg — diese vier genügen:**
 
 | Name | Inhalt |
 |---|---|
 | `APPLE_TEAM_ID` | die Team-ID aus Schritt 1 |
-| `IOS_CERT_P12_BASE64` | `jolt.p12`, base64-codiert (siehe unten) |
-| `IOS_CERT_PASSWORD` | das Passwort aus Schritt 3 |
-| `IOS_PROFILE_BASE64` | die `.mobileprovision` aus Schritt 4, base64-codiert |
 | `APPSTORE_KEY_ID` | die Key-ID aus Schritt 6 |
 | `APPSTORE_ISSUER_ID` | die Issuer-ID aus Schritt 6 |
 | `APPSTORE_KEY_P8_BASE64` | die `.p8` aus Schritt 6, base64-codiert |
 
-Base64 ohne Zeilenumbrüche:
+**Manueller Rückfall — zusätzlich diese drei, nur alle zusammen:**
+
+| Name | Inhalt |
+|---|---|
+| `IOS_CERT_P12_BASE64` | `jolt.p12`, base64-codiert (siehe unten) |
+| `IOS_CERT_PASSWORD` | das Passwort aus Schritt 3 |
+| `IOS_PROFILE_BASE64` | die `.mobileprovision` aus Schritt 4, base64-codiert |
+
+Sind die drei gesetzt, nimmt der Workflow sie und signiert manuell; fehlen
+alle, signiert Apple. Zwei von dreien sind ein Fehler, den der erste Schritt
+meldet.
+
+Base64 ohne Zeilenumbrüche (für die `.p8`, beim Rückfall auch für `.p12` und
+`.mobileprovision`):
 
 ```bash
-base64 -w0 jolt.p12                    # Linux / unRAID
-base64 -i jolt.p12                     # macOS
+base64 -w0 AuthKey_XXXXXXXXXX.p8       # Linux / unRAID
+base64 -i AuthKey_XXXXXXXXXX.p8        # macOS
 ```
 
 Die Ausgabe in die Zwischenablage und ins Geheimnis-Feld. **Nirgendwo
@@ -188,7 +210,10 @@ in 2 hinzufügen. Bis 100 interne Tester, ohne Prüfung.
 | Meldung | Ursache |
 |---|---|
 | `Es fehlen Repository-Geheimnisse: …` | Schritt 7 nicht vollständig; der Name muss genau stimmen. |
-| `MAC verification failed` beim Import | `.p12` ohne `-legacy` erzeugt (Schritt 3). |
+| `Von IOS_CERT_P12_BASE64, … sind nur 1 von 3 gesetzt` | Manueller Rückfall halb eingerichtet: alle drei Geheimnisse setzen oder alle löschen. |
+| `No signing certificate … found` / `Communication with Apple failed` im automatischen Modus | Schlüsselrolle ist nicht **Admin** (Schritt 6), oder Key-ID/Issuer-ID sind vertauscht. |
+| `Your team has no devices from which to generate a provisioning profile` | Der automatische Weg braucht beim Archivieren ein Entwicklungsprofil und damit ein registriertes Gerät. Entweder das iPhone unter [Geräte](https://developer.apple.com/account/resources/devices/list) eintragen (UDID) oder auf den manuellen Rückfall (Schritt 3, 4, 7) wechseln. |
+| `MAC verification failed` beim Import (manuell) | `.p12` ohne `-legacy` erzeugt (Schritt 3). |
 | `Das Profil ist für … die App heisst …` | Profil gehört zu einer anderen Bundle-ID als `capacitor.config.json`. |
 | `Das Profil enthält eine Geräteliste` | Development-/Ad-hoc-Profil statt App Store (Schritt 4). |
 | `No signing certificate "Apple Distribution" found` | Das Zertifikat im Profil ist nicht das aus der `.p12`. Beide aus demselben Durchgang. |
