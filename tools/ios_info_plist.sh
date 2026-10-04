@@ -44,6 +44,13 @@ setze_text NSLocationWhenInUseUsageDescription \
 setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
   "jolt zeichnet die Fahrt weiter auf, waehrend das Telefon gesperrt ist."
 
+# **Ausfuhrbestimmungen.** Ohne diesen Schluessel fragt App Store Connect bei
+# jedem hochgeladenen Bau von Hand nach der Verschluesselung, und der Bau
+# bleibt bis zur Antwort fuer TestFlight gesperrt. jolt benutzt nur das, was
+# iOS ohnehin mitbringt (HTTPS, CoreBluetooth) - das ist ausgenommen.
+/usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
+
 /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string bluetooth-central" "$PLIST"
@@ -51,4 +58,4 @@ setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
 
 echo "Info.plist ergaenzt:"
 /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E \
-  "NSBluetooth|NSLocation|UIBackgroundModes" -A 2 || true
+  "NSBluetooth|NSLocation|UIBackgroundModes|ITSApp" -A 2 || true

@@ -1004,7 +1004,9 @@ def main() -> int:
     ohne_beide = []
     for name in werkzeuge:
         quelle = open(os.path.join(WERKZEUGE, name), encoding="utf-8").read()
-        if "app" not in quelle:
+        # Nur wer das Paket wirklich importiert, braucht den Suchpfad - das
+        # blosse Wort "app" steht auch in Werkzeugen ohne Anwendung.
+        if not re.search(r"^\s*(from|import) app\b", quelle, re.M):
             continue
         # Entweder das Skript kennt beide Layouts selbst, oder es überlässt
         # das `pruefen.anwendung_bereitstellen`.

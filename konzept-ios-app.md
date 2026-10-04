@@ -234,8 +234,8 @@ Byte-Formeln anzufassen.
 |---|---|---|---|
 | 1 | Capacitor-Gerüst, Plugin-Hülle, `bt()` im Kern | Bluetooth läuft nativ statt über Bluefy | erledigt |
 | 2 | `keep-awake` statt Video-Behelf | Bildschirm bleibt an | erledigt |
-| 3 | CI erzeugt und baut das iOS-Projekt | „compiliert es" ohne Mac beantwortbar | erledigt |
-| 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | offen, siehe unten |
+| 3 | CI erzeugt und baut das iOS-Projekt | „compiliert es" ohne Mac beantwortbar | gebaut; der erste Lauf scheiterte an der App-ID (Bindestrich), behoben |
+| 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
 | 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | offen |
 | 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | offen |
 | 7 | SwiftUI, falls CarPlay dazukommt | siehe oben | zurückgestellt |
@@ -288,16 +288,21 @@ läuft sieben Tage — setzt genau das Xcode voraus, das hier fehlt.
 
 **Ein Apple-Developer-Programm für 99 $/Jahr ist damit Pflicht**, und zwar
 früher als auf dem SwiftUI-Weg. Was danach zu tun ist, lässt sich
-vollständig ohne Mac erledigen, aber es ist Handarbeit beim ersten Mal:
+vollständig ohne Mac erledigen; die Schritte stehen mit Befehlen in
+[`ios-einrichten.md`](ios-einrichten.md):
 
-1. Im Developer-Portal ein Distributionszertifikat anlegen. Die dafür nötige
-   Signieranfrage (CSR) erzeugt `openssl` auf jedem Rechner, ein Mac ist
-   dafür nicht nötig.
-2. In App Store Connect eine App-ID `de.the-smarthome.jolt` und einen
-   API-Schlüssel für den Upload anlegen.
-3. Zertifikat, Profil und API-Schlüssel als Repository-Geheimnisse
-   hinterlegen und den Ablauf um einen signierten Archivbau mit
-   anschliessendem Upload ergänzen.
+1. Distributionszertifikat — die Signieranfrage (CSR) erzeugt `openssl`.
+2. App-ID `de.thesmarthome.jolt` (ohne Bindestrich: Capacitor lehnt ihn ab),
+   die App in App Store Connect und ein API-Schlüssel für den Upload.
+3. Zertifikat, Profil und API-Schlüssel als sieben Repository-Geheimnisse.
+
+Der Ablauf dahinter ist fertig: `.github/workflows/ios-testflight.yml`
+archiviert mit manueller Signatur und lädt direkt nach TestFlight hoch,
+ausgelöst von Hand oder per Tag `ios-*`. `tools/ios_signatur.sh` stellt dafür
+nur das App-Ziel um (eine Kommandozeilen-Einstellung träfe auch die
+Swift-Pakete, die keine Profile kennen), `tools/ios_symbol.sh` setzt das
+jolt-Symbol statt des Capacitor-Logos, `tools/check_ios.py` prüft in der
+normalen CI alles, was sich ohne Mac prüfen lässt.
 
 Erst danach ist die App auf dem Telefon. Bis dahin beantwortet die CI nur,
 ob sie sich bauen lässt — was nicht wenig ist, aber eben noch nichts fährt.
