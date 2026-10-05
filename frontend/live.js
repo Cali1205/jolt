@@ -1114,6 +1114,7 @@ window.joltLive = (function () {
   let standGesehen = true;
   let manuellBis = 0;
   let letzteLage = null;
+  let letzteGeschwindigkeit = null;
 
   function lesenErlaubt() {
     if (donglePause) return false;
@@ -1125,6 +1126,7 @@ window.joltLive = (function () {
     fahrZustand = zustand;
     stehSeit = null; stehOrt = null; schnellFolge = 0;
     standGesehen = true; manuellBis = 0; letzteLage = null;
+    spannungBasis = []; spannungFolge = 0;
   }
 
   function entfernungM(a, b) {
@@ -1155,6 +1157,7 @@ window.joltLive = (function () {
     const ort = { lat: coords.latitude, lon: coords.longitude };
     const v = geschwindigkeitKmh(coords, ort, zeitMs || jetzt);
     if (v === null) return;
+    letzteGeschwindigkeit = v;
 
     if (v >= SCHNELL_KMH) {
       stehSeit = null; stehOrt = null;
@@ -1177,6 +1180,69 @@ window.joltLive = (function () {
     }
   }
 
+  /* Das Auto ist aus - das merkt man an der 12-V-Spannung, ohne zu fragen.
+   *
+   * `ATRV` misst der ELM-Chip selbst, es geht nichts auf den CAN-Bus (siehe
+   * `obd-kern.js: spannung`). Solange das Auto an ist oder lädt, hält der
+   * DC/DC-Wandler die Spannung oben; geht es aus, fällt sie binnen
+   * Sekunden. Das passiert **vor** dem Abschliessen - man schaltet aus,
+   * steigt aus und schliesst ab - und ist damit das Signal, das die
+   * Bewegung des Telefons nicht liefern kann.
+   *
+   * Eine feste Schwelle gibt es absichtlich nicht: Wie hoch die Spannung
+   * bei laufendem Wandler liegt, ist von Auto zu Auto verschieden. Verglichen
+   * wird mit dem Mittel aus der letzten Fahrt, und zwar nur im Stand - ein
+   * Abfall während der Fahrt ist keine Parkposition. Wer nie gefahren ist,
+   * hat keine Grundlage; dann gelten die Regeln über Stand und Weg.
+   *
+   * Lädt das Auto verriegelt, bleibt die Spannung oben, und es bleibt bei
+   * diesen Regeln. Auch das ist in Ordnung: Dann ist die Abfrage gerade
+   * *nicht* das Problem, solange nichts mehr gefragt wird. */
+  const SPANNUNG_TAKT_MS = 2000;
+  const SPANNUNG_FALL_V = 0.7;
+  const SPANNUNG_FOLGE = 2;
+  const SPANNUNG_GRUNDLAGE = 5;
+  let spannungBasis = [];
+  let spannungFolge = 0;
+  let spannungLaeuft = false;
+  let letzteSpannung = null;
+  let letzteSpannungZeit = 0;
+
+  function mittel(liste) {
+    const sortiert = [...liste].sort((a, b) => a - b);
+    const m = Math.floor(sortiert.length / 2);
+    return sortiert.length % 2 ? sortiert[m] : (sortiert[m - 1] + sortiert[m]) / 2;
+  }
+
+  async function spannungPruefen() {
+    if (spannungLaeuft || !K.zustand.sitzungId || !dongle || !autoModus
+        || fahrZustand === "geparkt" || donglePause || !window.joltObd
+        || !window.joltObd.verbunden() || !window.joltObd.spannung) return;
+    spannungLaeuft = true;
+    try {
+      const v = await window.joltObd.spannung();
+      if (typeof v !== "number" || !(v > 5 && v < 30)) return;
+      letzteSpannung = v;
+      letzteSpannungZeit = Date.now();
+      if (letzteGeschwindigkeit !== null && letzteGeschwindigkeit >= SCHNELL_KMH) {
+        spannungBasis.push(v);
+        if (spannungBasis.length > 40) spannungBasis.shift();
+        spannungFolge = 0;
+        return;
+      }
+      if (Date.now() < manuellBis || spannungBasis.length < SPANNUNG_GRUNDLAGE) return;
+      if (v < mittel(spannungBasis) - SPANNUNG_FALL_V) {
+        if (++spannungFolge >= SPANNUNG_FOLGE) {
+          zustandParken("Die 12-V-Spannung ist gefallen, das Auto ist aus");
+        }
+      } else {
+        spannungFolge = 0;
+      }
+    } finally {
+      spannungLaeuft = false;
+    }
+  }
+
   function zustandParken(grund) {
     if (fahrZustand === "geparkt") return;
     // Erst den Zustand setzen, dann trennen: `trennen()` löst den
@@ -1184,6 +1250,7 @@ window.joltLive = (function () {
     fahrZustand = "geparkt";
     stehSeit = null; stehOrt = null;
     standGesehen = false;
+    spannungBasis = []; spannungFolge = 0;
     if (dongle && window.joltObd) {
       try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
       K.melden(grund + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
@@ -1824,6 +1891,11 @@ window.joltLive = (function () {
         && window.joltObd.verbunden()) {
       try {
         const roh = await window.joltObd.satzLesen(runde++);
+        // Die 12-V-Spannung mitschreiben, solange sie frisch ist: Daran
+        // lässt sich später nachsehen, wie weit sie beim Ausschalten fällt.
+        if (letzteSpannung !== null && Date.now() - letzteSpannungZeit < 15000) {
+          roh.batt_v = letzteSpannung;
+        }
         if (typeof roh.hoehe_m !== "number" && typeof coords.altitude === "number") {
           roh.hoehe_m = Math.round(coords.altitude);
         }
@@ -2326,6 +2398,7 @@ window.joltLive = (function () {
     // Erst wenn die Fahrzeugliste steht - sonst fehlt die Akkugrösse.
     setTimeout(sitzungFortsetzen, 800);
     K.an("dongle-pause", "click", donglePausieren);
+    setInterval(spannungPruefen, SPANNUNG_TAKT_MS);
     const autoHaken = document.getElementById("dongle-auto");
     if (autoHaken) {
       autoHaken.checked = autoModus;
@@ -2347,5 +2420,6 @@ window.joltLive = (function () {
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
            dongleNutzen, verlaufZeichnen,
            fahrzustand: () => fahrZustand, lesenErlaubt, dongleVerbinden,
+           spannungPruefen,
            autoSetzen: (an) => { autoModus = !!an; } };
 })();

@@ -28,7 +28,7 @@ const K0 = {
   zustand: { sitzungId: 7 },
   melden: (t) => meldungen.push(t),
   an() {}, reglerKoppeln() {}, sitzungMerken() {}, gemerkteSitzung: () => null,
-  api: async () => ({ typ: "zustand" }),
+  api: async (pfad, opt) => { K0.letzterBody = opt && opt.body; return { typ: "zustand" }; },
 };
 const leer = () => new Proxy(function () { return ""; }, {
   get: (z, n) => (n === Symbol.toPrimitive ? () => "" : n === "style" ? {} : leer()),
@@ -47,6 +47,8 @@ const obd = {
   anschliessen: async () => { obd.verbundenFlag = true; },
   handshake: async () => true,
   satzLesen: async () => { obd.gelesen++; return { soc_roh: 180, tempo_kmh: 0 }; },
+  volt: null, spannungen: 0,
+  spannung: async () => { obd.spannungen++; return obd.volt; },
   socAusRoh: () => ({ hmi: 73 }),
   trennen() {
     obd.getrennt++;
@@ -238,6 +240,98 @@ async function runde(kmh, nordM = 0) {
   pruefe(live.fahrzustand() === "faehrt",
          "fehlt die Geschwindigkeit (iOS im Browser), wird sie aus zwei Positionen " +
          "gerechnet", live.fahrzustand());
+
+  console.log("\n12-V-Spannung: Das Auto geht aus");
+  /* ATRV misst der ELM-Chip selbst, ohne den CAN-Bus zu beruehren. Faellt die
+   * Spannung im Stand ab, ist das Auto aus - noch bevor jemand abschliesst. */
+  const ticks = async (n, kmh, nordM = 330) => {
+    for (let i = 0; i < n; i++) { vergeht(2); await fix(kmh, nordM); await live.spannungPruefen(); }
+  };
+  obd.verbundenFlag = true; obd.volt = 14.0;
+  await fix(30, 400); vergeht(1); await fix(30, 420);
+  pruefe(live.fahrzustand() === "faehrt", "Ausgangslage: Das Auto faehrt");
+  await ticks(6, 50, 440);
+  pruefe(obd.spannungen >= 6, "waehrend der Fahrt wird die Spannung gemessen",
+         String(obd.spannungen));
+
+  await ticks(3, 0, 440);
+  pruefe(live.fahrzustand() !== "geparkt",
+         "steht das Auto mit unveraenderter Spannung (Ampel, laedt, Fahrer sitzt " +
+         "drin), aendert sich nichts", live.fahrzustand());
+
+  obd.volt = 12.5;
+  await ticks(1, 0, 440);
+  pruefe(live.fahrzustand() !== "geparkt",
+         "ein einzelner niedriger Wert reicht nicht - ein Lastspruung ist keine Aus",
+         live.fahrzustand());
+  obd.volt = 14.0; await ticks(1, 0, 440);
+  obd.volt = 12.5; await ticks(1, 0, 440);
+  pruefe(live.fahrzustand() !== "geparkt",
+         "und er zaehlt nicht mit dem naechsten zusammen, wenn dazwischen " +
+         "wieder alles normal war");
+
+  const getrenntVor = obd.getrennt, aufbautenVor = obd.aufbauten;
+  const t0 = jetzt;
+  await ticks(2, 0, 440);
+  pruefe(live.fahrzustand() === "geparkt" && obd.getrennt === getrenntVor + 1,
+         "zwei niedrige Werte hintereinander im Stand: Das Auto ist aus, Dongle " +
+         "getrennt", `${live.fahrzustand()}, getrennt ${obd.getrennt - getrenntVor}`);
+  pruefe(jetzt - t0 < 10000,
+         "und zwar nach Sekunden, nicht erst nach den zehn Sekunden Stillstand " +
+         "oder den drei Minuten", `${(jetzt - t0) / 1000} s`);
+  pruefe(obd.aufbauten === aufbautenVor,
+         "ohne dass das Trennen einen Wiederaufbau ausloest");
+  pruefe(/12-V/.test(meldungen[meldungen.length - 1]),
+         "und es wird gesagt, warum", meldungen[meldungen.length - 1]);
+  pruefe(await runde(0) === 0, "danach fragt jolt das Auto nichts mehr");
+  const messungen = obd.spannungen;
+  await ticks(3, 0, 440);
+  pruefe(obd.spannungen === messungen,
+         "und misst auch die Spannung nicht mehr - der Dongle ist getrennt");
+
+  console.log("\n12-V-Spannung: Fahrt ohne Grundlage");
+  for (let i = 0; i < 3; i++) { vergeht(1); await fix(0, 440); }
+  await fix(30, 460); vergeht(1); await fix(30, 480);
+  obd.verbundenFlag = true;
+  pruefe(live.fahrzustand() === "faehrt", "wieder losgefahren");
+  obd.volt = 14.0;
+  await ticks(2, 50, 500);                       // zu wenige Werte
+  for (let i = 0; i < 3; i++) { vergeht(1); await fix(0, 500); }
+  obd.volt = 12.5;
+  await ticks(3, 0, 500);
+  pruefe(live.fahrzustand() !== "geparkt",
+         "ohne genug Werte aus der Fahrt entscheidet die Spannung nichts - die " +
+         "Regeln ueber Stand und Weg bleiben", live.fahrzustand());
+
+  console.log("\n12-V-Spannung: Abfall waehrend der Fahrt");
+  obd.volt = 14.0;
+  await fix(30, 520); vergeht(1); await fix(30, 540);
+  await ticks(6, 60, 560);
+  obd.volt = 12.5;
+  await ticks(4, 60, 600);
+  pruefe(live.fahrzustand() === "faehrt",
+         "ein Abfall bei Fahrtgeschwindigkeit ist keine Parkposition");
+
+  console.log("\n12-V-Spannung: Unbrauchbare Antwort");
+  obd.volt = null;
+  await ticks(3, 0, 600);
+  pruefe(live.fahrzustand() !== "geparkt", "keine Antwort: nichts passiert");
+  obd.volt = 99;
+  await ticks(3, 0, 600);
+  pruefe(live.fahrzustand() !== "geparkt", "und ein Unsinnswert auch nicht");
+
+  console.log("\n12-V-Spannung im Messpunkt");
+  obd.volt = 14.0; obd.verbundenFlag = true;
+  await fix(30, 620); vergeht(1); await fix(30, 640);
+  await ticks(1, 50, 650);
+  await runde(50, 660);
+  await warte(20);
+  const gesendet = K0.letzterBody && K0.letzterBody.punkte
+    ? K0.letzterBody.punkte[K0.letzterBody.punkte.length - 1] : null;
+  pruefe(!!gesendet && gesendet.rohwerte && gesendet.rohwerte.batt_v === 14,
+         "die Spannung geht mit dem Messpunkt hinaus - damit sich die Schwelle " +
+         "spaeter an echten Fahrten nachpruefen laesst",
+         JSON.stringify(gesendet && gesendet.rohwerte));
 
   Date.now = echtesNow;
   console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.`

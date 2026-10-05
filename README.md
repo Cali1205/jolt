@@ -142,8 +142,17 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   wird getrennt. Ein Fehlversuch ohne Dongle in Reichweite (Fahrrad, Bus) hört
   nach acht Versuchen bis zum nächsten Halt auf. Die Zähler im Auto laufen über
   die Lebensdauer, eine Lücke im Stand kostet deshalb keinen Verbrauch. Abschalten
-  lässt sich das mit dem Haken „Dongle nur beim Fahren lesen". Nicht erfassbar
-  ist, wer abschliesst, bevor die zehn Sekunden um sind.
+  lässt sich das mit dem Haken „Dongle nur beim Fahren lesen".
+  **Das frühere Signal ist die 12-V-Spannung:** `ATRV` misst der ELM-Chip selbst,
+  es geht kein Rahmen auf den CAN-Bus, jolt darf es also auch am abgeschlossenen
+  Auto fragen. Solange das Auto an ist oder lädt, hält der DC/DC-Wandler die
+  Spannung oben; geht es aus, fällt sie binnen Sekunden — vor dem Abschliessen.
+  Zwei niedrige Werte hintereinander im Stand, verglichen mit dem Mittel der
+  letzten Fahrt (keine feste Schwelle), trennen den Dongle sofort. Die Spannung
+  steht als `batt_v` an jedem Messpunkt, damit sich die Schwelle an echten
+  Fahrten nachprüfen lässt. Lädt das Auto verriegelt, bleibt die Spannung oben;
+  dann gelten Stand und Weg. Nicht erfassbar bleibt, wer im ersten Moment nach
+  dem Anhalten abschliesst, ohne dass das Auto je „aus" war.
 - **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin
   `@capacitor-community/background-geolocation` (`CLLocationManager` mit
   Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren
