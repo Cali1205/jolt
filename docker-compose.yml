@@ -32,6 +32,9 @@ services:
       # Routing: ohne Schluessel laesst sich keine Route rechnen.
       # Kostenloser Schluessel: https://openrouteservice.org/dev/#/signup
       ORS_API_KEY: ${ORS_API_KEY:?Bitte ORS_API_KEY in .env setzen}
+      # TomTom als Berater fuer Alternativen und Verkehr (optional). Ohne
+      # Schluessel laeuft die Planung wie bisher; gespeichert wird davon nichts.
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
       # Open Charge Map nur fuer den Import ausserhalb Deutschlands noetig.
       OCM_API_KEY: ${OCM_API_KEY:-}
       # Haertung fuer einen exponierten Host

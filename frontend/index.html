@@ -341,6 +341,16 @@ table.kurve input { padding: 6px 8px; }
         als weitere Route mit und vergleicht ihn am fertigen Ladeplan. Das
         kostet höchstens zwei Routing-Anfragen mehr.</p>
 
+      <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <input type="checkbox" id="tomtom" style="width:auto" checked>
+        <span>Verkehr und Alternativen von TomTom</span>
+      </label>
+      <p class="leer" style="padding-top:0">Fragt TomTom nach weiteren Wegen und
+        nach dem aktuellen Verkehr auf jeder Route; die Verzögerung geht in die
+        Rangfolge ein. Gespeichert wird davon nichts - die Strecke selbst
+        kommt weiter von OpenRouteService. Ohne Schlüssel auf dem Server
+        passiert nichts.</p>
+
       <label for="anbau">Aussen am Auto</label>
       <select id="anbau">
         <option value="1.0" selected>nichts</option>

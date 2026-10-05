@@ -89,6 +89,7 @@ window.joltRoute = (function () {
         luftwiderstand_faktor: Number(document.getElementById("anbau").value),
         alternative: document.getElementById("alternative").checked,
         eigene_fahrten: document.getElementById("eigene-fahrten").checked,
+        tomtom: document.getElementById("tomtom").checked,
         // Der Regler steht ganz links auf einem negativen Wert - das ist
         // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
@@ -158,21 +159,35 @@ window.joltRoute = (function () {
       /* Die Kennwerte zeigen, was zählt: die Zeit **inklusive Laden** und
        * die Kosten. Vorher standen dort Fahrzeit und kWh - beides sagt
        * nichts darüber, wann man ankommt, wenn zweimal geladen werden muss. */
+      /* Mit Verkehr, wenn TomTom ihn geliefert hat: Die Rangfolge rechnet
+       * genauso, und die Zahl am Etikett muss zu ihr passen. */
+      const mitVerkehr = typeof v.plan_gesamt_mit_verkehr_min === "number";
       const gesamt = v.plan_machbar
-        ? `${K.dauer(v.plan_gesamt_minuten)} inkl. Laden · ${v.plan_stopps} Stopps`
+        ? `${K.dauer(mitVerkehr ? v.plan_gesamt_mit_verkehr_min : v.plan_gesamt_minuten)} `
+          + `inkl. Laden${mitVerkehr ? " und Verkehr" : ""} · ${v.plan_stopps} Stopps`
         : (v.plan_machbar === false ? "kein Ladeplan möglich"
                                     : K.dauer(v.fahrzeit_minuten) + " Fahrzeit");
       const kosten = (v.plan_kosten_eur !== undefined && v.plan_kosten_eur !== null)
         ? ` · ${K.zahl(v.plan_kosten_eur, 2)} €` : "";
+      const verkehr = typeof v.verkehr_min === "number"
+        ? ` · Verkehr ${v.verkehr_min >= 0.5 ? "+" + K.zahl(v.verkehr_min, 0) + " min" : "frei"}` : "";
       knopf.innerHTML = `
         <span class="etiketten">${etiketten}</span>
-        <span class="kennwerte">${K.zahl(v.strecke_km)} km · ${gesamt}${kosten}</span>`;
+        <span class="kennwerte">${K.zahl(v.strecke_km)} km · ${gesamt}${kosten}${verkehr}</span>`;
       knopf.addEventListener("click", () => {
         if (v.fahrt_id !== (K.zustand.fahrt && K.zustand.fahrt.fahrt_id)) {
           varianteWaehlen(v);
         }
       });
       liste.appendChild(knopf);
+    }
+    /* Die Quelle nennen: Der Verkehr kommt von TomTom, und wer eine Zahl sieht,
+     * soll wissen, woher sie ist. */
+    if (letzteVarianten.some((v) => v.verkehr_quelle)) {
+      const quelle = document.createElement("div");
+      quelle.className = "unter";
+      quelle.textContent = "Verkehr: TomTom, Stand jetzt";
+      liste.appendChild(quelle);
     }
   }
 
