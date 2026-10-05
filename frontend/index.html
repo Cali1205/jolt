@@ -341,6 +341,15 @@ table.kurve input { padding: 6px 8px; }
         als weitere Route mit und vergleicht ihn am fertigen Ladeplan. Das
         kostet höchstens zwei Routing-Anfragen mehr.</p>
 
+      <label for="abfahrt">Abfahrt</label>
+      <input type="datetime-local" id="abfahrt">
+      <p class="leer" style="padding-top:0">Leer heisst jetzt. Mit einer Zeit
+        rechnet jolt den <strong>Verkehr</strong> (TomTom, zeitabhängig
+        prognostiziert - Freitag um vier ist ein anderer Tag als Sonntag um
+        drei) und das <strong>Wetter</strong> (stündliche Vorhersage, an jedem
+        Punkt für die Stunde der Ankunft) für diese Zeit. Das Wetter reicht
+        15 Tage, der Verkehr 60 Tage voraus.</p>
+
       <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
         <input type="checkbox" id="tomtom" style="width:auto" checked>
         <span>Verkehr und Alternativen von TomTom</span>

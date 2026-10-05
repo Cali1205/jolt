@@ -25,6 +25,7 @@ weitergegeben, sondern nur der Typ - sonst stünde der Schlüssel im Log.
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -35,6 +36,10 @@ BASIS = "https://api.tomtom.com/routing/1/calculateRoute"
 # Eine Antwort mit Geometrie ist für 600 km rund zweieinhalb Megabyte gross.
 TIMEOUT_GEOMETRIE_S = 40
 TIMEOUT_ZUSAMMENFASSUNG_S = 20
+
+# Eine Abfahrt in den nächsten Minuten ist "jetzt": Dann gilt der Live-Verkehr,
+# und `departAt` bleibt weg.
+JETZT_TOLERANZ = timedelta(minutes=5)
 
 MAX_ALTERNATIVEN = 5
 # Wie viele der nicht überholten Vorschläge höchstens nachgefahren werden. Jeder
@@ -54,17 +59,28 @@ class Vorschlag:
     """Ein Weg, wie TomTom ihn sieht. Nur Zahlen und Punkte, nichts Gespeichertes."""
     punkte: list = field(default_factory=list)   # [(lat, lon), ...]
     strecke_m: float = 0.0
-    zeit_s: float = 0.0              # mit Live-Verkehr
-    ohne_verkehr_s: float = 0.0
-    verkehr_s: float = 0.0           # die Verzögerung durch den Verkehr
+    zeit_s: float = 0.0              # mit Verkehr: live, oder zeitabhängig prognostiziert
+    ohne_verkehr_s: float = 0.0      # bei freiem Fluss
+    verkehr_s: float = 0.0           # Unterschied der beiden
 
 
 @dataclass
 class Verkehr:
-    """Was der Verkehr auf einer bestimmten Strecke kostet - als Zahlen."""
+    """Was der Verkehr auf einer bestimmten Strecke kostet - als Zahlen.
+
+    `verzoegerung_s` ist der **ganze** Verkehrseinfluss: Zeit mit Verkehr
+    minus Zeit bei freiem Fluss. Nicht `trafficDelayInSeconds`: Das Feld meint
+    laut Dokumentation die Verzögerung nach *Echtzeit*-Verkehrsinformation und
+    taugt deshalb für eine spätere Abfahrt nicht. Gemessen am 5.10.2026,
+    Reutlingen - Hamburg: Für Freitag 16 Uhr stand dort +6,5 min, obwohl die
+    zeitabhängige Prognose 28 Minuten über dem freien Fluss liegt; in 90 Tagen
+    stand 0,0. Die Differenz der beiden Reisezeiten ist in beiden Fällen
+    richtig und für "jetzt" die vollständigere Zahl (+21 gegen +12,9 min).
+    """
     verzoegerung_s: float
     zeit_s: float
     ohne_verkehr_s: float
+    prognose: bool = False       # zeitabhängig prognostiziert statt live
 
 
 def schluessel() -> str:
@@ -73,6 +89,27 @@ def schluessel() -> str:
 
 def verfuegbar() -> bool:
     return bool(schluessel())
+
+
+def _abfahrt(abfahrt: datetime | None) -> datetime | None:
+    """Die Abfahrt, wenn sie später als in ein paar Minuten liegt - sonst None."""
+    if abfahrt is None:
+        return None
+    if abfahrt.tzinfo is None:
+        abfahrt = abfahrt.replace(tzinfo=timezone.utc)
+    if abfahrt <= datetime.now(timezone.utc) + JETZT_TOLERANZ:
+        return None
+    return abfahrt.astimezone(timezone.utc)
+
+
+def _abfahrt_parameter(abfahrt: datetime | None) -> dict:
+    """`departAt` für TomTom: RFC 3339 in UTC. Ohne Zeitzone nähme TomTom die
+    des Startpunkts an - das hiesse, eine Uhrzeit des Browsers anders zu
+    lesen, als sie gemeint war."""
+    spaeter = _abfahrt(abfahrt)
+    if spaeter is None:
+        return {}
+    return {"departAt": spaeter.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def _orte(start, ziel, zwischen=None) -> str:
@@ -122,23 +159,30 @@ def vorschlaege_lesen(daten: dict) -> list[Vorschlag]:
         if len(punkte) < 2 or strecke <= 0:
             continue
         zeit = _zahl(z, "travelTimeInSeconds")
-        aus.append(Vorschlag(
-            punkte=punkte, strecke_m=strecke, zeit_s=zeit,
-            ohne_verkehr_s=_zahl(z, "noTrafficTravelTimeInSeconds") or zeit,
-            verkehr_s=_zahl(z, "trafficDelayInSeconds")))
+        ohne = _zahl(z, "noTrafficTravelTimeInSeconds") or zeit
+        aus.append(Vorschlag(punkte=punkte, strecke_m=strecke, zeit_s=zeit,
+                             ohne_verkehr_s=ohne, verkehr_s=max(0.0, zeit - ohne)))
     return aus
 
 
 def alternativen(start: tuple[float, float], ziel: tuple[float, float],
-                 maximal: int = MAX_ALTERNATIVEN) -> list[Vorschlag]:
-    """Die beste Route und bis zu `maximal` Alternativen, mit Geometrie."""
+                 maximal: int = MAX_ALTERNATIVEN,
+                 abfahrt: datetime | None = None) -> list[Vorschlag]:
+    """Die beste Route und bis zu `maximal` Alternativen, mit Geometrie.
+
+    Mit `abfahrt` rechnet TomTom zeitabhängig: Freitag um vier ist eine
+    andere Strasse die schnellste als Sonntag um drei (gemessen: 723 km statt
+    712 km auf Reutlingen - Hamburg).
+    """
     daten = _abfragen(_orte(start, ziel), TIMEOUT_GEOMETRIE_S,
-                      maxAlternatives=max(0, min(maximal, MAX_ALTERNATIVEN)))
+                      maxAlternatives=max(0, min(maximal, MAX_ALTERNATIVEN)),
+                      **_abfahrt_parameter(abfahrt))
     return vorschlaege_lesen(daten)
 
 
 def verkehr(start: tuple[float, float], ziel: tuple[float, float],
-            zwischen: list[tuple[float, float]]) -> Verkehr | None:
+            zwischen: list[tuple[float, float]],
+            abfahrt: datetime | None = None) -> Verkehr | None:
     """Was der Verkehr auf dem Weg durch `zwischen` gerade kostet.
 
     Nur die Zusammenfassung - ein Kilobyte statt zweieinhalb Megabyte. Die
@@ -147,7 +191,7 @@ def verkehr(start: tuple[float, float], ziel: tuple[float, float],
     nichts zu tun.
     """
     daten = _abfragen(_orte(start, ziel, zwischen), TIMEOUT_ZUSAMMENFASSUNG_S,
-                      routeRepresentation="summaryOnly")
+                      routeRepresentation="summaryOnly", **_abfahrt_parameter(abfahrt))
     routen = daten.get("routes") or []
     if not routen:
         return None
@@ -155,8 +199,9 @@ def verkehr(start: tuple[float, float], ziel: tuple[float, float],
     zeit = _zahl(z, "travelTimeInSeconds")
     if zeit <= 0:
         return None
-    return Verkehr(verzoegerung_s=_zahl(z, "trafficDelayInSeconds"), zeit_s=zeit,
-                   ohne_verkehr_s=_zahl(z, "noTrafficTravelTimeInSeconds") or zeit)
+    ohne = _zahl(z, "noTrafficTravelTimeInSeconds") or zeit
+    return Verkehr(verzoegerung_s=max(0.0, zeit - ohne), zeit_s=zeit,
+                   ohne_verkehr_s=ohne, prognose=_abfahrt(abfahrt) is not None)
 
 
 def nicht_ueberholt(vorschlaege: list[Vorschlag]) -> list[Vorschlag]:

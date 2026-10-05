@@ -25,6 +25,7 @@ Routenanfrage: Radius, Mindestleistung und Steckertyp will man durchprobieren,
 ohne jedes Mal das Routing-Kontingent zu belasten.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 
 from types import SimpleNamespace
 
@@ -111,6 +112,11 @@ class Routenanfrage(BaseModel):
     # nicht liefert, und die Verkehrsverzögerung je Route. Ohne
     # TOMTOM_API_KEY geschieht nichts. Gespeichert wird davon nichts.
     tomtom: bool = True
+    # Wann losgefahren wird. Leer heisst jetzt. Der Verkehr (TomTom, zeitabhängig
+    # prognostiziert) und das Wetter (stündliche Vorhersage, je Stützpunkt für
+    # die Stunde der Ankunft dort) gelten dann für diese Zeit. Mit Zeitzone; der
+    # Browser schickt UTC.
+    abfahrt: datetime | None = None
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
     # einmal voll beladen geplant wird: Masse geht linear in Roll- und
@@ -137,6 +143,38 @@ def orte_suchen(text: str = Query(min_length=2), land: str = ""):
                         for o in treffer]}
 
 
+# Eine Abfahrt, die höchstens so weit zurückliegt, ist "jetzt": Wer die Uhrzeit
+# im Formular eintippt, braucht eine Weile.
+ABFAHRT_TOLERANZ = timedelta(minutes=10)
+# So weit im Voraus kennt TomTom Strassensperrungen und Baustellen; darüber
+# hinaus gäbe es nur noch den üblichen Verkehr, und das Wetter reicht ohnehin
+# nur 15 Tage.
+ABFAHRT_MAX = timedelta(days=60)
+
+
+def _abfahrt_pruefen(anfrage: Routenanfrage) -> datetime | None:
+    """Die Abfahrt als Zeitpunkt mit Zeitzone - oder None für "jetzt".
+
+    Vergangenheit und fernes Datum sind ein Tippfehler und werden abgelehnt,
+    statt stillschweigend mit "jetzt" zu rechnen: Wer für Freitag plant und
+    den Montag erwischt, soll es merken, bevor er auf die Zahlen vertraut.
+    """
+    abfahrt = anfrage.abfahrt
+    if abfahrt is None:
+        return None
+    if abfahrt.tzinfo is None:
+        abfahrt = abfahrt.replace(tzinfo=timezone.utc)
+    jetzt = datetime.now(timezone.utc)
+    if abfahrt < jetzt - ABFAHRT_TOLERANZ:
+        raise HTTPException(422, "Die Abfahrt liegt in der Vergangenheit.")
+    if abfahrt > jetzt + ABFAHRT_MAX:
+        raise HTTPException(422, "Die Abfahrt liegt mehr als 60 Tage in der "
+                                 "Zukunft - so weit reicht keine Prognose.")
+    if abfahrt <= jetzt + ABFAHRT_TOLERANZ:
+        return None
+    return abfahrt
+
+
 @router.post("/route")
 def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     fahrzeug = db.get(models.Fahrzeug, anfrage.fahrzeug_id)
@@ -154,14 +192,16 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         anhaenger_cwa_m2=anfrage.anhaenger_cwa_m2,
         tempo_max_kmh=anfrage.tempo_max_kmh))
 
-    gruppen = _strecken_sammeln(anfrage, db)
-    kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen)
+    abfahrt = _abfahrt_pruefen(anfrage)
+    gruppen = _strecken_sammeln(anfrage, db, abfahrt)
+    kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen, abfahrt)
     ergebnisse = _fahrten_speichern(db, anfrage, fahrzeug, kandidaten)
 
     # Vor der Bewertung: Der Verkehr gehört in die Rangfolge.
-    _verkehr_holen(db, anfrage, ergebnisse)
+    _verkehr_holen(db, anfrage, ergebnisse, abfahrt)
     _varianten_bewerten(db, ergebnisse, fahrzeug)
-    return {"varianten": ergebnisse}
+    return {"varianten": ergebnisse,
+            "abfahrt": abfahrt.isoformat() if abfahrt else None}
 
 
 # So viele gefahrene Strecken werden höchstens als Kandidaten nachgefahren.
@@ -232,7 +272,8 @@ def _eigene_wege(db: Session, start: tuple, ziel: tuple) -> list[dict]:
     return wege
 
 
-def _tomtom_wege(start: tuple, ziel: tuple) -> list[dict]:
+def _tomtom_wege(start: tuple, ziel: tuple,
+                 abfahrt: datetime | None = None) -> list[dict]:
     """Wege nach den Vorschlägen von TomTom, die nicht überholt sind.
 
     TomTom liefert nur die Vorlage: Aus dem Vorschlag werden Zwischenpunkte
@@ -248,7 +289,7 @@ def _tomtom_wege(start: tuple, ziel: tuple) -> list[dict]:
     if not tomtom.verfuegbar():
         return []
     try:
-        vorschlaege = tomtom.alternativen(start, ziel)
+        vorschlaege = tomtom.alternativen(start, ziel, abfahrt=abfahrt)
     except tomtom.TomTomFehler as fehler:
         log.warning("TomTom: %s Die Planung läuft ohne.", fehler)
         return []
@@ -271,7 +312,8 @@ def _tomtom_wege(start: tuple, ziel: tuple) -> list[dict]:
     return wege
 
 
-def _verkehr_holen(db: Session, anfrage: Routenanfrage, ergebnisse: list) -> None:
+def _verkehr_holen(db: Session, anfrage: Routenanfrage, ergebnisse: list,
+                   abfahrt: datetime | None = None) -> None:
     """Die Verkehrsverzögerung je Route - als Zahl in der Antwort, sonst nirgends.
 
     Gefragt wird TomTom für den Weg, den jolt fährt, nicht für seinen eigenen:
@@ -293,7 +335,7 @@ def _verkehr_holen(db: Session, anfrage: Routenanfrage, ergebnisse: list) -> Non
             gegenrichtung=False, abstand_start_km=0.0, abstand_ziel_km=0.0,
             laenge_km=(fahrt.strecke_m or 0.0) / 1000.0))
         try:
-            ergebnis = tomtom.verkehr(start, ziel, zwischen)
+            ergebnis = tomtom.verkehr(start, ziel, zwischen, abfahrt=abfahrt)
         except tomtom.TomTomFehler as fehler:
             # Derselbe Fehler träfe die übrigen Anfragen auch.
             log.warning("TomTom-Verkehr: %s Die Rangfolge gilt ohne.", fehler)
@@ -301,10 +343,13 @@ def _verkehr_holen(db: Session, anfrage: Routenanfrage, ergebnisse: list) -> Non
         if ergebnis is not None:
             variante["verkehr_min"] = round(ergebnis.verzoegerung_s / 60.0, 1)
             variante["verkehr_quelle"] = "TomTom"
+            # Live oder zeitabhängig prognostiziert - die Oberfläche sagt es.
+            variante["verkehr_basis"] = "prognose" if abfahrt else "live"
 
 
 def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple,
-                 db: Session | None = None) -> list[dict]:
+                 db: Session | None = None,
+                 abfahrt: datetime | None = None) -> list[dict]:
     """Welche Routing-Anfragen gestellt werden - jede kostet vom Tageskontingent.
 
     Die erste ist die schnellste Strasse und zugleich der Massstab; alles
@@ -325,11 +370,12 @@ def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple,
     if anfrage.eigene_fahrten and db is not None:
         wege += _eigene_wege(db, start, ziel)
     if anfrage.tomtom:
-        wege += _tomtom_wege(start, ziel)
+        wege += _tomtom_wege(start, ziel, abfahrt)
     return wege
 
 
-def _strecken_sammeln(anfrage: Routenanfrage, db: Session | None = None) -> list[dict]:
+def _strecken_sammeln(anfrage: Routenanfrage, db: Session | None = None,
+                      abfahrt: datetime | None = None) -> list[dict]:
     """Schritt 1: die Wege abfragen und zusammenlegen, was dieselbe Strasse ist.
 
     Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und im
@@ -346,7 +392,7 @@ def _strecken_sammeln(anfrage: Routenanfrage, db: Session | None = None) -> list
     gruppen: list[dict] = []
     letzter_fehler: RoutingFehler | None = None
     basis = None
-    for weg in _wege_planen(anfrage, start, ziel, db):
+    for weg in _wege_planen(anfrage, start, ziel, db, abfahrt):
         try:
             strecke = anbieter.route(start, ziel,
                                      zwischenstopps=weg["zwischen"] or None,
@@ -409,7 +455,8 @@ def _deckel_faktor(profil) -> float:
     return 1.0
 
 
-def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict]) -> list[dict]:
+def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict],
+                        abfahrt: datetime | None = None) -> list[dict]:
     """Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
     die - Wetter und Verbrauchsmodell rechnen."""
     kandidaten: list[dict] = []
@@ -422,8 +469,12 @@ def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict]) -> l
         punkte, tempo = modell.ausduennen(strecke.punkte, strecke.tempo_ms)
 
         if anfrage.wetter_beruecksichtigen:
-            umgebung_fuer = wetter.entlang_route(punkte)
-            mittel = wetter.mittelwert(punkte)
+            # Für die Abfahrtszeit, nicht für jetzt: Eine Fahrt morgen früh
+            # soll nicht mit dem Wetter von heute Nachmittag gerechnet werden.
+            umgebung_fuer = wetter.entlang_route(
+                punkte, abfahrt=abfahrt, dauer_s=strecke.fahrzeit_s)
+            mittel = wetter.mittelwert(punkte, abfahrt=abfahrt,
+                                       dauer_s=strecke.fahrzeit_s)
         else:
             umgebung_fuer = None
             mittel = modell.Umgebung()

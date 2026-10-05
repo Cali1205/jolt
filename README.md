@@ -60,6 +60,22 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   der Antwort an den Browser und sonst nirgends. Scheitert TomTom, läuft die
   Planung ohne weiter. Der Schlüssel steht in der Adresse, deshalb wird nie die
   Ausnahme selbst geloggt.
+- **Abfahrtszeit.** Leer heisst jetzt; mit einer Zeit gelten Verkehr und Wetter
+  für sie. Der Verkehr kommt zeitabhängig prognostiziert von TomTom (`departAt`):
+  Freitag um vier ist eine andere Strasse die schnellste als Sonntag um drei
+  (gemessen auf Reutlingen - Hamburg: 723 statt 712 km), und der Verkehr kostet
+  +28 statt +5 Minuten. Das Wetter ist die stündliche Vorhersage, **je
+  Stützpunkt für die Stunde der Ankunft dort** (Abfahrt plus Anteil der
+  Fahrzeit); eine Fahrt morgen früh wird nicht mit dem Wetter von heute
+  Nachmittag gerechnet, die Heizung ist der grösste Einzelposten der Kälte. Die
+  Zeit geht als UTC mit Z hinaus, nie als Ortszeit ohne Zone. Abgelehnt wird
+  Vergangenheit (mehr als zehn Minuten zurück) und alles über 60 Tage; das Wetter
+  reicht nur 15 Tage, danach gilt das aktuelle, und das steht im Log.
+  **Der Verkehr ist der ganze Einfluss** — Reisezeit mit Verkehr minus Reisezeit
+  bei freiem Fluss —, nicht das Feld `trafficDelayInSeconds`: Das meint nur die
+  Echtzeit-Verzögerung und stand für Freitag 16 Uhr bei +6,5 min (zeitabhängig
+  sind es 28), in 90 Tagen bei 0,0. Für „jetzt" ist es dadurch die vollständigere
+  Zahl (+21 statt +12,9 min auf Reutlingen - Hamburg).
 - **Ladestopps planen** — die zeitoptimale Folge von Stopps und Lademengen:
   Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`, anschliessend wandern die
   Ladehübe auf feinem Raster in den steilen Teil der Ladekurve. Zu jedem Stopp
