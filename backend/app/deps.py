@@ -41,7 +41,11 @@ def passwort_pruefen(eingabe: str) -> bool:
     # compare_digest statt ==, damit die Laufzeit nichts über das Passwort
     # verrät. Bei einem Heimserver ist das Paranoia mit vernachlässigbaren
     # Kosten - aber es ist die richtige Gewohnheit.
-    return secrets.compare_digest(eingabe or "", erwartet)
+    # Bytes, nicht Strings: compare_digest wirft bei Nicht-ASCII in str einen
+    # TypeError. Ein Passwort mit Umlaut machte den Login zum 500er - und ein
+    # so eingerichtetes APP_PASSWORT hätte nie angenommen werden können.
+    return secrets.compare_digest((eingabe or "").encode("utf-8"),
+                                  erwartet.encode("utf-8"))
 
 
 def sitzung_anlegen(db: Session, geraet: str = "") -> str:
