@@ -225,11 +225,18 @@ in 2 hinzufügen. Bis 100 interne Tester, ohne Prüfung.
 
 ## Offen
 
-- **Hintergrund-Standort** (Schritt 5 im Konzept): Die `Info.plist` kennt den
-  Modus `location` schon, aber es gibt noch kein Plugin, das ihn nutzt. Bis
-  dahin zeichnet die App bei gesperrtem Bildschirm nur über Bluetooth auf,
-  nicht über GPS.
-- **Warteschlange gegen Funklöcher** (Schritt 6): ebenfalls noch nicht gebaut.
+- **Hintergrund-Standort prüfen** (Schritt 5 im Konzept): Das Plugin
+  `@capacitor-community/background-geolocation` ist eingebaut, und `live.js`
+  nutzt es in der App statt `watchPosition`. Ob iOS die App bei gesperrtem
+  Bildschirm wirklich weiterlaufen lässt, zeigt nur eine Fahrt. Einmal so
+  prüfen: Aufzeichnung starten, Telefon sperren, zehn Minuten fahren, danach
+  in der Fahrtenliste nachsehen, ob die Strecke durchgehend ist. Beim ersten
+  Start fragt iOS nach dem Standort; „Beim Verwenden der App" genügt (die
+  blaue Anzeige in der Statusleiste ist gewollt), „Immer" ist die
+  großzügigere Wahl. Eine **ältere App ohne das Plugin** läuft weiter wie
+  bisher über den Browser-Standort - sie braucht für das Plugin einen neuen
+  Bau (TestFlight).
+- **Warteschlange gegen Funklöcher** ist erledigt (Schritt 6).
 - **Push-Benachrichtigungen** laufen weiter über Web-Push im Browser; die App
   hat keine Push-Berechtigung (das bräuchte APNs und eine Capability).
 

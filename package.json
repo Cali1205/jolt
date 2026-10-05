@@ -9,6 +9,7 @@
     "ios:abgleichen": "cap sync ios"
   },
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
     "@capacitor-community/bluetooth-le": "^8.3.0",
     "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/core": "^8.5.2",

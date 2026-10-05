@@ -12,7 +12,10 @@ window.joltLive = (function () {
   const K = window.jolt;
   let steckdose = null;       // WebSocket
   let plan = null;            // der aktuell gültige Ladeplan
-  let wache = null;           // watchPosition-Kennung
+  let wache = null;           // watchPosition-Kennung, oder "nativ"
+  let nativeWacheId = null;   // Kennung des Hintergrund-Standorts der App
+  let nativeLauf = 0;         // zählt Starts, damit ein später Rückruf weiss, ob er noch gilt
+  let standortFehlerGemeldet = false;
   let letzteMeldung = 0;      // Zeitpunkt der letzten Positionsmeldung
   let dongle = false;         // liest der OBD2-Dongle mit?
   let runde = 0;
@@ -734,29 +737,139 @@ window.joltLive = (function () {
    * erfinden - der Verbrauchsfaktor läse daraus, das Auto habe seither nichts
    * verbraucht. Was zwischen zwei Meldungen gilt, rechnet der Server aus dem
    * Energieprofil hoch. */
+  function standortEingang(coords, zeitMs) {
+    const jetzt = Date.now();
+    // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
+    // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
+    // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
+    if (jetzt - letzteMeldung < MELDEABSTAND_MS) return;
+    letzteMeldung = jetzt;
+    positionMelden(coords, zeitMs);
+  }
+
   function positionVerfolgen() {
-    if (!navigator.geolocation || wache !== null) return;
+    if (wache !== null) return;
+    const nativ = nativerStandort();
+    if (nativ) { nativVerfolgen(nativ); return; }
+    webVerfolgen();
+  }
+
+  function webVerfolgen() {
+    if (!navigator.geolocation) return;
     bildschirmWachHalten();
     wache = navigator.geolocation.watchPosition(
-      (pos) => {
-        const jetzt = Date.now();
-        // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
-        // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
-        // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
-        if (jetzt - letzteMeldung < MELDEABSTAND_MS) return;
-        letzteMeldung = jetzt;
-        positionMelden(pos.coords, pos.timestamp);
-      },
+      (pos) => standortEingang(pos.coords, pos.timestamp),
       // Ein GPS-Fehler unterwegs ist kein Grund, den Nutzer zu behelligen -
       // in einem Tunnel ist er der Normalfall, und die nächste Messung kommt.
       () => {},
       { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 });
   }
 
+  /* Der Standort bei gesperrtem Telefon - nur in der iOS-App.
+   *
+   * `watchPosition` im WebView liefert nichts mehr, sobald der Bildschirm
+   * gesperrt ist: iOS friert die Seite ein, und mit ihr die Meldungen. Das
+   * Plugin dagegen läuft über `CLLocationManager` mit
+   * `allowsBackgroundLocationUpdates`; solange es Positionen liefert, hält
+   * iOS die App am Leben, und die Meldungen - samt Dongle-Lesen und
+   * Warteschlange - laufen weiter wie im Vordergrund.
+   *
+   * Entscheidend ist `backgroundMessage`: Ist sie gesetzt, bleibt der Watcher
+   * auch im Hintergrund aktiv, sonst nur im Vordergrund. Auf iOS sieht man
+   * dann die blaue Standortanzeige in der Statusleiste - gewollt.
+   *
+   * Im Browser gibt es das Plugin nicht, dort gilt `watchPosition`.
+   *
+   * **Das Plugin muss auch wirklich eingebaut sein.** Die App lädt ihre
+   * Oberfläche zur Laufzeit vom Server; dieser Code ist also sofort da, die
+   * native Klasse dagegen erst nach einem neuen App-Bau. Auf einem älteren
+   * Stand liefert `registerPlugin` einen Stellvertreter, dessen Aufrufe mit
+   * "not implemented" scheitern - und die Fahrt hätte gar keinen Standort
+   * mehr. `isPluginAvailable` fragt nach, und sonst gilt der Browser-Weg. */
+  function nativerStandort() {
+    const h = window.joltBlePlugin;
+    if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()
+        || !h.BackgroundGeolocation) return null;
+    if (typeof h.Capacitor.isPluginAvailable === "function"
+        && !h.Capacitor.isPluginAvailable("BackgroundGeolocation")) return null;
+    return h.BackgroundGeolocation;
+  }
+
+  async function nativVerfolgen(plugin) {
+    // Sofort besetzen: `addWatcher` antwortet erst nach der
+    // Berechtigungsfrage, und bis dahin darf kein zweiter Start dazwischen.
+    wache = "nativ";
+    const lauf = ++nativeLauf;
+    bildschirmWachHalten();
+    let id;
+    try {
+      id = await plugin.addWatcher({
+        backgroundTitle: "jolt zeichnet die Fahrt auf",
+        backgroundMessage: "Position und Ladestand werden weiter erfasst.",
+        requestPermissions: true,
+        distanceFilter: 0,
+      }, (ort, fehler) => {
+        if (fehler) { standortFehler(fehler); return; }
+        if (!ort || typeof ort.latitude !== "number") return;
+        standortEingang({
+          latitude: ort.latitude, longitude: ort.longitude,
+          // Das Plugin liefert null statt -1, wenn die Geschwindigkeit fehlt.
+          speed: typeof ort.speed === "number" ? ort.speed : null,
+          altitude: typeof ort.altitude === "number" ? ort.altitude : null,
+        }, ort.time);
+      });
+    } catch (fehler) {
+      // Das Plugin ging nicht - dann wenigstens der Standort im Vordergrund,
+      // statt für den Rest der Fahrt gar keinen.
+      if (lauf === nativeLauf) { wache = null; webVerfolgen(); }
+      standortFehler(fehler);
+      return;
+    }
+    // Beendet, während iOS noch fragte: den eben angelegten Watcher gleich
+    // wieder entfernen, sonst läuft er ohne Fahrt weiter und kostet Akku.
+    if (lauf !== nativeLauf || wache !== "nativ") {
+      watcherEntfernen(plugin, id);
+      return;
+    }
+    nativeWacheId = id;
+  }
+
+  function watcherEntfernen(plugin, id) {
+    // Ein Promise: Eine Ablehnung fängt kein try/catch.
+    try {
+      Promise.resolve(plugin.removeWatcher({ id })).catch(() => {});
+    } catch (e) { /* schon weg */ }
+  }
+
+  function standortFehler(fehler) {
+    if (fehler && fehler.code === "NOT_AUTHORIZED") {
+      // Einmal sagen, nicht bei jedem Rückruf. Ohne Erlaubnis gibt es bei
+      // gesperrtem Telefon keine Messpunkte - das muss man wissen, bevor man
+      // losfährt.
+      if (standortFehlerGemeldet) return;
+      standortFehlerGemeldet = true;
+      K.melden("Standort nicht erlaubt. In den iOS-Einstellungen für jolt "
+        + "Standort auf „Beim Verwenden“ oder „Immer“ stellen - sonst "
+        + "kommen bei gesperrtem Telefon keine Messpunkte an.", "warnung");
+    }
+    // Alles andere ist wie beim Browser: ein Tunnel, die nächste Messung kommt.
+  }
+
   function positionAufgeben() {
     if (wache === null) return;
-    try { navigator.geolocation.clearWatch(wache); } catch (e) {}
+    if (wache === "nativ") {
+      const id = nativeWacheId;
+      nativeWacheId = null;
+      nativeLauf++;
+      const plugin = nativerStandort();
+      if (id && plugin) {
+        watcherEntfernen(plugin, id);
+      }
+    } else {
+      try { navigator.geolocation.clearWatch(wache); } catch (e) {}
+    }
     wache = null;
+    standortFehlerGemeldet = false;
     bildschirmFreigeben();
   }
 

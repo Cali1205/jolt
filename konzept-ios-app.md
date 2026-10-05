@@ -236,8 +236,8 @@ Byte-Formeln anzufassen.
 | 2 | `keep-awake` statt Video-Behelf | Bildschirm bleibt an | erledigt |
 | 3 | CI erzeugt und baut das iOS-Projekt | „compiliert es" ohne Mac beantwortbar | gebaut; der erste Lauf scheiterte an der App-ID (Bindestrich), behoben |
 | 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
-| 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | offen |
-| 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | offen |
+| 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | eingebaut (`@capacitor-community/background-geolocation`), **ungeprüft auf dem Gerät** |
+| 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | erledigt (`live.js`, Stapel-Endpunkt `/punkte`) |
 | 7 | SwiftUI, falls CarPlay dazukommt | siehe oben | zurückgestellt |
 
 **Schritt 4 ist der Engpass, nicht der Code.** Alles bis einschliesslich 3
