@@ -21,6 +21,8 @@ class FahrzeugEingabe(BaseModel):
     c_w: float = 0.28
     stirnflaeche_m2: float = 2.30
     c_rr: float = 0.010
+    # Höchstgeschwindigkeit in km/h; None = keine Grenze im Modell.
+    max_tempo_kmh: float | None = Field(default=None, ge=30, le=300)
     eta_antrieb: float = Field(default=0.88, gt=0, le=1)
     eta_rekup: float = Field(default=0.70, ge=0, le=1)
     p_neben_w: float = 350.0
@@ -47,7 +49,8 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             "leermasse_kg": fahrzeug.leermasse_kg,
             "zuladung_kg": fahrzeug.zuladung_kg,
             "c_w": fahrzeug.c_w, "stirnflaeche_m2": fahrzeug.stirnflaeche_m2,
-            "c_rr": fahrzeug.c_rr, "eta_antrieb": fahrzeug.eta_antrieb,
+            "c_rr": fahrzeug.c_rr, "max_tempo_kmh": fahrzeug.max_tempo_kmh,
+            "eta_antrieb": fahrzeug.eta_antrieb,
             "eta_rekup": fahrzeug.eta_rekup, "p_neben_w": fahrzeug.p_neben_w,
             "waermepumpe": fahrzeug.waermepumpe,
             "reserve_soc": fahrzeug.reserve_soc, "ziel_soc": fahrzeug.ziel_soc,

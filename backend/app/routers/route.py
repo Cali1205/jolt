@@ -106,6 +106,13 @@ class Routenanfrage(BaseModel):
     # Steigungswiderstand ein, auf einer Bergstrecke sind 600 kg Unterschied
     # deutlich mehr als Kosmetik.
     zuladung_kg: float | None = Field(default=None, ge=0, le=2000)
+    # Anhänger dieser Fahrt: Masse und zusätzliche Luftwiderstandsfläche
+    # (c_w mal A, in m²). Siehe models.Fahrt.anhaenger_kg.
+    anhaenger_kg: float | None = Field(default=None, ge=0, le=3500)
+    anhaenger_cwa_m2: float | None = Field(default=None, ge=0, le=5)
+    # Harte Höchstgeschwindigkeit dieser Fahrt in km/h, etwa 100 für ein
+    # Gespann. Wirkt zusätzlich zu der des Fahrzeugs; es gilt die kleinere.
+    tempo_max_kmh: float | None = Field(default=None, ge=30, le=250)
 
 
 @router.get("/orte")
@@ -131,7 +138,10 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     # in `_fahrten_speichern`, deshalb ein leichtgewichtiger Platzhalter.
     werte = modell.Fahrzeugwerte.aus_fahrt(SimpleNamespace(
         fahrzeug=fahrzeug, zuladung_kg=anfrage.zuladung_kg,
-        luftwiderstand_faktor=anfrage.luftwiderstand_faktor))
+        luftwiderstand_faktor=anfrage.luftwiderstand_faktor,
+        anhaenger_kg=anfrage.anhaenger_kg,
+        anhaenger_cwa_m2=anfrage.anhaenger_cwa_m2,
+        tempo_max_kmh=anfrage.tempo_max_kmh))
 
     gruppen = _strecken_sammeln(anfrage)
     kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen)
@@ -235,6 +245,13 @@ def _strecken_sammeln(anfrage: Routenanfrage) -> list[dict]:
     return gruppen
 
 
+def _deckel_faktor(profil) -> float:
+    """Um wieviel die Tempo-Obergrenze die Fahrzeit streckt, mindestens 1."""
+    if profil.minuten_ohne_deckel > 0 and profil.minuten > 0:
+        return max(1.0, profil.minuten / profil.minuten_ohne_deckel)
+    return 1.0
+
+
 def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict]) -> list[dict]:
     """Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
     die - Wetter und Verbrauchsmodell rechnen."""
@@ -270,7 +287,13 @@ def _kandidaten_rechnen(anfrage: Routenanfrage, werte, gruppen: list[dict]) -> l
             # der Regler stand - waehrend Verbrauch und Ladeplan darunter
             # sich sehr wohl aenderten. Zwei verschiedene Zeiten fuer
             # dieselbe Fahrt auf demselben Schirm.
-            "fahrzeit_min": (strecke.fahrzeit_s / 60.0 / anfrage.tempo_faktor)
+            #
+            # Mit Tempo-Obergrenze kommt ein dritter Posten dazu: Was die
+            # Grenze abschneidet, kostet Zeit. `profil` kennt beide Zeiten,
+            # mit und ohne Grenze; ihr Verhältnis streckt die Zeit des
+            # Routings (1.0, solange keine Grenze greift).
+            "fahrzeit_min": (strecke.fahrzeit_s / 60.0 / anfrage.tempo_faktor
+                             * _deckel_faktor(profil))
                 if strecke.fahrzeit_s else profil.minuten,
             "punkte": punkte, "profil": profil, "mittel": mittel})
     return kandidaten
@@ -290,6 +313,9 @@ def _fahrten_speichern(db: Session, anfrage: Routenanfrage, fahrzeug,
             aussentemp_c=kandidat["mittel"].temp_c,
             zuladung_kg=anfrage.zuladung_kg,
             luftwiderstand_faktor=anfrage.luftwiderstand_faktor,
+            anhaenger_kg=anfrage.anhaenger_kg,
+            anhaenger_cwa_m2=anfrage.anhaenger_cwa_m2,
+            tempo_max_kmh=anfrage.tempo_max_kmh,
             strecke_m=kandidat["strecke_km"] * 1000,
             fahrzeit_s=kandidat["fahrzeit_min"] * 60,
             geometrie=kandidat["punkte"],
@@ -396,6 +422,9 @@ def fahrt_lesen(fahrt_id: int, db: Session = Depends(get_db)):
                          "reserve_soc": reserve_soc},
             "start_soc": fahrt.start_soc, "tempo_faktor": fahrt.tempo_faktor,
             "aussentemp_c": fahrt.aussentemp_c, "zuladung_kg": fahrt.zuladung_kg,
+            "anhaenger_kg": fahrt.anhaenger_kg,
+            "anhaenger_cwa_m2": fahrt.anhaenger_cwa_m2,
+            "tempo_max_kmh": fahrt.tempo_max_kmh,
             "strecke_km": strecke_km,
             "fahrzeit_minuten": round((fahrt.fahrzeit_s or 0) / 60.0),
             "kwh_gesamt": round(kwh_gesamt, 3) if kwh_gesamt is not None else None,
@@ -509,6 +538,8 @@ def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, le=200)
             # mit einem Entwurf. Beides muss man sehen können, sonst
             # vergleicht man Äpfel mit Birnen und wundert sich.
             "luftwiderstand_faktor": f.luftwiderstand_faktor,
+            "anhaenger_kg": f.anhaenger_kg,
+            "tempo_max_kmh": f.tempo_max_kmh,
             "aufzeichnung": bool(f.aufzeichnung),
             # Ob zu dieser Fahrt tatsächlich gefahren wurde - eine geplante
             # Fahrt ohne Live-Sitzung ist ein Entwurf, keine Erinnerung.

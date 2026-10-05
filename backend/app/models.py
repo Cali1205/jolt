@@ -76,6 +76,11 @@ class Fahrzeug(Base):
     stirnflaeche_m2 = Column(Float, nullable=False, default=2.3)
     c_rr = Column(Float, nullable=False, default=0.010)
 
+    # Höchstgeschwindigkeit des Fahrzeugs in km/h. NULL = keine Grenze im
+    # Modell. Der Tempo-Regler der Planung stösst daran an, statt das
+    # Modell mit Geschwindigkeiten rechnen zu lassen, die das Auto nicht fährt.
+    max_tempo_kmh = Column(Float)
+
     eta_antrieb = Column(Float, nullable=False, default=0.88)
     # Rekuperation holt nie alles zurück. Deshalb ist die Bilanz über einen
     # Pass negativ, obwohl man am Ende wieder auf Ausgangshöhe steht.
@@ -263,6 +268,18 @@ class Fahrt(Base):
     # sind zwei verschiedene Energiebilanzen, und der Träger ist im Sommer
     # dran und im Winter nicht.
     luftwiderstand_faktor = Column(Float, nullable=False, default=1.0)
+
+    # Ein Anhänger gehört zur Fahrt: Masse in kg und zusätzliche
+    # Luftwiderstandsfläche (c_w mal A) in m². NULL heisst "keiner".
+    # Bewusst nicht im `luftwiderstand_faktor` aufgegangen: Ein Wohnwagen
+    # verdoppelt nicht den cw-Wert des Autos, er bringt eine eigene Fläche mit
+    # und 1,3 t dazu.
+    anhaenger_kg = Column(Float)
+    anhaenger_cwa_m2 = Column(Float)
+    # Höchstgeschwindigkeit dieser Fahrt in km/h - für ein Gespann 100, als
+    # harte Grenze und nicht als Vorliebe. NULL = keine über die des
+    # Fahrzeugs hinaus.
+    tempo_max_kmh = Column(Float)
 
     # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
     # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe

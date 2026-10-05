@@ -47,6 +47,17 @@ class Fahrzeugwerte:
     akku_netto_kwh: float = 60.0
     reserve_soc: float = 10.0
     korrekturfaktor: float = 1.0
+    # Ein Anhänger ist eine eigene Grösse und kein verbogener cw-Wert des
+    # Autos: Er bringt Masse (steckt schon in `masse_kg`) und eine eigene
+    # Luftwiderstandsfläche mit, c_w mal A in m². Sie wird zu der des Autos
+    # **addiert**; dahinter fährt der Anhänger im Windschatten, deshalb ist
+    # sie kleiner als seine Stirnfläche allein.
+    cwa_zusatz_m2: float = 0.0
+    # Harte Obergrenze in m/s, None = keine. Der Tempo-Regler skaliert nur
+    # die Annahme des Routings und kennt keine Grenze: bei 130 % rechnete das
+    # Modell mit 165 km/h, die kein Serienfahrzeug fährt - und ein Gespann
+    # darf in Deutschland 100.
+    tempo_max_ms: float | None = None
 
     @classmethod
     def aus_fahrt(cls, fahrt) -> "Fahrzeugwerte":
@@ -68,6 +79,16 @@ class Fahrzeugwerte:
         # Stirnfläche ist eine Abmessung des Autos und ändert sich nicht,
         # wenn hinten Räder hängen.
         werte.c_w = werte.c_w * faktor
+
+        anhaenger_kg = getattr(fahrt, "anhaenger_kg", None)
+        if anhaenger_kg:
+            werte.masse_kg += anhaenger_kg
+            werte.cwa_zusatz_m2 = getattr(fahrt, "anhaenger_cwa_m2", None) or 0.0
+        # Die Grenze der Fahrt und die des Fahrzeugs: Es gilt die kleinere.
+        grenzen = [g for g in (getattr(fahrt, "tempo_max_kmh", None),
+                               werte.tempo_max_ms and werte.tempo_max_ms * 3.6)
+                   if g]
+        werte.tempo_max_ms = min(grenzen) / 3.6 if grenzen else None
         return werte
 
     @classmethod
@@ -82,7 +103,9 @@ class Fahrzeugwerte:
                    akku_netto_kwh=getattr(fahrzeug, "kapazitaet_kwh",
                                           fahrzeug.akku_netto_kwh),
                    reserve_soc=fahrzeug.reserve_soc,
-                   korrekturfaktor=fahrzeug.korrekturfaktor)
+                   korrekturfaktor=fahrzeug.korrekturfaktor,
+                   tempo_max_ms=(getattr(fahrzeug, "max_tempo_kmh", None) or 0)
+                   / 3.6 or None)
 
 
 @dataclass
@@ -122,6 +145,10 @@ class Profil:
     kwh_gesamt: float = 0.0
     strecke_km: float = 0.0
     minuten: float = 0.0
+    # Fahrzeit ohne die Tempo-Obergrenze. Das Verhältnis `minuten` zu diesem
+    # Wert ist, um wieviel die Grenze die Fahrt verlängert - und damit der
+    # Faktor, mit dem sich die Zeit des Routings entsprechend strecken lässt.
+    minuten_ohne_deckel: float = 0.0
     # Kilometerstand, an dem der SoC die Reserve erreicht. None = Ziel wird
     # erreicht, ohne die Reserve anzugreifen.
     reserve_bei_km: float | None = None
@@ -200,7 +227,8 @@ def segment_wh(fz: Fahrzeugwerte, strecke_m: float, hoehe_delta_m: float,
     rho = luftdichte(umgebung.temp_c, hoehe_m)
     v_luft = tempo_ms + gegenwind_ms(peilung, umgebung)
     # Quadrat mit Vorzeichen: starker Rückenwind schiebt, er bremst nicht.
-    f_luft = 0.5 * rho * fz.c_w * fz.stirnflaeche_m2 * v_luft * abs(v_luft)
+    cwa = fz.c_w * fz.stirnflaeche_m2 + fz.cwa_zusatz_m2
+    f_luft = 0.5 * rho * cwa * v_luft * abs(v_luft)
     f_roll = fz.c_rr * fz.masse_kg * G * cos_theta
     f_steig = fz.masse_kg * G * sin_theta
 
@@ -223,7 +251,8 @@ def segment_wh(fz: Fahrzeugwerte, strecke_m: float, hoehe_delta_m: float,
 def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
                    start_soc: float, umgebung_fuer=None,
                    tempo_faktor: float = 1.0,
-                   strecke_faktor: float = 1.0) -> Profil:
+                   strecke_faktor: float = 1.0,
+                   tempo_deckel: bool = True) -> Profil:
     """Das Energieprofil über die gesamte Route.
 
     `punkte`      : [[lon, lat, hoehe], ...] aus dem Routing
@@ -242,6 +271,10 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
                     wie auf die Steigung - eine längere Strecke bei gleichem
                     Höhenunterschied ist eine flachere Steigung, und genau so
                     war sie auch gefahren.
+    `tempo_deckel`: Wendet `fz.tempo_max_ms` an. Aus für **Aufzeichnungen**:
+                    Was gefahren wurde, wird nicht nachträglich auf die
+                    Grenze zurechtgestutzt - sonst stimmte der gemessene
+                    Verbrauch nicht mehr zur gemessenen Strecke.
     """
     standard = Umgebung()
     hole_umgebung = umgebung_fuer or (lambda lat, lon: standard)
@@ -251,6 +284,7 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
     kwh_kum = 0.0
     meter_kum = 0.0
     sekunden_kum = 0.0
+    sekunden_ohne_deckel = 0.0
     reserve_bei_km = None
 
     ergebnis = Profil()
@@ -273,6 +307,9 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
 
         v = (tempo_ms[i] if i < len(tempo_ms) else 25.0) * tempo_faktor
         v = max(2.0, v)
+        v_frei = v
+        if tempo_deckel and fz.tempo_max_ms:
+            v = max(2.0, min(v, fz.tempo_max_ms))
         umgebung = hole_umgebung(lat1, lon1)
         peilung = peilung_grad(lat1, lon1, lat2, lon2)
 
@@ -282,6 +319,7 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
         kwh_kum += wh / 1000.0
         meter_kum += strecke
         sekunden_kum += dauer
+        sekunden_ohne_deckel += strecke / v_frei
         soc = start_soc - (kwh_kum * 1000.0 / kapazitaet_wh) * 100.0
 
         if reserve_bei_km is None and soc <= fz.reserve_soc:
@@ -296,6 +334,7 @@ def profil_rechnen(fz: Fahrzeugwerte, punkte: list, tempo_ms: list,
     ergebnis.kwh_gesamt = round(kwh_kum, 3)
     ergebnis.strecke_km = round(meter_kum / 1000.0, 2)
     ergebnis.minuten = round(sekunden_kum / 60.0, 1)
+    ergebnis.minuten_ohne_deckel = round(sekunden_ohne_deckel / 60.0, 1)
     ergebnis.reserve_bei_km = round(reserve_bei_km, 2) if reserve_bei_km else None
     ergebnis.soc_am_ziel = round(soc, 2)
     if meter_kum > 0:

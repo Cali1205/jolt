@@ -22,6 +22,10 @@ window.joltFahrzeug = (function () {
     { name: "c_w", titel: "cw-Wert", schritt: 0.001 },
     { name: "stirnflaeche_m2", titel: "Stirnfläche (m²)", schritt: 0.01 },
     { name: "c_rr", titel: "Rollwiderstand", schritt: 0.001 },
+    { name: "max_tempo_kmh", titel: "Höchstgeschwindigkeit (km/h)", schritt: 1,
+      optional: true,
+      hinweis: "Leer = keine Grenze im Modell. Der Tempo-Regler der Planung "
+        + "stösst sonst nirgends an und rechnet bei 130 % mit 165 km/h." },
     { name: "eta_antrieb", titel: "Wirkungsgrad Antrieb", schritt: 0.01 },
     { name: "eta_rekup", titel: "Wirkungsgrad Rekuperation", schritt: 0.01 },
     { name: "p_neben_w", titel: "Grundlast (W)", schritt: 10 },
@@ -67,7 +71,8 @@ window.joltFahrzeug = (function () {
       if (!el) continue;
       if (feld.typ === "checkbox") el.checked = !!fahrzeug[feld.name];
       else if (feld.typ === "liste") el.value = (fahrzeug[feld.name] || []).join(", ");
-      else el.value = fahrzeug[feld.name] !== undefined ? fahrzeug[feld.name] : "";
+      else el.value = fahrzeug[feld.name] !== undefined && fahrzeug[feld.name] !== null
+        ? fahrzeug[feld.name] : "";
     }
     kurveFuellen(fahrzeug.ladekurve || []);
   }
@@ -81,6 +86,7 @@ window.joltFahrzeug = (function () {
       else if (feld.typ === "liste") {
         daten[feld.name] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
       } else if (feld.typ === "text" || feld.typ === "auswahl") daten[feld.name] = el.value;
+      else if (feld.optional && el.value === "") daten[feld.name] = null;
       else daten[feld.name] = Number(el.value);
     }
     daten.ladekurve = kurveLesen();
