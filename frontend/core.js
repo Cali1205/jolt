@@ -83,6 +83,8 @@ window.jolt = (function () {
     try {
       antwort = await fetch(pfad, opt);
     } catch (e) {
+      // Kein `status`: Wer puffert, unterscheidet damit "Netz weg" von
+      // "Server hat abgelehnt".
       throw new Error("Server nicht erreichbar.");
     }
 
@@ -92,7 +94,10 @@ window.jolt = (function () {
     if (!antwort.ok) {
       const grund = (daten && (daten.detail || daten.message))
         || `HTTP ${antwort.status}`;
-      throw new Error(typeof grund === "string" ? grund : JSON.stringify(grund));
+      const fehler = new Error(typeof grund === "string" ? grund
+                                                         : JSON.stringify(grund));
+      fehler.status = antwort.status;
+      throw fehler;
     }
     return daten;
   }

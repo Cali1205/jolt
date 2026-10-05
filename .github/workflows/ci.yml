@@ -90,3 +90,8 @@ jobs:
       # so einem Umbau still daneben.
       - name: Messwert-Tabelle gegen die alten Formeln pruefen
         run: node tools/check_messwerte.js
+
+      # Die Warteschlange fuer Messpunkte laeuft in live.js gegen einen
+      # Server, der ausfaellt - Funkloch, Nachreichen, abgelehnte Stapel.
+      - name: Messpunkt-Warteschlange pruefen
+        run: node tools/check_puffer.js

@@ -7,7 +7,7 @@ der später die echten Fahrzeugdaten andocken.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import (APIRouter, Depends, HTTPException, Query, WebSocket,
                      WebSocketDisconnect)
@@ -38,6 +38,40 @@ class Messpunkt(BaseModel):
     # Alles Weitere, was die Quelle liefert - wird nur aufbewahrt, nicht
     # verrechnet. Siehe models.LivePunkt.rohwerte.
     rohwerte: dict | None = None
+    # Zeitpunkt der **Messung**. Fehlt er, gilt der Eingang. Gesetzt wird er
+    # von einem Gerät, das einen Funkloch-Puffer nachreicht - sonst lägen alle
+    # nachgereichten Punkte auf derselben Sekunde, und der Zeitfaktor wäre
+    # Unsinn. Mit Zeitzone (`Z`) oder ohne; ohne gilt UTC.
+    zeit: datetime | None = None
+
+
+class MesspunktStapel(BaseModel):
+    punkte: list[Messpunkt] = Field(min_length=1, max_length=500)
+
+
+# Wie weit ein Zeitstempel von der Gegenwart abweichen darf. Nach vorn nur
+# ein Uhrenfehler des Telefons, nach hinten eine lange Fahrt ohne Netz.
+ZEIT_VORAUS = timedelta(minutes=5)
+ZEIT_ZURUECK = timedelta(hours=48)
+
+
+def _zeit_pruefen(zeit: datetime | None) -> datetime | None:
+    """Zeitstempel eines Geräts auf naives UTC bringen - oder ablehnen.
+
+    Die Datenbank führt naive UTC-Zeiten (`datetime.utcnow`). Ein Stempel mit
+    Zeitzone wird umgerechnet statt abgeschnitten, sonst wäre `+02:00` zwei
+    Stunden daneben. Ein Stempel aus der Zukunft oder aus dem Jahr 1970 ist
+    ein Uhrenfehler und würde die Reihenfolge der Punkte zerlegen.
+    """
+    if zeit is None:
+        return None
+    if zeit.tzinfo is not None:
+        zeit = zeit.astimezone(timezone.utc).replace(tzinfo=None)
+    jetzt = datetime.utcnow()
+    if zeit > jetzt + ZEIT_VORAUS or zeit < jetzt - ZEIT_ZURUECK:
+        raise HTTPException(422, "Der Zeitstempel der Messung liegt zu weit "
+                                 "von der Gegenwart entfernt.")
+    return zeit
 
 
 class LoggerMeldung(BaseModel):
@@ -64,15 +98,23 @@ def _sitzung_holen(db: Session, sitzung_id: int) -> models.LiveSitzung:
 
 
 async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
-                             punkt: quellen.Rohpunkt) -> dict:
-    """Einen Messpunkt einsortieren und alle unterrichten, die es angeht."""
+                             punkt: quellen.Rohpunkt,
+                             neu_planen: bool = True) -> dict:
+    """Einen Messpunkt einsortieren und alle unterrichten, die es angeht.
+
+    `neu_planen=False` heisst: nachgereichter Punkt, nicht die Gegenwart.
+    Dann wird weder umgeplant noch an die Zuschauer gesendet - ein Zustand
+    von vor zehn Minuten liesse die Anzeige zurückspringen.
+    """
     zustand = live_sitzung.messpunkt_aufnehmen(
         db, sitzung, punkt.lat, punkt.lon, punkt.soc,
         punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit,
-        rohwerte=punkt.rohwerte)
+        rohwerte=punkt.rohwerte, neu_planen=neu_planen)
 
     nachricht = {"typ": "zustand", "simuliert": False,
                  **live_sitzung.zustand_als_dict(zustand)}
+    if not neu_planen:
+        return nachricht
     await kanal.senden(sitzung.id, nachricht)
     # Eine geänderte Planung ist der einzige Anlass, jemanden am Steuer zu
     # stören - und der einzige, der auch ein dunkles Telefon erreichen muss.
@@ -149,7 +191,38 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
     return await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
         lat=messpunkt.lat, lon=messpunkt.lon, soc=messpunkt.soc,
         tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c,
-        rohwerte=messpunkt.rohwerte))
+        zeit=_zeit_pruefen(messpunkt.zeit), rohwerte=messpunkt.rohwerte))
+
+
+@router.post("/{sitzung_id}/punkte")
+async def punkte_melden(sitzung_id: int, stapel: MesspunktStapel,
+                        db: Session = Depends(get_db)):
+    """Mehrere Messpunkte auf einmal - der Weg für einen Funkloch-Puffer.
+
+    Die Punkte werden nach Messzeit geordnet und der Reihe nach aufgenommen;
+    die Reihenfolge der Anfrage ist gleichgültig. Neu geplant wird nur beim
+    **letzten** (siehe `messpunkt_aufnehmen`), und nur ihn gibt es als
+    Zustand an die Zuschauer. Antwort ist der Zustand nach dem letzten Punkt
+    - dieselbe Form wie bei `/punkt`, damit die Oberfläche beides gleich
+    behandelt.
+
+    Alles oder nichts: Ein ungültiger Zeitstempel lehnt den ganzen Stapel ab,
+    bevor irgendetwas geschrieben wurde.
+    """
+    sitzung = _sitzung_holen(db, sitzung_id)
+    if not sitzung.laeuft:
+        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
+    jetzt = datetime.utcnow()
+    geprueft = [(_zeit_pruefen(p.zeit) or jetzt, i, p)
+                for i, p in enumerate(stapel.punkte)]
+    geprueft.sort(key=lambda t: (t[0], t[1]))
+    nachricht = None
+    for nr, (zeit, _, p) in enumerate(geprueft):
+        nachricht = await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
+            lat=p.lat, lon=p.lon, soc=p.soc, tempo_kmh=p.tempo_kmh,
+            aussentemp_c=p.aussentemp_c, zeit=zeit, rohwerte=p.rohwerte),
+            neu_planen=nr == len(geprueft) - 1)
+    return nachricht
 
 
 class Aufzeichnungsstart(BaseModel):

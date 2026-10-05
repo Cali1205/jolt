@@ -598,6 +598,72 @@ def main() -> int:
            "danach werden keine Messpunkte mehr angenommen",
            f"HTTP {gesperrt.status_code}")
 
+    print("\nNachgereichte Messpunkte (Funkloch-Puffer)")
+    # Ein Telefon ohne Netz sammelt Punkte und reicht sie nach. Dafür braucht
+    # der Punkt eine Messzeit - sonst lägen alle auf der Sekunde des
+    # Nachreichens, und der Zeitfaktor (der den Stau abbildet) wäre Unsinn.
+    from datetime import datetime, timedelta, timezone
+    puffer = client.post(f"/api/live/start/{fahrt_id}").json()["sitzung_id"]
+    jetzt = datetime.now(timezone.utc)
+    stapel = []
+    for nr, mp in enumerate(punkte_planmaessig[:6]):
+        stapel.append({"lat": mp["lat"], "lon": mp["lon"], "soc": mp["soc"],
+                       "zeit": (jetzt - timedelta(minutes=60 - 5 * nr)
+                                ).isoformat().replace("+00:00", "Z")})
+    # Absichtlich in falscher Reihenfolge: Der Server ordnet nach Messzeit.
+    stapel.reverse()
+    antwort = client.post(f"/api/live/{puffer}/punkte", json={"punkte": stapel})
+    pruefe(antwort.status_code == 200, "ein Stapel wird angenommen",
+           f"HTTP {antwort.status_code} {antwort.text[:120]}")
+    zeiten = client.get(f"/api/live/{puffer}/punkte").json()["punkte"]
+    pruefe(len(zeiten) == 6, "alle sechs Punkte sind gespeichert", f"{len(zeiten)}")
+    ts = [z["zeit"] for z in zeiten]
+    pruefe(ts == sorted(ts) and len(set(ts)) == 6,
+           "mit ihrer Messzeit und nicht mit der des Nachreichens, in "
+           "richtiger Reihenfolge", str(ts[:3]))
+    erwartet = (jetzt - timedelta(minutes=60)).replace(tzinfo=None)
+    pruefe(abs((datetime.fromisoformat(ts[0]) - erwartet).total_seconds()) < 5,
+           "der erste Punkt liegt eine Stunde zurück - Zone Z wurde als UTC gelesen",
+           ts[0])
+    pruefe(antwort.json().get("typ") == "zustand"
+           and "verbrauchsfaktor" in antwort.json(),
+           "die Antwort hat dieselbe Form wie bei /punkt")
+
+    einzel = client.post(f"/api/live/{puffer}/punkt", json={
+        "lat": punkte_planmaessig[6]["lat"], "lon": punkte_planmaessig[6]["lon"],
+        "soc": punkte_planmaessig[6]["soc"],
+        "zeit": (jetzt - timedelta(minutes=29)).isoformat()})
+    pruefe(einzel.status_code == 200, "auch /punkt kennt die Messzeit",
+           f"HTTP {einzel.status_code}")
+
+    zukunft = client.post(f"/api/live/{puffer}/punkt", json={
+        "lat": 52.0, "lon": 10.0, "soc": 50.0,
+        "zeit": (jetzt + timedelta(hours=1)).isoformat()})
+    pruefe(zukunft.status_code == 422,
+           "ein Zeitstempel aus der Zukunft wird abgelehnt",
+           f"HTTP {zukunft.status_code}")
+    alt = client.post(f"/api/live/{puffer}/punkt", json={
+        "lat": 52.0, "lon": 10.0, "soc": 50.0, "zeit": "1970-01-01T00:00:00Z"})
+    pruefe(alt.status_code == 422, "und einer aus dem Jahr 1970",
+           f"HTTP {alt.status_code}")
+    vorher = len(client.get(f"/api/live/{puffer}/punkte").json()["punkte"])
+    halb = client.post(f"/api/live/{puffer}/punkte", json={"punkte": [
+        {"lat": 52.0, "lon": 10.0, "soc": 50.0},
+        {"lat": 52.0, "lon": 10.0, "soc": 50.0, "zeit": "1970-01-01T00:00:00Z"}]})
+    nachher = len(client.get(f"/api/live/{puffer}/punkte").json()["punkte"])
+    pruefe(halb.status_code == 422 and vorher == nachher,
+           "ein schlechter Punkt im Stapel lehnt den ganzen Stapel ab - "
+           "ohne dass der gute vorher geschrieben wurde",
+           f"HTTP {halb.status_code}, {vorher} -> {nachher} Punkte")
+    leer = client.post(f"/api/live/{puffer}/punkte", json={"punkte": []})
+    pruefe(leer.status_code == 422, "ein leerer Stapel ist ein Fehler",
+           f"HTTP {leer.status_code}")
+    client.post(f"/api/live/{puffer}/ende")
+    zu = client.post(f"/api/live/{puffer}/punkte", json={"punkte": [
+        {"lat": 52.0, "lon": 10.0, "soc": 50.0}]})
+    pruefe(zu.status_code == 409,
+           "in eine beendete Sitzung geht auch kein Stapel", f"HTTP {zu.status_code}")
+
     print("\nLogger im Auto meldet sich über das Fahrzeug")
     # Ein Gerät, das fest im Auto sitzt, kann die Sitzungs-ID nicht kennen:
     # Sie entsteht beim Losfahren in der App und wechselt mit jeder Fahrt.
