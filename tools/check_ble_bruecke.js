@@ -102,7 +102,8 @@ function falschesPlugin(protokoll) {
       async write(kennung, dienst, charakteristik, wert) {
         const text = new TextDecoder().decode(wert);
         protokoll.push("write:" + JSON.stringify(text));
-        const antwort = text.startsWith("ATZ") ? "ELM327 v2.3" : "OK";
+        const antwort = text.startsWith("ATZ") ? "ELM327 v2.3"
+          : text.startsWith("ATRV") ? "12.6V" : "OK";
         // In zwei Haeppchen, wie BLE sie liefert.
         setTimeout(() => {
           melden(alsDataView(antwort.slice(0, 3)));
@@ -145,6 +146,17 @@ async function nativerWeg() {
          "ATZ ging mit Wagenruecklauf hinaus");
   pruefe(antwort === "ELM327 v2.3",
          `die zweigeteilte Antwort wurde zusammengesetzt (kam: ${JSON.stringify(antwort)})`);
+
+  // ATRV misst der ELM-Chip selbst und fasst den CAN-Bus nicht an. Darauf
+  // haengt, ob jolt am abgeschlossenen Auto die Spannung lesen darf, ohne die
+  // Alarmanlage zu wecken - es darf also genau dieser eine Befehl hinausgehen.
+  const vorher = protokoll.length;
+  const volt = await f.joltObd.spannung();
+  const gesendet = protokoll.slice(vorher).filter((z) => z.startsWith("write:"));
+  pruefe(volt === 12.6, `spannung() liest 12,6 V aus "12.6V" (kam: ${volt})`);
+  pruefe(gesendet.length === 1 && gesendet[0] === 'write:"ATRV\\r"',
+         "und es geht nur ATRV hinaus - nichts, was den Bus weckt",
+         JSON.stringify(gesendet));
 
   // Die Kennung muss den Neustart ueberdauern, sonst kommt bei jeder Fahrt
   // der Auswahldialog.

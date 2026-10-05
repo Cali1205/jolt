@@ -132,6 +132,27 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   davon ausgenommen (gefahren ist gefahren), und aus einer Fahrt mit Anhänger
   lernt jolt keinen Fahrzeugfaktor. Die Vorgaben für die Fläche sind
   Schätzwerte, bis eine aufgezeichnete Fahrt sie bestätigt.
+- **Der Dongle fragt nur beim Fahren.** Ob das Auto verriegelt ist, lässt sich
+  nicht erfahren, ohne es zu fragen — und das Fragen löst bei verriegeltem Auto
+  die Alarmanlage aus. jolt schliesst deshalb aus der Bewegung des Telefons:
+  ab 15 km/h (zweimal hintereinander) sitzt man im Auto, dann wird gelesen und
+  der Dongle bei Bedarf wieder verbunden; nach zehn Sekunden Stillstand wird
+  nichts mehr gefragt (die Verbindung bleibt, Ampel und Stau kosten keinen
+  Neuaufbau); wer mehr als 25 m weggeht oder drei Minuten steht, dessen Dongle
+  wird getrennt. Ein Fehlversuch ohne Dongle in Reichweite (Fahrrad, Bus) hört
+  nach acht Versuchen bis zum nächsten Halt auf. Die Zähler im Auto laufen über
+  die Lebensdauer, eine Lücke im Stand kostet deshalb keinen Verbrauch. Abschalten
+  lässt sich das mit dem Haken „Dongle nur beim Fahren lesen".
+  **Das frühere Signal ist die 12-V-Spannung:** `ATRV` misst der ELM-Chip selbst,
+  es geht kein Rahmen auf den CAN-Bus, jolt darf es also auch am abgeschlossenen
+  Auto fragen. Solange das Auto an ist oder lädt, hält der DC/DC-Wandler die
+  Spannung oben; geht es aus, fällt sie binnen Sekunden — vor dem Abschliessen.
+  Zwei niedrige Werte hintereinander im Stand, verglichen mit dem Mittel der
+  letzten Fahrt (keine feste Schwelle), trennen den Dongle sofort. Die Spannung
+  steht als `batt_v` an jedem Messpunkt, damit sich die Schwelle an echten
+  Fahrten nachprüfen lässt. Lädt das Auto verriegelt, bleibt die Spannung oben;
+  dann gelten Stand und Weg. Nicht erfassbar bleibt, wer im ersten Moment nach
+  dem Anhalten abschliesst, ohne dass das Auto je „aus" war.
 - **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin
   `@capacitor-community/background-geolocation` (`CLLocationManager` mit
   Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren

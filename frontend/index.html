@@ -512,6 +512,14 @@ table.kurve input { padding: 6px 8px; }
           <button class="tat neben" id="dongle-an" style="margin:0">Dongle verbinden</button>
           <button class="tat neben" id="dongle-pause" style="margin:0" hidden>Pause</button>
         </div>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <input type="checkbox" id="dongle-auto" style="width:auto" checked>
+          <span>Dongle nur beim Fahren lesen</span>
+        </label>
+        <div class="unter" style="margin-top:2px">Im Stand fragt jolt das Auto
+          nichts und trennt den Dongle, sobald du weggehst oder das Auto drei
+          Minuten steht. Beim Losfahren (ab 15&nbsp;km/h) verbindet es sich
+          selbst wieder. So löst ein abgeschlossenes Auto keinen Alarm aus.</div>
 
         <div class="karte-fuss">
           <span id="live-hinweis">–</span>

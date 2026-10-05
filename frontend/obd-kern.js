@@ -108,6 +108,7 @@ window.joltObd = (function () {
   let warteAuf = null;       // {erfuellen, ablehnen, uhr}
   let letzteAdresse = null;
   let notifyAktuell = null;  // aktuell abonnierte Charakteristik
+  let rundeLaeuft = false;   // gerade wird ein Satz gelesen
 
   /* Ohne diese Sperre konnten zwei Verbindungsversuche gleichzeitig laufen -
    * etwa das automatische Wiederverbinden im Hintergrund und ein manuelles
@@ -259,10 +260,10 @@ window.joltObd = (function () {
    *
    * Eine Obergrenze war für den Fall gedacht, dass der Dongle gezogen wurde.
    * Genau dafür ist aber `weiter` da - es endet, wenn die Fahrt endet. Statt
-   * aufzugeben wird der Abstand nur gedeckelt: alle sechzig Sekunden
+   * aufzugeben wird der Abstand nur gedeckelt: alle zwanzig Sekunden
    * anklopfen kostet fast nichts und holt eine Verbindung zurück, sobald sie
    * wieder möglich ist. */
-  const WIEDER_HOECHSTABSTAND_MS = 60000;
+  const WIEDER_HOECHSTABSTAND_MS = 20000;
 
   async function wiederverbinden(versuch = 1, weiter = () => true) {
     if (!weiter()) return;
@@ -745,6 +746,40 @@ function befehl(text, grenze_ms = 15000) {
    * vermerkt und übergangen - eine Aufzeichnung, die wegen des
    * Kilometerstands abbricht, hätte den Ladestand mit verloren. */
   async function satzLesen(runde) {
+    rundeLaeuft = true;
+    try { return await satzLesenRoh(runde); }
+    finally { rundeLaeuft = false; }
+  }
+
+  /* Die Spannung am Diagnosestecker, in Volt - **ohne den CAN-Bus
+   * anzufassen**.
+   *
+   * `ATRV` ist ein Befehl an den ELM327-Chip selbst: Er misst die Spannung an
+   * Pin 16 mit seinem eigenen Wandler und antwortet, ohne einen einzigen
+   * Rahmen zu senden. Das ist der Unterschied zu allem anderen in dieser
+   * Datei - jede Datenkennung weckt das Fahrzeug, `ATRV` nicht. Deshalb darf
+   * es auch am abgeschlossenen Auto laufen.
+   *
+   * Es sagt etwas über den Zustand des Autos: Läuft der DC/DC-Wandler (das
+   * Auto ist an oder lädt), liegt die 12-V-Spannung deutlich über der der
+   * ruhenden Batterie. Fällt sie ab, ist das Auto ausgegangen - und zwar
+   * Sekunden bevor jemand ausgestiegen ist und abschliesst.
+   *
+   * Während einer Leserunde und bei jedem laufenden Befehl gibt es nichts
+   * zurück statt zu warten: Die Spannung ist ein Zusatz, und `befehl()`
+   * lässt ohnehin nur einen wartenden Befehl zu. */
+  async function spannung() {
+    if (!schreiben || warteAuf || rundeLaeuft) return null;
+    try {
+      const antwort = await befehl("ATRV", 3000);
+      const treffer = /(\d{1,2}\.\d+)\s*V?/i.exec(antwort || "");
+      return treffer ? parseFloat(treffer[1]) : null;
+    } catch (fehler) {
+      return null;
+    }
+  }
+
+  async function satzLesenRoh(runde) {
     const roh = {};
     for (const eintrag of MESSWERTE) {
       if (eintrag.selten && runde % eintrag.selten !== 0) continue;
@@ -872,6 +907,7 @@ function befehl(text, grenze_ms = 15000) {
     befehl,
     reihe,
     satzLesen,
+    spannung,
     socAusRoh,
     socAusAntwort,
     // Fuer die Diagnoseseite: rohe Nutzbytes einer Antwort, inklusive
