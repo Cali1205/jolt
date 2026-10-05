@@ -126,3 +126,9 @@ jobs:
       # unter vier Zeitzonen.
       - name: Zeiten pruefen
         run: node tools/check_zeit.js
+
+      # Die Einstellungen-Ansicht zeigt Zaehler und Protokoll des Dongle-
+      # Bausteins. Stimmen die nicht, fuehrt die Diagnose in die Irre - und
+      # sie wird gerade dann gebraucht, wenn im Auto etwas nicht stimmt.
+      - name: Dongle-Diagnose pruefen
+        run: node tools/check_diagnose.js

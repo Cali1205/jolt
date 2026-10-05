@@ -112,6 +112,56 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+/* ------------------------------- Einstellungen
+ *
+ * Klappen statt einer langen Seite: Man sucht hier eine Sache und kommt
+ * selten wieder. Die Diagnose-Tabelle ist breit und darf seitlich scrollen,
+ * statt die Seite zu dehnen. */
+details.einst { background: var(--flaeche); border: 1px solid var(--rand);
+  border-radius: 14px; margin-bottom: 10px; }
+details.einst > summary { cursor: pointer; padding: 14px; font-weight: 600;
+  list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+details.einst > summary::-webkit-details-marker { display: none; }
+details.einst > summary::after { content: "▸"; color: var(--gedaempft); }
+details.einst[open] > summary::after { content: "▾"; }
+details.einst .einst-inhalt { padding: 0 14px 14px; }
+details.einst h3 { font-size: 13px; color: var(--gedaempft); font-weight: 600;
+  margin: 18px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+.einst-kurz { font-weight: 400; font-size: 12px; color: var(--gedaempft);
+  margin-left: auto; }
+dl.einst-liste { margin: 0 0 10px; display: grid;
+  grid-template-columns: minmax(110px, 38%) 1fr; gap: 4px 12px; font-size: 13px; }
+dl.einst-liste dt { color: var(--gedaempft); }
+dl.einst-liste dd { margin: 0; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere; }
+dl.einst-liste dd.gut { color: var(--gut); }
+dl.einst-liste dd.warnung { color: var(--warnung); }
+dl.einst-liste dd.schlecht { color: var(--schlecht); }
+.einst-haken { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.einst-befehl { display: flex; gap: 8px; }
+.einst-befehl input { flex: 1 1 auto; min-width: 0; margin: 0;
+  font-family: ui-monospace, monospace; }
+.einst-befehl button.tat { width: auto; flex: 0 0 auto; padding-left: 22px;
+  padding-right: 22px; }
+table.diag-tabelle { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.diag-tabelle th, table.diag-tabelle td { padding: 4px 8px;
+  border-bottom: 1px solid var(--rand); text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+table.diag-tabelle th:first-child, table.diag-tabelle td:first-child {
+  text-align: left; white-space: normal; }
+table.diag-tabelle th { color: var(--gedaempft); font-weight: 400; }
+table.diag-tabelle td.schlecht { color: var(--schlecht); }
+table.diag-tabelle td.warnung { color: var(--warnung); }
+table.diag-tabelle td.still { color: var(--gedaempft); }
+pre.diag-protokoll { background: #0c1116; border: 1px solid var(--rand);
+  border-radius: 10px; padding: 8px 10px; margin: 6px 0 10px; height: 240px;
+  overflow: auto; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap;
+  overflow-wrap: anywhere; }
+pre.diag-protokoll .raus { color: var(--akzent); }
+pre.diag-protokoll .rein { color: #7fd3a0; }
+pre.diag-protokoll .auff { color: var(--schlecht); }
+pre.diag-protokoll .zeit { color: var(--gedaempft); }
+
 /* Die eine Zahl, die im Fahren zählt: Reicht es? Alles andere ist Beiwerk,
    und Beiwerk gehört nicht in dieselbe Grösse wie die Antwort. */
 #live-antwort { text-align: center; padding: 6px 0 12px; }
@@ -266,6 +316,7 @@ table.kurve input { padding: 6px 8px; }
   <button data-ansicht="live" aria-selected="false">Live</button>
   <button data-ansicht="fahrten" aria-selected="false">Fahrten</button>
   <button data-ansicht="fahrzeug" aria-selected="false">Fahrzeug</button>
+  <button data-ansicht="einstellungen" aria-selected="false">Einstellungen</button>
 </nav>
 
 <main>
@@ -716,6 +767,122 @@ table.kurve input { padding: 6px 8px; }
     </div>
   </section>
 
+  <!-- ------------------------------- Einstellungen -->
+  <!-- Was man selten braucht: Konto, Benachrichtigungen, Dongle, Speicher.
+       Und die Diagnose des Dongles - sie steht hier und nicht im Fahrbild,
+       weil man sie ansieht, wenn etwas nicht stimmt, nicht beim Fahren.
+       Jeder Abschnitt ist eine Klappe; offen ist nur, was man beim Öffnen
+       am ehesten sucht. -->
+  <section id="ansicht-einstellungen" hidden>
+
+    <details class="einst" open>
+      <summary>Konto und Server</summary>
+      <div class="einst-inhalt">
+        <dl class="einst-liste" id="einst-server"></dl>
+        <div id="einst-konto-zeile">
+          <button class="tat neben" id="einst-abmelden">Auf diesem Gerät abmelden</button>
+        </div>
+        <p class="leer" id="einst-konto-hinweis" style="padding-top:6px"></p>
+      </div>
+    </details>
+
+    <details class="einst">
+      <summary>Benachrichtigungen</summary>
+      <div class="einst-inhalt">
+        <p class="leer" style="padding-top:0">Eine geänderte Ladeplanung meldet
+          jolt aufs Telefon – auch bei dunklem Bildschirm.</p>
+        <dl class="einst-liste" id="einst-push"></dl>
+        <button class="tat neben" id="einst-push-an">Aktivieren</button>
+        <button class="tat neben" id="einst-push-aus">Auf diesem Gerät abmelden</button>
+        <button class="tat neben" id="einst-push-probe">Testnachricht senden</button>
+      </div>
+    </details>
+
+    <details class="einst">
+      <summary>Dongle</summary>
+      <div class="einst-inhalt">
+        <label class="einst-haken">
+          <input type="checkbox" id="einst-auto" style="width:auto">
+          <span>Dongle nur beim Fahren lesen</span>
+        </label>
+        <p class="leer" style="padding-top:0">Im Stand fragt jolt das Auto nichts
+          und trennt den Dongle – ein abgeschlossenes Auto löst sonst die
+          Alarmanlage aus. Dieselbe Einstellung wie in der Live-Ansicht.</p>
+        <button class="tat neben" id="einst-trennen">Dongle trennen</button>
+        <button class="tat neben" id="einst-vergessen">Gemerktes Gerät vergessen</button>
+        <p class="leer" style="padding-top:6px">Verbunden wird in der Live-Ansicht
+          (Knopf „Dongle verbinden“) oder auf <a href="/obd">der Diagnoseseite</a>.
+          Das Gerät vergessen heisst: Beim nächsten Verbinden fragt jolt wieder,
+          welcher Dongle es sein soll.</p>
+      </div>
+    </details>
+
+    <details class="einst" id="einst-diagnose">
+      <summary>Dongle-Diagnose <span class="einst-kurz" id="einst-diag-kurz">–</span></summary>
+      <div class="einst-inhalt">
+        <h3>Verbindung</h3>
+        <dl class="einst-liste" id="diag-verbindung"></dl>
+
+        <h3>Messwerte</h3>
+        <p class="leer" style="padding-top:0">Je Messgrösse: letzter Wert und wie
+          alt er ist, wie oft er kam (<b>ok</b>), leer blieb (<b>leer</b> –
+          das Steuergerät antwortet, aber die Datenkennung passt nicht zum
+          Fahrzeug) oder ausblieb (<b>aus</b> – keine Antwort), und wie lange
+          die Abfrage dauert.</p>
+        <div style="overflow-x:auto">
+          <table class="diag-tabelle" id="diag-messwerte"></table>
+        </div>
+
+        <h3>Runden und Befehle</h3>
+        <dl class="einst-liste" id="diag-runden"></dl>
+        <button class="tat neben" id="diag-zuruecksetzen">Zähler zurücksetzen</button>
+
+        <h3>Protokoll</h3>
+        <label class="einst-haken">
+          <input type="checkbox" id="diag-auffaellig" style="width:auto">
+          <span>Nur Auffälliges (Fehler, Zeitüberschreitungen, Abrisse)</span>
+        </label>
+        <pre id="diag-protokoll" class="diag-protokoll"></pre>
+        <button class="tat neben" id="diag-kopieren">Bericht kopieren</button>
+        <button class="tat neben" id="diag-protokoll-leeren">Protokoll leeren</button>
+        <p class="leer" style="padding-top:6px">Der Bericht enthält Fassung,
+          Verbindungsdaten, Zähler, die Messwert-Tabelle und das Protokoll – nichts
+          davon ist ein Geheimnis. Zum Einfügen in eine Nachricht, wenn ein Wert
+          fehlt.</p>
+
+        <h3>Befehl senden</h3>
+        <p class="leer" style="padding-top:0">Ein ELM327-Befehl (<code>ATRV</code>,
+          <code>ATDP</code>) oder eine Abfrage (<code>22028C</code>). Die Antwort
+          steht im Protokoll. <strong>Während einer laufenden Fahrt</strong> stört
+          ein Befehl die Messung: Adresse und Filter werden danach neu gesetzt,
+          eine Runde kann ausfallen.</p>
+        <div class="einst-befehl">
+          <input type="text" id="diag-befehl" placeholder="ATRV" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false"
+                 enterkeyhint="send">
+          <button class="tat" id="diag-senden" style="margin:0">Senden</button>
+        </div>
+        <label class="einst-haken" id="diag-fahrt-zeile" hidden>
+          <input type="checkbox" id="diag-fahrt-ok" style="width:auto">
+          <span>Trotz laufender Fahrt senden</span>
+        </label>
+      </div>
+    </details>
+
+    <details class="einst">
+      <summary>Speicher und App</summary>
+      <div class="einst-inhalt">
+        <dl class="einst-liste" id="einst-speicher"></dl>
+        <button class="tat neben" id="einst-puffer-leeren" hidden>Wartende Messpunkte verwerfen</button>
+        <button class="tat neben" id="einst-cache-leeren">App-Cache zurücksetzen</button>
+        <p class="leer" style="padding-top:6px">Der Cache hält die Oberfläche für
+          schlechten Empfang bereit. Setzt du ihn zurück, lädt jolt beim nächsten
+          Start alles frisch – der Weg, wenn nach einem Update noch die alte
+          Fassung erscheint. Anmeldung und Fahrzeuge bleiben erhalten.</p>
+      </div>
+    </details>
+  </section>
+
   <!-- Genau eine Karte für die ganze App. Zwei Canvas-Elemente hiessen zwei
        Kachel-Caches und zwei Zustände, die auseinanderlaufen können. -->
   <div id="karte-block" class="karte-block">
@@ -742,6 +909,7 @@ table.kurve input { padding: 6px 8px; }
 <script src="/static/live.js"></script>
 <script src="/static/fahrten.js"></script>
 <script src="/static/fahrzeug.js"></script>
+<script src="/static/einstellungen.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -14,6 +14,9 @@ window.joltApp = (function () {
     karteUmhaengen(name);
     // Die Fahrtenliste holt sich ihre Daten erst, wenn jemand hinsieht.
     if (name === "fahrten" && window.joltFahrten) window.joltFahrten.anzeigen();
+    // Die Einstellungen aktualisieren sich sekündlich - aber nur, solange man
+    // sie ansieht.
+    if (window.joltEinstellungen) window.joltEinstellungen.anzeigen(name === "einstellungen");
   }
 
   /* Die eine Karte wandert in die gerade sichtbare Ansicht.
@@ -49,6 +52,7 @@ window.joltApp = (function () {
     window.joltLive.einrichten();
     window.joltFahrten.einrichten();
     window.joltFahrzeug.einrichten();
+    window.joltEinstellungen.einrichten();
 
     let status;
     try {

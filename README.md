@@ -138,6 +138,16 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Alle Messwerte stehen live im Dashboard, samt Alter je Wert: Eine
   eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
   und wie, steht weiter unten.
+- **Einstellungen und Dongle-Diagnose** — der Reiter „Einstellungen“ sammelt,
+  was man selten braucht: Konto und Server, Benachrichtigungen, die
+  Dongle-Optionen (nur beim Fahren lesen, trennen, Gerät vergessen) und den
+  Speicher (wartende Messpunkte, App-Cache zurücksetzen). Die **Dongle-Diagnose**
+  zeigt live: Verbindung (Zugang, Gerät, Abrisse), je Messgrösse letzten Wert,
+  Alter, Treffer (`ok`), leere Antworten und Ausfälle samt Antwortzeit, die
+  Rundenstatistik, das Protokoll des Dongles (filterbar auf Auffälliges), eine
+  Befehlskonsole und einen **Bericht zum Kopieren** — der Weg, einem anderen zu
+  zeigen, warum ein Wert fehlt. Der Dongle-Baustein führt dafür selbst Buch
+  (`joltObd.diagnose()`), unabhängig davon, welche Ansicht ihn verbunden hat.
 - **Die Strecke aus dem Kilometerstand** statt aus dem GPS. Bei
   Zwölf-Sekunden-Takt liegen bei Landstrassentempo hundertsechzig Meter
   zwischen zwei Punkten, und die Luftlinie schneidet jede Kurve ab; ein

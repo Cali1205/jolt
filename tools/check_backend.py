@@ -1257,6 +1257,18 @@ def main() -> int:
 
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
 
+    # Die Einstellungen: ein Reiter, ein Abschnitt, ein Skript - und im
+    # Service-Worker-Gerüst, sonst fehlt die Ansicht bei schlechtem Empfang.
+    seite_text = client.get("/").text
+    sw_text = client.get("/sw.js").text
+    pruefe('data-ansicht="einstellungen"' in seite_text
+           and 'id="ansicht-einstellungen"' in seite_text
+           and "/static/einstellungen.js" in seite_text,
+           "die Einstellungen haben Reiter, Abschnitt und Skript")
+    pruefe(client.get("/static/einstellungen.js").status_code == 200
+           and "/static/einstellungen.js" in sw_text,
+           "das Skript wird ausgeliefert und steht im Gerüst des Service Workers")
+
     # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
     # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste steht als Tabelle
     # in messwerte.js, der Interpreter in obd-kern.js, und die Oberflaeche
