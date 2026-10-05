@@ -210,6 +210,24 @@ window.joltRoute = (function () {
 
   /* ---------- Ergebnis ---------- */
 
+  /* Die Verkehrskachel der gewählten Route - oder nichts.
+   *
+   * Die Angabe liegt nicht an der gespeicherten Fahrt (von TomTom wird nichts
+   * gespeichert), sondern nur in der Antwort der letzten Planung. Gesucht
+   * wird sie deshalb dort, über die Fahrt-ID: So erscheint sie auch bei
+   * einer einzelnen Route, wo es keine Variantenkarten gibt. Eine Fahrt aus
+   * der Liste, zu der keine Planung vorliegt, bekommt keine Kachel - ein
+   * Verkehr von gestern wäre schlimmer als keiner. */
+  function verkehrKachel(fahrt, varianten) {
+    const v = (varianten || []).find((x) => x.fahrt_id === fahrt.fahrt_id);
+    if (!v || typeof v.verkehr_min !== "number") return "";
+    const text = v.verkehr_min >= 0.5 ? "+" + K.zahl(v.verkehr_min, 0) + " min" : "frei";
+    // Ab einer Viertelstunde fällt es auf: Das ist der Unterschied zwischen
+    // "ein bisschen Verkehr" und "eine andere Ankunftszeit".
+    return K.wertKachel("Verkehr · " + (v.verkehr_quelle || "TomTom"), text,
+                        v.verkehr_min >= 15 ? "schlecht" : "");
+  }
+
   function anzeigen(fahrt) {
     document.getElementById("ergebnis").hidden = false;
 
@@ -217,6 +235,7 @@ window.joltRoute = (function () {
     document.getElementById("kennzahlen").innerHTML = [
       K.wertKachel("Strecke", K.zahl(fahrt.strecke_km) + " km"),
       K.wertKachel("Fahrzeit", K.dauer(fahrt.fahrzeit_minuten)),
+      verkehrKachel(fahrt, letzteVarianten),
       K.wertKachel("Energie", K.zahl(fahrt.kwh_gesamt, 1) + " kWh"),
       K.wertKachel("Verbrauch", K.zahl(fahrt.verbrauch_kwh_100km, 1) + " kWh/100"),
       fahrt.reicht
@@ -626,6 +645,6 @@ window.joltRoute = (function () {
     });
   }
 
-  return { einrichten, anzeigen, saeulenLaden, ladeplanLaden, varianteWaehlen,
+  return { einrichten, anzeigen, verkehrKachel, saeulenLaden, ladeplanLaden, varianteWaehlen,
            fahrtLaden };
 })();

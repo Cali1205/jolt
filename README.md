@@ -50,7 +50,10 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Alternative überholt, das spart die meisten Anfragen. Die
   Verkehrsverzögerung wird je fertiger Route abgefragt, indem Zwischenpunkte
   TomTom auf dieselbe Strasse zwingen, und geht in die Rangfolge ein
-  („insgesamt schnellste" rechnet Verkehr mit). **Gespeichert wird nichts von
+  („insgesamt schnellste" rechnet Verkehr mit); sie steht an jeder Variantenkarte
+  und, auch bei einer einzelnen Route, als Kachel bei den Kennzahlen. Zu einer
+  aus der Liste geladenen Fahrt gibt es keine — ein Verkehr von gestern wäre
+  schlimmer als keiner. **Gespeichert wird nichts von
   TomTom**: Dessen Bedingungen erlauben Ergebnisse nur kurzzeitig im
   Zwischenspeicher und verbieten abgeleitete Datenbanken. Aus einem Vorschlag
   werden nur Zwischenpunkte, die das Routing abfährt; die Verzögerung steht in
