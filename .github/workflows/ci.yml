@@ -125,3 +125,8 @@ jobs:
       # unter vier Zeitzonen.
       - name: Zeiten pruefen
         run: node tools/check_zeit.js
+
+      # Das Anzeigemodell fuer CarPlay und Widget: wenige Zahlen, gedrosselt,
+      # ohne erfundene Felder - ohne Swift und ohne Mac pruefbar.
+      - name: Anzeigemodell pruefen
+        run: node tools/check_anzeige.js

@@ -208,6 +208,11 @@ window.joltLive = (function () {
   }
 
   function zustandAnzeigen(z) {
+    // Das Anzeigemodell für alles ausserhalb dieser Oberfläche (CarPlay,
+    // Widget): wenige Zahlen, gedrosselt. Ein Fehler dort darf die Anzeige
+    // hier nie mitreissen.
+    try { if (window.joltAnzeige) window.joltAnzeige.melden(z); }
+    catch (e) { console.log("[anzeige]", e && e.message); }
     const fahrt = K.zustand.fahrt;
     const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
 
@@ -2165,6 +2170,9 @@ window.joltLive = (function () {
     K.zustand.sitzungId = null;
     K.sitzungMerken(null);
     fahrzustandStart("steht");
+    // Die Fahrt ist zu Ende: Die Anzeige im Auto soll verschwinden.
+    try { if (window.joltAnzeige) window.joltAnzeige.beenden(); }
+    catch (e) { console.log("[anzeige]", e && e.message); }
     plan = null;
     const kasten = document.getElementById("live-aenderung");
     if (kasten) kasten.hidden = true;
