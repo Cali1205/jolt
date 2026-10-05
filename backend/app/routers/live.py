@@ -6,15 +6,17 @@ Position und Ladestand, mehr braucht es nicht. Das ist die Schnittstelle, an
 der später die echten Fahrzeugdaten andocken.
 """
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import (APIRouter, Depends, HTTPException, Query, WebSocket,
-                     WebSocketDisconnect)
+from fastapi import (APIRouter, Depends, HTTPException, Query, Request,
+                     WebSocket, WebSocketDisconnect)
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from .. import deps, models, push
+from .. import deps, models, push, security
 from ..zeit import utc_iso
 from ..database import SessionLocal, get_db
 from ..live import aufraeumen, kanal, quellen, simulator, umplanung
@@ -176,15 +178,16 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
             "plan": sitzung.plan}
 
 
-@router.post("/{sitzung_id}/punkt")
+@router.post("/{sitzung_id}/punkt", dependencies=[Depends(deps.aktuelle_sitzung)])
 async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
                        db: Session = Depends(get_db)):
     """Einen Messpunkt einsortieren.
 
-    Ohne Anmeldung erreichbar, damit ein Logger im Auto nichts über Tokens
-    wissen muss - die Sitzungs-ID ist der Schlüssel. Geschrieben wird nur in
-    eine bereits laufende Sitzung, und die legt ausschliesslich an, wer
-    angemeldet ist.
+    Nur mit Anmeldung (`X-Token`). Vorher stand hier, die Sitzungs-ID sei
+    der Schlüssel - eine fortlaufende Zahl, die jeder raten konnte, mit der
+    sich Position und Ladestand lesen und falsche Messpunkte einspielen
+    liessen. Ein Gerät im Auto ohne Anmeldung nimmt `/melden` mit dem
+    Logger-Token seines Fahrzeugs.
     """
     sitzung = _sitzung_holen(db, sitzung_id)
     if not sitzung.laeuft:
@@ -195,7 +198,7 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
         zeit=_zeit_pruefen(messpunkt.zeit), rohwerte=messpunkt.rohwerte))
 
 
-@router.post("/{sitzung_id}/punkte")
+@router.post("/{sitzung_id}/punkte", dependencies=[Depends(deps.aktuelle_sitzung)])
 async def punkte_melden(sitzung_id: int, stapel: MesspunktStapel,
                         db: Session = Depends(get_db)):
     """Mehrere Messpunkte auf einmal - der Weg für einen Funkloch-Puffer.
@@ -311,7 +314,8 @@ def aufzeichnung_starten(start: Aufzeichnungsstart,
 
 
 @router.post("/melden")
-async def logger_melden(meldung: LoggerMeldung, db: Session = Depends(get_db)):
+async def logger_melden(meldung: LoggerMeldung, request: Request,
+                        db: Session = Depends(get_db)):
     """Einen Messpunkt melden, ohne die Sitzungs-ID zu kennen.
 
     Der Weg für ein Gerät, das fest im Auto sitzt: ein OBD2-Dongle, ein
@@ -330,6 +334,22 @@ async def logger_melden(meldung: LoggerMeldung, db: Session = Depends(get_db)):
     In welchem Format die Messwerte stehen, sagt `format`; übersetzt wird in
     `live/quellen/`. Ohne Angabe gilt jolts eigenes.
     """
+    # Das Token zuerst: Wer keines hat, soll nicht erst die Übersetzung und
+    # damit Rechenzeit bekommen. Und wer zu oft ein falsches schickt, wird
+    # gebremst - der Pfad ist vom allgemeinen Limit ausgenommen.
+    if security.melden_gesperrt(request):
+        raise HTTPException(429, "Zu viele ungültige Logger-Token. "
+                                 "Später erneut versuchen.")
+    fahrzeug = (db.query(models.Fahrzeug)
+                .filter(models.Fahrzeug.logger_token == meldung.token)
+                .one_or_none())
+    if not fahrzeug:
+        # Ein falsches Token ist ein Fehler - sonst liesse sich nicht
+        # unterscheiden, ob der Logger falsch eingerichtet ist oder ob nur
+        # gerade keine Fahrt läuft.
+        security.melden_fehler_zaehlen(request)
+        raise HTTPException(401, "Logger-Token unbekannt.")
+
     try:
         uebersetzer = quellen.finden(meldung.format)
         punkt = uebersetzer.normalisieren(
@@ -338,15 +358,6 @@ async def logger_melden(meldung: LoggerMeldung, db: Session = Depends(get_db)):
         # 400 und nicht 422: Der Satz aus dem Übersetzer sagt, was der Logger
         # falsch schickt, und der soll ungefiltert beim Einrichtenden ankommen.
         raise HTTPException(400, str(fehler))
-
-    fahrzeug = (db.query(models.Fahrzeug)
-                .filter(models.Fahrzeug.logger_token == meldung.token)
-                .one_or_none())
-    if not fahrzeug:
-        # Ein falsches Token ist dagegen sehr wohl ein Fehler - sonst liesse
-        # sich nicht unterscheiden, ob der Logger falsch eingerichtet ist oder
-        # ob nur gerade keine Fahrt läuft.
-        raise HTTPException(401, "Logger-Token unbekannt.")
 
     sitzung = (db.query(models.LiveSitzung)
                .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
@@ -362,7 +373,7 @@ async def logger_melden(meldung: LoggerMeldung, db: Session = Depends(get_db)):
     return {"aufgenommen": True, "sitzung_id": sitzung.id, **nachricht}
 
 
-@router.get("/{sitzung_id}")
+@router.get("/{sitzung_id}", dependencies=[Depends(deps.aktuelle_sitzung)])
 def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
     sitzung = _sitzung_holen(db, sitzung_id)
     letzter = sitzung.punkte[-1] if sitzung.punkte else None
@@ -382,7 +393,7 @@ def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
                 "zeit": utc_iso(letzter.zeit)}}
 
 
-@router.get("/{sitzung_id}/punkte")
+@router.get("/{sitzung_id}/punkte", dependencies=[Depends(deps.aktuelle_sitzung)])
 def punkte_lesen(sitzung_id: int, db: Session = Depends(get_db)):
     """Die Messpunkte einer Sitzung - fuer ein Geraet, das neu dazukommt.
 
@@ -482,9 +493,33 @@ async def simulieren(sitzung_id: int,
 
 @router.websocket("/{sitzung_id}/ws")
 async def live_kanal(websocket: WebSocket, sitzung_id: int):
+    """Der Zustand einer Fahrt, live.
+
+    Ein Browser kann beim WebSocket keine Header setzen, und ein Token in der
+    Adresse stünde in jedem Proxy-Protokoll. Deshalb schickt der Client den
+    Token als **erste Nachricht** (`{"token": "..."}`); erst danach wird er
+    in den Verteiler aufgenommen und bekommt etwas zu sehen. Ohne Passwort
+    entfällt das, die Antwort `{"typ": "bereit"}` kommt trotzdem.
+    """
     await websocket.accept()
+    if deps.passwort_gesetzt():
+        try:
+            erste = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+            token = json.loads(erste).get("token", "")
+            gueltig = isinstance(token, str) and await run_in_threadpool(
+                deps.token_gueltig, token)
+        except (asyncio.TimeoutError, ValueError, AttributeError,
+                WebSocketDisconnect):
+            gueltig = False
+        if not gueltig:
+            try:
+                await websocket.close(code=4401)
+            except Exception:      # noqa: BLE001
+                pass
+            return
     await kanal.anmelden(sitzung_id, websocket)
     try:
+        await websocket.send_json({"typ": "bereit"})
         while True:
             # Es wird nichts erwartet; der Empfang hält nur die Verbindung
             # offen und meldet ihren Abbruch.
