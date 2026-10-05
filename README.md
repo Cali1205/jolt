@@ -132,6 +132,18 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   davon ausgenommen (gefahren ist gefahren), und aus einer Fahrt mit Anhänger
   lernt jolt keinen Fahrzeugfaktor. Die Vorgaben für die Fläche sind
   Schätzwerte, bis eine aufgezeichnete Fahrt sie bestätigt.
+- **Der Dongle fragt nur beim Fahren.** Ob das Auto verriegelt ist, lässt sich
+  nicht erfahren, ohne es zu fragen — und das Fragen löst bei verriegeltem Auto
+  die Alarmanlage aus. jolt schliesst deshalb aus der Bewegung des Telefons:
+  ab 15 km/h (zweimal hintereinander) sitzt man im Auto, dann wird gelesen und
+  der Dongle bei Bedarf wieder verbunden; nach zehn Sekunden Stillstand wird
+  nichts mehr gefragt (die Verbindung bleibt, Ampel und Stau kosten keinen
+  Neuaufbau); wer mehr als 25 m weggeht oder drei Minuten steht, dessen Dongle
+  wird getrennt. Ein Fehlversuch ohne Dongle in Reichweite (Fahrrad, Bus) hört
+  nach acht Versuchen bis zum nächsten Halt auf. Die Zähler im Auto laufen über
+  die Lebensdauer, eine Lücke im Stand kostet deshalb keinen Verbrauch. Abschalten
+  lässt sich das mit dem Haken „Dongle nur beim Fahren lesen". Nicht erfassbar
+  ist, wer abschliesst, bevor die zehn Sekunden um sind.
 - **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin
   `@capacitor-community/background-geolocation` (`CLLocationManager` mit
   Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren

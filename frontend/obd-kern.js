@@ -259,10 +259,10 @@ window.joltObd = (function () {
    *
    * Eine Obergrenze war für den Fall gedacht, dass der Dongle gezogen wurde.
    * Genau dafür ist aber `weiter` da - es endet, wenn die Fahrt endet. Statt
-   * aufzugeben wird der Abstand nur gedeckelt: alle sechzig Sekunden
+   * aufzugeben wird der Abstand nur gedeckelt: alle zwanzig Sekunden
    * anklopfen kostet fast nichts und holt eine Verbindung zurück, sobald sie
    * wieder möglich ist. */
-  const WIEDER_HOECHSTABSTAND_MS = 60000;
+  const WIEDER_HOECHSTABSTAND_MS = 20000;
 
   async function wiederverbinden(versuch = 1, weiter = () => true) {
     if (!weiter()) return;

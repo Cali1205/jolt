@@ -125,6 +125,9 @@ window.joltLive = (function () {
         { method: "POST" });
       K.zustand.sitzungId = antwort.sitzung_id;
       K.sitzungMerken(antwort.sitzung_id);
+      // Wer die Fahrt startet, sitzt im Auto: Es darf gelesen werden, bis
+      // das Telefon sagt, dass das Auto steht.
+      fahrzustandStart("faehrt");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       plan = antwort.plan || null;
@@ -738,6 +741,9 @@ window.joltLive = (function () {
    * verbraucht. Was zwischen zwei Meldungen gilt, rechnet der Server aus dem
    * Energieprofil hoch. */
   function standortEingang(coords, zeitMs) {
+    // Vor der Drosselung: Der Zustand will jeden Fix sehen, nicht jeden
+    // zwölften.
+    fahrzustandPruefen(coords, zeitMs);
     const jetzt = Date.now();
     // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
     // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
@@ -1037,11 +1043,7 @@ window.joltLive = (function () {
     // zurückholt, löst die Alarmanlage aus. Heute deckt `dongle` den Fall
     // schon ab - aber diese Bedingung darf nicht davon abhängen, dass eine
     // zweite Variable anderswo richtig gesetzt wurde.
-    if (dongle && !donglePause && window.joltObd
-        && !window.joltObd.verbunden()) {
-      window.joltObd.wiederverbinden(
-        1, () => !!K.zustand.sitzungId && !donglePause);
-    }
+    dongleWiederverbinden();
     // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
     // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
     // wichtige - er schliesst die Lücke.
@@ -1063,6 +1065,167 @@ window.joltLive = (function () {
    * Verbindung von selbst zurückholen. Pause heisst deshalb: trennen und
    * nicht wieder aufbauen, bis jemand es sagt. */
   let donglePause = false;
+
+  /* ---------- Wann darf der Dongle das Auto fragen? ---------- */
+
+  /* Ob das Auto verriegelt ist, lässt sich **nicht** erfahren, ohne es zu
+   * fragen - und genau das Fragen löst bei verriegeltem Auto die
+   * Alarmanlage aus. Ein Signal, das der Dongle oder das Auto von sich aus
+   * aussendet, gibt es nicht. Also wird umgekehrt gerechnet: Gelesen wird
+   * nur, wenn das Telefon etwas weiss, was bei verriegeltem Auto nicht sein
+   * kann - es bewegt sich mit Fahrtgeschwindigkeit.
+   *
+   *   fährt    ab 15 km/h (zwei Messungen hintereinander). Zu Fuss kommt man
+   *            nicht dorthin, und wer so schnell ist, sitzt im Auto.
+   *            Gelesen wird, und ist der Dongle weg, wird er geholt.
+   *   steht    unter 3 km/h seit zehn Sekunden. Es wird nichts mehr gefragt;
+   *            die Verbindung bleibt, ein Dongle im Leerlauf sendet nichts auf
+   *            den Bus. Ampel, Stau und Zapfsäule kosten so keinen Neuaufbau.
+   *   geparkt  das Telefon ist zu Fuss mehr als 25 m vom Halteort weg, oder
+   *            das Auto steht seit drei Minuten: Verbindung trennen, nicht
+   *            wieder aufbauen. Erst eine Fahrt holt sie zurück.
+   *
+   * Die Zähler im Auto laufen über die Lebensdauer: Was während einer Pause
+   * verbraucht wurde, steckt in der Differenz der nächsten Messung. Eine
+   * Lücke im Stand kostet deshalb keinen Verbrauch, nur Einzelwerte.
+   *
+   * Nicht erfassbar: Wer abschliesst, noch bevor zehn Sekunden vergangen
+   * sind, kann im ersten Moment noch eine Abfrage auslösen. Sicher wäre nur
+   * ein Signal aus dem Auto selbst. */
+  const SCHNELL_KMH = 15;
+  const STEH_KMH = 3;
+  const STEHZEIT_MS = 10000;
+  const PARKZEIT_MS = 180000;
+  const WEG_M = 25;
+  // Hat jemand "Dongle verbinden" von Hand getippt, will er im Stand lesen.
+  const MANUELL_MS = 600000;
+  // Kein Dongle in Reichweite (Fahrrad, Bus): Nach so vielen Fehlversuchen ist
+  // Schluss, bis wieder angehalten wurde.
+  const WIEDER_VERSUCHE_MAX = 8;
+
+  let autoModus = true;
+  try { autoModus = localStorage.getItem("jolt-dongle-auto") !== "0"; }
+  catch (e) { /* ohne Speicher gilt die Vorgabe */ }
+
+  let fahrZustand = "steht";     // "faehrt" | "steht" | "geparkt"
+  let stehSeit = null;
+  let stehOrt = null;
+  let schnellFolge = 0;
+  let standGesehen = true;
+  let manuellBis = 0;
+  let letzteLage = null;
+
+  function lesenErlaubt() {
+    if (donglePause) return false;
+    if (!autoModus) return true;
+    return fahrZustand === "faehrt" || Date.now() < manuellBis;
+  }
+
+  function fahrzustandStart(zustand) {
+    fahrZustand = zustand;
+    stehSeit = null; stehOrt = null; schnellFolge = 0;
+    standGesehen = true; manuellBis = 0; letzteLage = null;
+  }
+
+  function entfernungM(a, b) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  /* Die Geschwindigkeit aus dem Fix - oder aus zwei Fixes, wenn das Gerät
+   * keine liefert (im Browser auf iOS regelmässig). */
+  function geschwindigkeitKmh(coords, ort, zeitMs) {
+    const vor = letzteLage;
+    letzteLage = { lat: ort.lat, lon: ort.lon, zeit: zeitMs };
+    if (typeof coords.speed === "number" && coords.speed >= 0) {
+      return coords.speed * 3.6;
+    }
+    if (!vor) return null;
+    const dt = (zeitMs - vor.zeit) / 1000;
+    if (dt < 1 || dt > 30) return null;
+    return entfernungM(vor, ort) / dt * 3.6;
+  }
+
+  function fahrzustandPruefen(coords, zeitMs) {
+    if (!autoModus || !K.zustand.sitzungId) return;
+    const jetzt = Date.now();
+    const ort = { lat: coords.latitude, lon: coords.longitude };
+    const v = geschwindigkeitKmh(coords, ort, zeitMs || jetzt);
+    if (v === null) return;
+
+    if (v >= SCHNELL_KMH) {
+      stehSeit = null; stehOrt = null;
+      schnellFolge++;
+      if (schnellFolge >= 2 && fahrZustand !== "faehrt") fahrenBeginnt();
+      return;
+    }
+    schnellFolge = 0;
+    if (v < STEH_KMH) standGesehen = true;
+    if (jetzt < manuellBis || fahrZustand === "geparkt") return;
+
+    if (v < STEH_KMH) {
+      if (stehSeit === null) { stehSeit = jetzt; stehOrt = ort; }
+      const stand = jetzt - stehSeit;
+      if (stand >= PARKZEIT_MS) zustandParken("Das Auto steht seit drei Minuten");
+      else if (stand >= STEHZEIT_MS && fahrZustand === "faehrt") fahrZustand = "steht";
+    } else if (stehOrt && entfernungM(stehOrt, ort) > WEG_M) {
+      // Langsam und weit vom Halteort: Man ist ausgestiegen und geht.
+      zustandParken("Du bist vom Auto weggegangen");
+    }
+  }
+
+  function zustandParken(grund) {
+    if (fahrZustand === "geparkt") return;
+    // Erst den Zustand setzen, dann trennen: `trennen()` löst den
+    // Verbindungsabriss aus, und dessen Behandlung fragt `lesenErlaubt()`.
+    fahrZustand = "geparkt";
+    stehSeit = null; stehOrt = null;
+    standGesehen = false;
+    if (dongle && window.joltObd) {
+      try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
+      K.melden(grund + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
+        + "So löst ein abgeschlossenes Auto keinen Alarm aus.", "hinweis");
+    }
+    dongleAnzeigen();
+  }
+
+  function fahrenBeginnt() {
+    // Nach einem Fehlversuch ohne Dongle erst wieder, wenn angehalten wurde -
+    // sonst probierte eine Radfahrt den ganzen Weg über zu verbinden.
+    if (fahrZustand === "geparkt" && !standGesehen) return;
+    const warGeparkt = fahrZustand === "geparkt";
+    fahrZustand = "faehrt";
+    stehSeit = null; stehOrt = null;
+    if (warGeparkt && dongle) {
+      K.melden("Fahrt erkannt – jolt verbindet den Dongle wieder.", "hinweis");
+    }
+    dongleWiederverbinden();
+    dongleAnzeigen();
+  }
+
+  /* Den Dongle holen, wenn er fehlt - solange das Auto fährt, aber nicht
+   * endlos: Ist keiner in Reichweite, bleibt die Verbindung aus, und jeder
+   * weitere Versuch kostet nur Akku. */
+  function dongleWiederverbinden() {
+    if (!dongle || !lesenErlaubt() || !window.joltObd
+        || window.joltObd.verbunden()) return;
+    let versuche = 0;
+    window.joltObd.wiederverbinden(1, () => {
+      if (!K.zustand.sitzungId || !lesenErlaubt()) return false;
+      if (autoModus && ++versuche > WIEDER_VERSUCHE_MAX) {
+        fahrZustand = "geparkt";
+        standGesehen = false;
+        K.melden("Kein Dongle in Reichweite – jolt versucht es erst nach dem "
+          + "nächsten Halt wieder.", "hinweis");
+        dongleAnzeigen();
+        return false;
+      }
+      return true;
+    });
+  }
 
   function dongleAnzeigen() {
     const an = document.getElementById("dongle-an");
@@ -1110,7 +1273,7 @@ window.joltLive = (function () {
   const STILLE_NEUSTART_MS = 120000;
 
   function stilleUeberwachen() {
-    if (donglePause || !window.joltObd || !window.joltObd.verbunden()) return;
+    if (!lesenErlaubt() || !window.joltObd || !window.joltObd.verbunden()) return;
     // Kam noch nie etwas, läuft die Uhr ab jetzt - sonst wartet die
     // Überwachung auf einen Wert, der nie kommt, und greift nie ein.
     if (!letzteRohwerteZeit) { letzteRohwerteZeit = Date.now(); return; }
@@ -1121,13 +1284,7 @@ window.joltLive = (function () {
     K.melden("Der Dongle antwortet seit zwei Minuten nicht mehr – jolt baut "
       + "die Verbindung neu auf.", "hinweis");
     try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
-    setTimeout(() => {
-      if (!donglePause && K.zustand.sitzungId && window.joltObd
-          && !window.joltObd.verbunden()) {
-        window.joltObd.wiederverbinden(
-          1, () => !!K.zustand.sitzungId && !donglePause);
-      }
-    }, 3000);
+    setTimeout(dongleWiederverbinden, 3000);
   }
 
   /* Den Dongle anbieten, bevor sonst irgendetwas läuft.
@@ -1170,6 +1327,9 @@ window.joltLive = (function () {
         return;
       }
       donglePause = false;
+      // Wer von Hand verbindet, will lesen - auch im Stand, zehn Minuten lang.
+      manuellBis = Date.now() + MANUELL_MS;
+      if (fahrZustand === "geparkt") fahrZustand = "steht";
       dongleNutzen();
       await window.joltObd.anschliessen();
       if (!window.joltObd.verbunden()) throw new Error("keine Verbindung");
@@ -1195,12 +1355,7 @@ window.joltLive = (function () {
         (t) => console.log("[obd]", t),
         // Ein Abriss im Tunnel ist kein Grund aufzuhören, solange die Fahrt
         // läuft: Der Baustein baut selbst wieder auf.
-        () => {
-          if (K.zustand.sitzungId && !donglePause) {
-            window.joltObd.wiederverbinden(
-              1, () => !!K.zustand.sitzungId && !donglePause);
-          }
-        });
+        () => { if (K.zustand.sitzungId) dongleWiederverbinden(); });
     }
   }
 
@@ -1665,7 +1820,7 @@ window.joltLive = (function () {
       zeit: new Date(zeitMs || Date.now()).toISOString(),
     };
 
-    if (dongle && !donglePause && window.joltObd
+    if (dongle && lesenErlaubt() && window.joltObd
         && window.joltObd.verbunden()) {
       try {
         const roh = await window.joltObd.satzLesen(runde++);
@@ -1928,6 +2083,7 @@ window.joltLive = (function () {
     }
     K.zustand.sitzungId = null;
     K.sitzungMerken(null);
+    fahrzustandStart("steht");
     plan = null;
     const kasten = document.getElementById("live-aenderung");
     if (kasten) kasten.hidden = true;
@@ -2119,6 +2275,9 @@ window.joltLive = (function () {
     if (!zustand || zustand.laeuft === false) { K.sitzungMerken(null); return; }
 
     K.zustand.sitzungId = id;
+    // Nach einem Neuladen ist unbekannt, wo das Auto steht und ob es offen
+    // ist. Also erst fragen, wenn gefahren wird.
+    fahrzustandStart("steht");
     pufferFuer(id);
     if (puffer.length) pufferAbarbeiten();
     /* Die Fahrt dazuholen. Die Live-Ansicht braucht sie fuer das
@@ -2167,6 +2326,17 @@ window.joltLive = (function () {
     // Erst wenn die Fahrzeugliste steht - sonst fehlt die Akkugrösse.
     setTimeout(sitzungFortsetzen, 800);
     K.an("dongle-pause", "click", donglePausieren);
+    const autoHaken = document.getElementById("dongle-auto");
+    if (autoHaken) {
+      autoHaken.checked = autoModus;
+      autoHaken.addEventListener("change", () => {
+        autoModus = autoHaken.checked;
+        try { localStorage.setItem("jolt-dongle-auto", autoModus ? "1" : "0"); }
+        catch (e) { /* nur diese Sitzung */ }
+        if (autoModus) fahrZustand = "steht";
+        else dongleWiederverbinden();
+      });
+    }
     // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
     // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
     K.an("ist-soc", "keydown", (e) => {
@@ -2175,5 +2345,7 @@ window.joltLive = (function () {
   }
 
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
-           dongleNutzen, verlaufZeichnen };
+           dongleNutzen, verlaufZeichnen,
+           fahrzustand: () => fahrZustand, lesenErlaubt, dongleVerbinden,
+           autoSetzen: (an) => { autoModus = !!an; } };
 })();

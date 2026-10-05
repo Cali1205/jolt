@@ -101,3 +101,8 @@ jobs:
       # die Oberflaeche, die der Server ihr liefert.
       - name: Standort-Weg pruefen
         run: node tools/check_standort.js
+
+      # Wann der Dongle das Auto fragen darf: nur bei Fahrt, nie am
+      # verriegelten Auto (Alarmanlage) - und von selbst wieder verbinden.
+      - name: Fahrzustand pruefen
+        run: node tools/check_fahrzustand.js
