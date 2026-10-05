@@ -113,3 +113,8 @@ jobs:
       # Er bleibt in Benutzung, solange die Verbindung steht.
       - name: Aufzeichnungsstart pruefen
         run: node tools/check_aufzeichnung.js
+
+      # Die Verkehrskachel der gewaehlten Route: Der Verkehr steht nur in der
+      # Antwort der letzten Planung, nicht an der gespeicherten Fahrt.
+      - name: Verkehrskachel pruefen
+        run: node tools/check_route_anzeige.js
