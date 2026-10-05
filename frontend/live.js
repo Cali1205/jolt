@@ -745,7 +745,7 @@ window.joltLive = (function () {
         // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
         if (jetzt - letzteMeldung < MELDEABSTAND_MS) return;
         letzteMeldung = jetzt;
-        positionMelden(pos.coords);
+        positionMelden(pos.coords, pos.timestamp);
       },
       // Ein GPS-Fehler unterwegs ist kein Grund, den Nutzer zu behelligen -
       // in einem Tunnel ist er der Normalfall, und die nächste Messung kommt.
@@ -1542,11 +1542,14 @@ window.joltLive = (function () {
     return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
   }
 
-  async function positionMelden(coords) {
+  async function positionMelden(coords, zeitMs) {
     if (!K.zustand.sitzungId) return;
     const nutzlast = {
       lat: coords.latitude, lon: coords.longitude,
       tempo_kmh: coords.speed === null ? null : coords.speed * 3.6,
+      // Wann gemessen wurde, nicht wann es ankommt - sonst wären alle
+      // nachgereichten Punkte aus einem Funkloch auf dieselbe Sekunde datiert.
+      zeit: new Date(zeitMs || Date.now()).toISOString(),
     };
 
     if (dongle && !donglePause && window.joltObd
@@ -1577,16 +1580,128 @@ window.joltLive = (function () {
       stilleUeberwachen();
     }
 
-    try {
-      const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
-        { method: "POST", body: nutzlast });
-      zustandAnzeigen(zustand);
-    } catch (fehler) {
-      // Stillschweigend: Ein Funkloch ist unterwegs normal, und eine
-      // Fehlermeldung je verlorener Positionsmeldung wäre eine Meldung alle
-      // dreissig Sekunden.
-    }
+    pufferAnhaengen(nutzlast);
+    pufferAbarbeiten();
   }
+
+  /* ---------- Messpunkte puffern ---------- */
+
+  /* Jeder Messpunkt geht zuerst in eine Warteschlange und von dort an den
+   * Server - nie direkt. Fällt das Netz aus, bleiben die Punkte liegen und
+   * gehen beim nächsten Versuch gesammelt hinaus, mit ihrer Messzeit.
+   *
+   * Vorher verschluckte `positionMelden` den fehlgeschlagenen POST. Für eine
+   * geplante Fahrt ist das harmlos, der nächste Punkt kommt. Für eine
+   * Aufzeichnung ist es Datenverlust: Nach zwanzig Minuten ohne Netz fehlten
+   * bis zu 13 % der Strecke, und der gelernte Faktor verschob sich um bis zu
+   * 35 % - unsichtbar, in einer Zahl, die dauerhaft am Fahrzeug bleibt.
+   *
+   * Es gibt immer nur **einen** Sendevorgang. Zwei gleichzeitige könnten
+   * einander überholen, und der Server bekäme neuere Punkte vor älteren.
+   *
+   * Die Warteschlange liegt auch im localStorage: Lädt iOS die Seite im
+   * Hintergrund neu, sollen die Punkte nicht mit ihr verschwinden. Das Limit
+   * schützt vor einem Speicher, der ewig wächst; dann gehen die ältesten. */
+  const PUFFER_MAX = 2000;
+  const STAPEL_MAX = 100;
+  let puffer = [];
+  let pufferSitzung = null;
+  let pufferLauf = null;
+  let pufferNochmal = false;
+  let ohneNetzGemeldet = false;
+  let nachgereicht = 0;
+
+  function pufferSpeicher(id) { return "jolt-puffer-" + id; }
+
+  function pufferFuer(id) {
+    if (pufferSitzung === id) return;
+    pufferSitzung = id;
+    puffer = [];
+    try {
+      const roh = JSON.parse(localStorage.getItem(pufferSpeicher(id)) || "[]");
+      if (Array.isArray(roh)) puffer = roh;
+    } catch (e) { /* kein Speicher oder beschädigt: ohne weiter */ }
+  }
+
+  function pufferSichern() {
+    if (pufferSitzung === null) return;
+    try {
+      if (puffer.length) {
+        localStorage.setItem(pufferSpeicher(pufferSitzung), JSON.stringify(puffer));
+      } else {
+        localStorage.removeItem(pufferSpeicher(pufferSitzung));
+      }
+    } catch (e) { /* voll oder gesperrt: dann bleibt er eben im Arbeitsspeicher */ }
+  }
+
+  function pufferAnhaengen(punkt) {
+    pufferFuer(K.zustand.sitzungId);
+    puffer.push(punkt);
+    if (puffer.length > PUFFER_MAX) puffer.splice(0, puffer.length - PUFFER_MAX);
+    // Gesichert wird nur, wenn sich etwas staut - im Normalfall steht der
+    // Punkt eine Sekunde später auf dem Server.
+    if (puffer.length > 1) pufferSichern();
+  }
+
+  function pufferAbarbeiten() {
+    if (pufferLauf) { pufferNochmal = true; return pufferLauf; }
+    pufferLauf = pufferSenden().finally(() => { pufferLauf = null; });
+    return pufferLauf;
+  }
+
+  async function pufferSenden() {
+    do {
+      pufferNochmal = false;
+      const id = K.zustand.sitzungId;
+      while (id && puffer.length && K.zustand.sitzungId === id) {
+        const stapel = puffer.slice(0, STAPEL_MAX);
+        let zustand;
+        try {
+          zustand = await K.api(`/api/live/${id}/punkte`,
+            { method: "POST", body: { punkte: stapel } });
+        } catch (fehler) {
+          const status = fehler.status;
+          if (status === 404 || status === 409) {
+            // Die Sitzung gibt es nicht mehr oder ist beendet: Weiter zu
+            // senden hiesse, dieselbe Ablehnung bis in alle Ewigkeit zu holen.
+            puffer = [];
+          } else if (status === 422) {
+            // Der Server hält diesen Stapel für ungültig - etwa einen
+            // Zeitstempel von vor mehr als zwei Tagen. Er würde nie
+            // angenommen und verstopfte alles dahinter.
+            puffer.splice(0, stapel.length);
+          } else if (!ohneNetzGemeldet) {
+            ohneNetzGemeldet = true;
+            K.melden("Keine Verbindung zu jolt – die Messpunkte werden "
+              + "gesammelt und nachgereicht.", "hinweis");
+          }
+          pufferSichern();
+          // Netz weg, Server überlastet oder abgemeldet: liegen lassen, der
+          // nächste Punkt oder das Zurückkehren des Netzes versucht es erneut.
+          if (status !== 404 && status !== 409 && status !== 422) return;
+          continue;
+        }
+        puffer.splice(0, stapel.length);
+        pufferSichern();
+        if (ohneNetzGemeldet) nachgereicht += stapel.length;
+        // Den Zustand nur zeigen, wenn der Stapel die Gegenwart erreicht hat.
+        // Mitten im Nachreichen wäre es der von vor zehn Minuten.
+        if (!puffer.length) {
+          if (ohneNetzGemeldet) {
+            ohneNetzGemeldet = false;
+            K.melden("Verbindung wieder da – " + nachgereicht
+              + " Messpunkte nachgereicht.", "hinweis");
+            nachgereicht = 0;
+          }
+          zustandAnzeigen(zustand);
+        }
+      }
+    } while (pufferNochmal);
+  }
+
+  window.addEventListener("online", () => {
+    if (K.zustand.sitzungId) pufferAbarbeiten();
+  });
 
   function standortHolen() {
     return new Promise((erfuellen, ablehnen) => {
@@ -1660,6 +1775,14 @@ window.joltLive = (function () {
 
   async function beenden() {
     if (!K.zustand.sitzungId) return;
+    // Was noch in der Warteschlange liegt, gehört zur Fahrt - und nach dem
+    // Beenden nimmt der Server nichts mehr an.
+    pufferFuer(K.zustand.sitzungId);
+    if (puffer.length) await pufferAbarbeiten();
+    if (puffer.length) {
+      K.melden(puffer.length + " Messpunkte konnten nicht mehr übertragen "
+        + "werden - kein Netz.", "warnung");
+    }
     let ergebnis = null;
     try {
       ergebnis = await K.api(`/api/live/${K.zustand.sitzungId}/ende`,
@@ -1669,6 +1792,11 @@ window.joltLive = (function () {
     // beendete Fahrt gehört hinein.
     K.zustand.fahrtenVeraltet = true;
     positionAufgeben();
+    puffer = [];
+    pufferSichern();
+    pufferSitzung = null;
+    ohneNetzGemeldet = false;
+    nachgereicht = 0;
     dongle = false;
     spur = [];
     gefahrenKm = 0;
@@ -1878,6 +2006,8 @@ window.joltLive = (function () {
     if (!zustand || zustand.laeuft === false) { K.sitzungMerken(null); return; }
 
     K.zustand.sitzungId = id;
+    pufferFuer(id);
+    if (puffer.length) pufferAbarbeiten();
     /* Die Fahrt dazuholen. Die Live-Ansicht braucht sie fuer das
      * Energieprofil, die Reserve-Marke und die Soll-Kurve; ohne sie zeigt
      * sie nur die halbe Wahrheit. Bei einer Aufzeichnung gibt es sie noch

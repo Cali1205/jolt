@@ -123,9 +123,15 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   unbeaufsichtigtes Gerät, das auf Fehlerantworten stösst, protokolliert Fehler
   oder schaltet sich ab.
 
+- **Messpunkte puffern** — jeder Punkt trägt seine Messzeit und geht zuerst in
+  eine Warteschlange (`localStorage`), von dort in Stapeln zu 100 an
+  `POST /api/live/{id}/punkte`. Ohne Netz bleiben die Punkte liegen und gehen
+  später in Messreihenfolge hinaus; geplant wird nur beim letzten Punkt eines
+  Stapels, weil ein Plan ab einer Position von vor zehn Minuten beim Erscheinen
+  veraltet wäre.
+
 **Noch nicht da**: Belegungsdaten der Ladepunkte (es gibt sie inzwischen, siehe
-„Nächste Schritte") und ein Puffer für Messpunkte, die während eines Funklochs
-nicht rausgehen — heute sind sie verloren.
+„Nächste Schritte") und Hintergrund-Standort bei gesperrtem iPhone.
 
 ---
 
@@ -235,6 +241,7 @@ Alle Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 ./tools/check_quellen.py    # Fremde Meldeformate übersetzen - und Schrott ablehnen
 ./tools/check_umplanung.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
 ./tools/check_push.py       # Web Push: Schlüssel, Verschlüsselung, Abos, Aufräumen
+node tools/check_puffer.js  # Messpunkt-Warteschlange im Frontend: Funkloch, Nachreichen
 ./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
 ```
 
@@ -536,21 +543,6 @@ Live-Einträge tragen eine `evse_id`, jolts OCM-Import speichert die nicht.
 Zehntel der Standorte und für Frankreich gar nicht; ein Optimierer, der
 Standorte ohne Live-Daten benachteiligt, wählt auf einer Frankreichfahrt
 systematisch die falschen.
-
-**Messpunkte puffern.** Was während eines Funklochs nicht rausgeht, ist heute
-verloren — `positionMelden` schluckt den fehlgeschlagenen POST stillschweigend,
-und einen Puffer gibt es nirgends. Für eine geplante Fahrt ist das harmlos, der
-nächste Punkt kommt. Für eine **Aufzeichnung** ist es teuer: Gemessen an einer
-echten Strecke fehlen nach zwanzig Minuten ohne Netz bis zu 13 % der Strecke,
-und der gelernte Faktor verschiebt sich um bis zu 35 % — unsichtbar, als stille
-Verschiebung in einer Zahl, die dauerhaft im Fahrzeug bleibt. Der
-Kilometerstand fängt inzwischen die Strecke wieder ein, nicht aber den Verlauf.
-
-Das ist **nicht rein im Frontend** zu machen: Das Eingabemodell `Messpunkt` hat
-kein `zeit`-Feld, nachgereichte Punkte bekämen alle den Zeitstempel des
-Nachreichens — und damit wäre der Zeitfaktor kaputt statt der Strecke.
-`messpunkt_aufnehmen` kann `zeit` bereits, es fehlt nur der Weg durch die
-Schnittstelle.
 
 **Höchstgeschwindigkeit am Fahrzeug.** Der Tempo-Regler hat keine absolute
 Obergrenze; bei 130 % rechnet das Modell mit 165 km/h, die kein Serienfahrzeug

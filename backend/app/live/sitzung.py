@@ -279,7 +279,8 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
                         soc: float | None = None, tempo_kmh: float | None = None,
                         aussentemp_c: float | None = None,
                         zeit: datetime | None = None,
-                        rohwerte: dict | None = None) -> Zustand:
+                        rohwerte: dict | None = None,
+                        neu_planen: bool = True) -> Zustand:
     """Einen Messpunkt einsortieren und den neuen Zustand zurückgeben.
 
     `soc` darf fehlen. Dann ist es eine reine Positionsmeldung, wie sie das
@@ -291,6 +292,12 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
     `zeit` überschreibt den Zeitstempel. Gebraucht wird das vom Simulator: Er
     spielt Stunden in Sekunden ab, und mit echten Uhrzeiten wäre der
     Zeitfaktor dort sinnlos - also genau die Grösse, die den Stau abbildet.
+
+    `neu_planen=False` nimmt den Punkt auf, ohne die Reststrecke neu zu
+    rechnen. Gebraucht für nachgereichte Punkte aus einem Funkloch: Ein Plan,
+    der ab einer Position von vor zehn Minuten gerechnet wird, ist schon beim
+    Erscheinen veraltet - und meldete dazu eine Änderung aufs Telefon. Erst
+    der letzte Punkt des Stapels, der die Gegenwart ist, darf umplanen.
     """
     fahrt = sitzung.fahrt
     geometrie = fahrt.geometrie or []
@@ -329,7 +336,8 @@ def messpunkt_aufnehmen(db, sitzung: models.LiveSitzung, lat: float, lon: float,
 
     # Umgeplant wird mit dem Ladestand, der gilt - gemeldet oder hochgerechnet.
     # Sonst käme ein reiner Positionspunkt mit `None` beim Optimierer an.
-    if zustand.neuplanung_noetig and _darf_neu_planen(sitzung, km, zustand):
+    if (neu_planen and zustand.neuplanung_noetig
+            and _darf_neu_planen(sitzung, km, zustand)):
         _umplanen(db, sitzung, zustand, km, zustand.ist_soc)
 
     sitzung.hinweis = zustand.grund
