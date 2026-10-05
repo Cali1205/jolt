@@ -30,6 +30,16 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   die vor der Abfahrt zählt.
 - **Ladepunkte im Korridor** mit Umwegzeit in Minuten, sortiert nach
   Fortschritt entlang der Route.
+- **Eigene Fahrten als Routenkandidaten.** Geometrisch erzeugte Umwege taugen
+  nichts (alle zwölf verloren auf der Messstrecke), die Route, die gewann, kam
+  aus zwei Punkten der **gefahrenen** Strecke. Passt eine frühere Fahrt zu Start
+  und Ziel — vorwärts, rückwärts oder als Teilstück, aufgezeichnet oder geplant
+  und gefahren —, wählt jolt Zwischenpunkte entlang des gefahrenen Pfads (alle
+  25 km, höchstens 20, nie auf Pausen und Ladeplätzen, die als Zwischenpunkt
+  einen Abstecher erzwängen) und lässt das Routing sie abfahren. Das Ergebnis
+  ist eine Strasse und eine weitere Variante, die am fertigen Ladeplan gegen die
+  schnellste antritt. Kosten: höchstens zwei Routing-Anfragen, und nur wenn
+  etwas passt. Abschaltbar mit dem Haken „Meine gefahrenen Strecken mitrechnen".
 - **Ladestopps planen** — die zeitoptimale Folge von Stopps und Lademengen:
   Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`, anschliessend wandern die
   Ladehübe auf feinem Raster in den steilen Teil der Ladekurve. Zu jedem Stopp

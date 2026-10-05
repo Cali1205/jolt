@@ -30,16 +30,18 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
+from ..geo import haversine_m
 # Nur noch für die Vorgabewerte der Regler - gerechnet wird über
 # `umplanung.planen`, das den Optimierer selbst aufruft.
 from ..laden import optimierer
 from ..live import umplanung
-from ..routing import varianten
+from ..routing import eigene, varianten
 from ..routing.provider import RoutingFehler
 
 # Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
@@ -100,6 +102,11 @@ class Routenanfrage(BaseModel):
     # Mechanik dahinter stimmt - sie wartet nur auf einen
     # Kandidatenlieferanten, der etwas taugt.
     umwege_pruefen: bool = False
+    # Gefahrene Strecken als zusätzliche Kandidaten (routing/eigene.py): Wer
+    # eine Strecke schon gefahren ist, kennt einen Weg, den kein Kantengewicht
+    # kennt. Es werden höchstens zwei Anfragen mehr gestellt, und nur, wenn zu
+    # Start und Ziel überhaupt eine frühere Fahrt passt.
+    eigene_fahrten: bool = True
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
     # einmal voll beladen geplant wird: Masse geht linear in Roll- und
@@ -143,7 +150,7 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
         anhaenger_cwa_m2=anfrage.anhaenger_cwa_m2,
         tempo_max_kmh=anfrage.tempo_max_kmh))
 
-    gruppen = _strecken_sammeln(anfrage)
+    gruppen = _strecken_sammeln(anfrage, db)
     kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen)
     ergebnisse = _fahrten_speichern(db, anfrage, fahrzeug, kandidaten)
 
@@ -151,7 +158,76 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     return {"varianten": ergebnisse}
 
 
-def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple) -> list[dict]:
+# So viele gefahrene Strecken werden höchstens als Kandidaten nachgefahren.
+# Jede kostet eine Routing-Anfrage vom Tageskontingent, und mehr als die
+# letzten zwei bringen selten etwas Neues.
+MAX_EIGENE = 2
+
+
+def _eigene_wege(db: Session, start: tuple, ziel: tuple) -> list[dict]:
+    """Wege nach früheren Fahrten, die zu Start und Ziel passen.
+
+    Zuerst eine billige Abfrage nach dem Umschliessenden Rechteck je Sitzung
+    (eine Zeile je Sitzung, nicht je Messpunkt); nur Sitzungen, deren
+    Rechteck Start **und** Ziel einschliesst, werden überhaupt geladen. Die
+    neuesten zuerst: Die Strasse, die man zuletzt gefahren ist, ist die, die
+    es noch gibt.
+    """
+    luftlinie_km = haversine_m(start[0], start[1], ziel[0], ziel[1]) / 1000.0
+    if luftlinie_km < eigene.RADIUS_MIN_KM:
+        return []
+    rand = eigene.radius_km(luftlinie_km) + 5.0
+    # Ein Grad Länge ist nördlich von 60° weniger als 55 km; mit 55 zu
+    # rechnen macht das Rechteck eher zu gross als zu klein - und zu gross
+    # kostet nur ein paar Zeilen mehr.
+    rand_grad = rand / 55.0
+
+    kasten = (db.query(models.LivePunkt.sitzung_id,
+                       func.min(models.LivePunkt.lat), func.max(models.LivePunkt.lat),
+                       func.min(models.LivePunkt.lon), func.max(models.LivePunkt.lon),
+                       func.count(models.LivePunkt.id))
+              .group_by(models.LivePunkt.sitzung_id)
+              .having(func.count(models.LivePunkt.id) >= 20)
+              .order_by(models.LivePunkt.sitzung_id.desc()).all())
+
+    def drin(punkt, lat0, lat1, lon0, lon1) -> bool:
+        return (lat0 - rand_grad <= punkt[0] <= lat1 + rand_grad
+                and lon0 - rand_grad <= punkt[1] <= lon1 + rand_grad)
+
+    wege: list[dict] = []
+    for sitzung_id, lat0, lat1, lon0, lon1, _ in kasten:
+        if len(wege) >= MAX_EIGENE:
+            break
+        if not (drin(start, lat0, lat1, lon0, lon1)
+                and drin(ziel, lat0, lat1, lon0, lon1)):
+            continue
+        zeilen = (db.query(models.LivePunkt.lat, models.LivePunkt.lon,
+                           models.LivePunkt.tempo_kmh)
+                  .filter(models.LivePunkt.sitzung_id == sitzung_id)
+                  .order_by(models.LivePunkt.zeit).all())
+        abschnitt = eigene.passender_abschnitt(
+            eigene.pfad_aus_messpunkten(zeilen), start, ziel)
+        if abschnitt is None:
+            continue
+        zwischen = eigene.zwischenpunkte(abschnitt)
+        if not zwischen:
+            continue
+        sitzung = db.get(models.LiveSitzung, sitzung_id)
+        datum = sitzung.gestartet.strftime("%d.%m.%Y") if sitzung else "?"
+        etikett = f"meine Strecke vom {datum}"
+        if abschnitt.gegenrichtung:
+            etikett += " (Gegenrichtung)"
+        log.info("Eigene Strecke aus Sitzung %s: %d Zwischenpunkte, %.0f km "
+                 "Pfad (Abstand Start %.1f km, Ziel %.1f km).", sitzung_id,
+                 len(zwischen), abschnitt.laenge_km,
+                 abschnitt.abstand_start_km, abschnitt.abstand_ziel_km)
+        wege.append({"zwischen": zwischen, "mautfrei": False,
+                     "etikett": etikett})
+    return wege
+
+
+def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple,
+                 db: Session | None = None) -> list[dict]:
     """Welche Routing-Anfragen gestellt werden - jede kostet vom Tageskontingent.
 
     Die erste ist die schnellste Strasse und zugleich der Massstab; alles
@@ -169,10 +245,12 @@ def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple) -> list[dict
         wege += [{"zwischen": [k["punkt"]], "mautfrei": False,
                   "etikett": k["etikett"]}
                  for k in varianten.ausweichpunkte(start, ziel)]
+    if anfrage.eigene_fahrten and db is not None:
+        wege += _eigene_wege(db, start, ziel)
     return wege
 
 
-def _strecken_sammeln(anfrage: Routenanfrage) -> list[dict]:
+def _strecken_sammeln(anfrage: Routenanfrage, db: Session | None = None) -> list[dict]:
     """Schritt 1: die Wege abfragen und zusammenlegen, was dieselbe Strasse ist.
 
     Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und im
@@ -189,7 +267,7 @@ def _strecken_sammeln(anfrage: Routenanfrage) -> list[dict]:
     gruppen: list[dict] = []
     letzter_fehler: RoutingFehler | None = None
     basis = None
-    for weg in _wege_planen(anfrage, start, ziel):
+    for weg in _wege_planen(anfrage, start, ziel, db):
         try:
             strecke = anbieter.route(start, ziel,
                                      zwischenstopps=weg["zwischen"] or None,

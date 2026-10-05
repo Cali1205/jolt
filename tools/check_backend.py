@@ -484,6 +484,100 @@ def main() -> int:
         **fahrzeuge[0],
         "max_tempo_kmh": None})
 
+    print("\nEigene Strecken als Kandidaten")
+    # Eine frühere Fahrt Hamburg - München (60 Messpunkte entlang der
+    # Strecke, mit Tempo) macht aus derselben Anfrage einen Kandidaten mehr.
+    #
+    # Das Demo-Routing erfindet für jedes Teilstück eine leicht andere Linie;
+    # der Kandidat wäre darin immer länger und langsamer und würde als
+    # aussichtslos verworfen, bevor er ein Etikett bekäme. Deshalb steht hier
+    # ein Routing, das jeden Aufruf mitschreibt und immer dieselbe Strasse
+    # liefert: Geprüft wird, was dieses Modul verantwortet - dass die
+    # Zwischenpunkte beim Routing ankommen und das Etikett an der Route steht.
+    from datetime import datetime as _dt, timedelta as _td
+    from app import routing as _routing
+    from app.routing.demo import DemoRouting as _Demo
+    HH = (53.5511, 9.9937)
+    MUC = (48.1351, 11.5820)
+
+    class _Aufrufe(_Demo):
+        aufrufe: list = []
+
+        def route(self, start, ziel, zwischenstopps=None, praeferenz="recommended",
+                  mautfrei=False):
+            _Aufrufe.aufrufe.append(list(zwischenstopps or []))
+            return super().route(start, ziel)         # dieselbe Strasse, immer
+
+    def auf_der_linie(anteil):
+        return (HH[0] + (MUC[0] - HH[0]) * anteil,
+                HH[1] + (MUC[1] - HH[1]) * anteil)
+
+    db = SessionLocal()
+    try:
+        alt = models.LiveSitzung(fahrt_id=fahrt_id, gestartet=_dt(2026, 9, 4, 10, 0),
+                                 beendet=_dt(2026, 9, 4, 16, 0), laeuft=False)
+        db.add(alt)
+        db.flush()
+        alt_id = alt.id
+        for i in range(60):
+            lat, lon = auf_der_linie(i / 59)
+            db.add(models.LivePunkt(sitzung_id=alt_id, lat=lat, lon=lon,
+                                    zeit=_dt(2026, 9, 4, 10, 0) + _td(minutes=5 * i),
+                                    tempo_kmh=100.0))
+        db.commit()
+    finally:
+        db.close()
+
+    ersatz = _routing.provider
+    _routing.provider = lambda: _Aufrufe()
+    try:
+        def planen(start, ziel, **mehr):
+            _Aufrufe.aufrufe = []
+            antwort = client.post("/api/route", json={
+                "fahrzeug_id": fahrzeuge[0]["id"],
+                "start": {"lat": start[0], "lon": start[1], "text": "A"},
+                "ziel": {"lat": ziel[0], "lon": ziel[1], "text": "B"},
+                "start_soc": 80.0, **mehr})
+            pruefe(antwort.status_code == 200, "die Anfrage geht durch",
+                   f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+            etiketten = [e for v in antwort.json()["varianten"] for e in v["etiketten"]]
+            return etiketten, [a for a in _Aufrufe.aufrufe if a]
+
+        etiketten, mit_via = planen(HH, MUC)
+        pruefe(len(mit_via) == 1 and len(mit_via[0]) >= 5,
+               "dieselbe Strecke noch einmal: Das Routing bekommt die gefahrene "
+               "als Zwischenpunkte - einmal, nicht je Messpunkt",
+               f"{len(mit_via)} Aufrufe mit Zwischenpunkten")
+        pruefe(any(e.startswith("meine Strecke vom 04.09.2026") for e in etiketten),
+               "und die Route trägt das Datum der Fahrt", str(etiketten))
+        etiketten, mit_via = planen(HH, MUC, eigene_fahrten=False)
+        pruefe(not mit_via and not any("meine Strecke" in e for e in etiketten),
+               "abgeschaltet gibt es weder Aufruf noch Etikett")
+        etiketten, mit_via = planen(MUC, HH)
+        pruefe(len(mit_via) == 1
+               and any("meine Strecke" in e and "Gegenrichtung" in e for e in etiketten),
+               "andersherum gefahren zählt auch, und das Etikett sagt es",
+               str(etiketten))
+        etiketten, mit_via = planen(auf_der_linie(0.2), auf_der_linie(0.8))
+        pruefe(len(mit_via) == 1 and any("meine Strecke" in e for e in etiketten),
+               "ein Teilstück genügt", str(etiketten))
+        etiketten, mit_via = planen((52.52, 13.405), (51.05, 13.74))
+        pruefe(not mit_via and not any("meine Strecke" in e for e in etiketten),
+               "eine Strecke, zu der keine Fahrt passt (Berlin - Dresden), "
+               "kostet keine Anfrage mehr")
+        etiketten, mit_via = planen((53.5511, 9.9937), (53.0793, 8.8017))
+        pruefe(not mit_via, "und eine kurze, die nur im selben Ort beginnt, auch nicht")
+    finally:
+        _routing.provider = ersatz
+
+    # Wegräumen: Die späteren Abschnitte zählen Sitzungen und Fahrten.
+    db = SessionLocal()
+    try:
+        db.query(models.LiveSitzung).filter_by(id=alt_id).delete()
+        db.commit()
+    finally:
+        db.close()
+
     print("\nLadepunkte im Korridor")
     korridor = client.get(f"/api/saeulen/entlang/{fahrt_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()
