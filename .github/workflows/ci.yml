@@ -106,3 +106,8 @@ jobs:
       # verriegelten Auto (Alarmanlage) - und von selbst wieder verbinden.
       - name: Fahrzustand pruefen
         run: node tools/check_fahrzustand.js
+
+      # Der Start einer Aufzeichnung gegen einen Dongle, der nicht antwortet:
+      # Er bleibt in Benutzung, solange die Verbindung steht.
+      - name: Aufzeichnungsstart pruefen
+        run: node tools/check_aufzeichnung.js

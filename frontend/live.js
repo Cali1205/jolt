@@ -1920,6 +1920,14 @@ window.joltLive = (function () {
       stilleUeberwachen();
     }
 
+    // Die Spannung auch ohne Fahrzeugabfrage mitgeben. Im Stand wird nichts
+    // gefragt, `ATRV` aber weiter gemessen - und gerade dort fällt sie, wenn
+    // das Auto ausgeht. Ohne diese Zeile stünde der Abfall nirgends, und die
+    // Schwelle liesse sich nicht an einer echten Fahrt prüfen.
+    if (!nutzlast.rohwerte && letzteSpannung !== null
+        && Date.now() - letzteSpannungZeit < 15000) {
+      nutzlast.rohwerte = { batt_v: letzteSpannung };
+    }
     pufferAnhaengen(nutzlast);
     pufferAbarbeiten();
   }

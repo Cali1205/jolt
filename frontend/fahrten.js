@@ -245,7 +245,22 @@ window.joltFahrten = (function () {
           const wert = window.joltObd.socAusAntwort(
             await window.joltObd.befehl("22028C"));
           if (wert) soc = Math.round(wert.hmi * 10) / 10;
-        } catch (fehler) { mitDongle = false; }
+        } catch (fehler) {
+          /* Keine Antwort auf die erste Abfrage heisst **nicht** "kein
+           * Dongle". Ein Auto, das noch schläft, antwortet nicht - der
+           * Dongle ist trotzdem da, und sobald es fährt, kommen die Werte.
+           *
+           * Hier stand `mitDongle = false`. Damit lief die ganze
+           * Aufzeichnung ohne Fahrzeugwerte, obwohl der Dongle verbunden
+           * war: Am 5.10. hat eine Fahrt (Sitzung 6) drei Minuten lang nur
+           * GPS geliefert, bis jemand von Hand neu gestartet hat. Nur wenn
+           * die Verbindung selbst weg ist, gilt der Dongle als nicht da. */
+          if (!window.joltObd.verbunden()) {
+            mitDongle = false;
+          } else {
+            console.log("[obd] Startladestand ohne Antwort:", fehler);
+          }
+        }
       }
 
       stand("Fahrt anlegen …");
@@ -268,8 +283,10 @@ window.joltFahrten = (function () {
       window.joltLive.positionVerfolgen();
       if (mitDongle) {
         window.joltLive.dongleNutzen();
-        K.melden("Aufzeichnung läuft, Ladestand kommt aus dem Auto.",
-                 "hinweis");
+        K.melden(soc !== null
+          ? "Aufzeichnung läuft, Ladestand kommt aus dem Auto."
+          : "Aufzeichnung läuft. Das Auto antwortet noch nicht – jolt liest "
+            + "den Ladestand, sobald du fährst.", "hinweis");
       } else {
         K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
           + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
@@ -333,5 +350,5 @@ window.joltFahrten = (function () {
     }
   }
 
-  return { einrichten, laden, anzeigen };
+  return { einrichten, laden, anzeigen, aufzeichnungStarten };
 })();

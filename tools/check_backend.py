@@ -714,6 +714,16 @@ def main() -> int:
     leer = client.post(f"/api/live/{puffer}/punkte", json={"punkte": []})
     pruefe(leer.status_code == 422, "ein leerer Stapel ist ein Fehler",
            f"HTTP {leer.status_code}")
+    # Im Stand fragt jolt das Auto nichts, misst aber weiter die 12-V-Spannung
+    # und schickt sie mit: ein Punkt, dessen Rohwerte nur `batt_v` enthalten.
+    nur_spannung = client.post(f"/api/live/{puffer}/punkt", json={
+        "lat": punkte_planmaessig[6]["lat"], "lon": punkte_planmaessig[6]["lon"],
+        "rohwerte": {"batt_v": 13.9}})
+    pruefe(nur_spannung.status_code == 200
+           and nur_spannung.json().get("typ") == "zustand",
+           "ein Punkt ohne Fahrzeugabfrage, nur mit der 12-V-Spannung, wird "
+           "angenommen - ohne Zähler und ohne Ladestand",
+           f"HTTP {nur_spannung.status_code}: {nur_spannung.text[:120]}")
     client.post(f"/api/live/{puffer}/ende")
     zu = client.post(f"/api/live/{puffer}/punkte", json={"punkte": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0}]})

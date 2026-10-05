@@ -150,7 +150,10 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Zwei niedrige Werte hintereinander im Stand, verglichen mit dem Mittel der
   letzten Fahrt (keine feste Schwelle), trennen den Dongle sofort. Die Spannung
   steht als `batt_v` an jedem Messpunkt, damit sich die Schwelle an echten
-  Fahrten nachprüfen lässt. Lädt das Auto verriegelt, bleibt die Spannung oben;
+  Fahrten nachprüfen lässt — auch an Punkten ohne Fahrzeugabfrage, denn gerade im
+  Stand fällt sie beim Ausschalten. Eine Aufzeichnung behält den Dongle, auch wenn
+  das Auto beim Start noch schläft und die erste Abfrage nicht beantwortet.
+  Lädt das Auto verriegelt, bleibt die Spannung oben;
   dann gelten Stand und Weg. Nicht erfassbar bleibt, wer im ersten Moment nach
   dem Anhalten abschliesst, ohne dass das Auto je „aus" war.
 - **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin

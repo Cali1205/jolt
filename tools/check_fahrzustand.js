@@ -333,6 +333,24 @@ async function runde(kmh, nordM = 0) {
          "spaeter an echten Fahrten nachpruefen laesst",
          JSON.stringify(gesendet && gesendet.rohwerte));
 
+  console.log("\n12-V-Spannung im Stand: auch ohne Fahrzeugabfrage");
+  for (let i = 0; i < 12; i++) { vergeht(1); await fix(0, 660); }
+  obd.volt = 13.9;
+  await live.spannungPruefen();
+  const gelesenVor = obd.gelesen;
+  await runde(0, 660);
+  await warte(20);
+  const ohneCan = K0.letzterBody && K0.letzterBody.punkte
+    ? K0.letzterBody.punkte[K0.letzterBody.punkte.length - 1] : null;
+  pruefe(obd.gelesen === gelesenVor && !live.lesenErlaubt(),
+         "im Stand wird das Auto nicht gefragt");
+  pruefe(!!ohneCan && ohneCan.rohwerte && ohneCan.rohwerte.batt_v === 13.9,
+         "die Spannung geht trotzdem mit - dort fällt sie beim Ausschalten, und " +
+         "ohne diesen Punkt stünde der Abfall nirgends",
+         JSON.stringify(ohneCan && ohneCan.rohwerte));
+  pruefe(Object.keys(ohneCan.rohwerte).join() === "batt_v",
+         "und nur sie: Ein Punkt ohne Fahrzeugabfrage behauptet keine Zähler");
+
   Date.now = echtesNow;
   console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.`
                      : "\nAlle Pruefungen bestanden.");
