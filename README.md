@@ -132,6 +132,13 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   davon ausgenommen (gefahren ist gefahren), und aus einer Fahrt mit Anhänger
   lernt jolt keinen Fahrzeugfaktor. Die Vorgaben für die Fläche sind
   Schätzwerte, bis eine aufgezeichnete Fahrt sie bestätigt.
+- **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin
+  `@capacitor-community/background-geolocation` (`CLLocationManager` mit
+  Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren
+  einfriert. Die Messpunkte laufen dabei durch dieselbe Warteschlange. Eine
+  ältere App ohne das Plugin fällt auf den Browser-Standort zurück. Bisher nur
+  gegen Attrappen geprüft (`tools/check_standort.js`); ob iOS die App wirklich
+  am Leben hält, zeigt eine Fahrt.
 - **Messpunkte puffern** — jeder Punkt trägt seine Messzeit und geht zuerst in
   eine Warteschlange (`localStorage`), von dort in Stapeln zu 100 an
   `POST /api/live/{id}/punkte`. Ohne Netz bleiben die Punkte liegen und gehen
@@ -140,7 +147,8 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   veraltet wäre.
 
 **Noch nicht da**: Belegungsdaten der Ladepunkte (es gibt sie inzwischen, siehe
-„Nächste Schritte") und Hintergrund-Standort bei gesperrtem iPhone.
+„Nächste Schritte") und eine Auswertung, ob der Hintergrund-Standort auf dem iPhone wirklich
+durchläuft.
 
 ---
 

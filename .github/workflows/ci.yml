@@ -95,3 +95,9 @@ jobs:
       # Server, der ausfaellt - Funkloch, Nachreichen, abgelehnte Stapel.
       - name: Messpunkt-Warteschlange pruefen
         run: node tools/check_puffer.js
+
+      # Der Standort-Weg: Browser ueber navigator.geolocation, iOS-App ueber
+      # das Hintergrund-Plugin - samt Rueckfall, wenn die App aelter ist als
+      # die Oberflaeche, die der Server ihr liefert.
+      - name: Standort-Weg pruefen
+        run: node tools/check_standort.js
