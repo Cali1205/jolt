@@ -375,9 +375,12 @@
       : "/api/live/melden";
     if (!sitzungId) nutzlast.token = el("token").value.trim();
 
+    // `/punkt` verlangt die Anmeldung; `/melden` weist sich mit dem
+    // Logger-Token im Rumpf aus und braucht den Header nicht, schadet er
+    // aber auch nicht.
     const antwort = await fetch(ziel, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify(nutzlast),
     });
     const daten = await antwort.json().catch(() => ({}));

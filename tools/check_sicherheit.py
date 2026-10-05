@@ -91,9 +91,90 @@ def teil_limit() -> None:
            str(len(security._treffer)))
 
 
+def teil_live() -> None:
+    """Die Live-Endpunkte verlangen die Anmeldung - Bug-Scan #49, Punkt 1.
+
+    Vorher waren Lesen, Messpunkte und WebSocket ohne Anmeldung erreichbar, und
+    der einzige "Schlüssel" war eine fortlaufende Sitzungs-ID.
+    """
+    pruefe.abschnitt("Live-Endpunkte")
+    security._treffer.clear()
+    client = TestClient(app)
+    token = client.post("/api/login", json={"passwort": PASSWORT}).json()["token"]
+    kopf = {"X-Token": token}
+    punkt = {"lat": 50.0, "lon": 10.0, "soc": 60}
+
+    for methode, pfad, rumpf in (
+            ("get", "/api/live/1", None),
+            ("get", "/api/live/1/punkte", None),
+            ("post", "/api/live/1/punkt", punkt),
+            ("post", "/api/live/1/punkte", {"punkte": [punkt]})):
+        antwort = getattr(client, methode)(pfad, **({"json": rumpf} if rumpf else {}))
+        pruefe(antwort.status_code == 401,
+               f"{methode.upper()} {pfad} ohne Anmeldung: 401", f"HTTP {antwort.status_code}")
+        antwort = getattr(client, methode)(
+            pfad, headers=kopf, **({"json": rumpf} if rumpf else {}))
+        pruefe(antwort.status_code == 404,
+               f"und mit Anmeldung geht es bis zur Sitzung (404 - es gibt keine)",
+               f"HTTP {antwort.status_code}")
+
+    # WebSocket: der Token kommt als erste Nachricht.
+    def ws_ergebnis(erste):
+        try:
+            with client.websocket_connect("/api/live/1/ws") as ws:
+                if erste is not None:
+                    ws.send_text(erste)
+                return ws.receive_json()
+        except Exception as fehler:      # noqa: BLE001
+            return type(fehler).__name__
+
+    pruefe(ws_ergebnis('{"token": "' + token + '"}') == {"typ": "bereit"},
+           "der WebSocket nimmt den Token als erste Nachricht an und meldet 'bereit'")
+    pruefe(ws_ergebnis('{"token": "falsch"}') == "WebSocketDisconnect",
+           "mit falschem Token wird er geschlossen")
+    pruefe(ws_ergebnis("kein json") == "WebSocketDisconnect",
+           "mit Unsinn als erster Nachricht ebenso")
+    pruefe(ws_ergebnis('{"token": 5}') == "WebSocketDisconnect"
+           and ws_ergebnis("[1]") == "WebSocketDisconnect",
+           "und mit einem Token, der keine Zeichenkette ist")
+
+    # /melden bleibt offen, aber nur mit gültigem Logger-Token - und wer zu
+    # oft ein falsches schickt, wird gebremst.
+    security._melden_fehler.clear()
+    meldung = {"token": "gibt-es-nicht", "lat": 50, "lon": 10, "soc": 50}
+    antwort = client.post("/api/live/melden", json=meldung)
+    pruefe(antwort.status_code == 401,
+           "/melden mit unbekanntem Logger-Token: 401", f"HTTP {antwort.status_code}")
+    antwort = client.post("/api/live/melden",
+                          json={"token": "gibt-es-nicht", "format": "gibt-es-nicht"})
+    pruefe(antwort.status_code == 401,
+           "das Token wird vor der Übersetzung geprüft - ein unbekanntes Format "
+           "kostet ohne gültiges Token keine Rechenzeit", f"HTTP {antwort.status_code}")
+    codes = [client.post("/api/live/melden", json=meldung).status_code
+             for _ in range(security.MELDEN_FEHLER_MAX + 2)]
+    pruefe(codes[-1] == 429 and codes[0] == 401,
+           "nach zu vielen Fehlversuchen kommt 429 - vom allgemeinen Limit ist "
+           "der Pfad ausgenommen, also braucht er ein eigenes", str(codes[-3:]))
+    security._melden_fehler.clear()
+
+    # Die Gegenstelle: Eine Oberfläche, die den Token nicht schickt, wäre nach
+    # der Absicherung stumm - der WebSocket schlösse sich, `/punkt` gäbe 401.
+    frontend = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "frontend")
+    live = open(os.path.join(frontend, "live.js"), encoding="utf-8").read()
+    obd = open(os.path.join(frontend, "obd.js"), encoding="utf-8").read()
+    pruefe("steckdose.send(JSON.stringify({ token: K.token() }))" in live
+           and 'daten.typ === "bereit"' in live,
+           "die Live-Ansicht schickt den Token als erste WebSocket-Nachricht "
+           "und gilt erst nach 'bereit' als verbunden")
+    pruefe('"X-Token": joltToken() },\n      body: JSON.stringify(nutzlast)' in obd,
+           "die Diagnoseseite meldet Punkte mit Anmeldung")
+
+
 def main() -> int:
     teil_passwort()
     teil_limit()
+    teil_live()
     return pruefe.bilanz()
 
 
