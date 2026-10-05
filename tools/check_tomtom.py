@@ -96,8 +96,10 @@ def main() -> int:
     pruefe(len(vs) == 2 and abs(vs[0].strecke_m - 610000) < 1,
            "zwei Vorschläge mit Länge", str(len(vs)))
     pruefe(vs[0].zeit_s == 19862 and vs[0].ohne_verkehr_s == 19269
-           and vs[0].verkehr_s == 37,
-           "mit Zeit, Zeit ohne Verkehr und Verzögerung")
+           and vs[0].verkehr_s == 593,
+           "mit Zeit, Zeit ohne Verkehr und dem Verkehrseinfluss - der Differenz, "
+           "nicht dem Feld trafficDelayInSeconds (37), das nur die "
+           "Echtzeit-Verzögerung meint", str(vs[0].verkehr_s))
     pruefe(len(vs[0].punkte) == 3 and vs[0].punkte[0] == (48.0, 9.0),
            "und der Geometrie als (Breite, Länge)")
     kaputt = {"routes": [route_json(610, 19862), {"summary": {}, "legs": []},
@@ -180,15 +182,18 @@ def main() -> int:
            "mehr als fünf verlangt TomTom nicht - zu hoch gegriffen wird gedeckelt")
 
     pruefe.abschnitt("Verkehr")
+    # trafficDelayInSeconds steht absichtlich daneben und stimmt nicht: Es
+    # meint nur die Echtzeit-Verzögerung (gemessen +12,9 min, wo die Reisezeiten
+    # 21 Minuten Unterschied zeigen).
     zusammenfassung = {"routes": [{"summary": {"travelTimeInSeconds": 23340,
-                                               "trafficDelayInSeconds": 702,
+                                               "trafficDelayInSeconds": 100,
                                                "noTrafficTravelTimeInSeconds": 22638}}]}
     ergebnis, aufrufe = mit_antwort(
         Antwort(200, zusammenfassung),
         lambda: tomtom.verkehr((48.0, 9.0), (53.0, 10.0), [(50.0, 9.5), (51.5, 9.8)]))
     pruefe(ergebnis is not None and abs(ergebnis.verzoegerung_s / 60 - 11.7) < 0.01,
-           "11,7 Minuten Verzögerung (Reutlingen - Hamburg, 5.10.)",
-           str(ergebnis))
+           "11,7 Minuten Verkehrseinfluss aus der Differenz der Reisezeiten, nicht "
+           "aus dem Echtzeit-Feld daneben", str(ergebnis))
     url, kw = aufrufe[0]
     pruefe(url.split("calculateRoute/")[1].count(":") == 3 and "50.00000,9.50000" in url,
            "die Zwischenpunkte stehen in der Adresse - sie zwingen TomTom auf "
@@ -201,6 +206,60 @@ def main() -> int:
     null, _ = mit_antwort(Antwort(200, {"routes": [{"summary": {}}]}),
                           lambda: tomtom.verkehr(ort, (49.0, 9.0), []))
     pruefe(null is None, "und eine Zusammenfassung ohne Zeit auch")
+
+    pruefe.abschnitt("Abfahrtszeit")
+    from datetime import datetime, timedelta, timezone
+    spaeter = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=4)
+    ant = {"routes": [route_json(723, 23400, ohne=21720)]}      # Fr 16 Uhr, gemessen
+
+    def params_von(abfahrt):
+        _, aufrufe = mit_antwort(Antwort(200, ant),
+                                 lambda: tomtom.alternativen((48.0, 9.0), (53.0, 10.0),
+                                                             abfahrt=abfahrt))
+        return aufrufe[0][1]["params"]
+
+    pruefe(params_von(spaeter)["departAt"] == spaeter.strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "eine spätere Abfahrt geht als departAt in UTC mit Z hinaus")
+    pruefe("departAt" not in params_von(None), "ohne Abfahrt gibt es kein departAt")
+    pruefe("departAt" not in params_von(datetime.now(timezone.utc) + timedelta(minutes=1)),
+           "und eine Abfahrt in der nächsten Minute ist jetzt - dann gilt der Live-Verkehr")
+    pruefe("departAt" not in params_von(datetime.now(timezone.utc) - timedelta(days=1)),
+           "eine vergangene Abfahrt wird nie an TomTom geschickt")
+    naiv = (spaeter + timedelta(hours=1)).replace(tzinfo=None)
+    pruefe(params_von(naiv)["departAt"].endswith("Z")
+           and params_von(naiv)["departAt"].startswith(naiv.strftime("%Y-%m-%dT%H")),
+           "ohne Zeitzone gilt UTC - nicht die des Startpunkts, die TomTom sonst "
+           "annähme und die eine andere Uhrzeit meinte")
+    plus2 = datetime(2026, 10, 9, 16, 0, tzinfo=timezone(timedelta(hours=2))) + timedelta(days=365)
+    pruefe(params_von(plus2)["departAt"].endswith("T14:00:00Z"),
+           "16 Uhr in +02:00 wird zu 14 Uhr UTC")
+
+    freitag, aufrufe = mit_antwort(
+        Antwort(200, {"routes": [{"summary": {"travelTimeInSeconds": 23400,
+                                              "trafficDelayInSeconds": 390,
+                                              "noTrafficTravelTimeInSeconds": 21720}}]}),
+        lambda: tomtom.verkehr(ort, (53.0, 10.0), [], abfahrt=spaeter))
+    pruefe(abs(freitag.verzoegerung_s / 60 - 28.0) < 0.01 and freitag.prognose is True,
+           "Freitag 16 Uhr: 28 Minuten Verkehrseinfluss (gemessen), als Prognose "
+           "gekennzeichnet - nicht die 6,5 aus dem Echtzeit-Feld",
+           str(freitag))
+    jetzt_v, _ = mit_antwort(Antwort(200, zusammenfassung),
+                             lambda: tomtom.verkehr(ort, (53.0, 10.0), []))
+    pruefe(jetzt_v.prognose is False, "ohne Abfahrt ist es live")
+    fern, _ = mit_antwort(
+        Antwort(200, {"routes": [{"summary": {"travelTimeInSeconds": 22440,
+                                              "trafficDelayInSeconds": 0,
+                                              "noTrafficTravelTimeInSeconds": 21720}}]}),
+        lambda: tomtom.verkehr(ort, (53.0, 10.0), [], abfahrt=spaeter))
+    pruefe(abs(fern.verzoegerung_s / 60 - 12.0) < 0.01,
+           "weit in der Zukunft steht im Echtzeit-Feld 0, die zeitabhängige "
+           "Prognose aber 12 Minuten - die Differenz ist die richtige Zahl")
+    schneller, _ = mit_antwort(
+        Antwort(200, {"routes": [{"summary": {"travelTimeInSeconds": 21000,
+                                              "noTrafficTravelTimeInSeconds": 21720}}]}),
+        lambda: tomtom.verkehr(ort, (53.0, 10.0), []))
+    pruefe(schneller.verzoegerung_s == 0.0,
+           "eine Reisezeit unter dem freien Fluss gibt keine negative Verzögerung")
 
     return pruefe.bilanz()
 

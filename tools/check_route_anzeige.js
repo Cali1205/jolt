@@ -81,5 +81,33 @@ pruefe(kachel({ fahrt_id: 11 }, [{ fahrt_id: 11, verkehr_min: "viel" }]) === "",
 pruefe(kachel({ fahrt_id: 11 }, [{ fahrt_id: 11, verkehr_min: 3 }]).includes("TomTom"),
        "fehlt die Quelle, steht TomTom da - es gibt keine andere");
 
+console.log("\nPrognose statt live");
+const prognose = { fahrt_id: 21, verkehr_min: 28, verkehr_quelle: "TomTom", verkehr_basis: "prognose" };
+pruefe(kachel({ fahrt_id: 21 }, [prognose]).startsWith("[Verkehr (Prognose) · TomTom|+28 min|"),
+       "für eine spätere Abfahrt steht \"Prognose\" an der Kachel - eine Zahl für "
+       + "Freitag 16 Uhr ist keine Messung von jetzt", kachel({ fahrt_id: 21 }, [prognose]));
+pruefe(kachel({ fahrt_id: 21 }, [{ ...prognose, verkehr_basis: "live" }])
+       .startsWith("[Verkehr · TomTom|"),
+       "live bleibt ohne den Zusatz");
+pruefe(kachel({ fahrt_id: 11 }, planung).startsWith("[Verkehr · TomTom|"),
+       "und ohne Angabe der Basis auch (ältere Antworten)");
+
+console.log("\nAbfahrt aus dem Formularfeld");
+const iso = fenster.joltRoute.abfahrtIso;
+pruefe(iso("") === null && iso(null) === null && iso(undefined) === null,
+       "leer heisst jetzt");
+pruefe(iso("kein Datum") === null, "und Unlesbares auch");
+const w = "2026-10-09T16:00";
+const e = iso(w);
+pruefe(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(e),
+       "sonst ein Zeitpunkt in UTC mit Z - der Server liest damit keine "
+       + "Ortszeit falsch", String(e));
+pruefe(new Date(e).getTime() === new Date(w).getTime(),
+       "und es ist derselbe Moment wie die Eingabe, in welcher Zeitzone das "
+       + "Gerät auch steht");
+const feld = fenster.joltRoute.lokalFuerFeld(new Date(2026, 9, 9, 7, 5));
+pruefe(feld === "2026-10-09T07:05", "min und max des Felds sind Ortszeit mit "
+       + "führenden Nullen", feld);
+
 console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen.` : "\nAlle Prüfungen bestanden.");
 process.exit(fehler ? 1 : 0);

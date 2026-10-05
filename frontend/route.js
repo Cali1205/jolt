@@ -13,6 +13,7 @@ window.joltRoute = (function () {
   // ggf. zusammengelegt) - für die Wechsel-Karten und um beim Tippen auf eine
   // Karte zu wissen, welcher fahrt_id sie entspricht.
   let letzteVarianten = [];
+  let letzteAbfahrt = null;       // wofür der Verkehr gilt: null = jetzt
 
   /* ---------- Ortssuche ---------- */
 
@@ -90,6 +91,7 @@ window.joltRoute = (function () {
         alternative: document.getElementById("alternative").checked,
         eigene_fahrten: document.getElementById("eigene-fahrten").checked,
         tomtom: document.getElementById("tomtom").checked,
+        abfahrt: abfahrtIso(document.getElementById("abfahrt").value),
         // Der Regler steht ganz links auf einem negativen Wert - das ist
         // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
@@ -99,6 +101,7 @@ window.joltRoute = (function () {
         tempo_max_kmh: zahlOderNull("tempo-max"),
       }});
       letzteVarianten = antwort.varianten || [];
+      letzteAbfahrt = antwort.abfahrt || null;
       variantenZeichnen();
       // Die sparsamste Variante ist jolts Grundhaltung - sie wird
       // vorausgewählt, ein Tippen auf eine andere Karte wechselt.
@@ -186,7 +189,9 @@ window.joltRoute = (function () {
     if (letzteVarianten.some((v) => v.verkehr_quelle)) {
       const quelle = document.createElement("div");
       quelle.className = "unter";
-      quelle.textContent = "Verkehr: TomTom, Stand jetzt";
+      quelle.textContent = letzteAbfahrt
+        ? "Verkehr: TomTom, Prognose für " + abfahrtText(letzteAbfahrt) + " · Wetter: Vorhersage für diese Zeit"
+        : "Verkehr: TomTom, Stand jetzt";
       liste.appendChild(quelle);
     }
   }
@@ -224,7 +229,10 @@ window.joltRoute = (function () {
     const text = v.verkehr_min >= 0.5 ? "+" + K.zahl(v.verkehr_min, 0) + " min" : "frei";
     // Ab einer Viertelstunde fällt es auf: Das ist der Unterschied zwischen
     // "ein bisschen Verkehr" und "eine andere Ankunftszeit".
-    return K.wertKachel("Verkehr · " + (v.verkehr_quelle || "TomTom"), text,
+    // Prognose oder live: Eine Zahl für Freitag 16 Uhr ist keine Messung von
+    // jetzt, und das soll man ihr ansehen.
+    const art = v.verkehr_basis === "prognose" ? "Verkehr (Prognose)" : "Verkehr";
+    return K.wertKachel(art + " · " + (v.verkehr_quelle || "TomTom"), text,
                         v.verkehr_min >= 15 ? "schlecht" : "");
   }
 
@@ -559,6 +567,44 @@ window.joltRoute = (function () {
     aktualisieren();
   }
 
+  /* ---------- Abfahrtszeit ---------- */
+
+  /* "Fr., 09.10., 16:00" in der Ortszeit des Geräts. */
+  function abfahrtText(iso) {
+    const zeit = new Date(iso);
+    if (Number.isNaN(zeit.getTime())) return iso;
+    return zeit.toLocaleString("de-DE", { weekday: "short", day: "2-digit",
+                                          month: "2-digit", hour: "2-digit",
+                                          minute: "2-digit" });
+  }
+
+  /* Das Feld liefert Ortszeit ohne Zone ("2026-10-09T16:00"). Der Server
+   * braucht einen Zeitpunkt: `new Date` liest den Text als Ortszeit dieses
+   * Geräts, `toISOString` macht daraus UTC mit Z - und damit ist die Zone
+   * nicht mehr zu verwechseln. Leer oder unlesbar heisst "jetzt". */
+  function abfahrtIso(wert) {
+    if (!wert) return null;
+    const zeit = new Date(wert);
+    return Number.isNaN(zeit.getTime()) ? null : zeit.toISOString();
+  }
+
+  /* "2026-10-09T16:00" für `min` und `max` des Felds, in Ortszeit. */
+  function lokalFuerFeld(zeit) {
+    const z = (n) => String(n).padStart(2, "0");
+    return `${zeit.getFullYear()}-${z(zeit.getMonth() + 1)}-${z(zeit.getDate())}`
+      + `T${z(zeit.getHours())}:${z(zeit.getMinutes())}`;
+  }
+
+  /* Vergangenheit und mehr als 60 Tage lehnt auch der Server ab; das Feld
+   * zeigt es schon beim Auswählen. */
+  function abfahrtGrenzen() {
+    const feld = document.getElementById("abfahrt");
+    if (!feld) return;
+    const jetzt = new Date();
+    feld.min = lokalFuerFeld(jetzt);
+    feld.max = lokalFuerFeld(new Date(jetzt.getTime() + 60 * 24 * 3600 * 1000));
+  }
+
   /* ---------- Anhänger und Höchstgeschwindigkeit ---------- */
 
   /* Ein leeres Feld heisst "nicht gesetzt" und geht als null hinaus - nicht
@@ -612,6 +658,11 @@ window.joltRoute = (function () {
     K.reglerKoppeln("tempo", "tempo-wert");
     zuladungKoppeln();
     anhaengerKoppeln();
+    abfahrtGrenzen();
+    const abfahrtFeld = document.getElementById("abfahrt");
+    // Wer das Feld nach einer Stunde Pause wieder anfasst, soll nicht mit den
+    // Grenzen von vorhin arbeiten.
+    if (abfahrtFeld) abfahrtFeld.addEventListener("focus", abfahrtGrenzen);
 
     let warten = null;
     let wartenPlan = null;
@@ -645,6 +696,6 @@ window.joltRoute = (function () {
     });
   }
 
-  return { einrichten, anzeigen, verkehrKachel, saeulenLaden, ladeplanLaden, varianteWaehlen,
+  return { einrichten, anzeigen, verkehrKachel, abfahrtIso, lokalFuerFeld, saeulenLaden, ladeplanLaden, varianteWaehlen,
            fahrtLaden };
 })();

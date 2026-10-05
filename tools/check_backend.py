@@ -605,23 +605,43 @@ def main() -> int:
              for i in range(51)]
     verzoegerungen: list = []
     zaehler = {"alternativen": 0, "verkehr": 0}
+    abfahrten: list = []                 # was TomTom an Abfahrt bekam
 
-    def alternativen_fake(start, ziel, maximal=5):
+    def alternativen_fake(start, ziel, maximal=5, abfahrt=None):
         zaehler["alternativen"] += 1
+        abfahrten.append(abfahrt)
         return [_tt.Vorschlag(punkte=linie, strecke_m=780000.0, zeit_s=30000.0)]
 
-    def verkehr_fake(start, ziel, zwischen):
+    def verkehr_fake(start, ziel, zwischen, abfahrt=None):
         nr = zaehler["verkehr"]
         zaehler["verkehr"] += 1
+        abfahrten.append(abfahrt)
         minuten = verzoegerungen[nr] if nr < len(verzoegerungen) else 0.0
         return _tt.Verkehr(verzoegerung_s=minuten * 60.0, zeit_s=30000.0,
                            ohne_verkehr_s=30000.0 - minuten * 60.0)
 
+    # Das Wetter ersetzen und mitschreiben: Die Abfahrtszeit gilt auch dafür, und
+    # ohne Ersatz ginge dieser Abschnitt ins Netz.
+    from app.energie import wetter as _wetter
+    from app.energie.modell import Umgebung as _Umgebung
+    wetter_aufrufe: list = []
+
+    def wetter_fake(punkte, anzahl=6, vorgabe=None, abfahrt=None, dauer_s=0.0):
+        wetter_aufrufe.append((abfahrt, dauer_s))
+        return lambda lat, lon: _Umgebung(temp_c=7.0)
+
+    def mittelwert_fake(punkte, abfahrt=None, dauer_s=0.0):
+        return _Umgebung(temp_c=7.0)
+
+    echtes_wetter = (_wetter.entlang_route, _wetter.mittelwert)
+    _wetter.entlang_route, _wetter.mittelwert = wetter_fake, mittelwert_fake
     echte_alt, echter_verkehr = _tt.alternativen, _tt.verkehr
     ersatz_routing = _routing.provider
     _routing.provider = lambda: _Zweiwege()
     _tt.alternativen, _tt.verkehr = alternativen_fake, verkehr_fake
     _os.environ["TOMTOM_API_KEY"] = "test"
+
+    letzte: dict = {}
 
     def tomtom_planen(**mehr):
         _Zweiwege.aufrufe = []
@@ -633,7 +653,15 @@ def main() -> int:
             "start_soc": 80.0, "eigene_fahrten": False, **mehr})
         pruefe(antwort.status_code == 200, "die Anfrage geht durch",
                f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+        letzte["json"] = antwort.json() if antwort.status_code == 200 else {}
         return antwort.json()["varianten"] if antwort.status_code == 200 else []
+
+    def roh_planen(**mehr):
+        return client.post("/api/route", json={
+            "fahrzeug_id": fahrzeuge[0]["id"],
+            "start": {"lat": 53.5511, "lon": 9.9937, "text": "A"},
+            "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
+            "start_soc": 80.0, "eigene_fahrten": False, **mehr})
 
     def schnellste(varianten):
         return [v for v in varianten if "insgesamt schnellste" in v["etiketten"]]
@@ -691,6 +719,64 @@ def main() -> int:
         pruefe(zaehler == {"alternativen": 0, "verkehr": 0}
                and not any("verkehr_min" in v for v in vs),
                "abgeschaltet wird TomTom nicht gefragt", str(zaehler))
+        # --- Abfahrtszeit: Verkehr und Wetter gelten für diese Zeit ---------
+        from datetime import datetime as _dt3, timedelta as _td3, timezone as _tz3
+        morgen = (_dt3.now(_tz3.utc) + _td3(days=1)).replace(microsecond=0)
+        verzoegerungen[:] = [0.0, 0.0]
+        abfahrten.clear()
+        wetter_aufrufe.clear()
+        vs = tomtom_planen(abfahrt=morgen.isoformat().replace("+00:00", "Z"))
+        pruefe(abfahrten and all(a == morgen for a in abfahrten) and len(abfahrten) == 3,
+               "die Abfahrt geht an jede TomTom-Anfrage: Vorschläge und Verkehr je Route",
+               str(abfahrten))
+        pruefe(wetter_aufrufe and all(a == morgen and d > 0 for a, d in wetter_aufrufe),
+               "und ans Wetter, mit der Fahrzeit - sonst läge eine Fahrt morgen "
+               "früh auf dem Wetter von heute Nachmittag", str(wetter_aufrufe))
+        pruefe(all(v["verkehr_basis"] == "prognose" for v in vs),
+               "der Verkehr ist als Prognose gekennzeichnet")
+        pruefe(letzte["json"].get("abfahrt") == morgen.isoformat(),
+               "und die Antwort nennt die Abfahrt, mit der gerechnet wurde",
+               str(letzte["json"].get("abfahrt")))
+
+        abfahrten.clear()
+        wetter_aufrufe.clear()
+        vs = tomtom_planen()
+        pruefe(all(a is None for a in abfahrten) and letzte["json"]["abfahrt"] is None
+               and all(v["verkehr_basis"] == "live" for v in vs),
+               "ohne Abfahrt gilt jetzt: Live-Verkehr, keine Abfahrt in der Antwort")
+        pruefe(wetter_aufrufe and all(a is None for a, _ in wetter_aufrufe),
+               "und das aktuelle Wetter")
+
+        abfahrten.clear()
+        tomtom_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(minutes=3)).isoformat())
+        pruefe(all(a is None for a in abfahrten) and letzte["json"]["abfahrt"] is None,
+               "eine Abfahrt in drei Minuten ist jetzt - wer die Uhrzeit eintippt, "
+               "braucht eine Weile")
+        tomtom_planen(abfahrt=(_dt3.now(_tz3.utc) - _td3(minutes=4)).isoformat())
+        pruefe(letzte["json"]["abfahrt"] is None,
+               "und vor vier Minuten auch - es gilt jetzt")
+
+        abfahrten.clear()
+        naiv = (_dt3.now(_tz3.utc) + _td3(days=2)).replace(microsecond=0, tzinfo=None)
+        tomtom_planen(abfahrt=naiv.isoformat())
+        pruefe(abfahrten and all(a.replace(tzinfo=None) == naiv for a in abfahrten),
+               "ohne Zeitzone gilt UTC - nicht stillschweigend die Ortszeit des Servers")
+
+        vergangen = roh_planen(abfahrt=(_dt3.now(_tz3.utc) - _td3(days=1)).isoformat())
+        pruefe(vergangen.status_code == 422 and "Vergangenheit" in vergangen.text,
+               "eine Abfahrt von gestern ist ein Tippfehler und wird abgelehnt, "
+               "statt stillschweigend mit jetzt zu rechnen",
+               f"HTTP {vergangen.status_code}: {vergangen.text[:100]}")
+        fern = roh_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(days=61)).isoformat())
+        pruefe(fern.status_code == 422 and "60 Tage" in fern.text,
+               "und eine in 61 Tagen auch - so weit reicht keine Prognose",
+               f"HTTP {fern.status_code}: {fern.text[:100]}")
+        ok60 = roh_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(days=59)).isoformat())
+        pruefe(ok60.status_code == 200, "59 Tage gehen",
+               f"HTTP {ok60.status_code}: {ok60.text[:100]}")
+        quatsch = roh_planen(abfahrt="morgen früh")
+        pruefe(quatsch.status_code == 422, "und ein Wert, der kein Zeitpunkt ist, auch")
+
         del _os.environ["TOMTOM_API_KEY"]
         vs = tomtom_planen()
         pruefe(zaehler == {"alternativen": 0, "verkehr": 0} and len(vs) == 1,
@@ -698,6 +784,7 @@ def main() -> int:
                str(zaehler))
     finally:
         _tt.alternativen, _tt.verkehr = echte_alt, echter_verkehr
+        _wetter.entlang_route, _wetter.mittelwert = echtes_wetter
         _routing.provider = ersatz_routing
         _os.environ.pop("TOMTOM_API_KEY", None)
 
