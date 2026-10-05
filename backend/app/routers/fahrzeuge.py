@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .. import deps, models
+from ..zeit import utc_iso
 from ..database import get_db
 from ..laden import kurven
 
@@ -63,8 +64,7 @@ def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
             # Was das Fahrzeug selbst ueber seinen Akku sagt, und wann.
             # Beides null, solange nie gemessen wurde.
             "gemessene_kapazitaet_kwh": fahrzeug.gemessene_kapazitaet_kwh,
-            "kapazitaet_gemessen_am": (fahrzeug.kapazitaet_gemessen_am.isoformat()
-                                       if fahrzeug.kapazitaet_gemessen_am else None),
+            "kapazitaet_gemessen_am": utc_iso(fahrzeug.kapazitaet_gemessen_am),
             # Womit tatsaechlich gerechnet wird - gemessen, sonst Profil.
             "kapazitaet_kwh": fahrzeug.kapazitaet_kwh,
             # Nur ob eines eingerichtet ist, nicht welches. Das Token steht

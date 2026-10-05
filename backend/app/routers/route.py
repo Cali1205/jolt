@@ -38,6 +38,7 @@ from .. import deps, models, routing
 from ..database import get_db
 from ..energie import modell, wetter
 from ..geo import haversine_m
+from ..zeit import utc_iso
 # Nur noch für die Vorgabewerte der Regler - gerechnet wird über
 # `umplanung.planen`, das den Optimierer selbst aufruft.
 from ..laden import optimierer
@@ -736,7 +737,7 @@ def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, le=200)
         strecke_km = round((f.strecke_m or 0) / 1000.0, 1)
         ergebnis.append({
             "id": f.id, "start": f.start_text, "ziel": f.ziel_text,
-            "angelegt": f.angelegt.isoformat(),
+            "angelegt": utc_iso(f.angelegt),
             "strecke_km": strecke_km,
             "fahrzeit_minuten": round((f.fahrzeit_s or 0) / 60.0),
             "fahrzeug": f.fahrzeug.name,

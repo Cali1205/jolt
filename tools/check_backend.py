@@ -570,9 +570,13 @@ def main() -> int:
     finally:
         _routing.provider = ersatz
 
-    # Wegräumen: Die späteren Abschnitte zählen Sitzungen und Fahrten.
+    # Wegräumen: Die späteren Abschnitte zählen Sitzungen und Fahrten. Die
+    # Messpunkte zuerst: Ein Massen-Delete kaskadiert nicht, und unter SQLite
+    # erzwingt niemand den Fremdschlüssel - die nächste Sitzung bekäme dieselbe
+    # ID und erbte die Waisen.
     db = SessionLocal()
     try:
+        db.query(models.LivePunkt).filter_by(sitzung_id=alt_id).delete()
         db.query(models.LiveSitzung).filter_by(id=alt_id).delete()
         db.commit()
     finally:
@@ -788,6 +792,70 @@ def main() -> int:
         _routing.provider = ersatz_routing
         _os.environ.pop("TOMTOM_API_KEY", None)
 
+    print("\nZeitangaben und Aufzeichnungsstart")
+    # Der Server speichert UTC ohne Zone. `isoformat()` einer solchen Zeit hat
+    # kein Z - und ein Browser liest das als Ortszeit: In Sommerzeit stand
+    # 15:56 Uhr, wo es 17:56 war, und jeder Vergleich mit Date.now() lag zwei
+    # Stunden daneben. Jede Zeit verlässt den Server deshalb mit Z.
+    from datetime import datetime as _dz, timezone as _tzz
+    # Eine Aufzeichnung hat kein Energieprofil, aus dem sich ein Ladestand
+    # schätzen liesse. Ohne Messung blieb die Live-Anzeige leer - bis das Auto
+    # zum ersten Mal antwortete, und das tut es im Stand nicht (Alarmanlage).
+    start = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeuge[0]["id"], "lat": 48.4770, "lon": 9.1444,
+        "soc": 79.6, "name": "Start"}).json()
+    sid = start["sitzung_id"]
+    erste = client.get(f"/api/live/{sid}/punkte").json()["punkte"]
+    pruefe(len(erste) == 1 and erste[0]["soc"] == 79.6,
+           "der Startladestand ist der erste Messpunkt der Aufzeichnung",
+           f"{len(erste)} Punkte, erster: {erste[:1]}")
+    gps = client.post(f"/api/live/{sid}/punkt", json={
+        "lat": 48.4771, "lon": 9.1445}).json()
+    pruefe(gps["ist_soc"] == 79.6 and gps["soc_gemeldet"] is False
+           and gps["soc_quelle"] == "zuletzt",
+           "ein Punkt nur mit Position zeigt die letzte Messung - und sagt, dass "
+           "sie es ist, statt leer zu bleiben",
+           f"{gps['ist_soc']} / {gps['soc_gemeldet']} / {gps['soc_quelle']}")
+    gemessen = client.post(f"/api/live/{sid}/punkt", json={
+        "lat": 48.4772, "lon": 9.1446, "soc": 79.2}).json()
+    pruefe(gemessen["ist_soc"] == 79.2 and gemessen["soc_gemeldet"] is True
+           and gemessen["soc_quelle"] == "gemessen",
+           "und ein gemessener Wert ersetzt sie", str(gemessen["soc_quelle"]))
+    nur_gps = client.post(f"/api/live/{sid}/punkt", json={
+        "lat": 48.4773, "lon": 9.1447}).json()
+    pruefe(nur_gps["ist_soc"] == 79.2 and nur_gps["soc_quelle"] == "zuletzt",
+           "danach gilt die neueste Messung, nicht die vom Start")
+    client.post(f"/api/live/{sid}/ende")
+
+    punkte_zeit = client.get(f"/api/live/{sid}/punkte").json()["punkte"]
+    pruefe(punkte_zeit and all(p["zeit"].endswith("Z") for p in punkte_zeit),
+           "die Messzeiten tragen ein Z - sonst läse der Browser UTC als Ortszeit",
+           str(punkte_zeit[:1]))
+    pruefe(all(_dz.fromisoformat(p["zeit"]).tzinfo is not None for p in punkte_zeit),
+           "und sind für Python zonenbewusst lesbar")
+    fahrten_liste = client.get("/api/fahrten").json()
+    pruefe(fahrten_liste and all(f["angelegt"].endswith("Z") for f in fahrten_liste),
+           "auch das Datum in der Fahrtenliste", str(fahrten_liste[:1]))
+    jetzt_utc = _dz.now(_tzz.utc)
+    neueste = max(_dz.fromisoformat(f["angelegt"]) for f in fahrten_liste)
+    pruefe(abs((jetzt_utc - neueste).total_seconds()) < 3600,
+           "und es ist wirklich UTC: die jüngste Fahrt liegt höchstens eine "
+           "Stunde zurück, nicht zwei Stunden daneben",
+           f"{neueste} gegen {jetzt_utc}")
+
+    ohne = client.post("/api/live/aufzeichnung", json={
+        "fahrzeug_id": fahrzeuge[0]["id"], "lat": 48.4770, "lon": 9.1444,
+        "name": "Ohne Auto"}).json()
+    pruefe(client.get(f"/api/live/{ohne['sitzung_id']}/punkte").json()["punkte"] == [],
+           "ohne gemeldeten Startladestand gibt es keinen Startpunkt - es wird "
+           "nichts erfunden")
+    leer = client.post(f"/api/live/{ohne['sitzung_id']}/punkt", json={
+        "lat": 48.4771, "lon": 9.1445}).json()
+    pruefe(leer["ist_soc"] is None,
+           "und der Ladestand bleibt unbekannt, statt mit 100 % zu raten",
+           str(leer["ist_soc"]))
+    client.post(f"/api/live/{ohne['sitzung_id']}/ende")
+
     print("\nLadepunkte im Korridor")
     korridor = client.get(f"/api/saeulen/entlang/{fahrt_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()
@@ -981,7 +1049,7 @@ def main() -> int:
     pruefe(ts == sorted(ts) and len(set(ts)) == 6,
            "mit ihrer Messzeit und nicht mit der des Nachreichens, in "
            "richtiger Reihenfolge", str(ts[:3]))
-    erwartet = (jetzt - timedelta(minutes=60)).replace(tzinfo=None)
+    erwartet = jetzt - timedelta(minutes=60)
     pruefe(abs((datetime.fromisoformat(ts[0]) - erwartet).total_seconds()) < 5,
            "der erste Punkt liegt eine Stunde zurück - Zone Z wurde als UTC gelesen",
            ts[0])

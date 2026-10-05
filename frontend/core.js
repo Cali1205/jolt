@@ -144,6 +144,30 @@ window.jolt = (function () {
       <div class="zahl">${zahlText}</div><div class="name">${name}</div></div>`;
   }
 
+  /* ---------- Zeiten vom Server ---------- */
+
+  /* Eine Zeit vom Server als Date - oder null.
+   *
+   * Der Server liefert UTC mit Z. Fehlt die Zone (ältere Antwort, andere
+   * Quelle), gilt UTC und **nicht** die Ortszeit: `new Date("2026-10-05T15:56:21")`
+   * liest den Text als Ortszeit des Geräts. In Sommerzeit stand dann 15:56 Uhr,
+   * wo es 17:56 war, und jeder Vergleich mit `Date.now()` lag zwei Stunden
+   * daneben - so hielt jolt nach dem Neuladen die letzten Fahrzeugwerte für
+   * zwei Stunden alt und baute die Dongle-Verbindung neu auf. */
+  function zeit(text) {
+    if (typeof text !== "string" || !text) return null;
+    // Nur ein Datum ohne Uhrzeit liest JavaScript ohnehin als UTC.
+    const hatZone = !text.includes("T") || /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
+    const d = new Date(hatZone ? text : text + "Z");
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  /* Dasselbe als Millisekunden - NaN, wenn es keine Zeit ist. */
+  function zeitMs(text) {
+    const d = zeit(text);
+    return d === null ? NaN : d.getTime();
+  }
+
   /* ---------- Kleinkram ---------- */
 
   function an(id, ereignis, funktion) {
@@ -166,5 +190,5 @@ window.jolt = (function () {
 
   return { zustand, api, token, tokenSetzen, melden, meldungenLeeren,
            sitzungMerken, gemerkteSitzung,
-           zahl, dauer, wertKachel, an, reglerKoppeln };
+           zahl, dauer, wertKachel, zeit, zeitMs, an, reglerKoppeln };
 })();
