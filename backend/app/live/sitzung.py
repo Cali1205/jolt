@@ -94,6 +94,11 @@ class Zustand:
     plan_geaendert: bool = False
     aenderung: str = ""
     dringend: bool = field(default=False, repr=False)
+    # Woher `ist_soc` kommt: "gemessen" (dieser Punkt), "gerechnet" (aus dem
+    # Profil) oder "zuletzt" (die letzte Messung dieser Fahrt, weil dieser Punkt
+    # keine hat und es kein Profil gibt - der Fall einer Aufzeichnung, solange
+    # das Auto nicht antwortet).
+    soc_quelle: str = "gemessen"
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +479,16 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
     gemeldet = punkt.soc is not None
     ist_soc = punkt.soc if gemeldet else soc_schaetzen(
         sitzung.punkte, punkt, sitzung.verbrauchsfaktor)
+    soc_quelle = "gemessen" if gemeldet else "gerechnet"
+    if ist_soc is None:
+        # Eine Aufzeichnung hat kein Profil, aus dem sich ein Ladestand
+        # schätzen liesse. Dann zeigt die Anzeige die letzte Messung dieser
+        # Fahrt - als solche gekennzeichnet -, statt leer zu bleiben. Gerechnet
+        # wird damit nichts: Ohne Profil gibt es weder Abweichung noch Prognose.
+        letzte = next((p.soc for p in reversed(sitzung.punkte)
+                       if p.soc is not None), None)
+        if letzte is not None:
+            ist_soc, soc_quelle = letzte, "zuletzt"
 
     abweichung = None
     if punkt.soll_soc is not None and ist_soc is not None:
@@ -498,7 +513,7 @@ def _zustand_bilden(sitzung: models.LiveSitzung, punkt: models.LivePunkt,
         km_auf_route=round(km, 2), abstand_zur_route_m=round(abstand_m),
         lat=punkt.lat, lon=punkt.lon,
         ist_soc=None if ist_soc is None else round(ist_soc, 2),
-        soc_gemeldet=gemeldet, soll_soc=punkt.soll_soc,
+        soc_gemeldet=gemeldet, soc_quelle=soc_quelle, soll_soc=punkt.soll_soc,
         abweichung_pp=abweichung,
         verbrauchsfaktor=round(sitzung.verbrauchsfaktor, 3),
         zeitfaktor=round(sitzung.zeitfaktor, 3),

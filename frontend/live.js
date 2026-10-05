@@ -248,7 +248,8 @@ window.joltLive = (function () {
       // von 0,4 Prozentpunkten (ein Byte durch 2,5). Auf ganze Prozent
       // gerundet steht die Zahl minutenlang still, obwohl sie sich bewegt -
       // und gerade die Bewegung will man sehen.
-      K.wertKachel(z.soc_gemeldet === false ? "Ladestand (gerechnet)" : "Ladestand",
+      K.wertKachel(z.soc_quelle === "zuletzt" ? "Ladestand (zuletzt gemessen)"
+                   : (z.soc_gemeldet === false ? "Ladestand (gerechnet)" : "Ladestand"),
         K.zahl(z.ist_soc, 1) + " %"),
       K.wertKachel("Abweichung",
         (z.abweichung_pp === null ? "–"
@@ -2294,7 +2295,7 @@ window.joltLive = (function () {
                               ? p.geladen_kwh : 0)
           : null;
         verbrauchsspur.push({
-          zeit: new Date(p.zeit).getTime(), km: p.km_stand, netto,
+          zeit: K.zeitMs(p.zeit), km: p.km_stand, netto,
           // Die GPS-Strecke ist hier schon bekannt - anders als im Betrieb,
           // wo sie erst mit der Position nachgetragen wird.
           gps: gefahrenKm,
@@ -2317,7 +2318,10 @@ window.joltLive = (function () {
 
     const letzter = punkte[punkte.length - 1];
     if (typeof letzter.km_stand === "number") {
-      letzteRohwerteZeit = new Date(letzter.zeit).getTime();
+      // Über K.zeit: UTC vom Server. Als Ortszeit gelesen wäre der Wert zwei
+      // Stunden alt, und `stilleUeberwachen` baute die Verbindung nach jedem
+      // Neuladen der Seite neu auf ("antwortet seit zwei Minuten nicht").
+      letzteRohwerteZeit = K.zeitMs(letzter.zeit);
     }
     verlaufZeichnen();
     verbrauchZeichnen();
@@ -2427,7 +2431,7 @@ window.joltLive = (function () {
 
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
            dongleNutzen, verlaufZeichnen,
-           fahrzustand: () => fahrZustand, lesenErlaubt, dongleVerbinden,
+           fahrzustand: () => fahrZustand, fahrzustandStart, lesenErlaubt, dongleVerbinden,
            spannungPruefen,
            autoSetzen: (an) => { autoModus = !!an; } };
 })();

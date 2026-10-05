@@ -511,6 +511,28 @@ def teil_kette():
     client.post(f"/api/live/{sitzung4}/ende")
 
 
+def _start_ohne_punkt(client, koerper):
+    """Eine Aufzeichnung starten, **ohne** den Startpunkt, den der Server anlegt.
+
+    Der Server nimmt den Startladestand als ersten Messpunkt auf (`Zeit =
+    jetzt`). Die Tests unten bauen ihre Fahrt dagegen aus rueckdatierten
+    Messpunkten: Der Startpunkt laege dann hinter allen anderen, mit der
+    Startposition am Ende der Strecke - in der Wirklichkeit ist er der
+    fruehste. Sie pruefen auch etwas anderes (Aufraeumen, Kilometerstand,
+    Lernen); der Startpunkt selbst steht in check_backend.py.
+    """
+    antwort = client.post("/api/live/aufzeichnung", json=koerper)
+    if antwort.status_code == 200:
+        db = SessionLocal()
+        try:
+            db.query(models.LivePunkt).filter_by(
+                sitzung_id=antwort.json()["sitzung_id"]).delete()
+            db.commit()
+        finally:
+            db.close()
+    return antwort
+
+
 def _fahrt_anlegen(client, fahrzeug, name, minuten_her, laedt=False):
     """Eine Aufzeichnung mit Messpunkten, deren letzter `minuten_her` alt ist.
 
@@ -518,7 +540,7 @@ def _fahrt_anlegen(client, fahrzeug, name, minuten_her, laedt=False):
     anderen laufenden Sitzungen. Zwei Sitzungen nebeneinander aufzubauen geht
     deshalb nicht - jeder Fall wird einzeln geprüft.
     """
-    antwort = client.post("/api/live/aufzeichnung", json={
+    antwort = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": name}).json()
     db = SessionLocal()
@@ -614,7 +636,7 @@ def teil_gemessene_kapazitaet():
     client = TestClient(app)
     print("\nGemessene Akkukapazität")
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
-    start = client.post("/api/live/aufzeichnung", json={
+    start = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Kapazität"}).json()
 
@@ -686,7 +708,7 @@ def teil_odometer_strecke():
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
 
     def fahrt(name, mit_zaehler):
-        start = client.post("/api/live/aufzeichnung", json={
+        start = _start_ohne_punkt(client, {
             "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
             "soc": 90.0, "name": name}).json()
         db = SessionLocal()
@@ -840,7 +862,7 @@ def teil_laden_verfaelscht_nicht():
     client = TestClient(app)
     print("\nEin Ladestopp verfälscht weder Lernen noch Abweichung")
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
-    start = client.post("/api/live/aufzeichnung", json={
+    start = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 80.0, "name": "Mit Ladestopp"}).json()
 
@@ -903,7 +925,7 @@ def teil_laden_verfaelscht_nicht():
     zustand = client.post(f"/api/live/{start['sitzung_id']}/punkt",
                           json={"lat": 48.5, "lon": 11.0, "soc": 50.0})
     # Die Sitzung ist beendet; eine zweite fuer die Abweichung.
-    start2 = client.post("/api/live/aufzeichnung", json={
+    start2 = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 80.0, "name": "Abweichung"}).json()
     letzte = None
@@ -966,7 +988,7 @@ def teil_zustand_koordinate():
     client = TestClient(app)
     print("\nZustand trägt die Koordinate")
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
-    start = client.post("/api/live/aufzeichnung", json={
+    start = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Koordinate"}).json()
 
@@ -1101,7 +1123,7 @@ def teil_abgeloeste_fahrt():
     print("\nAbgelöste Aufzeichnung")
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
 
-    erste = client.post("/api/live/aufzeichnung", json={
+    erste = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Vergessen"}).json()
     db = SessionLocal()
@@ -1116,7 +1138,7 @@ def teil_abgeloeste_fahrt():
         db.close()
 
     # Und jetzt faehrt jemand los, ohne die alte Fahrt beendet zu haben.
-    client.post("/api/live/aufzeichnung", json={
+    _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 49.0, "lon": 9.0,
         "soc": 80.0, "name": "Die neue"})
 
@@ -1206,7 +1228,7 @@ def teil_aufzeichnung():
     print("\nFahrt aufzeichnen statt planen")
 
     fahrzeug = client.get("/api/fahrzeuge").json()[0]
-    antwort = client.post("/api/live/aufzeichnung", json={
+    antwort = _start_ohne_punkt(client, {
         "fahrzeug_id": fahrzeug["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Runde um den Block"})
     pruefe(antwort.status_code == 200,

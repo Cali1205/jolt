@@ -119,3 +119,9 @@ jobs:
       # Antwort der letzten Planung, nicht an der gespeicherten Fahrt.
       - name: Verkehrskachel pruefen
         run: node tools/check_route_anzeige.js
+
+      # Zeiten vom Server: UTC, und der Browser darf sie nie als Ortszeit lesen.
+      # Das Ergebnis darf von der Zeitzone nicht abhaengen - die Pruefung laeuft
+      # unter vier Zeitzonen.
+      - name: Zeiten pruefen
+        run: node tools/check_zeit.js

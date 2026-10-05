@@ -25,7 +25,8 @@ function pruefe(ok, text, detail) {
 /* Ein Durchlauf mit einem Dongle, der sich so verhaelt, wie `szenario` sagt. */
 async function lauf(szenario) {
   const meldungen = [];
-  const aufrufe = { dongleNutzen: 0, verbinden: 0, positionVerfolgen: 0 };
+  const aufrufe = { dongleNutzen: 0, verbinden: 0, positionVerfolgen: 0,
+                    zustand: null, reihenfolge: [] };
   const gesendet = [];
   const elemente = {
     "aufz-start": { disabled: false },
@@ -65,7 +66,8 @@ async function lauf(szenario) {
     joltApp: { ansichtZeigen() {} },
     joltLive: {
       verbinden: () => { aufrufe.verbinden++; },
-      positionVerfolgen: () => { aufrufe.positionVerfolgen++; },
+      positionVerfolgen: () => { aufrufe.positionVerfolgen++; aufrufe.reihenfolge.push("position"); },
+      fahrzustandStart: (z) => { aufrufe.zustand = z; aufrufe.reihenfolge.push("zustand"); },
       dongleNutzen: () => { aufrufe.dongleNutzen++; },
     },
   };
@@ -107,6 +109,12 @@ async function lauf(szenario) {
          r.meldungen.join(" | "));
   pruefe(r.aufrufe.verbinden === 1 && r.aufrufe.positionVerfolgen === 1,
          "die Fahrt läuft an");
+  pruefe(r.aufrufe.zustand === "faehrt"
+         && r.aufrufe.reihenfolge.join() === "zustand,position",
+         "und beginnt im Zustand 'fährt', noch bevor die Position verfolgt wird - "
+         + "wer die Aufzeichnung startet, sitzt im Auto. Sonst begann sie im "
+         + "Zustand 'steht' und las im Stand nie: Die Live-Anzeige blieb leer",
+         `${r.aufrufe.zustand} / ${r.aufrufe.reihenfolge.join()}`);
 
   console.log("\nDie Verbindung ist weg");
   r = await lauf({ verbindungWeg: true });
@@ -120,6 +128,9 @@ async function lauf(szenario) {
   r = await lauf({ verbundenNachAnschliessen: false });
   pruefe(r.aufrufe.dongleNutzen === 0 && r.gesendet.length === 1,
          "ohne Verbindung läuft die Aufzeichnung ohne Dongle weiter");
+  pruefe(r.aufrufe.zustand === "faehrt",
+         "der Zustand gilt auch dann - er sagt nur, ob gelesen werden darf, "
+         + "falls später doch ein Dongle verbunden wird");
 
   console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen.`
                      : "\nAlle Prüfungen bestanden.");

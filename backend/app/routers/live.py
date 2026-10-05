@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from .. import deps, models, push
+from ..zeit import utc_iso
 from ..database import SessionLocal, get_db
 from ..live import aufraeumen, kanal, quellen, simulator, umplanung
 from ..live import sitzung as live_sitzung
@@ -287,6 +288,24 @@ def aufzeichnung_starten(start: Aufzeichnungsstart,
     sitzung = models.LiveSitzung(fahrt_id=fahrt.id)
     db.add(sitzung)
     db.commit()
+
+    # Der Startladestand ist eine Messung - die erste der Fahrt. Als Messpunkt
+    # aufgenommen, hat die Aufzeichnung von der ersten Sekunde an einen
+    # Ladestand: Die Live-Anzeige zeigt ihn, und die Rekonstruktion beim
+    # Abschliessen beginnt bei dem, was das Auto gemeldet hat, nicht bei 100 %.
+    #
+    # Bisher stand er nur an der Fahrt. Eine Aufzeichnung hat kein Profil, aus
+    # dem sich ein Ladestand schätzen liesse - ohne Messung blieb die Anzeige
+    # leer, bis das Auto zum ersten Mal antwortete.
+    if start.soc is not None:
+        try:
+            live_sitzung.messpunkt_aufnehmen(db, sitzung, start.lat, start.lon,
+                                             soc=start.soc)
+        except Exception as fehler:      # noqa: BLE001
+            # Die Fahrt darf daran nicht scheitern - jemand sitzt im Auto.
+            log.warning("Startpunkt der Aufzeichnung %s nicht aufgenommen: %s",
+                        sitzung.id, fehler)
+            db.rollback()
     return {"sitzung_id": sitzung.id, "fahrt_id": fahrt.id,
             "aufzeichnung": True}
 
@@ -360,7 +379,7 @@ def zustand_lesen(sitzung_id: int, db: Session = Depends(get_db)):
                 "lat": letzter.lat, "lon": letzter.lon, "soc": letzter.soc,
                 "km_auf_route": letzter.km_auf_route,
                 "soll_soc": letzter.soll_soc,
-                "zeit": letzter.zeit.isoformat()}}
+                "zeit": utc_iso(letzter.zeit)}}
 
 
 @router.get("/{sitzung_id}/punkte")
@@ -384,7 +403,7 @@ def punkte_lesen(sitzung_id: int, db: Session = Depends(get_db)):
     for punkt in sitzung.punkte:
         roh = punkt.rohwerte if isinstance(punkt.rohwerte, dict) else {}
         aus.append({
-            "zeit": punkt.zeit.isoformat(),
+            "zeit": utc_iso(punkt.zeit),
             "lat": punkt.lat, "lon": punkt.lon,
             "soc": punkt.soc, "km_auf_route": punkt.km_auf_route,
             "km_stand": roh.get("km_stand"),

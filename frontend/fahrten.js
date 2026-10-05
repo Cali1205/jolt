@@ -13,9 +13,10 @@ window.joltFahrten = (function () {
   let geladen = false;
 
   function datum(iso) {
-    if (!iso) return "–";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "–";
+    // Über K.zeit: Der Server liefert UTC, und `new Date` auf einem Text ohne
+    // Zone läse es als Ortszeit - zwei Stunden daneben.
+    const d = K.zeit(iso);
+    if (!d) return "–";
     return d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
                                        year: "numeric", hour: "2-digit",
                                        minute: "2-digit" });
@@ -280,6 +281,11 @@ window.joltFahrten = (function () {
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       window.joltLive.verbinden(antwort.sitzung_id);
+      // Wer die Aufzeichnung startet, sitzt im Auto: Es darf gelesen werden,
+      // bis das Telefon sagt, dass das Auto steht. Ohne das begann sie im
+      // Zustand "steht" und las erst ab 15 km/h - im Stand also nie. Die
+      // Live-Anzeige blieb leer, und wer nicht losfuhr, sah nichts.
+      window.joltLive.fahrzustandStart("faehrt");
       window.joltLive.positionVerfolgen();
       if (mitDongle) {
         window.joltLive.dongleNutzen();
