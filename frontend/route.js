@@ -93,6 +93,8 @@ window.joltRoute = (function () {
         // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
         // die der Regler schon beantwortet.
         zuladung_kg: zuladungWert(),
+        ...anhaengerWerte(),
+        tempo_max_kmh: zahlOderNull("tempo-max"),
       }});
       letzteVarianten = antwort.varianten || [];
       variantenZeichnen();
@@ -522,6 +524,50 @@ window.joltRoute = (function () {
     aktualisieren();
   }
 
+  /* ---------- Anhänger und Höchstgeschwindigkeit ---------- */
+
+  /* Ein leeres Feld heisst "nicht gesetzt" und geht als null hinaus - nicht
+   * als 0, das der Server als "null km/h" läse. */
+  function zahlOderNull(id) {
+    const el = document.getElementById(id);
+    if (!el || el.value === "") return null;
+    const wert = Number(el.value);
+    return Number.isFinite(wert) ? wert : null;
+  }
+
+  function anhaengerWerte() {
+    const kg = zahlOderNull("anhaenger-kg");
+    if (!kg) return { anhaenger_kg: null, anhaenger_cwa_m2: null };
+    return { anhaenger_kg: kg, anhaenger_cwa_m2: zahlOderNull("anhaenger-cwa") || 0 };
+  }
+
+  /* Die Auswahl füllt die beiden Felder vor; sie bleiben änderbar. Wer einen
+   * Anhänger wählt und noch keine Grenze eingetragen hat, bekommt 100 km/h -
+   * die Grenze für ein Gespann in Deutschland, und das, was man sonst
+   * vergisst. */
+  function anhaengerKoppeln() {
+    const wahl = document.getElementById("anhaenger");
+    const felder = document.getElementById("anhaenger-werte");
+    if (!wahl || !felder) return;
+    wahl.addEventListener("change", () => {
+      const kg = document.getElementById("anhaenger-kg");
+      const cwa = document.getElementById("anhaenger-cwa");
+      const tempoMax = document.getElementById("tempo-max");
+      if (wahl.value === "") {
+        felder.hidden = true;
+        kg.value = ""; cwa.value = "";
+        return;
+      }
+      felder.hidden = false;
+      if (wahl.value !== "eigen") {
+        const [masse, flaeche] = wahl.value.split(",");
+        kg.value = masse;
+        cwa.value = flaeche;
+      }
+      if (tempoMax && tempoMax.value === "") tempoMax.value = "100";
+    });
+  }
+
   /* ---------- Einrichten ---------- */
 
   function einrichten() {
@@ -530,6 +576,7 @@ window.joltRoute = (function () {
     K.reglerKoppeln("start-soc", "start-soc-wert");
     K.reglerKoppeln("tempo", "tempo-wert");
     zuladungKoppeln();
+    anhaengerKoppeln();
 
     let warten = null;
     let wartenPlan = null;

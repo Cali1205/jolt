@@ -428,6 +428,62 @@ def main() -> int:
     pruefe(kurz["reicht"] is True, "Hamburg-Bremen reicht dagegen locker",
            f"SoC am Ziel {kurz['soc_am_ziel']} %")
 
+    print("\nAnhänger und Höchstgeschwindigkeit")
+    # Der Regler steht auf 150 %: Das Routing-Tempo wird um die Hälfte
+    # angehoben - weit über jede Grenze, die ein Gespann hat.
+    def hamburg_bremen(**mehr):
+        antwort = client.post("/api/route", json={
+            "fahrzeug_id": fahrzeuge[0]["id"],
+            "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
+            "ziel": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
+            "start_soc": 80.0, "tempo_faktor": 1.5, **mehr})
+        return antwort, (antwort.json()["varianten"][0]
+                         if antwort.status_code == 200 else None)
+
+    _, frei = hamburg_bremen()
+    antwort, begrenzt = hamburg_bremen(tempo_max_kmh=100.0)
+    pruefe(antwort.status_code == 200, "eine Fahrt mit Tempo-Grenze wird gerechnet",
+           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+    pruefe(begrenzt["kwh_gesamt"] < frei["kwh_gesamt"],
+           "mit 100 km/h als Grenze braucht dieselbe Strecke weniger Energie "
+           "als bei 150 % ungebremst",
+           f"{begrenzt['kwh_gesamt']} gegen {frei['kwh_gesamt']} kWh")
+    pruefe(begrenzt["fahrzeit_minuten"] > frei["fahrzeit_minuten"],
+           "und dauert länger - die Grenze kostet Zeit, und die Anzeige sagt es",
+           f"{begrenzt['fahrzeit_minuten']} gegen {frei['fahrzeit_minuten']} min")
+
+    antwort, gespann = hamburg_bremen(tempo_max_kmh=100.0, anhaenger_kg=1300,
+                                      anhaenger_cwa_m2=1.1)
+    pruefe(antwort.status_code == 200, "mit Anhänger auch",
+           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+    pruefe(gespann["kwh_gesamt"] > begrenzt["kwh_gesamt"] * 1.25,
+           "der Anhänger kostet bei gleichem Tempo deutlich mehr",
+           f"{begrenzt['kwh_gesamt']} -> {gespann['kwh_gesamt']} kWh")
+    gespeichert = client.get(f"/api/fahrten/{gespann['fahrt_id']}").json()
+    pruefe(gespeichert.get("anhaenger_kg") == 1300
+           and gespeichert.get("tempo_max_kmh") == 100.0,
+           "beides steht an der Fahrt - eine Umplanung unterwegs rechnet damit",
+           f"{gespeichert.get('anhaenger_kg')}, {gespeichert.get('tempo_max_kmh')}")
+    pruefe(client.post("/api/route", json={
+        "fahrzeug_id": fahrzeuge[0]["id"],
+        "start": {"lat": 53.5511, "lon": 9.9937}, "ziel": {"lat": 53.0793, "lon": 8.8017},
+        "tempo_max_kmh": 5}).status_code == 422,
+        "eine Grenze von 5 km/h ist ein Tippfehler und wird abgelehnt")
+
+    grenze = client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
+        **fahrzeuge[0],
+        "max_tempo_kmh": 120.0})
+    pruefe(grenze.status_code == 200 and grenze.json().get("max_tempo_kmh") == 120.0,
+           "die Höchstgeschwindigkeit lässt sich am Fahrzeug setzen",
+           f"HTTP {grenze.status_code}: {grenze.text[:120]}")
+    _, am_auto = hamburg_bremen()
+    pruefe(am_auto["kwh_gesamt"] < frei["kwh_gesamt"],
+           "und begrenzt jede Fahrt dieses Fahrzeugs",
+           f"{am_auto['kwh_gesamt']} gegen {frei['kwh_gesamt']} kWh")
+    client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
+        **fahrzeuge[0],
+        "max_tempo_kmh": None})
+
     print("\nLadepunkte im Korridor")
     korridor = client.get(f"/api/saeulen/entlang/{fahrt_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()

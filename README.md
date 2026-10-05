@@ -123,6 +123,15 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   unbeaufsichtigtes Gerät, das auf Fehlerantworten stösst, protokolliert Fehler
   oder schaltet sich ab.
 
+- **Anhänger und Höchstgeschwindigkeit.** Ein Anhänger gehört zur Fahrt und
+  bringt Masse *und* eine eigene Luftwiderstandsfläche (c_w mal A in m²) mit —
+  keine Verbiegung des cw-Werts vom Auto. Dazu eine harte Tempo-Grenze, an der
+  Fahrt (Gespann: 100 km/h) und am Fahrzeug; es gilt die kleinere. Der
+  Tempo-Regler stösst daran an, statt mit 165 km/h zu rechnen, und die
+  Fahrzeit wird um das gestreckt, was die Grenze kostet. Aufzeichnungen sind
+  davon ausgenommen (gefahren ist gefahren), und aus einer Fahrt mit Anhänger
+  lernt jolt keinen Fahrzeugfaktor. Die Vorgaben für die Fläche sind
+  Schätzwerte, bis eine aufgezeichnete Fahrt sie bestätigt.
 - **Messpunkte puffern** — jeder Punkt trägt seine Messzeit und geht zuerst in
   eine Warteschlange (`localStorage`), von dort in Stapeln zu 100 an
   `POST /api/live/{id}/punkte`. Ohne Netz bleiben die Punkte liegen und gehen
@@ -543,14 +552,6 @@ Live-Einträge tragen eine `evse_id`, jolts OCM-Import speichert die nicht.
 Zehntel der Standorte und für Frankreich gar nicht; ein Optimierer, der
 Standorte ohne Live-Daten benachteiligt, wählt auf einer Frankreichfahrt
 systematisch die falschen.
-
-**Höchstgeschwindigkeit am Fahrzeug.** Der Tempo-Regler hat keine absolute
-Obergrenze; bei 130 % rechnet das Modell mit 165 km/h, die kein Serienfahrzeug
-mit diesem Luftwiderstand fährt. Für ein **Gespann** ist 100 km/h ausserdem
-keine Vorliebe, sondern eine harte Grenze — der Regler bildet das falsch ab.
-Sauber wäre eine Höchstgeschwindigkeit am Fahrzeug und ein Anhänger als eigene
-Grösse (Masse plus Luftwiderstands-Aufschlag), statt den cw-Wert des Autos zu
-verbiegen.
 
 **Was der Kompressor sonst noch hergibt.** `220800` liefert neben der Leistung
 Soll- und Ist-Drehzahl; ein Wert steht noch ohne Deutung (`b7`, dieselbe Grösse

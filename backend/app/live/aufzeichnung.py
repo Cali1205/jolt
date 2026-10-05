@@ -319,7 +319,8 @@ def abschliessen(db, fahrt: models.Fahrt, sitzung: models.LiveSitzung) -> dict:
         Fahrzeugwerte.aus_fahrt(fahrt), geometrie,
         tempo_je_teilstueck(gewaehlt, faktor),
         start_soc=gewaehlt[0].soc if gewaehlt[0].soc is not None else 100.0,
-        umgebung_fuer=hole_umgebung, strecke_faktor=faktor)
+        umgebung_fuer=hole_umgebung, strecke_faktor=faktor,
+        tempo_deckel=False)
     if len(profil.punkte) < 2:
         return {"ok": False, "grund": "Aus der Strecke entstand kein Profil."}
 

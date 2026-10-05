@@ -38,6 +38,12 @@ window.joltFahrten = (function () {
     if (fahrt.luftwiderstand_faktor && fahrt.luftwiderstand_faktor > 1.001) {
       m.push(`<span class="marke warn">Anbau ×${K.zahl(fahrt.luftwiderstand_faktor, 2)}</span>`);
     }
+    if (fahrt.anhaenger_kg) {
+      m.push(`<span class="marke warn">Anhänger ${K.zahl(fahrt.anhaenger_kg, 0)} kg</span>`);
+    }
+    if (fahrt.tempo_max_kmh) {
+      m.push(`<span class="marke">max ${K.zahl(fahrt.tempo_max_kmh, 0)} km/h</span>`);
+    }
     return m.join(" ");
   }
 

@@ -105,7 +105,14 @@ def beenden_und_lernen(db, sitzung) -> dict:
     # *Fahrzeug*: Der gemessene Mehrverbrauch enthaelt dann zwei Unbekannte,
     # und aus einer Messung lassen sich nicht zwei Zahlen bestimmen.
     zuschlag = (fahrt.luftwiderstand_faktor or 1.0) if fahrt else 1.0
-    if fahrzeug and abs(zuschlag - 1.0) > 0.001:
+    # Mit Anhänger gilt dasselbe: Masse und Luftwiderstand des Gespanns
+    # stecken im gemessenen Verbrauch und gehören nicht ins Fahrzeug.
+    if fahrzeug and fahrt.anhaenger_kg:
+        ergebnis["nicht_gelernt"] = (
+            f"Fahrt mit Anhänger ({fahrt.anhaenger_kg:g} kg) - daraus "
+            f"lässt sich der Faktor des Fahrzeugs nicht bestimmen.")
+        fahrzeug = None
+    elif fahrzeug and abs(zuschlag - 1.0) > 0.001:
         ergebnis["nicht_gelernt"] = (
             f"Fahrt mit Luftwiderstands-Zuschlag ×{zuschlag:g} - daraus "
             f"lässt sich der Faktor des Fahrzeugs nicht bestimmen.")
