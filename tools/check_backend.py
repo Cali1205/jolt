@@ -578,6 +578,129 @@ def main() -> int:
     finally:
         db.close()
 
+    print("\nTomTom als Berater")
+    # TomTom liefert Vorschläge und Verkehr, gespeichert wird davon nichts. Hier
+    # ersetzen zwei Funktionen das Netz: ein Vorschlag entlang der Luftlinie und
+    # eine Verzögerung je Route. Das Routing ist eines, das einen Weg mit
+    # Zwischenpunkten um sechs Prozent schneller macht - dann ist der Vorschlag
+    # ohne Verkehr die schnellste Route, und genau das soll der Verkehr drehen.
+    import os as _os
+    from app.routing import tomtom as _tt
+    from app.routing.demo import DemoRouting as _Demo2
+    from app.routing.provider import Route as _Route
+
+    class _Zweiwege(_Demo2):
+        aufrufe: list = []
+
+        def route(self, start, ziel, zwischenstopps=None, praeferenz="recommended",
+                  mautfrei=False):
+            _Zweiwege.aufrufe.append(list(zwischenstopps or []))
+            r = super().route(start, ziel)
+            if zwischenstopps:
+                return _Route(punkte=r.punkte, tempo_ms=[t * 1.06 for t in r.tempo_ms],
+                              strecke_m=r.strecke_m, fahrzeit_s=r.fahrzeit_s / 1.06)
+            return r
+
+    linie = [(53.5511 + (48.1351 - 53.5511) * i / 50, 9.9937 + (11.5820 - 9.9937) * i / 50)
+             for i in range(51)]
+    verzoegerungen: list = []
+    zaehler = {"alternativen": 0, "verkehr": 0}
+
+    def alternativen_fake(start, ziel, maximal=5):
+        zaehler["alternativen"] += 1
+        return [_tt.Vorschlag(punkte=linie, strecke_m=780000.0, zeit_s=30000.0)]
+
+    def verkehr_fake(start, ziel, zwischen):
+        nr = zaehler["verkehr"]
+        zaehler["verkehr"] += 1
+        minuten = verzoegerungen[nr] if nr < len(verzoegerungen) else 0.0
+        return _tt.Verkehr(verzoegerung_s=minuten * 60.0, zeit_s=30000.0,
+                           ohne_verkehr_s=30000.0 - minuten * 60.0)
+
+    echte_alt, echter_verkehr = _tt.alternativen, _tt.verkehr
+    ersatz_routing = _routing.provider
+    _routing.provider = lambda: _Zweiwege()
+    _tt.alternativen, _tt.verkehr = alternativen_fake, verkehr_fake
+    _os.environ["TOMTOM_API_KEY"] = "test"
+
+    def tomtom_planen(**mehr):
+        _Zweiwege.aufrufe = []
+        zaehler["alternativen"] = zaehler["verkehr"] = 0
+        antwort = client.post("/api/route", json={
+            "fahrzeug_id": fahrzeuge[0]["id"],
+            "start": {"lat": 53.5511, "lon": 9.9937, "text": "A"},
+            "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
+            "start_soc": 80.0, "eigene_fahrten": False, **mehr})
+        pruefe(antwort.status_code == 200, "die Anfrage geht durch",
+               f"HTTP {antwort.status_code}: {antwort.text[:120]}")
+        return antwort.json()["varianten"] if antwort.status_code == 200 else []
+
+    def schnellste(varianten):
+        return [v for v in varianten if "insgesamt schnellste" in v["etiketten"]]
+
+    try:
+        verzoegerungen[:] = [0.0, 0.0]
+        vs = tomtom_planen()
+        vorschlag = [v for v in vs if any(e.startswith("TomTom-Vorschlag") for e in v["etiketten"])]
+        pruefe(len(vs) == 2 and len(vorschlag) == 1,
+               "ein Vorschlag von TomTom wird zur zweiten Variante, mit Etikett",
+               str([v["etiketten"] for v in vs]))
+        pruefe(any(len(a) >= 5 for a in _Zweiwege.aufrufe),
+               "das Routing bekommt ihn als Zwischenpunkte - gespeichert wird die "
+               "Strasse von OpenRouteService, nicht die von TomTom")
+        pruefe(zaehler["alternativen"] == 1 and zaehler["verkehr"] == 2,
+               "eine Anfrage nach Vorschlägen und eine Verkehrsabfrage je Route",
+               str(zaehler))
+        pruefe(all("verkehr_min" in v and v["verkehr_quelle"] == "TomTom" for v in vs),
+               "der Verkehr steht an jeder Variante, mit Quelle")
+        pruefe(len(schnellste(vs)) == 1,
+               "ohne Verkehr gewinnt genau eine der beiden",
+               str([v["etiketten"] for v in vs]))
+        # Wer ohne Verkehr gewinnt, bekommt zwei Stunden Stau. Welche das ist,
+        # entscheidet das Modell (mehr Tempo heisst auch mehr Energie und mehr
+        # Ladezeit) - der Test nimmt es nicht vorweg.
+        sieger_war_tomtom = any(e.startswith("TomTom-Vorschlag")
+                                for e in schnellste(vs)[0]["etiketten"])
+        # Die Verzögerungen werden in der Reihenfolge abgefragt, in der die
+        # Varianten entstehen: erst die schnellste von OpenRouteService, dann
+        # der Vorschlag.
+        verzoegerungen[:] = [0.0, 120.0] if sieger_war_tomtom else [120.0, 0.0]
+        vs = tomtom_planen()
+        sieger_ist_tomtom = any(e.startswith("TomTom-Vorschlag")
+                                for e in schnellste(vs)[0]["etiketten"])
+        pruefe(len(schnellste(vs)) == 1 and sieger_ist_tomtom != sieger_war_tomtom,
+               "zwei Stunden Stau auf dem bisherigen Sieger drehen die Rangfolge: "
+               "Der Verkehr gehört zur Zeit",
+               str([v["etiketten"] for v in vs]))
+        stau = [v for v in vs if v.get("verkehr_min") == 120.0]
+        pruefe(len(stau) == 1 and stau[0]["plan_gesamt_mit_verkehr_min"]
+               == round(stau[0]["plan_gesamt_minuten"] + 120),
+               "und die Gesamtzeit mit Verkehr steht daneben")
+
+        _tt.alternativen = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomFehler("Kontingent erschöpft."))
+        _tt.verkehr = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomFehler("Kontingent erschöpft."))
+        vs = tomtom_planen()
+        pruefe(len(vs) == 1 and "verkehr_min" not in vs[0]
+               and not any(e.startswith("TomTom") for e in vs[0]["etiketten"]),
+               "scheitert TomTom, läuft die Planung ohne weiter - ein Berater, der "
+               "sie abbrechen liesse, wäre schlechter als keiner",
+               str([v["etiketten"] for v in vs]))
+
+        _tt.alternativen, _tt.verkehr = alternativen_fake, verkehr_fake
+        vs = tomtom_planen(tomtom=False)
+        pruefe(zaehler == {"alternativen": 0, "verkehr": 0}
+               and not any("verkehr_min" in v for v in vs),
+               "abgeschaltet wird TomTom nicht gefragt", str(zaehler))
+        del _os.environ["TOMTOM_API_KEY"]
+        vs = tomtom_planen()
+        pruefe(zaehler == {"alternativen": 0, "verkehr": 0} and len(vs) == 1,
+               "und ohne Schlüssel auch nicht - die Planung läuft wie bisher",
+               str(zaehler))
+    finally:
+        _tt.alternativen, _tt.verkehr = echte_alt, echter_verkehr
+        _routing.provider = ersatz_routing
+        _os.environ.pop("TOMTOM_API_KEY", None)
+
     print("\nLadepunkte im Korridor")
     korridor = client.get(f"/api/saeulen/entlang/{fahrt_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()

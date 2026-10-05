@@ -40,6 +40,23 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   ist eine Strasse und eine weitere Variante, die am fertigen Ladeplan gegen die
   schnellste antritt. Kosten: höchstens zwei Routing-Anfragen, und nur wenn
   etwas passt. Abschaltbar mit dem Haken „Meine gefahrenen Strecken mitrechnen".
+- **TomTom als Berater.** OpenRouteService bleibt die Quelle jeder gespeicherten
+  Route (Höhe und Tempo je Teilstück braucht das Verbrauchsmodell, TomTom
+  liefert beides nicht). TomTom beantwortet zwei Fragen, die dieser Dienst nicht
+  kennt: *Welche Wege gibt es noch?* (bis zu fünf Alternativen, ohne die
+  100-km-Grenze) und *Was kostet der Verkehr?* (je Route, aus dem Live-Verkehr).
+  Nur Vorschläge, die kein anderer zugleich kürzer und schneller übertrifft,
+  werden nachgefahren — bei vier von fünf gemessenen Strecken war jede
+  Alternative überholt, das spart die meisten Anfragen. Die
+  Verkehrsverzögerung wird je fertiger Route abgefragt, indem Zwischenpunkte
+  TomTom auf dieselbe Strasse zwingen, und geht in die Rangfolge ein
+  („insgesamt schnellste" rechnet Verkehr mit). **Gespeichert wird nichts von
+  TomTom**: Dessen Bedingungen erlauben Ergebnisse nur kurzzeitig im
+  Zwischenspeicher und verbieten abgeleitete Datenbanken. Aus einem Vorschlag
+  werden nur Zwischenpunkte, die das Routing abfährt; die Verzögerung steht in
+  der Antwort an den Browser und sonst nirgends. Scheitert TomTom, läuft die
+  Planung ohne weiter. Der Schlüssel steht in der Adresse, deshalb wird nie die
+  Ausnahme selbst geloggt.
 - **Ladestopps planen** — die zeitoptimale Folge von Stopps und Lademengen:
   Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`, anschliessend wandern die
   Ladehübe auf feinem Raster in den steilen Teil der Ladekurve. Zu jedem Stopp
@@ -273,6 +290,7 @@ Geräte senden.
 | `APP_PASSWORT` | Zugang zur App. **Leer heisst: kein Login.** Steht beim Start als Warnung im Log. |
 | `ORS_API_KEY` | openrouteservice. Fehlt er, greift das Demo-Routing. |
 | `OCM_API_KEY` | Nur für den Open-Charge-Map-Import. |
+| `TOMTOM_API_KEY` | Optional. TomTom als Berater für Alternativen und Verkehr. Ohne ihn läuft die Planung wie bisher. |
 | `VAPID_PRIVATE_KEY` | Web Push. Fehlt er, sind Benachrichtigungen aus. |
 | `VAPID_PUBLIC_KEY` | Derselbe Schlüssel, öffentliche Hälfte — der Browser braucht ihn. |
 | `VAPID_SUBJECT` | `mailto:` oder `https:` — wen der Push-Dienst erreicht. |

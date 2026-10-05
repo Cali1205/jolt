@@ -41,7 +41,7 @@ from ..geo import haversine_m
 # `umplanung.planen`, das den Optimierer selbst aufruft.
 from ..laden import optimierer
 from ..live import umplanung
-from ..routing import eigene, varianten
+from ..routing import eigene, tomtom, varianten
 from ..routing.provider import RoutingFehler
 
 # Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
@@ -107,6 +107,10 @@ class Routenanfrage(BaseModel):
     # kennt. Es werden höchstens zwei Anfragen mehr gestellt, und nur, wenn zu
     # Start und Ziel überhaupt eine frühere Fahrt passt.
     eigene_fahrten: bool = True
+    # TomTom als Berater (routing/tomtom.py): Vorschläge, die OpenRouteService
+    # nicht liefert, und die Verkehrsverzögerung je Route. Ohne
+    # TOMTOM_API_KEY geschieht nichts. Gespeichert wird davon nichts.
+    tomtom: bool = True
     # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
     # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
     # einmal voll beladen geplant wird: Masse geht linear in Roll- und
@@ -154,6 +158,8 @@ def route_rechnen(anfrage: Routenanfrage, db: Session = Depends(get_db)):
     kandidaten = _kandidaten_rechnen(anfrage, werte, gruppen)
     ergebnisse = _fahrten_speichern(db, anfrage, fahrzeug, kandidaten)
 
+    # Vor der Bewertung: Der Verkehr gehört in die Rangfolge.
+    _verkehr_holen(db, anfrage, ergebnisse)
     _varianten_bewerten(db, ergebnisse, fahrzeug)
     return {"varianten": ergebnisse}
 
@@ -226,6 +232,77 @@ def _eigene_wege(db: Session, start: tuple, ziel: tuple) -> list[dict]:
     return wege
 
 
+def _tomtom_wege(start: tuple, ziel: tuple) -> list[dict]:
+    """Wege nach den Vorschlägen von TomTom, die nicht überholt sind.
+
+    TomTom liefert nur die Vorlage: Aus dem Vorschlag werden Zwischenpunkte
+    gewählt, und das Routing von OpenRouteService fährt sie ab. Gespeichert
+    wird dessen Strasse mit Höhe und Tempo, nicht die von TomTom - schon
+    deshalb, weil das Verbrauchsmodell beides braucht, und weil TomToms
+    Bedingungen das Speichern ihrer Ergebnisse nicht erlauben.
+
+    Scheitert TomTom (Schlüssel, Kontingent, Netz), läuft die Planung ohne
+    weiter. Ein Berater, der die Planung zum Absturz bringt, wäre schlechter
+    als keiner.
+    """
+    if not tomtom.verfuegbar():
+        return []
+    try:
+        vorschlaege = tomtom.alternativen(start, ziel)
+    except tomtom.TomTomFehler as fehler:
+        log.warning("TomTom: %s Die Planung läuft ohne.", fehler)
+        return []
+
+    wege: list[dict] = []
+    for nr, v in enumerate(tomtom.nicht_ueberholt(vorschlaege), 1):
+        abschnitt = eigene.Abschnitt(
+            punkte=[(lat, lon, None) for lat, lon in v.punkte],
+            gegenrichtung=False, abstand_start_km=0.0, abstand_ziel_km=0.0,
+            laenge_km=v.strecke_m / 1000.0)
+        zwischen = eigene.zwischenpunkte(abschnitt)
+        if not zwischen:
+            continue
+        # Keine Koordinaten ins Log: Es sind TomTom-Ergebnisse.
+        log.info("TomTom-Vorschlag %d: %d Zwischenpunkte (%.0f km, %.0f min "
+                 "bei TomTom).", nr, len(zwischen), v.strecke_m / 1000,
+                 v.zeit_s / 60)
+        wege.append({"zwischen": zwischen, "mautfrei": False,
+                     "etikett": f"TomTom-Vorschlag {nr}"})
+    return wege
+
+
+def _verkehr_holen(db: Session, anfrage: Routenanfrage, ergebnisse: list) -> None:
+    """Die Verkehrsverzögerung je Route - als Zahl in der Antwort, sonst nirgends.
+
+    Gefragt wird TomTom für den Weg, den jolt fährt, nicht für seinen eigenen:
+    Aus der gespeicherten Geometrie werden Zwischenpunkte gewählt, die TomTom
+    auf dieselbe Strasse zwingen. Die Verzögerung steht danach an der Variante
+    und fliesst in `_varianten_bewerten` ein; in die Datenbank geht sie nicht.
+    """
+    if not (anfrage.tomtom and tomtom.verfuegbar()):
+        return
+    start = (anfrage.start.lat, anfrage.start.lon)
+    ziel = (anfrage.ziel.lat, anfrage.ziel.lon)
+    for variante in ergebnisse:
+        fahrt = db.get(models.Fahrt, variante["fahrt_id"])
+        geometrie = (fahrt.geometrie or []) if fahrt else []
+        if len(geometrie) < 3:
+            continue
+        zwischen = eigene.zwischenpunkte(eigene.Abschnitt(
+            punkte=[(p[1], p[0], None) for p in geometrie],
+            gegenrichtung=False, abstand_start_km=0.0, abstand_ziel_km=0.0,
+            laenge_km=(fahrt.strecke_m or 0.0) / 1000.0))
+        try:
+            ergebnis = tomtom.verkehr(start, ziel, zwischen)
+        except tomtom.TomTomFehler as fehler:
+            # Derselbe Fehler träfe die übrigen Anfragen auch.
+            log.warning("TomTom-Verkehr: %s Die Rangfolge gilt ohne.", fehler)
+            return
+        if ergebnis is not None:
+            variante["verkehr_min"] = round(ergebnis.verzoegerung_s / 60.0, 1)
+            variante["verkehr_quelle"] = "TomTom"
+
+
 def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple,
                  db: Session | None = None) -> list[dict]:
     """Welche Routing-Anfragen gestellt werden - jede kostet vom Tageskontingent.
@@ -247,6 +324,8 @@ def _wege_planen(anfrage: Routenanfrage, start: tuple, ziel: tuple,
                  for k in varianten.ausweichpunkte(start, ziel)]
     if anfrage.eigene_fahrten and db is not None:
         wege += _eigene_wege(db, start, ziel)
+    if anfrage.tomtom:
+        wege += _tomtom_wege(start, ziel)
     return wege
 
 
@@ -452,9 +531,16 @@ def _varianten_bewerten(db, ergebnisse: list, fahrzeug) -> None:
             "plan_kosten_eur": plan.get("kosten_eur")})
 
     bewertet = [v for v in ergebnisse if v.get("plan_machbar")]
+    # Der Verkehr gehört zur Zeit: Eine Route, die auf dem Papier zwei
+    # Minuten schneller ist, aber zwölf im Stau steht, ist nicht die schnellste.
+    def gesamt(v: dict) -> float:
+        return v["plan_gesamt_minuten"] + (v.get("verkehr_min") or 0.0)
+
+    for v in bewertet:
+        if v.get("verkehr_min") is not None:
+            v["plan_gesamt_mit_verkehr_min"] = round(gesamt(v))
     if bewertet:
-        min(bewertet, key=lambda v: v["plan_gesamt_minuten"])["etiketten"] \
-            .append("insgesamt schnellste")
+        min(bewertet, key=gesamt)["etiketten"].append("insgesamt schnellste")
         guenstigste = min(bewertet, key=lambda v: v["plan_kosten_eur"])
         if "insgesamt schnellste" not in guenstigste["etiketten"]:
             guenstigste["etiketten"].append("günstigste")
