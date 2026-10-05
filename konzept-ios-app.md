@@ -206,19 +206,139 @@ Hintergrundprozess ist. Der Token bleibt gültig, während Sitzungs-IDs mit
 jeder Fahrt wechseln; ein Hintergrunddienst müsste sonst Zustand pflegen, den
 er beim Aufwachen längst verloren hat.
 
-### 4. CarPlay — Statusanzeige
+### 4. CarPlay — was geht, und auf welchem Weg
 
-Klein halten. `CPInformationTemplate` oder `CPListTemplate` mit Ladestand,
-nächstem Ladestopp und Ankunftszeit — dieselben Daten, die
-`GET /api/live/{sitzung_id}` ohnehin liefert. Keine Karte, keine
-Abbiegehinweise.
+*Quelle: Apples CarPlay Developer Guide, Stand 8.6.2026
+(<https://developer.apple.com/download/files/CarPlay-Developer-Guide.pdf>).
+Was dort nicht steht, ist unten als Annahme oder offen gekennzeichnet.*
 
-**Der Berechtigungsantrag ist der lange Posten.** CarPlay-Entitlements
-vergibt Apple auf Antrag im Developer-Portal, mit Begründung des
-Anwendungsfalls, und das dauert Wochen. Der Antrag hängt an keiner Zeile Code
-und sollte deshalb **als Erstes** gestellt werden, parallel zu allem anderen.
-Die einfache Statusanzeige wird dabei weniger streng geprüft als eine
-Navigationsanzeige — ein weiterer Grund, klein anzufangen.
+**Das Dashboard selbst lässt sich nicht zeigen.** CarPlay-Apps bestehen aus
+einem festen Satz Vorlagen, die iOS zeichnet; Web-Inhalte, eigene Karten und
+Diagramme gibt es nicht. Möglich ist eine **native Kurzfassung** — ein Blick auf
+das, was man unterwegs wissen muss —, und dafür gibt es zwei Wege, die sich
+nicht ausschliessen.
+
+| | Weg A: Widget und Live Activity | Weg B: CarPlay-App mit Vorlagen |
+|---|---|---|
+| Freigabe von Apple | **keine** („Your app does not need to be a CarPlay app") | Antrag mit Begründung, Prüfung durch Apple |
+| Mindestens | iOS 26 | iOS 14 (Driving task) bzw. 16 (EV charging) |
+| Wo es erscheint | links vom CarPlay-Dashboard (Widget), im Dashboard oder als Mitteilung (Live Activity) | eigenes Symbol auf dem CarPlay-Startbildschirm |
+| Was es kann | ein Blick: wenige Zahlen, aktualisiert von der App | Listen, Informationsseiten, Raster; Auswahl und Schaltflächen |
+| Grössen | Widget `systemSmall`, Live Activity `small` (dieselbe wie Apple Watch) | feste Vorlagen, höchstens 2 bis 3 Ebenen tief (Driving task) |
+| Swift-Ziel | Widget-Erweiterung (eigenes Ziel im Xcode-Projekt) | Szenen-Delegate in der App selbst |
+| Aufwand | mittel | höher, und er beginnt mit dem Warten auf Apple |
+
+**Weg A im Einzelnen.**
+
+- Ein Widget in CarPlay braucht die Familie `.systemSmall`, eine Live Activity
+  `.supplementalActivityFamilies([.small])`. Fehlt die kleine Aktivität, zeigt
+  CarPlay die kompakten Ansichten der Dynamic Island.
+- Ein Widget öffnet die App in CarPlay **nicht**, solange die App keine
+  CarPlay-App ist. Es zeigt, es bedient nicht.
+- Ein Widget, dessen Daten hinter Datenschutzklasse A oder B liegen, ist in
+  CarPlay nutzlos: Das iPhone ist dort meist gesperrt. Die Daten gehören in
+  eine ungeschützte Ablage (Klasse C oder keine) — ein Detail, an dem das
+  leicht scheitert.
+- Die Live Activity ist der bessere Träger für jolt: Sie hat einen Beginn und
+  ein Ende — die Fahrt — und wird von der App aktualisiert, die ohnehin läuft
+  (Hintergrund-Standort, Dongle).
+
+**Weg B im Einzelnen.**
+
+- Kategorie **Driving task** (`com.apple.developer.carplay-driving-task`) oder
+  **EV charging** (`com.apple.developer.carplay-charging`, iOS 16). Eine App
+  bekommt eine Kategorie; gewählt wird im Antrag. **Navigation** scheidet aus —
+  sie verlangt Abbiegehinweise (`com.apple.developer.carplay-maps`).
+- Driving task: Aufgaben, die „wirklich bei der Fahrt helfen"; nur Vorlagen
+  (keine eigene Karte); Daten höchstens **alle 10 Sekunden** aktualisieren;
+  keine Ortssuche; keine Nutzung ausserhalb des Fahrzeugs.
+- EV charging: muss mehr leisten als eine Liste von Ladesäulen; auf einer Karte
+  dürfen nur Ladesäulen erscheinen; bis zu fünf Ebenen tief.
+- Für alle: Nichts darf zum Griff zum iPhone auffordern, jeder Ablauf muss ohne
+  iPhone möglich sein, nichts Unzusammenhängendes (Einstellungen, Konto).
+- Welche Vorlage in welcher Kategorie erlaubt ist, steht in einer Tabelle des
+  Leitfadens, deren Häkchen sich nicht aus dem Text lesen lassen. **Vor dem
+  Antrag im PDF nachsehen**, ob die Informationsvorlage (für „nächster Stopp")
+  und die Listenvorlage (für die Stopps) in der gewählten Kategorie stehen.
+- Ablauf: Antrag unter developer.apple.com/carplay, Zusatzvereinbarung
+  zustimmen, Apple prüft und ordnet dem Entwicklerkonto das Entitlement zu,
+  danach neues Provisionierungsprofil mit der CarPlay-Fähigkeit.
+
+*Gestrichen:* Hier stand, die Statusanzeige werde „weniger streng geprüft als
+eine Navigationsanzeige". Das steht nirgends im Leitfaden und war eine Annahme.
+
+#### Was angezeigt wird
+
+Dieselben Angaben für beide Wege — alle stehen schon im Zustand, den
+`GET /api/live/{sitzung_id}` und der WebSocket liefern:
+
+| Anzeige | Feld im Zustand | Anmerkung |
+|---|---|---|
+| Ladestand | `ist_soc`, `soc_quelle` | „zuletzt gemessen" kennzeichnen, wenn nicht frisch |
+| Reichweite bis Reserve | `reserve_bei_km` | leer, wenn das Ziel ohne Nachladen erreicht wird |
+| Nächster Ladestopp | `naechster_stopp` (Name, km, Ankunfts-Ladestand) | nur bei geplanter Fahrt |
+| Ankunft | `ankunft_verschiebung_min` | „nach Plan", „+12 min" |
+| Rest | `rest_km` | |
+
+Der Verkehr gehört **nicht** dazu: Er steht nur in der Antwort der Planung und
+wird nicht gespeichert (TomTom-Bedingungen), also nicht im laufenden Zustand.
+
+Bei einer **Aufzeichnung** ohne Plan bleiben Ladestand und, wenn das Auto
+antwortet, Fahrzeugwerte — kein Ladestopp, keine Ankunft. Die Anzeige muss mit
+fehlenden Feldern umgehen können; sie zeigt, was da ist, und erfindet nichts.
+
+#### Wie der Zustand zum Swift-Code kommt
+
+Der Zustand liegt im JavaScript der Oberfläche (`live.js: zustandAnzeigen`),
+und das läuft, solange die App am Leben gehalten wird — auch bei gesperrtem
+Telefon (Hintergrund-Standort, an einer echten Fahrt bestätigt). Ein kleines
+Capacitor-Plugin nimmt von dort **ein Anzeigemodell** entgegen und gibt es an
+ActivityKit (Weg A) oder an die Vorlage (Weg B). Kein zweiter Weg zum Server,
+kein zweiter Token, keine zweite Rechnung.
+
+Das Anzeigemodell ist eine reine Funktion `Zustand → {wenige Zahlen und Texte}`
+und lässt sich **ohne Swift und ohne Mac** bauen und prüfen: Rundung, Platzhalter
+für fehlende Werte, „veraltet" nach einer Frist, höchstens eine Aktualisierung
+alle 10 Sekunden (die Regel von Weg B; Weg A hat eigene Grenzen, siehe unten).
+
+#### Wie Swift-Code in ein erzeugtes Projekt kommt
+
+Das iOS-Projekt wird in der CI **erzeugt** und ist nicht eingecheckt (siehe
+„Bauen und Ausliefern") — das soll so bleiben. Der Swift-Code liegt deshalb
+eingecheckt neben der Konfiguration und wird nach `cap add ios` ergänzt:
+
+- **Plugin und CarPlay-Szene (Weg B):** als lokales Swift-Paket (wie die
+  Community-Plugins), das `cap sync` einbindet. Der Szenen-Delegate steht in
+  der `Info.plist` über den Klassennamen mit Modulnamen; `tools/ios_info_plist.sh`
+  ergänzt das Szenen-Manifest, das Entitlement geht als Build-Einstellung
+  (`CODE_SIGN_ENTITLEMENTS`) hinein. Das berührt das Xcode-Projekt kaum.
+  **Annahmen, ungeprüft:** dass sich ein Szenen-Delegate aus einem Swift-Paket
+  über seinen Modulnamen in der `Info.plist` einbinden lässt, und dass ein
+  CarPlay-Szenen-Manifest auch verlangt, das iPhone-Fenster als Szene zu führen.
+  Ob die Capacitor-Vorlage das bereits tut oder umgestellt werden müsste, ist
+  offen — und wäre der eigentliche Eingriff in die App.
+- **Widget-Erweiterung (Weg A):** ein Widget ist ein **eigenes Ziel** mit eigener
+  Bundle-Kennung — als Paket nicht abbildbar. Das Xcode-Projekt muss
+  programmatisch ergänzt werden (das Ruby-Werkzeug `xcodeproj` oder XcodeGen auf
+  dem macOS-Läufer; `tools/ios_signatur.sh` patcht das Projekt schon heute).
+  **Offen:** Die Erweiterung braucht eine eigene App-ID und ein eigenes Profil.
+  Ob die automatische Signatur über den API-Schlüssel (`-allowProvisioningUpdates`)
+  das für ein zweites Ziel ohne Handarbeit anlegt, ist **nicht geprüft** und
+  entscheidet, wie viel von Weg A in der CI läuft. Das zeigt nur ein Versuch.
+
+`tools/check_ios.py` bekommt die Prüfungen, die sich ohne Mac stellen lassen:
+Szenen-Manifest vorhanden, Entitlement gesetzt, das Widget-Ziel im Projekt.
+
+#### Was sich ohne Gerät nicht prüfen lässt
+
+Wie in der ganzen App: Die CI beantwortet, ob es **baut**. Ob es im Auto
+**erscheint**, zeigt nur CarPlay — auf dem Mac im *CarPlay Simulator* (Teil der
+Xcode-Zusatzwerkzeuge) oder im Fahrzeug über TestFlight. Ein Mac fehlt; also
+bleibt das Auto der Test, und der erste Versuch dort ist ein Versuch.
+
+Nicht nachgelesen, aber vor dem Bau zu klären: wie lange eine Live Activity
+laufen darf und wie oft sie sich aktualisieren lässt (Apple begrenzt beides) —
+bei einer Fahrt von acht Stunden ist das keine Nebensache.
 
 ---
 
@@ -238,15 +358,24 @@ Byte-Formeln anzufassen.
 | 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
 | 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | eingebaut (`@capacitor-community/background-geolocation`), **ungeprüft auf dem Gerät** |
 | 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | erledigt (`live.js`, Stapel-Endpunkt `/punkte`) |
-| 7 | SwiftUI, falls CarPlay dazukommt | siehe oben | zurückgestellt |
+| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | offen — **kann jetzt beginnen** |
+| 8 | CarPlay-Antrag bei Apple (Kategorie wählen, Vorlagen im Leitfaden prüfen) | Entitlement für Weg B | offen — **kann jetzt beginnen**, hängt an keiner Zeile Code |
+| 9 | Weg A: Plugin, Live Activity, Widget-Ziel in der CI, Signatur | Ladestand und nächster Stopp im CarPlay-Dashboard | offen, hängt an 7 (und an dem Versuch mit der Signatur) |
+| 10 | Weg B: CarPlay-Szene mit Vorlagen | Liste der Ladestopps im Auto | offen, hängt an 7 und an der Freigabe |
 
 **Schritt 4 ist der Engpass, nicht der Code.** Alles bis einschliesslich 3
 läuft ohne Apple-Konto und ohne Mac. Ab 4 geht nichts mehr ohne das
 Developer-Programm: Ohne Signatur gibt es keinen Weg auf ein Gerät, und ohne
 Mac oder hinterlegte Zertifikate keinen signierten Bau.
 
-CarPlay ist bewusst ans Ende gerückt — es war der einzige Punkt, der
-zwingend nach SwiftUI führt, und es wird vorerst nicht gebraucht.
+CarPlay steht am Ende, aber **nicht mehr hinter SwiftUI**: Beide Wege laufen
+über Capacitor mit einem kleinen Plugin, die App bleibt, wie sie ist. Der
+Antrag (8) und das Anzeigemodell (7) hängen an nichts und können sofort
+beginnen; 9 und 10 brauchen ein Gerät mit iOS 26 bzw. ein Fahrzeug.
+
+**Empfohlene Reihenfolge:** 7 und 8 gleichzeitig, danach 9. Weg A bringt ohne
+Antrag und ohne Warten etwas ins Auto; Weg B ist der Mehrwert für die Liste der
+Stopps und lohnt, wenn sie unterwegs gebraucht wird.
 
 ---
 
@@ -318,5 +447,15 @@ ob sie sich bauen lässt — was nicht wenig ist, aber eben noch nichts fährt.
 - **Ob das iPad als Testgerät taugt.** Nur die Mobilfunk-Ausführungen haben
   einen echten GPS-Empfänger; reine WLAN-Modelle schätzen die Position und sind
   für eine Fahrtaufzeichnung unbrauchbar.
-- **Ob Apple das CarPlay-Entitlement erteilt.** Bis dahin ist Schritt 6 offen,
-  und alles davor hängt nicht daran.
+- **Ob Apple das CarPlay-Entitlement erteilt**, und für welche Kategorie
+  (Driving task oder EV charging; eine App bekommt eine). Davon hängt nur Weg B
+  ab, Weg A nicht.
+- **Ob das Fahrzeug CarPlay hat** (kabelgebunden oder kabellos) **und welche
+  iOS-Version das iPhone hat.** Weg A braucht iOS 26.
+- **Ob die Capacitor-Vorlage das iPhone-Fenster schon als Szene führt**, wie es
+  ein CarPlay-Szenen-Manifest voraussetzt (Weg B).
+- **Ob die automatische Signatur über den API-Schlüssel eine zweite App-ID für
+  die Widget-Erweiterung selbst anlegt.** Nicht geprüft; ein Versuch in der CI
+  klärt es.
+- **Wie lange eine Live Activity bei einer langen Fahrt läuft.** Nicht
+  nachgelesen.
