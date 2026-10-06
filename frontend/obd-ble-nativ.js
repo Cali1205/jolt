@@ -57,6 +57,11 @@ window.joltBleNativ = (function () {
     catch (fehler) { /* privater Modus - dann eben jedes Mal der Dialog */ }
   }
 
+  function kennungVergessen() {
+    try { window.localStorage.removeItem(SCHLUESSEL); }
+    catch (fehler) { /* nichts gemerkt, nichts zu tun */ }
+  }
+
   let bereit = false;
 
   async function vorbereiten() {
@@ -258,5 +263,8 @@ window.joltBleNativ = (function () {
     bluetooth: { requestDevice, getDevices },
     /* Für die Fehlersuche auf der Diagnoseseite. */
     kennung: gemerkteKennung,
+    /* Das gemerkte Gerät löschen (Einstellungen): danach fragt der nächste
+     * Aufbau wieder mit dem Auswahldialog. */
+    vergessen: kennungVergessen,
   };
 })();

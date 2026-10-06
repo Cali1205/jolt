@@ -2503,6 +2503,6 @@ window.joltLive = (function () {
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
            dongleNutzen, verlaufZeichnen,
            fahrzustand: () => fahrZustand, fahrzustandStart, lesenErlaubt, dongleVerbinden,
-           spannungPruefen,
+           spannungPruefen, benachrichtigungenEinrichten,
            autoSetzen: (an) => { autoModus = !!an; } };
 })();

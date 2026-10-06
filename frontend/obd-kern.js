@@ -19,8 +19,44 @@
 window.joltObd = (function () {
   "use strict";
 
-  let melde = () => {};      // Protokoll-Rückruf des Aufrufers
+  let melderAussen = () => {};   // Protokoll-Rückruf des Aufrufers
   let beiAbriss = null;      // gerufen, wenn die Verbindung stirbt
+
+  /* ---------- Beobachten: Protokoll und Zähler ----------
+   *
+   * Das Modul führt selbst Buch, statt es den Aufrufern zu überlassen. Die
+   * Einstellungen-Ansicht will auch dann ein Protokoll zeigen, wenn die
+   * Verbindung längst steht - sie wurde dann von einer anderen Ansicht
+   * aufgebaut, und deren Rückruf hat niemand für die spätere gemerkt.
+   *
+   * Rein beobachtend: Nichts davon verändert, was gesendet oder wie gelesen
+   * wird. Die Messwert-Formeln und die Befehlsfolge bleiben unangetastet. */
+  const PROTOKOLL_MAX = 600;
+  const protokollRing = [];
+
+  function melde(text, art) {
+    protokollRing.push({ zeit: Date.now(), art: art || "", text: String(text) });
+    if (protokollRing.length > PROTOKOLL_MAX) {
+      protokollRing.splice(0, protokollRing.length - PROTOKOLL_MAX);
+    }
+    try { melderAussen(text, art); } catch (fehler) { /* der Aufrufer irrt, nicht wir */ }
+  }
+
+  let letzterSatz = null;   // der zuletzt vollständig gelesene Satz
+
+  const zaehler = {
+    befehle: { gesendet: 0, beantwortet: 0, zeitablauf: 0, verspaetet: 0,
+               summeMs: 0, letzteMs: null, letzterEmpfang: null },
+    messwerte: {},    // name -> { ok, leer, fehler, summeMs, letzteMs, wert, zeit }
+    runden: { n: 0, fehler: 0, summeMs: 0, letzteMs: null, zeit: null },
+    verbindung: { geraet: "", seit: null, abrisse: 0, wiederversuche: 0 },
+  };
+
+  function messwertZaehler(name) {
+    return zaehler.messwerte[name] || (zaehler.messwerte[name] = {
+      ok: 0, leer: 0, fehler: 0, summeMs: 0, letzteMs: null,
+      wert: null, zeit: null });
+  }
 
 
   const kurz = (id) => `0000${id}-0000-1000-8000-00805f9b34fb`;
@@ -172,6 +208,8 @@ window.joltObd = (function () {
       melde(`Gerät gewählt: ${geraet.name || "(ohne Namen)"}`);
       geraet.addEventListener("gattserverdisconnected", () => {
         melde("Verbindung getrennt.");
+        zaehler.verbindung.abrisse += 1;
+        zaehler.verbindung.seit = null;
         // Ohne das hier hielte `verbunden_()` einen Abriss für eine
         // bestehende Verbindung - `schreiben` wurde bisher nur beim
         // absichtlichen `trennen()` geloescht. `anschliessen()` verlässt
@@ -200,6 +238,7 @@ window.joltObd = (function () {
    * aufbauen, solange das Gerät gemerkt ist. */
   async function verbindungAufbauen(geraet) {
     const server = await geraet.gatt.connect();
+    zaehler.verbindung.geraet = geraet.name || "";
 
       // Den brauchbaren Dienst suchen: einer, der eine beschreibbare und eine
       // benachrichtigende Charakteristik hat. Bei manchen Dongles ist das
@@ -232,6 +271,7 @@ window.joltObd = (function () {
       notify.addEventListener("characteristicvaluechanged", beiDaten);
       notifyAktuell = notify;
       melde(`Bereit. Schreiben auf ${schreiben.uuid}, Lesen auf ${notify.uuid}`);
+      zaehler.verbindung.seit = Date.now();
   }
 
 
@@ -276,6 +316,7 @@ window.joltObd = (function () {
       }
       if (!geraet) throw new Error("kein gemerktes Gerät");
       melde(`Wiederverbinden, Versuch ${versuch} …`);
+      zaehler.verbindung.wiederversuche += 1;
       await gesperrt(async () => {
         await verbindungAufbauen(geraet);
         letzteAdresse = null;        // Adresse und Filter sind weg
@@ -328,6 +369,7 @@ window.joltObd = (function () {
     warteAuf = null;
     puffer = "";
     schuldigeAntworten = 0;
+    zaehler.verbindung.seit = null;
     melde("Verbindung absichtlich getrennt.");
   }
 
@@ -352,13 +394,19 @@ window.joltObd = (function () {
     if (!puffer.includes(">")) return;
     const antwort = puffer.replace(/>/g, "").replace(/\r/g, "\n").trim();
     puffer = "";
+    zaehler.befehle.letzterEmpfang = Date.now();
     if (schuldigeAntworten > 0) {
       schuldigeAntworten -= 1;
+      zaehler.befehle.verspaetet += 1;
       melde(`(verspätete Antwort verworfen: ${antwort || "leer"})`);
       return;
     }
     melde(antwort || "(leer)", "rein");
     if (warteAuf) {
+      const dauer = Date.now() - warteAuf.gesendet;
+      zaehler.befehle.beantwortet += 1;
+      zaehler.befehle.summeMs += dauer;
+      zaehler.befehle.letzteMs = dauer;
       clearTimeout(warteAuf.uhr);
       const { erfuellen } = warteAuf;
       warteAuf = null;
@@ -376,11 +424,14 @@ function befehl(text, grenze_ms = 15000) {
       if (!schreiben) { ablehnen(new Error("nicht verbunden")); return; }
       if (warteAuf) { ablehnen(new Error("es läuft noch ein Befehl")); return; }
       melde(text, "raus");
+      zaehler.befehle.gesendet += 1;
       puffer = "";
       warteAuf = {
         erfuellen,
+        gesendet: Date.now(),
         uhr: setTimeout(() => {
           warteAuf = null;
+          zaehler.befehle.zeitablauf += 1;
           // Der Dongle antwortet vielleicht doch noch. Diese eine Antwort
           // gehört zu keinem wartenden Befehl mehr und wird verworfen.
           schuldigeAntworten += 1;
@@ -747,8 +798,22 @@ function befehl(text, grenze_ms = 15000) {
    * Kilometerstands abbricht, hätte den Ladestand mit verloren. */
   async function satzLesen(runde) {
     rundeLaeuft = true;
-    try { return await satzLesenRoh(runde); }
-    finally { rundeLaeuft = false; }
+    const beginn = Date.now();
+    let gelungen = false;
+    try {
+      const satz = await satzLesenRoh(runde);
+      gelungen = true;
+      letzterSatz = { zeit: Date.now(), runde, werte: satz };
+      return satz;
+    } finally {
+      rundeLaeuft = false;
+      const r = zaehler.runden;
+      r.n += 1;
+      if (!gelungen) r.fehler += 1;
+      r.letzteMs = Date.now() - beginn;
+      r.summeMs += r.letzteMs;
+      r.zeit = Date.now();
+    }
   }
 
   /* Die Spannung am Diagnosestecker, in Volt - **ohne den CAN-Bus
@@ -783,6 +848,16 @@ function befehl(text, grenze_ms = 15000) {
     const roh = {};
     for (const eintrag of MESSWERTE) {
       if (eintrag.selten && runde % eintrag.selten !== 0) continue;
+      const z = messwertZaehler(eintrag.name);
+      const beginn = Date.now();
+      let gezaehlt = false;
+      const abschliessen = (art) => {
+        gezaehlt = true;
+        z[art] += 1;
+        z.letzteMs = Date.now() - beginn;
+        z.summeMs += z.letzteMs;
+        z.zeit = Date.now();
+      };
       try {
         let wert = await messwertLesen(eintrag);
         if (wert && typeof wert === "object") {
@@ -791,7 +866,10 @@ function befehl(text, grenze_ms = 15000) {
         }
         if (wert !== null) {
           roh[eintrag.name] = Math.round(wert * 1000) / 1000;
+          z.wert = roh[eintrag.name];
+          abschliessen("ok");
         } else if (eintrag.pflicht) {
+          abschliessen("fehler");
           throw new Error("keine Nutzdaten");
         } else {
           /* Geantwortet, aber ohne brauchbaren Wert.
@@ -806,8 +884,10 @@ function befehl(text, grenze_ms = 15000) {
            * dadurch vier von dreizehn Messwerten bei allen 77 Runden, ohne
            * dass irgendwo stand, dass sie fehlen. */
           (roh._leer = roh._leer || []).push(eintrag.name);
+          abschliessen("leer");
         }
       } catch (fehler) {
+        if (!gezaehlt) abschliessen("fehler");
         if (eintrag.pflicht) throw fehler;
         if (!roh._fehlend) roh._fehlend = [];
         roh._fehlend.push(eintrag.name);
@@ -895,10 +975,78 @@ function befehl(text, grenze_ms = 15000) {
   return {
     verfuegbar: () => !!bt(),
     verbunden: () => !!schreiben,
+
+    /* ---------- Beobachten (für die Einstellungen) ---------- */
+
+    /* Woher das Bluetooth kommt: "nativ" (CoreBluetooth in der iOS-App),
+     * "web" (Web Bluetooth, Bluefy/Chrome) oder "keiner". */
+    transport() {
+      const nativ = window.joltBleNativ;
+      if (nativ && nativ.verfuegbar()) return "nativ";
+      return navigator.bluetooth ? "web" : "keiner";
+    },
+
+    /* Eine Kopie des Ist-Zustands: nichts davon lässt sich von aussen
+     * verändern, und es ist als JSON ausgebbar (Diagnosebericht). */
+    diagnose() {
+      return JSON.parse(JSON.stringify({
+        verbunden: !!schreiben,
+        transport: this.transport(),
+        befehlLaeuft: !!warteAuf,
+        rundeLaeuft,
+        schuldigeAntworten,
+        gemerktesGeraet: geraetGemerkt ? (geraetGemerkt.name || "(ohne Namen)") : null,
+        wechselGescheitert: Array.from(wechselGescheitert),
+        tabellenFehler: TABELLE_FEHLER,
+        letzteAdresse: letzteAdresse ? letzteAdresse.sh : null,
+        ...zaehler,
+        letzterSatz,
+      }));
+    },
+
+    /* Die letzten Zeilen des Dongle-Protokolls, älteste zuerst. */
+    protokoll(nurAuffaelliges) {
+      const auffaellig = /FEHLER|Zeitüberschreitung|keine Antwort|verspätet|getrennt|fehlgeschlagen|NO DATA|ERROR|UNABLE|CAN ERROR|BUS/i;
+      return protokollRing
+        .filter((z) => !nurAuffaelliges || auffaellig.test(z.text))
+        .map((z) => ({ ...z }));
+    },
+    protokollLeeren() { protokollRing.length = 0; },
+
+    /* Zähler zurücksetzen - für eine saubere Messung "ab jetzt". */
+    zaehlerZuruecksetzen() {
+      zaehler.befehle = { gesendet: 0, beantwortet: 0, zeitablauf: 0,
+                          verspaetet: 0, summeMs: 0, letzteMs: null,
+                          letzterEmpfang: null };
+      zaehler.messwerte = {};
+      zaehler.runden = { n: 0, fehler: 0, summeMs: 0, letzteMs: null,
+                         zeit: null };
+      zaehler.verbindung.abrisse = 0;
+      zaehler.verbindung.wiederversuche = 0;
+    },
+
+    /* Einen einzelnen Befehl von Hand senden - die Konsole der Einstellungen.
+     *
+     * Danach wird die gemerkte Adresse verworfen: Wer ATSH oder ATCRA von
+     * Hand ändert, würde sonst die nächste Leserunde auf der falschen
+     * Adresse beginnen lassen, weil das Modul glaubt, sie stehe noch. */
+    async konsole(text) {
+      try { return await befehl(String(text).trim(), 8000); }
+      finally { letzteAdresse = null; }
+    },
+
+    /* Das gemerkte Gerät vergessen: Der nächste Aufbau fragt wieder nach. */
+    vergessen() {
+      geraetGemerkt = null;
+      const nativ = window.joltBleNativ;
+      if (nativ && nativ.vergessen) nativ.vergessen();
+      zaehler.verbindung.geraet = "";
+      melde("Gemerktes Gerät vergessen.");
+    },
     /* `melder` bekommt jede Zeile, die sonst im Protokoll stünde; `abriss`
      * wird gerufen, wenn die Verbindung stirbt - ob das ein Grund zum
      * Wiederverbinden ist, entscheidet der Aufrufer, nicht dieses Modul. */
-    einrichten(melder, abriss) { melde = melder || melde; beiAbriss = abriss; },
+    einrichten(melder, abriss) { melderAussen = melder || melderAussen; beiAbriss = abriss; },
     verbinden,
     anschliessen,
     wiederverbinden,

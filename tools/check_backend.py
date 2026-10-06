@@ -1225,6 +1225,14 @@ def main() -> int:
     pruefe(b'"/static/core.js"' not in inhalt,
            "und zwar alle, nicht nur einige",
            "core.js steht ohne Version im HTML")
+    # Der Fall, der bei einem neuen Skript immer wieder droht: Es steht im HTML,
+    # aber nicht in INDEX_DATEIEN (backend/app/main.py) - dann bleibt es bis zu
+    # vier Stunden im Cache haengen. Deshalb geprueft wird *jeder* Verweis.
+    import re as _re
+    ohne_version = _re.findall(rb'src="(/static/[^"?]+\.js)"', inhalt)
+    pruefe(not ohne_version,
+           "kein einziger Skriptverweis in index.html ohne Version - ein neues "
+           "Skript gehoert in INDEX_DATEIEN", str(ohne_version))
 
     # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
     # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
@@ -1256,6 +1264,18 @@ def main() -> int:
            "verlinkt, legt kein Symbol an")
 
     pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
+
+    # Die Einstellungen: ein Reiter, ein Abschnitt, ein Skript - und im
+    # Service-Worker-Gerüst, sonst fehlt die Ansicht bei schlechtem Empfang.
+    seite_text = client.get("/").text
+    sw_text = client.get("/sw.js").text
+    pruefe('data-ansicht="einstellungen"' in seite_text
+           and 'id="ansicht-einstellungen"' in seite_text
+           and "/static/einstellungen.js" in seite_text,
+           "die Einstellungen haben Reiter, Abschnitt und Skript")
+    pruefe(client.get("/static/einstellungen.js").status_code == 200
+           and "/static/einstellungen.js" in sw_text,
+           "das Skript wird ausgeliefert und steht im Gerüst des Service Workers")
 
     # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
     # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste steht als Tabelle
