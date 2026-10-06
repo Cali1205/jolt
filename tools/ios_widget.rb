@@ -17,7 +17,7 @@ pfad, app_id, team = ARGV
 abort "Aufruf: ios_widget.rb PROJEKT APP_ID [TEAM]" if pfad.nil? || app_id.nil?
 
 NAME = "JoltWidget"
-MIN_IOS = "18.0"   # supplementalActivityFamilies (CarPlay) gibt es ab iOS 18
+MIN_IOS = "16.2"   # ActivityContent und staleDate; die CarPlay-Familie schaltet #available(iOS 18) zu
 
 projekt = Xcodeproj::Project.open(pfad)
 app = projekt.targets.find { |t| t.name == "App" }
@@ -66,13 +66,9 @@ ziel.build_configurations.each do |k|
     "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
 end
 
-# Die App selbst muss mindestens so neu sein wie die Erweiterung, die sie
-# einbettet - und soll mit der Live-Activity-Faehigkeit gekennzeichnet sein.
-([projekt] + [app]).each do |t|
-  t.build_configurations.each do |k|
-    k.build_settings["IPHONEOS_DEPLOYMENT_TARGET"] = MIN_IOS
-  end
-end
+# Die App bleibt bei ihrer Mindestfassung. Sie anzuheben liess `cap sync` ein
+# Package.swift mit `.iOS(.v18)` schreiben, das der Paketmanager (tools-version
+# 5.9) ablehnt - der erste Versuch scheiterte daran.
 
 einbetten = app.new_copy_files_build_phase("Embed Foundation Extensions")
 einbetten.dst_subfolder_spec = "13"   # PlugIns
@@ -81,4 +77,4 @@ datei.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy"] }
 app.add_dependency(ziel)
 
 projekt.save
-puts "Widget-Ziel #{NAME} eingehaengt (#{app_id}.widget, iOS #{MIN_IOS})."
+puts "Widget-Ziel #{NAME} eingehaengt (#{app_id}.widget, ab iOS #{MIN_IOS})."
