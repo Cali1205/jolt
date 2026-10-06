@@ -27,18 +27,29 @@ function pruefe(ok, text, detail) {
 function neueKarte() {
   const ereignisse = {};
   const bilder = [];
+  const knoepfe = [];
+  const halter = { style: {}, appendChild: (k) => knoepfe.push(k) };
   const leinwand = {
+    parentElement: halter,
     clientWidth: 400, clientHeight: 300, width: 400, height: 300,
     addEventListener: (name, f) => { ereignisse[name] = f; },
     setPointerCapture() {},
     getBoundingClientRect: () => ({ left: 10, top: 20 }),   // nicht bei (0, 0)
     getContext: () => new Proxy({}, {
-      get: (z, n) => (n === "drawImage" ? (...a) => bilder.push(a) : () => {}),
+      get: (z, n) => (n === "drawImage" ? (...a) => bilder.push(a)
+        : n === "measureText" ? () => ({ width: 40 }) : () => {}),
       set: () => true }),
   };
   const fenster = { devicePixelRatio: 1, addEventListener() {} };
   const kontext = {
-    window: fenster, document: { getElementById: () => leinwand },
+    window: fenster,
+    document: {
+      getElementById: () => leinwand,
+      createElement: () => {
+        const k = { style: {}, hidden: false, klick: null,
+                    addEventListener: (n, f) => { if (n === "click") k.klick = f; } };
+        return k;
+      } },
     requestAnimationFrame: (f) => f(), Math, Number, Map, Array, Date,
     Image: function () { this.complete = false; },
     console,
@@ -51,7 +62,8 @@ function neueKarte() {
     pointerId: id, pointerType: "touch", button: 0,
     clientX: x + 10, clientY: y + 20,        // Bildschirm = Leinwand + Versatz
     preventDefault() {}, deltaY: 0 });
-  return { k, ereignisse, finger, bilder, leinwand };
+  return { k, ereignisse, finger, bilder, leinwand, knopf: () => knoepfe[0],
+           fenster };
 }
 
 // Wie weit liegt der Ort (lat, lon) gerade von der Stelle (x, y) entfernt?
@@ -189,6 +201,112 @@ t.finger("pointermove", 1, 200, 5000);        // weit nach unten ziehen
 const lat = t.k.ansicht().mitte.lat;
 pruefe(Number.isFinite(lat) && lat <= 85.06,
        "ueber den Rand der Welt hinaus gibt es keine unsinnigen Breiten", String(lat));
+
+console.log("\nAuto-Zoom auf die Strecke");
+// [lon, lat], wie die Geometrien der App.
+const stuttgartBerlin = [];
+for (let i = 0; i <= 50; i++) {
+  stuttgartBerlin.push([9.18 + (13.4 - 9.18) * i / 50, 48.78 + (52.52 - 48.78) * i / 50]);
+}
+const aufSchirm = (k, lon, lat) => k.nachSchirm(lat, lon);
+const imBild = (k, lon, lat, rand) => {
+  const p = aufSchirm(k, lon, lat);
+  return p.x >= rand && p.x <= 400 - rand && p.y >= rand && p.y <= 300 - rand;
+};
+
+t = neueKarte();
+t.k.routeSetzen(stuttgartBerlin);
+pruefe(stuttgartBerlin.every((q) => imBild(t.k, q[0], q[1], 0)),
+       "eine gesetzte Strecke liegt ganz im Bild, ohne dass jemand aufRoutePassen ruft");
+const z1 = t.k.ansicht().zoom;
+pruefe(z1 > 4 && z1 < 8 && z1 * 4 === Math.floor(z1 * 4),
+       "in Viertelstufen und nicht weiter herausgezoomt als noetig", String(z1));
+let grosse = stuttgartBerlin.map((q) => aufSchirm(t.k, q[0], q[1]));
+const xs = grosse.map((q) => q.x), ys = grosse.map((q) => q.y);
+pruefe(Math.max(Math.max(...xs) - Math.min(...xs), (Math.max(...ys) - Math.min(...ys)) * 400 / 300) > 400 * 0.7,
+       "und fuellt das Bild gut aus (mindestens 70 % der Breite oder Hoehe)");
+
+// Ladesaeulen am Rand duerfen die Ansicht nicht aufweiten.
+const vorherZoom = t.k.ansicht().zoom;
+t.k.markerSetzen([{ lat: 40.0, lon: 0.0, typ: "saeule" },
+                  { lat: stuttgartBerlin[0][1], lon: stuttgartBerlin[0][0], typ: "start" }]);
+pruefe(t.k.ansicht().zoom === vorherZoom,
+       "eine Ladesaeule weit abseits zieht die Karte nicht auf (nur Strecke, Auto, Start, Ziel, Stopps)");
+
+console.log("\nAufzeichnung: die Spur waechst");
+t = neueKarte();
+const spur = [];
+let wechsel = 0, letzterZoom = null, ausserhalb = 0;
+// Eine Fahrt von Stuttgart nach Norden, 120 Meldungen, ca. 400 km.
+for (let i = 0; i < 120; i++) {
+  const lat = 48.78 + i * 0.03, lon = 9.18 + Math.sin(i / 20) * 0.3;
+  spur.push([lon, lat]);
+  t.k.routeSetzen(spur.slice());
+  t.k.markerSetzen([{ lat, lon, typ: "auto", text: "hier" }]);
+  const z = t.k.ansicht().zoom;
+  if (letzterZoom !== null && z !== letzterZoom) wechsel++;
+  letzterZoom = z;
+  if (!imBild(t.k, lon, lat, 0)) ausserhalb++;
+}
+pruefe(ausserhalb === 0, "das Auto ist bei jeder Meldung im Bild", String(ausserhalb));
+pruefe(wechsel > 0 && wechsel < 25,
+       "die Karte zoomt dabei nur gelegentlich, nicht bei jeder Meldung (120 Meldungen)",
+       String(wechsel) + " Wechsel");
+pruefe(spur.every((q) => imBild(t.k, q[0], q[1], 0)),
+       "und am Ende liegt die ganze Spur im Bild");
+
+console.log("\nWer die Karte anfasst, behaelt sie");
+t = neueKarte();
+t.k.routeSetzen(stuttgartBerlin.slice(0, 10));
+pruefe(t.knopf().hidden === true, "solange die Karte folgt, gibt es keinen Knopf");
+t.finger("pointerdown", 1, 200, 150);
+t.finger("pointermove", 1, 150, 120);
+t.finger("pointerup", 1, 150, 120);
+const verschoben = t.k.ansicht();
+const lang = stuttgartBerlin.slice();
+t.k.routeSetzen(lang);                      // die Spur waechst weit ueber das Bild
+t.k.markerSetzen([{ lat: 52.5, lon: 13.4, typ: "auto" }]);
+const danach = t.k.ansicht();
+pruefe(danach.zoom === verschoben.zoom
+       && danach.mitte.lat === verschoben.mitte.lat && danach.mitte.lon === verschoben.mitte.lon,
+       "nach dem Anfassen aendert eine neue Meldung die Ansicht nicht mehr");
+pruefe(t.knopf().hidden === false, "stattdessen erscheint der Knopf 'Auf Strecke zoomen'");
+t.knopf().klick();
+pruefe(lang.every((q) => imBild(t.k, q[0], q[1], 0)) && t.knopf().hidden === true,
+       "ein Tipp darauf zeigt die ganze Strecke und versteckt den Knopf wieder");
+
+t = neueKarte();
+t.k.routeSetzen(stuttgartBerlin);
+t.ereignisse["wheel"]({ deltaY: -100, deltaMode: 0, ctrlKey: false,
+                        clientX: 200, clientY: 150, preventDefault() {} });
+t.k.aufRoutePassen();
+pruefe(stuttgartBerlin.every((q) => imBild(t.k, q[0], q[1], 0)) && t.knopf().hidden === true,
+       "aufRoutePassen (Planen) holt die Ansicht zurueck, auch nach dem Zoomen von Hand");
+
+console.log("\nEine neue Fahrt beginnt von vorn");
+t = neueKarte();
+t.k.routeSetzen(stuttgartBerlin);
+t.finger("pointerdown", 1, 200, 150);
+t.finger("pointerup", 1, 200, 150);
+t.k.routeSetzen([[9.18, 48.78]]);           // kuerzere Strecke = andere Fahrt
+t.k.markerSetzen([{ lat: 48.78, lon: 9.18, typ: "auto" }]);
+pruefe(t.knopf().hidden === true && t.k.ansicht().zoom === 15,
+       "nach einer von Hand verschobenen Karte folgt die naechste Aufzeichnung wieder: "
+       + "ein einzelner Punkt wird gross gezeigt (Stufe 15)", String(t.k.ansicht().zoom));
+
+console.log("\nGroesse aendert sich");
+t = neueKarte();
+t.k.routeSetzen(stuttgartBerlin);
+const zBreit = t.k.ansicht().zoom;
+t.leinwand.clientWidth = 200; t.leinwand.clientHeight = 150;   // Umhaengen / Drehen
+t.k.neuZeichnen();
+pruefe(t.k.ansicht().zoom < zBreit,
+       "in einem kleineren Ausschnitt zoomt die Karte heraus, damit die Strecke passt");
+t.leinwand.clientWidth = 0;                                      // versteckter Abschnitt
+const vorVersteckt = t.k.ansicht().zoom;
+t.k.neuZeichnen();
+pruefe(t.k.ansicht().zoom === vorVersteckt,
+       "ist der Abschnitt versteckt (Breite null), bleibt die Ansicht unberuehrt");
 
 console.log("\nKacheln");
 t = neueKarte();

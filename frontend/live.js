@@ -355,9 +355,10 @@ window.joltLive = (function () {
       // Gefüllt wird sie weiter oben, zusammen mit der Strecke.
       if (!fahrt) {
         window.joltKarte.routeSetzen(spur);
-        // Nur beim ersten Punkt zentrieren - danach würde die Karte bei
-        // jeder Meldung springen, und niemand könnte sie verschieben.
-        if (spur.length === 1) window.joltKarte.aufPunkt(hier[1], hier[0], 12);
+        // Die Karte folgt der Spur von selbst (karte.js), bis jemand sie
+        // anfasst - dann bleibt sie, wo sie ist. Frueher wurde nur der erste
+        // Punkt zentriert, und die wachsende Strecke musste man von Hand
+        // verfolgen.
       }
       if (fahrt && z.reserve_bei_km !== null && fahrt.profil) {
         const treffer = fahrt.profil.find((p) => p.km >= z.reserve_bei_km);
