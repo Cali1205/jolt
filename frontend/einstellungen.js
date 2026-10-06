@@ -380,6 +380,66 @@ window.joltEinstellungen = (function () {
     }
   }
 
+  /* ---------- Diagnose: Mithören ---------- */
+
+  let lauschText = "";
+
+  function lauschenFormat(e) {
+    const kopf = `Protokoll ${e.protokoll}, ${e.dauer_ms / 1000} s: ${e.gesamt} Frames, `
+      + `${e.ids.length} Kennungen`;
+    if (!e.gesamt) {
+      return kopf + "\n\nNichts angekommen. Der Bus war still, oder dieser Anschluss "
+        + "führt keine Broadcast-Daten (das Gateway filtert)."
+        + (e.hinweise.length ? "\n\nHinweise:\n  " + e.hinweise.join("\n  ") : "");
+    }
+    const zeilen = e.ids.slice(0, 40).map((i) =>
+      `${i.id.padEnd(9)} ${String(i.n).padStart(6)}x  ${String(i.proSek).padStart(6)}/s  `
+      + `${String(i.varianten >= 200 ? "200+" : i.varianten).padStart(4)} Werte  ${i.letzte}`);
+    return [kopf, "", "Kennung   Anzahl     pro s  Werte   letzte Daten", ...zeilen,
+            e.ids.length > 40 ? `… und ${e.ids.length - 40} weitere` : "",
+            e.hinweise.length ? "\nHinweise:\n  " + e.hinweise.join("\n  ") : ""]
+      .filter((z) => z !== "").join("\n");
+  }
+
+  async function lauschenStarten() {
+    if (!O.verbunden()) {
+      K.melden("Kein Dongle verbunden.", "warnung");
+      return;
+    }
+    if (fahrtLaeuft()) {
+      K.melden("Eine Fahrt läuft – Mithören unterbricht die Messung. Erst "
+        + "beenden.", "warnung");
+      return;
+    }
+    const knopf = el("lausch-start");
+    const ziel = el("lausch-ergebnis");
+    knopf.disabled = true;
+    ziel.hidden = false;
+    ziel.textContent = "höre zu …";
+    try {
+      const ergebnis = await O.lauschen({
+        protokoll: el("lausch-protokoll").value,
+        dauer_ms: Number(el("lausch-dauer").value) });
+      lauschText = lauschenFormat(ergebnis);
+      ziel.textContent = lauschText;
+      el("lausch-kopieren").hidden = false;
+    } catch (fehler) {
+      ziel.textContent = "Mithören: " + fehler.message;
+    } finally {
+      knopf.disabled = false;
+      aktualisieren();
+    }
+  }
+
+  async function lauschenKopieren() {
+    try {
+      await navigator.clipboard.writeText(lauschText);
+      K.melden("Ergebnis kopiert.", "hinweis");
+    } catch (fehler) {
+      K.melden("Kopieren ging nicht: " + fehler.message, "warnung");
+    }
+  }
+
   /* ---------- Speicher ---------- */
 
   function pufferSchluessel() {
@@ -490,6 +550,8 @@ window.joltEinstellungen = (function () {
     K.an("diag-befehl", "keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); befehlSenden(); }
     });
+    K.an("lausch-start", "click", lauschenStarten);
+    K.an("lausch-kopieren", "click", lauschenKopieren);
     K.an("einst-puffer-leeren", "click", pufferVerwerfen);
     K.an("einst-cache-leeren", "click", cacheLeeren);
   }

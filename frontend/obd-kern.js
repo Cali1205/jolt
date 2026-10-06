@@ -145,6 +145,8 @@ window.joltObd = (function () {
   let letzteAdresse = null;
   let notifyAktuell = null;  // aktuell abonnierte Charakteristik
   let rundeLaeuft = false;   // gerade wird ein Satz gelesen
+  let lauschenAktiv = false; // der Dongle hoert nur zu (lauschen())
+  let lauscher = null;       // nimmt die Rohdaten waehrend des Mithoerens entgegen
 
   /* Ohne diese Sperre konnten zwei Verbindungsversuche gleichzeitig laufen -
    * etwa das automatische Wiederverbinden im Hintergrund und ein manuelles
@@ -388,7 +390,11 @@ window.joltObd = (function () {
   let schuldigeAntworten = 0;
 
   function beiDaten(e) {
-    puffer += new TextDecoder().decode(e.target.value);
+    const text = new TextDecoder().decode(e.target.value);
+    // Beim Mithoeren kommt ein Strom von Frames ohne Eingabeaufforderung; er
+    // gehoert dem Mithoerer, nicht der Befehl-und-Antwort-Logik.
+    if (lauscher) { lauscher(text); return; }
+    puffer += text;
     // Der ELM327 schliesst jede Antwort mit '>' ab. Vorher ist sie
     // unvollständig - BLE liefert in Häppchen von rund zwanzig Byte.
     if (!puffer.includes(">")) return;
@@ -419,9 +425,15 @@ window.joltObd = (function () {
  * antwortet, bis zu zehn Sekunden. Die Antwort kam eine Sekunde nach dem
  * Abbruch - im Protokoll stand dann ein Zeitablauf, wo in Wirklichkeit ein
  * Befund war. */
-function befehl(text, grenze_ms = 15000) {
+function befehl(text, grenze_ms = 15000, intern = false) {
     return new Promise((erfuellen, ablehnen) => {
       if (!schreiben) { ablehnen(new Error("nicht verbunden")); return; }
+      // Jedes Zeichen beendet das Mithoeren des ELM327. Ein Befehl von aussen
+      // (Spannungspruefung, Konsole, Leserunde) wuerde es mitten im Strom
+      // abbrechen und dessen Antwort mit Frames vermischen.
+      if (lauschenAktiv && !intern) {
+        ablehnen(new Error("der Dongle lauscht gerade")); return;
+      }
       if (warteAuf) { ablehnen(new Error("es läuft noch ein Befehl")); return; }
       melde(text, "raus");
       zaehler.befehle.gesendet += 1;
@@ -803,6 +815,7 @@ function befehl(text, grenze_ms = 15000) {
    * vermerkt und übergangen - eine Aufzeichnung, die wegen des
    * Kilometerstands abbricht, hätte den Ladestand mit verloren. */
   async function satzLesen(runde) {
+    if (lauschenAktiv) throw new Error("der Dongle lauscht gerade");
     rundeLaeuft = true;
     const beginn = Date.now();
     let gelungen = false;
@@ -976,6 +989,129 @@ function befehl(text, grenze_ms = 15000) {
 
   function verbunden_() { return !!schreiben; }
 
+  /* ---------- Mithoeren (passiv) ----------
+   *
+   * Zuhoeren, was auf dem Bus ohnehin laeuft - ohne selbst zu fragen. Das ist
+   * der Weg, auf dem man ein verriegeltes, ladendes Auto beobachten koennte,
+   * ohne dass eine Diagnoseanfrage die Alarmanlage ausloest.
+   *
+   * Gesendet wird dabei **nichts auf den CAN**: Alle Befehle bis ATMA sind
+   * AT-Befehle, die im Dongle bleiben. ATCSM1 stellt den ELM327 auf stilles
+   * Mitlesen, ohne Bestaetigung der Frames; ob ein Nachbau das wirklich tut,
+   * laesst sich von hier aus nicht pruefen.
+   *
+   * Ob ueberhaupt etwas ankommt, ist offen: Der OBD-Anschluss haengt beim MEB
+   * vermutlich hinter dem Diagnose-Gateway, auf dem Broadcast-Daten nicht
+   * laufen. Diese Funktion beantwortet genau das - mit einer Liste der
+   * gesehenen Kennungen, wie oft und wie veraenderlich sie sind.
+   *
+   * Danach wird der Handshake wiederholt (nur AT-Befehle): Protokoll, Filter
+   * und Format sind sonst die des Mithoerens, und die naechste Leserunde
+   * bekaeme Unsinn. */
+  function schreibenRoh(text) {
+    const daten = new TextEncoder().encode(text);
+    const ohne_antwort = schreiben.properties.writeWithoutResponse
+      && typeof schreiben.writeValueWithoutResponse === "function";
+    return ohne_antwort ? schreiben.writeValueWithoutResponse(daten)
+                        : schreiben.writeValue(daten);
+  }
+
+  async function lauschen(optionen) {
+    const o = optionen || {};
+    const protokoll = o.protokoll === "7" ? "7" : "6";
+    const dauer = Math.max(500, Math.min(120000, Number(o.dauer_ms) || 10000));
+    if (!schreiben) throw new Error("nicht verbunden");
+    if (lauschenAktiv) throw new Error("es wird schon gelauscht");
+    if (warteAuf || rundeLaeuft) throw new Error("es läuft noch ein Befehl");
+
+    lauschenAktiv = true;
+    const ergebnis = { protokoll, dauer_ms: dauer, gesamt: 0, ids: [],
+                       proben: [], hinweise: [] };
+    const ids = new Map();
+    let rest = "";
+    let gestoppt = false;
+    const beginn = Date.now();
+
+    const hinweis = (t) => {
+      if (ergebnis.hinweise.length < 8 && !ergebnis.hinweise.includes(t)) {
+        ergebnis.hinweise.push(t);
+      }
+    };
+    const zeile = (z) => {
+      const t = z.toUpperCase().split(/\s+/);
+      const istFrame = /^(?:[0-9A-F]{3}|[0-9A-F]{8})$/.test(t[0])
+        && t.length > 1 && t.slice(1).every((b) => /^[0-9A-F]{2}$/.test(b));
+      if (!istFrame) { hinweis(z.slice(0, 60)); return; }
+      ergebnis.gesamt += 1;
+      const daten = t.slice(1).join(" ");
+      let e = ids.get(t[0]);
+      if (!e) {
+        if (ids.size >= 2000) return;
+        e = { id: t[0], n: 0, varianten: new Set(), letzte: "" };
+        ids.set(t[0], e);
+      }
+      e.n += 1;
+      e.letzte = daten;
+      if (e.varianten.size < 200) e.varianten.add(daten);
+      if (ergebnis.proben.length < 30) ergebnis.proben.push(z);
+    };
+    const sammeln = (text) => {
+      if (text.includes(">")) gestoppt = true;
+      rest += text.replace(/>/g, "");
+      const teile = rest.split(/[\r\n]+/);
+      rest = teile.pop();
+      for (const z of teile) { if (z.trim()) zeile(z.trim()); }
+    };
+
+    try {
+      for (const b of ["ATE0", "ATL0", "ATS1", "ATH1", "ATCAF0",
+                       `ATSP${protokoll}`, "ATCSM1", "ATCRA"]) {
+        try {
+          const antwort = await befehl(b, 4000, true);
+          if (/\?/.test(antwort || "")) hinweis(`${b}: vom Dongle nicht verstanden`);
+        } catch (fehler) {
+          hinweis(`${b}: ${fehler.message}`);
+        }
+      }
+      melde(`Mithören beginnt (Protokoll ${protokoll}, ${dauer / 1000} s) - `
+            + "gesendet werden nur AT-Befehle, nichts auf den CAN.");
+      puffer = "";
+      lauscher = sammeln;
+      await schreibenRoh("ATMA\r");
+      await new Promise((w) => setTimeout(w, dauer));
+      // Jedes Zeichen beendet das Mithören; die Eingabeaufforderung danach
+      // meldet, dass der Dongle wieder bereit ist.
+      await schreibenRoh("\r");
+      const bis = Date.now() + 2500;
+      while (!gestoppt && Date.now() < bis) {
+        await new Promise((w) => setTimeout(w, 25));
+      }
+      if (rest.trim()) zeile(rest.trim());
+      if (!gestoppt) hinweis("keine Eingabeaufforderung nach dem Stopp");
+    } finally {
+      lauscher = null;
+      puffer = "";
+      // Den Dongle zurückstellen - nur AT-Befehle.
+      for (const b of HANDSHAKE) {
+        try { await befehl(b, 5000, true); } catch (fehler) { /* weiter */ }
+      }
+      letzteAdresse = null;
+      wechselGescheitert.clear();
+      schuldigeAntworten = 0;
+      lauschenAktiv = false;
+    }
+
+    const sekunden = Math.max(1, (Date.now() - beginn) / 1000);
+    ergebnis.ids = Array.from(ids.values())
+      .sort((a, b) => b.n - a.n)
+      .map((e) => ({ id: e.id, n: e.n,
+                     proSek: Math.round(e.n / (dauer / 1000) * 10) / 10,
+                     varianten: e.varianten.size, letzte: e.letzte }));
+    melde(`Mithören beendet: ${ergebnis.gesamt} Frames, ${ergebnis.ids.length} `
+          + `Kennungen in ${Math.round(sekunden)} s.`);
+    return ergebnis;
+  }
+
   /* ---------- Nach aussen ---------- */
 
   return {
@@ -1057,6 +1193,8 @@ function befehl(text, grenze_ms = 15000) {
     anschliessen,
     wiederverbinden,
     handshake: () => gesperrt(() => reihe(HANDSHAKE)),
+    lauschen: (optionen) => gesperrt(() => lauschen(optionen)),
+    lauscht: () => lauschenAktiv,
     reiheFehler: () => reiheFehler.slice(),
     trennen,
     befehl,

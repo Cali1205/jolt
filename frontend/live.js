@@ -1140,6 +1140,8 @@ window.joltLive = (function () {
 
   function lesenErlaubt() {
     if (donglePause) return false;
+    // Beim Mithören (Einstellungen) darf nichts gefragt werden.
+    if (window.joltObd && window.joltObd.lauscht && window.joltObd.lauscht()) return false;
     if (!autoModus) return true;
     return fahrZustand === "faehrt" || Date.now() < manuellBis;
   }
