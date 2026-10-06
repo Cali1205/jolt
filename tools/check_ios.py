@@ -233,6 +233,12 @@ def teil_live_activity() -> None:
     wurzel = json.loads(lesen("package.json"))
     pruefe("jolt-anzeige" in wurzel.get("dependencies", {}),
            "und steht in den Abhängigkeiten - sonst bindet `cap sync` es nicht ein")
+    ignoriert = subprocess.run(["git", "check-ignore", "-q",
+        "plugins/jolt-anzeige/ios/Sources/JoltAnzeigePlugin/JoltAnzeigePlugin.swift"],
+        cwd=WURZEL).returncode == 0
+    pruefe(not ignoriert,
+           "die Plugin-Quellen werden von .gitignore nicht verschluckt - `ios/` "
+           "traf auch plugins/*/ios, und die CI fand die Dateien nicht")
     plugin = lesen("plugins", "jolt-anzeige", "ios", "Sources",
                    "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
     pruefe('jsName = "JoltAnzeige"' in plugin
