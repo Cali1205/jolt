@@ -59,6 +59,10 @@ for router in ALLE_ROUTER:
     app.include_router(router)
 
 
+# Starke Referenz: Die Ereignisschleife hält Aufgaben nur schwach.
+_aufgaben: set = set()
+
+
 @app.on_event("startup")
 def _beim_start():
     deps.beim_start_warnen()
@@ -68,7 +72,7 @@ def _beim_start():
     # Vergessene Fahrten selbst beenden. Für eine Aufzeichnung ist das
     # Vergessen ein Totalverlust: Strecke und Energieprofil entstehen erst
     # beim Beenden aus den Messpunkten.
-    asyncio.create_task(aufraeumen.schleife(SessionLocal))
+    _aufgaben.add(asyncio.create_task(aufraeumen.schleife(SessionLocal)))
 
 
 # ---------- Frontend ausliefern ----------

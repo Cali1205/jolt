@@ -503,6 +503,26 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
             "gelernt": gelernt}
 
 
+def _sitzung_existiert(sitzung_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        return db.get(models.LiveSitzung, sitzung_id) is not None
+    finally:
+        db.close()
+
+
+# Hintergrundaufgaben: Die Ereignisschleife hält nur eine schwache Referenz.
+# Ohne eigene kann der Müllsammler eine laufende Simulation abräumen.
+_aufgaben: set = set()
+_simulationen: dict = {}
+
+
+def _task_halten(task):
+    _aufgaben.add(task)
+    task.add_done_callback(_aufgaben.discard)
+    return task
+
+
 @router.post("/{sitzung_id}/simulieren",
              dependencies=[Depends(deps.aktuelle_sitzung)])
 async def simulieren(sitzung_id: int,
@@ -527,9 +547,13 @@ async def simulieren(sitzung_id: int,
 
     await run_in_threadpool(pruefen)
 
-    asyncio.create_task(simulator.abspielen(
-        SessionLocal, sitzung_id, mehrverbrauch, takt_s,
-        zeitfaktor=zeitfaktor))
+    if sitzung_id in _simulationen:
+        raise HTTPException(409, "Für diese Fahrt läuft schon eine Simulation.")
+    _simulationen[sitzung_id] = _task_halten(asyncio.create_task(
+        simulator.abspielen(SessionLocal, sitzung_id, mehrverbrauch, takt_s,
+                            zeitfaktor=zeitfaktor)))
+    _simulationen[sitzung_id].add_done_callback(
+        lambda _t, s=sitzung_id: _simulationen.pop(s, None))
     return {"gestartet": True, "mehrverbrauch": mehrverbrauch,
             "takt_s": takt_s, "zeitfaktor": zeitfaktor}
 
@@ -560,7 +584,13 @@ async def live_kanal(websocket: WebSocket, sitzung_id: int):
             except Exception:      # noqa: BLE001
                 pass
             return
-    await kanal.anmelden(sitzung_id, websocket)
+    vorhanden = await run_in_threadpool(_sitzung_existiert, sitzung_id)
+    if not vorhanden or not await kanal.anmelden(sitzung_id, websocket):
+        try:
+            await websocket.close(code=4404 if not vorhanden else 4429)
+        except Exception:      # noqa: BLE001
+            pass
+        return
     try:
         await websocket.send_json({"typ": "bereit"})
         while True:

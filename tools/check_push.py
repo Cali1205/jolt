@@ -267,6 +267,9 @@ def teil_mit_schluessel():
     os.environ["VAPID_SUBJECT"] = "mailto:jolt@example.org"
     try:
         client = TestClient(app)
+        # Ohne Netz gilt jeder https-Name als öffentlich; die Prüfung selbst
+        # steht in check_sicherheit.py.
+        push.endpoint_erlaubt = lambda url: url.startswith("https://")
         antwort = client.get("/api/push/schluessel").json()
         pruefe(antwort["eingerichtet"] is True, "eingerichtet")
         pruefe(antwort["schluessel"] == oeffentlich,
