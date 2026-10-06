@@ -12,43 +12,20 @@ import WidgetKit
 @main
 struct JoltWidgetBundle: WidgetBundle {
     var body: some Widget {
-        // Die kleine Familie (CarPlay) gibt es erst ab iOS 18. Die App selbst
-        // bleibt bei der Mindestfassung der Capacitor-Vorlage; deshalb zwei
-        // Widgets mit derselben Konfiguration, von denen eines gewählt wird.
-        if #available(iOS 18.0, *) {
-            JoltFahrtAnzeigeCarPlay()
-        } else {
-            JoltFahrtAnzeige()
-        }
+        JoltFahrtAnzeige()
     }
 }
 
+// Die Erweiterung gilt ab iOS 18: Erst dort gibt es die kleine Familie, die
+// CarPlay zeigt. Die App selbst behaelt ihre Mindestfassung; auf aelteren
+// iPhones fehlt nur die Live Activity.
 struct JoltFahrtAnzeige: Widget {
     var body: some WidgetConfiguration {
-        fahrtKonfiguration()
-    }
-}
-
-@available(iOS 18.0, *)
-struct JoltFahrtAnzeigeCarPlay: Widget {
-    var body: some WidgetConfiguration {
-        fahrtKonfiguration()
-            .supplementalActivityFamilies([.small])
-    }
-}
-
-func fahrtKonfiguration() -> ActivityConfiguration<JoltFahrtAttributes> {
         ActivityConfiguration(for: JoltFahrtAttributes.self) { context in
-            Group {
-                if #available(iOS 18.0, *) {
-                    FahrtAnsichtMitFamilie(zustand: context.state, veraltet: context.isStale)
-                } else {
-                    FahrtAnsicht(zustand: context.state, veraltet: context.isStale, klein: false)
-                }
-            }
-            .padding(12)
-            .activityBackgroundTint(Color.black.opacity(0.75))
-            .activitySystemActionForegroundColor(.white)
+            FahrtAnsicht(zustand: context.state, veraltet: context.isStale)
+                .padding(12)
+                .activityBackgroundTint(Color.black.opacity(0.75))
+                .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -71,32 +48,22 @@ func fahrtKonfiguration() -> ActivityConfiguration<JoltFahrtAttributes> {
                 Image(systemName: "bolt.fill")
             }
         }
+        .supplementalActivityFamilies([.small])
+    }
 }
 
-/// Liest die Familie aus der Umgebung: CarPlay und Apple Watch verlangen die
-/// kleine Anzeige.
-@available(iOS 18.0, *)
-struct FahrtAnsichtMitFamilie: View {
+struct FahrtAnsicht: View {
     @Environment(\.activityFamily) private var familie
 
     let zustand: JoltAnzeige
     let veraltet: Bool
 
     var body: some View {
-        FahrtAnsicht(zustand: zustand, veraltet: veraltet, klein: familie == .small)
-    }
-}
-
-struct FahrtAnsicht: View {
-    let zustand: JoltAnzeige
-    let veraltet: Bool
-    let klein: Bool
-
-    var body: some View {
         Group {
-            if klein {
-                kleineAnsicht
-            } else {
+            switch familie {
+            case .small:
+                klein
+            default:
                 gross
             }
         }
@@ -105,7 +72,7 @@ struct FahrtAnsicht: View {
     }
 
     /// CarPlay und Watch: eine große Zahl und eine Zeile.
-    private var kleineAnsicht: some View {
+    private var klein: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(zustand.soc?.text ?? "–")
                 .font(.system(size: 34, weight: .bold, design: .rounded))

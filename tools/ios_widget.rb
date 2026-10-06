@@ -17,7 +17,7 @@ pfad, app_id, team = ARGV
 abort "Aufruf: ios_widget.rb PROJEKT APP_ID [TEAM]" if pfad.nil? || app_id.nil?
 
 NAME = "JoltWidget"
-MIN_IOS = "16.2"   # ActivityContent und staleDate; die CarPlay-Familie schaltet #available(iOS 18) zu
+MIN_IOS = "18.0"   # supplementalActivityFamilies (CarPlay) gibt es ab iOS 18
 
 projekt = Xcodeproj::Project.open(pfad)
 app = projekt.targets.find { |t| t.name == "App" }
@@ -66,7 +66,8 @@ ziel.build_configurations.each do |k|
     "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
 end
 
-# Die App bleibt bei ihrer Mindestfassung. Sie anzuheben liess `cap sync` ein
+# Nur die Erweiterung steht auf iOS 18, die App bleibt bei ihrer Mindestfassung.
+# Die App anzuheben liess `cap sync` ein
 # Package.swift mit `.iOS(.v18)` schreiben, das der Paketmanager (tools-version
 # 5.9) ablehnt - der erste Versuch scheiterte daran.
 
