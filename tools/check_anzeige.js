@@ -127,7 +127,9 @@ pruefe(ohneQuelle.soc.quelle === "gerechnet",
 console.log("\nSender: drosseln");
 function bauen(opt) {
   const t = { jetzt: JETZT, geplant: [], gesendet: [] };
+  // Die Abstaende des Tests stehen fest, unabhaengig vom Vorgabewert der App.
   const s = A.sender({
+    abstandMs: 10000,
     jetzt: () => t.jetzt,
     planen: (f, ms) => { const e = { f, ms, aktiv: true }; t.geplant.push(e); return e; },
     loeschen: (e) => { if (e) e.aktiv = false; },
@@ -224,8 +226,121 @@ pruefe(t.gesendet.length === 0, "das Ziel laesst sich wieder abnehmen");
 console.log("\nStandard-Sender der Oberflaeche");
 ok = true;
 try { A.melden(geplant); A.beenden(); A.zielSetzen(null); } catch (e) { ok = false; }
-pruefe(ok && A.MIN_ABSTAND_MS === 10000,
-       "melden, beenden und zielSetzen laufen ohne Ziel durch; 10 s Mindestabstand");
+pruefe(ok && A.MIN_ABSTAND_MS === 15000,
+       "melden, beenden und zielSetzen laufen ohne Ziel durch; 15 s Mindestabstand");
+
+console.log("\nVerlauf: 1, 5, 30 und 60 Minuten");
+/* Eine Fahrt mit 70 km/h und 15 kWh/100 km: 1,1667 km und 0,175 kWh je
+ * Minute, ein Punkt alle zwölf Sekunden, 70 Minuten lang. Danach stimmt jedes
+ * Fenster auf die Nachkommastelle, und der Test sagt, wo die Rechnung abweicht. */
+function fahrt(minuten, optionen) {
+  const o = { kwh100: 15, kmh: 70, ...(optionen || {}) };
+  const spur = [];
+  const ende = JETZT;
+  const beginn = ende - minuten * 60000;
+  let km = 100, netto = 50, entl = 80, gel = 3;
+  for (let ms = beginn; ms <= ende; ms += 12000) {
+    spur.push({ zeit: ms, gps: km, netto, entl, gel });
+    const dkm = o.kmh * 12 / 3600;
+    km += dkm;
+    const dkwh = dkm * o.kwh100 / 100;
+    netto += dkwh;
+    entl += dkwh * 1.2;     // 20 % mehr entnommen ...
+    gel += dkwh * 0.2;      // ... und ein Sechstel davon zurueckgespeist
+  }
+  return spur;
+}
+const stand = (extras) => A.modell(geplant, JETZT, extras);
+
+let v = stand({ spur: fahrt(70) }).verlauf;
+pruefe(v && v.fenster.map((f) => f.min).join() === "1,5,30,60",
+       "vier Fenster: 1, 5, 30, 60 Minuten", JSON.stringify(v && v.fenster.map((f) => f.min)));
+pruefe(v.fenster.every((f) => Math.abs(f.kwh100 - 15) < 0.15),
+       "jedes zeigt 15 kWh/100 km", JSON.stringify(v.fenster.map((f) => f.kwh100)));
+pruefe(v.fenster.every((f) => Math.abs(f.kw - 10.5) < 0.15),
+       "und 10,5 kW (70 km/h mal 0,15 kWh/km)", JSON.stringify(v.fenster.map((f) => f.kw)));
+pruefe(v.fenster[0].text === "15,0" && v.fenster[0].kwText === "10,5",
+       "Texte mit Komma, fertig fuer die Anzeige", JSON.stringify(v.fenster[0]));
+pruefe(v.balken.length === 6 && v.balken.every((b) => b !== null && Math.abs(b - 15) < 0.3),
+       "sechs Balken zu fuenf Minuten, alle um 15", JSON.stringify(v.balken));
+pruefe(v.rekup && v.rekup.prozent === 17 && v.rekup.minuten >= 55,
+       "Rekuperation: ein Sechstel der entnommenen Energie kam zurueck (17 %)",
+       JSON.stringify(v.rekup));
+
+// Der Verbrauch aendert sich: die kurzen Fenster folgen schneller, die langen glaetten.
+const teuerDannBillig = (() => {
+  const a = fahrt(50, { kwh100: 25 }).filter((p) => p.zeit < JETZT - 10 * 60000);
+  const b = fahrt(10, { kwh100: 10 });
+  const dkm = a[a.length - 1].gps - b[0].gps, dn = a[a.length - 1].netto - b[0].netto;
+  return a.concat(b.map((p) => ({ ...p, gps: p.gps + dkm, netto: p.netto + dn })));
+})();
+v = stand({ spur: teuerDannBillig }).verlauf;
+pruefe(v.fenster[0].kwh100 < 11 && v.fenster[1].kwh100 < 11
+       && v.fenster[2].kwh100 > 13 && v.fenster[3].kwh100 > v.fenster[2].kwh100,
+       "kurze Fenster zeigen den Umschwung (10), lange glaetten ihn (um 20)",
+       JSON.stringify(v.fenster.map((f) => f.kwh100)));
+
+// Ehrlichkeit: kein Fenster ohne Spur dahinter.
+v = stand({ spur: fahrt(12) }).verlauf;
+pruefe(v.fenster[0].kwh100 !== null && v.fenster[1].kwh100 !== null
+       && v.fenster[2].kwh100 === null && v.fenster[3].kwh100 === null,
+       "nach zwoelf Minuten Fahrt gibt es 1 und 5, aber keinen 30- und 60-Minuten-Schnitt",
+       JSON.stringify(v.fenster.map((f) => f.kwh100)));
+pruefe(v.fenster[2].text === "–" && v.fenster[3].kwText === "–",
+       "und der Text ist ein Strich, keine Null");
+
+// Stand: Energie ohne Strecke - kWh/100 geht nicht, kW schon.
+const stehend = fahrt(10, { kmh: 0 });
+stehend.forEach((p, i) => { p.netto = 50 + i * 0.004; });   // 1,2 kW
+v = stand({ spur: stehend }).verlauf;
+pruefe(v.fenster[0].kwh100 === null && v.fenster[0].kw !== null && Math.abs(v.fenster[1].kw - 1.2) < 0.1,
+       "im Stand: kein kWh/100 (keine Strecke), aber die Leistung (1,2 kW)",
+       JSON.stringify(v.fenster.slice(0, 2)));
+
+// Spur steht (Dongle weg): kein "Jetzt".
+const alt = fahrt(70).filter((p) => p.zeit < JETZT - 2 * 60000);
+pruefe(stand({ spur: alt }).verlauf === null,
+       "ist der letzte Punkt zwei Minuten alt, steht kein Verlauf da - kein altes Jetzt");
+const ohneGps = stand({ spur: fahrt(70).map((p) => ({ ...p, gps: null })) }).verlauf;
+pruefe(ohneGps && ohneGps.fenster.every((f) => f.kw === null) && ohneGps.balken === null,
+       "ohne GPS-Strecke keine Fenster und keine Balken, auch wenn die Zaehler da sind - "
+       + "die Strecke aus dem Kilometerstand waere fuer eine Minute zu grob");
+pruefe(stand().verlauf === null && stand({ spur: [] }).verlauf === null
+       && stand({ spur: [fahrt(1)[0]] }).verlauf === null,
+       "ohne Spur, mit leerer oder einpunktiger: null");
+pruefe(stand({ spur: "x" }).verlauf === null && stand({ spur: [null, null] }).verlauf === null,
+       "Unsinn statt einer Spur bricht nichts");
+
+console.log("\nNebenverbraucher");
+const jetzt = JETZT;
+const werte = {
+  nebenverbrauch_kw: { wert: 1.84, zeit: jetzt - 20000 },
+  ptc_strom_a: { wert: 5.0, zeit: jetzt - 20000 },
+  spannung_v: { wert: 380, zeit: jetzt - 20000 },
+  kompressor_w: { wert: 450, zeit: jetzt - 5 * 60000 },
+  batterie_c: { wert: 27.4, zeit: jetzt - 20000 },
+};
+let n = stand({ werte }).neben;
+pruefe(n.kw === 1.8 && n.text === "1,8 kW" && n.quelle === "gemessen",
+       "der gemessene Nebenverbrauch, mit Quelle", JSON.stringify(n));
+pruefe(n.heizungKw === 1.9 && n.heizungText === "1,9 kW",
+       "Heizung = Strom mal Packspannung (5 A mal 380 V)", JSON.stringify(n));
+pruefe(n.klimaKw === 0.5 && n.klimaText === "0,5 kW",
+       "Klimakompressor in kW (450 W, fuenf Minuten alt ist noch gut)", JSON.stringify(n));
+pruefe(n.batterieC === 27 && n.batterieText === "27 °C", "Batterietemperatur");
+n = stand({ werte: { ...werte, nebenverbrauch_kw: undefined },
+            neben: { kw: 0.9, zeit: jetzt - 60000 } }).neben;
+pruefe(n.kw === 0.9 && n.quelle === "geschaetzt",
+       "ohne Messung gilt die Naeherung aus dem Stand - und heisst so", JSON.stringify(n));
+n = stand({ werte: { ptc_strom_a: { wert: 5, zeit: jetzt } } }).neben;
+pruefe(n === null,
+       "Heizstrom ohne Packspannung ergibt keine Heizleistung - und ohne alles nichts");
+n = stand({ werte: { nebenverbrauch_kw: { wert: 1.5, zeit: jetzt - 20 * 60000 } } }).neben;
+pruefe(n === null, "ein Wert, der zwanzig Minuten alt ist, wird nicht mehr gezeigt");
+n = stand({ werte: { nebenverbrauch_kw: { wert: NaN, zeit: jetzt }, batterie_c: { wert: "warm", zeit: jetzt } } }).neben;
+pruefe(n === null, "NaN und Text werden Luecken");
+pruefe(stand().neben === null && stand({ werte: null }).neben === null,
+       "ohne Werte: null");
 
 console.log("\nNatives Ziel: die Live Activity");
 function frischeSeite(huelle) {

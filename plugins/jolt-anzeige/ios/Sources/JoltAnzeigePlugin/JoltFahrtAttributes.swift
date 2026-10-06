@@ -33,7 +33,46 @@ public struct JoltAnzeige: Codable, Hashable {
         public var text: String
     }
 
+    /// Verbrauch im Schnitt über eine, fünf, dreissig und sechzig Minuten.
+    /// `text` ist "–", wenn die Spur das Fenster nicht abdeckt.
+    public struct Fenster: Codable, Hashable {
+        public var min: Int
+        public var kwh100: Double?
+        public var kw: Double?
+        public var text: String
+        public var kwText: String
+    }
+
+    /// Anteil der entnommenen Energie, der zurückgespeist wurde.
+    public struct Rekup: Codable, Hashable {
+        public var prozent: Int
+        public var minuten: Int
+    }
+
+    public struct Verlauf: Codable, Hashable {
+        public var fenster: [Fenster]
+        /// Die letzten dreissig Minuten in Balken zu fünf Minuten, ältester
+        /// zuerst; nil ist eine Lücke (Stand), nicht null Verbrauch.
+        public var balken: [Double?]?
+        public var rekup: Rekup?
+    }
+
+    /// Was das Auto zieht, ohne zu fahren, und was es sonst noch hergibt.
+    public struct Neben: Codable, Hashable {
+        public var kw: Double?
+        public var text: String?
+        public var quelle: String?
+        public var heizungKw: Double?
+        public var heizungText: String?
+        public var klimaKw: Double?
+        public var klimaText: String?
+        public var batterieC: Int?
+        public var batterieText: String?
+    }
+
     public var kurz: String
+    public var verlauf: Verlauf?
+    public var neben: Neben?
     public var soc: Soc?
     public var stopp: Stopp?
     public var reserve: Zeile?

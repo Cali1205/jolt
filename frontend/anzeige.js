@@ -21,7 +21,7 @@ window.joltAnzeige = (function () {
   // Apple erlaubt einer CarPlay-App der Kategorie "Driving task" höchstens alle
   // zehn Sekunden eine Aktualisierung der Anzeige. Für Live Activities gelten
   // eigene Grenzen; zehn Sekunden sind dafür ohnehin mehr als genug.
-  const MIN_ABSTAND_MS = 10000;
+  const MIN_ABSTAND_MS = 15000;
   // Auch wenn sich nichts ändert, kommt regelmässig eine Meldung: Das Modell
   // trägt `stand`, und eine Anzeige, die ihr Alter zeigt, darf nicht "alt"
   // aussehen, nur weil der Ladestand gerade ruhig bleibt.
@@ -50,13 +50,143 @@ window.joltAnzeige = (function () {
     return km < 10 ? `${zahl(km, 1)} km` : `${zahl(Math.round(km))} km`;
   }
 
+  /* ---------- Was das Auto nicht anzeigt ----------
+   *
+   * Der Bordcomputer zeigt Verbrauch seit Start und seit dem Tanken. Hier
+   * stehen Dinge, die er nicht zeigt: der Verbrauch der letzten Minute, der
+   * letzten fünf, dreissig, sechzig - und was die Nebenverbraucher ziehen.
+   *
+   * Alles kommt aus Grössen, die die Oberfläche ohnehin führt: die
+   * Verbrauchsspur (Zeit, Energiezähler, GPS-Strecke) und die letzten
+   * Messwerte. Energie aus den Zählern (0,117 Wh Auflösung), Strecke aus dem
+   * GPS - aus demselben Grund wie im Verlaufsdiagramm: der Kilometerstand
+   * löst nur in ganzen Kilometern auf und taugt nicht für eine Minute. */
+  const FENSTER_MIN = [1, 5, 30, 60];
+  // Ein Fenster zählt nur, wenn die Spur es auch abdeckt: Wer nach zwölf
+  // Minuten Fahrt einen "30-Minuten-Schnitt" zeigt, zeigt einen
+  // Zwölf-Minuten-Schnitt unter falschem Namen.
+  const FENSTER_ABDECKUNG = 0.7;
+  // Älter als das darf der letzte Punkt nicht sein, sonst ist die Spur
+  // stehengeblieben (Dongle weg) und das "Jetzt" ein altes.
+  const SPUR_FRISCH_MS = 45000;
+  const MIND_KM = 0.3;
+  // So alt darf ein gelesener Wert sein. Selten gelesene Werte (Klima) kommen
+  // nur alle paar Minuten.
+  const WERT_ALT_MS = 15 * 60000;
+
+  const MIN_MS = 60000;
+  const BALKEN_ZAHL = 6;      // sechs Balken zu je fünf Minuten = die letzten dreissig
+
+  function energieUndStrecke(punkte, vonMs) {
+    const p = punkte.filter((x) => x.zeit >= vonMs && ist(x.gps) && ist(x.netto));
+    if (p.length < 2) return null;
+    const erst = p[0], letzt = p[p.length - 1];
+    const dauer = letzt.zeit - erst.zeit;
+    if (dauer <= 0) return null;
+    return { erst, letzt, dauer, km: letzt.gps - erst.gps,
+             kwh: letzt.netto - erst.netto };
+  }
+
+  function verlaufModell(spur, jetzt) {
+    if (!Array.isArray(spur) || spur.length < 2) return null;
+    const letzter = spur[spur.length - 1];
+    if (!letzter || !ist(letzter.zeit) || jetzt - letzter.zeit > SPUR_FRISCH_MS) return null;
+
+    const fenster = FENSTER_MIN.map((min) => {
+      const e = energieUndStrecke(spur, jetzt - min * MIN_MS);
+      const leer = { min, kwh100: null, kw: null, text: "–", kwText: "–" };
+      if (!e || e.dauer < FENSTER_ABDECKUNG * min * MIN_MS) return leer;
+      const kw = e.kwh / (e.dauer / 3600000);
+      const kwh100 = e.km >= MIND_KM ? e.kwh / e.km * 100 : null;
+      return { min,
+               kwh100: kwh100 === null ? null : Math.round(kwh100 * 10) / 10,
+               kw: Math.round(kw * 10) / 10,
+               text: kwh100 === null ? "–" : zahl(kwh100, 1),
+               kwText: zahl(kw, 1) };
+    });
+
+    // Die letzten dreissig Minuten in Balken zu fünf Minuten, ältester
+    // zuerst. Ein Balken ohne Strecke (Stand, Ampel) ist eine Lücke, kein Null.
+    const balken = [];
+    for (let i = BALKEN_ZAHL - 1; i >= 0; i--) {
+      const bis = jetzt - i * 5 * MIN_MS;
+      const von = bis - 5 * MIN_MS;
+      const p = spur.filter((x) => x.zeit >= von && x.zeit <= bis && ist(x.gps) && ist(x.netto));
+      let wert = null;
+      if (p.length >= 2) {
+        const km = p[p.length - 1].gps - p[0].gps;
+        const dauer = p[p.length - 1].zeit - p[0].zeit;
+        if (km >= MIND_KM && dauer >= 2 * MIN_MS) {
+          wert = Math.round((p[p.length - 1].netto - p[0].netto) / km * 1000) / 10;
+        }
+      }
+      balken.push(wert);
+    }
+    const hatBalken = balken.some((b) => b !== null);
+
+    // Rekuperation: wie viel von der entnommenen Energie zurückkam, über die
+    // letzte Stunde (oder so lange, wie es die Spur hergibt, mindestens fünf
+    // Minuten).
+    let rekup = null;
+    const r = spur.filter((x) => x.zeit >= jetzt - 60 * MIN_MS && ist(x.entl) && ist(x.gel));
+    if (r.length >= 2) {
+      const dauer = r[r.length - 1].zeit - r[0].zeit;
+      const entl = r[r.length - 1].entl - r[0].entl;
+      const gel = r[r.length - 1].gel - r[0].gel;
+      if (dauer >= 5 * MIN_MS && entl > 0.2 && gel >= 0) {
+        rekup = { prozent: Math.min(100, Math.round(gel / entl * 100)),
+                  minuten: Math.round(dauer / MIN_MS) };
+      }
+    }
+
+    if (!fenster.some((f) => f.kw !== null) && !hatBalken && !rekup) return null;
+    return { fenster, balken: hatBalken ? balken : null, rekup };
+  }
+
+  function wertFrisch(werte, name, jetzt) {
+    const w = werte && werte[name];
+    return w && ist(w.wert) && jetzt - w.zeit <= WERT_ALT_MS ? w.wert : null;
+  }
+
+  /* Die Nebenverbraucher: was das Auto zieht, ohne zu fahren. Der gemessene
+   * Wert (`nebenverbrauch_kw`) schlägt die Näherung aus dem Stand. Heizung
+   * (PTC) und Klimakompressor kommen dazu, wenn sie gelesen wurden: Sie sind
+   * die beiden grossen Verbraucher, die man selbst beeinflusst. Die Leistung
+   * der Heizung ist Strom mal Packspannung - eine Näherung, kein Messwert. */
+  function nebenModell(werte, naeherung, jetzt) {
+    let kw = wertFrisch(werte, "nebenverbrauch_kw", jetzt);
+    let quelle = "gemessen";
+    if (kw === null && naeherung && ist(naeherung.kw) && jetzt - naeherung.zeit <= WERT_ALT_MS) {
+      kw = naeherung.kw;
+      quelle = "geschaetzt";
+    }
+    const ptcA = wertFrisch(werte, "ptc_strom_a", jetzt);
+    const spannung = wertFrisch(werte, "spannung_v", jetzt);
+    const heizung = (ptcA !== null && spannung !== null) ? ptcA * spannung / 1000 : null;
+    const kompressorW = wertFrisch(werte, "kompressor_w", jetzt);
+    const klima = kompressorW !== null ? kompressorW / 1000 : null;
+    const batterie = wertFrisch(werte, "batterie_c", jetzt);
+
+    if (kw === null && heizung === null && klima === null && batterie === null) return null;
+    const rund = (x) => (x === null ? null : Math.round(x * 10) / 10);
+    return {
+      kw: rund(kw), text: kw === null ? null : `${zahl(kw, 1)} kW`, quelle,
+      heizungKw: rund(heizung),
+      heizungText: heizung === null ? null : `${zahl(heizung, 1)} kW`,
+      klimaKw: rund(klima),
+      klimaText: klima === null ? null : `${zahl(klima, 1)} kW`,
+      batterieC: batterie === null ? null : Math.round(batterie),
+      batterieText: batterie === null ? null : `${zahl(Math.round(batterie))} °C`,
+    };
+  }
+
   /* Das Modell zu einem Zustand - oder null, wenn es nichts zu zeigen gibt.
    *
    * Fehlt etwas, fehlt es im Modell: kein Ladestopp bei einer Aufzeichnung,
    * keine Ankunft ohne Plan. Nichts wird ersetzt oder geschätzt - eine
    * Anzeige im Auto, die ein Feld erfindet, ist schlimmer als eine, die es
    * weglässt. */
-  function modell(z, jetzt) {
+  function modell(z, jetzt, extras) {
     // Ein Array ist in JavaScript auch ein Objekt - und kein Zustand.
     if (!z || typeof z !== "object" || Array.isArray(z)) return null;
     const stand = ist(jetzt) ? jetzt : Date.now();
@@ -115,6 +245,12 @@ window.joltAnzeige = (function () {
       teile.push(`Reserve in ${m.reserve.text}`);
     }
     m.kurz = teile.length ? teile.join(" · ") : "Keine Werte";
+
+    // Verlauf und Nebenverbraucher: nur, wenn die Oberfläche sie mitgibt.
+    // Fehlt etwas, fehlt das Feld.
+    const zusatz = extras || {};
+    m.verlauf = verlaufModell(zusatz.spur, stand);
+    m.neben = nebenModell(zusatz.werte, zusatz.neben, stand);
     return m;
   }
 
@@ -180,9 +316,9 @@ window.joltAnzeige = (function () {
     return {
       zielSetzen(f) { ziel = typeof f === "function" ? f : null; },
 
-      melden(z) {
+      melden(z, extras) {
         const jetzt = jetztFn();
-        const m = modell(z, jetzt);
+        const m = modell(z, jetzt, extras);
         if (m === null) return;
         beendet = false;
         const gleich = letzterInhalt !== null && inhalt(m) === letzterInhalt;
@@ -229,7 +365,7 @@ window.joltAnzeige = (function () {
 
   return {
     modell, sender,
-    melden: (z) => standard.melden(z),
+    melden: (z, extras) => standard.melden(z, extras),
     beenden: () => standard.beenden(),
     zielSetzen: (f) => standard.zielSetzen(f),
     MIN_ABSTAND_MS, HERZSCHLAG_MS,
