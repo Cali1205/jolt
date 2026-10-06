@@ -198,8 +198,15 @@ window.joltFahrzeug = (function () {
         auswahl.addEventListener("change", () => {
           try { localStorage.setItem("jolt-aufz-fahrzeug", auswahl.value); }
           catch (e) {}
+          if (window.joltFahrten && window.joltFahrten.fahrzeugMelden) {
+            window.joltFahrten.fahrzeugMelden();
+          }
         });
       }
+    }
+    // CarPlay zeigt am Start-Knopf, mit welchem Fahrzeug aufgezeichnet wird.
+    if (window.joltFahrten && window.joltFahrten.fahrzeugMelden) {
+      window.joltFahrten.fahrzeugMelden();
     }
 
     const neu = document.createElement("option");

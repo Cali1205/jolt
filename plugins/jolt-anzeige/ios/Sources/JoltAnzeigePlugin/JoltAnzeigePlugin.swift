@@ -22,8 +22,24 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "verfuegbar", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "aktualisieren", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "beenden", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "beenden", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "bereit", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "aktionErgebnis", returnType: CAPPluginReturnPromise)
     ]
+
+    /// Das Plugin ist geladen, also läuft die Oberfläche: CarPlay darf ihr
+    /// Aufträge geben (Aufzeichnung starten und beenden). Die Anfragen aus der
+    /// Liste kommen als Benachrichtigung und gehen als Ereignis "carplayAktion"
+    /// an das JavaScript (fahrten.js).
+    public override func load() {
+        JoltAnzeigeStore.shared.brueckeMelden(true)
+        NotificationCenter.default.addObserver(
+            forName: JoltAnzeigeStore.aktionName, object: nil, queue: .main
+        ) { [weak self] meldung in
+            guard let aktion = meldung.userInfo?["aktion"] as? String else { return }
+            self?.notifyListeners("carplayAktion", data: ["aktion": aktion])
+        }
+    }
 
     /// Wie lange eine Anzeige ohne neue Meldung als frisch gilt. Die
     /// Oberfläche meldet mindestens jede Minute; danach zeigt die Activity
@@ -79,6 +95,21 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
         #else
         call.reject("ActivityKit fehlt")
         #endif
+    }
+
+    /// Die Oberfläche meldet, mit welchem Fahrzeug eine Aufzeichnung starten würde.
+    @objc func bereit(_ call: CAPPluginCall) {
+        JoltAnzeigeStore.shared.fahrzeugSetzen(call.getString("fahrzeug"))
+        call.resolve()
+    }
+
+    /// Das Ergebnis einer Aktion aus CarPlay: ok, und bei einem Fehler der Grund.
+    @objc func aktionErgebnis(_ call: CAPPluginCall) {
+        JoltAnzeigeStore.shared.ergebnisMelden(
+            aktion: call.getString("aktion") ?? "",
+            ok: call.getBool("ok") ?? false,
+            text: call.getString("text") ?? "")
+        call.resolve()
     }
 
     @objc func beenden(_ call: CAPPluginCall) {
