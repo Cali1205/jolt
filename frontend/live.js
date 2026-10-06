@@ -1117,6 +1117,7 @@ window.joltLive = (function () {
   // Kein Dongle in Reichweite (Fahrrad, Bus): Nach so vielen Fehlversuchen ist
   // Schluss, bis wieder angehalten wurde.
   const WIEDER_VERSUCHE_MAX = 8;
+  const WIEDER_VERSUCHE_FAHREND = 40;
 
   let autoModus = true;
   try { autoModus = localStorage.getItem("jolt-dongle-auto") !== "0"; }
@@ -1297,7 +1298,15 @@ window.joltLive = (function () {
     let versuche = 0;
     window.joltObd.wiederverbinden(1, () => {
       if (!K.zustand.sitzungId || !lesenErlaubt()) return false;
-      if (autoModus && ++versuche > WIEDER_VERSUCHE_MAX) {
+      // Wer gerade fährt (GPS: mindestens 15 km/h), hat das Auto nicht
+      // verlassen: Nach zwei Minuten aufzugeben hiesse, bis zum nächsten Halt
+      // ohne Fahrzeugwerte zu fahren und von Hand neu zu verbinden. Dann wird
+      // gut zwölf Minuten lang weiter angeklopft (alle 20 s, kostet wenig).
+      // Im Stand - und im Bus ohne Dongle - bleibt es bei den acht Versuchen.
+      const fahrend = letzteGeschwindigkeit !== null
+                      && letzteGeschwindigkeit >= SCHNELL_KMH;
+      const grenze = fahrend ? WIEDER_VERSUCHE_FAHREND : WIEDER_VERSUCHE_MAX;
+      if (autoModus && ++versuche > grenze) {
         fahrZustand = "geparkt";
         standGesehen = false;
         K.melden("Kein Dongle in Reichweite – jolt versucht es erst nach dem "

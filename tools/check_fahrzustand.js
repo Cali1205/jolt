@@ -201,9 +201,10 @@ async function runde(kmh, nordM = 0) {
   const aufbauten = obd.aufbauten;
   const wl = obd.schleifen[obd.schleifen.length - 1];
   let antworten = [];
-  for (let i = 0; i < 10; i++) antworten.push(wl());
-  pruefe(antworten.slice(0, 8).every((x) => x === true) && antworten[8] === false,
-         "nach acht Fehlversuchen gibt jolt auf",
+  for (let i = 0; i < 42; i++) antworten.push(wl());
+  pruefe(antworten.slice(0, 40).every((x) => x === true) && antworten[40] === false,
+         "bei Fahrt gibt jolt erst nach vierzig Fehlversuchen auf - eine Fahrt "
+         + "ohne Dongle von Hand neu verbinden zu müssen war der Fehler",
          JSON.stringify(antworten));
   pruefe(live.fahrzustand() === "geparkt",
          "und parkt, statt den Rest der Fahrt weiter anzuklopfen");
