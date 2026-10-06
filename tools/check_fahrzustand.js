@@ -201,9 +201,10 @@ async function runde(kmh, nordM = 0) {
   const aufbauten = obd.aufbauten;
   const wl = obd.schleifen[obd.schleifen.length - 1];
   let antworten = [];
-  for (let i = 0; i < 10; i++) antworten.push(wl());
-  pruefe(antworten.slice(0, 8).every((x) => x === true) && antworten[8] === false,
-         "nach acht Fehlversuchen gibt jolt auf",
+  for (let i = 0; i < 42; i++) antworten.push(wl());
+  pruefe(antworten.slice(0, 40).every((x) => x === true) && antworten[40] === false,
+         "bei Fahrt gibt jolt erst nach vierzig Fehlversuchen auf - eine Fahrt "
+         + "ohne Dongle von Hand neu verbinden zu müssen war der Fehler",
          JSON.stringify(antworten));
   pruefe(live.fahrzustand() === "geparkt",
          "und parkt, statt den Rest der Fahrt weiter anzuklopfen");
@@ -226,6 +227,23 @@ async function runde(kmh, nordM = 0) {
   pruefe(live.fahrzustand() === "geparkt" && !obd.verbundenFlag,
          "und nach drei weiteren Minuten Stillstand ist der Dongle getrennt",
          live.fahrzustand());
+
+  console.log("\nHandshake unvollständig");
+  const handshakeAlt = obd.handshake;
+  let versuche = 0;
+  obd.verbundenFlag = true;
+  obd.handshake = async () => { versuche++; return versuche >= 2; };
+  pruefe(await live.handshakeSicher() === true && versuche === 2,
+         "ein unvollständiger Handshake wird einmal wiederholt");
+  versuche = 0;
+  obd.handshake = async () => { versuche++; return false; };
+  pruefe(await live.handshakeSicher() === true && versuche === 2,
+         "bleibt er unvollständig, der Dongle aber verbunden, gilt er als benutzbar");
+  obd.verbundenFlag = false;
+  pruefe(await live.handshakeSicher() === false,
+         "ohne Verbindung gilt er nicht");
+  obd.handshake = handshakeAlt;
+  obd.verbundenFlag = true;
 
   console.log("\nOhne Automatik");
   live.autoSetzen(false);

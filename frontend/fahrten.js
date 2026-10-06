@@ -193,6 +193,7 @@ window.joltFahrten = (function () {
     knopf.disabled = true;
     try {
       let mitDongle = false;
+      let dongleSpaeter = false;   // nicht verbunden, aber Bluetooth da
       if (window.joltObd && window.joltObd.verfuegbar()) {
         stand("Verbinde mit dem OBD2-Dongle …");
         try {
@@ -200,15 +201,14 @@ window.joltFahrten = (function () {
           // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt
           // worden, verbindet er ohne Berührung.
           await window.joltObd.anschliessen();
-          if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
-            mitDongle = true;
-          }
+          if (await window.joltLive.handshakeSicher()) mitDongle = true;
         } catch (fehler) {
           // Kein Grund abzubrechen - nur einer, ohne Dongle weiterzumachen.
           console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
         }
         if (!mitDongle) {
           stand("Ohne Dongle – der Ladestand kommt von Hand.");
+          dongleSpaeter = true;
         }
       }
 
@@ -258,6 +258,7 @@ window.joltFahrten = (function () {
            * die Verbindung selbst weg ist, gilt der Dongle als nicht da. */
           if (!window.joltObd.verbunden()) {
             mitDongle = false;
+            dongleSpaeter = true;
           } else {
             console.log("[obd] Startladestand ohne Antwort:", fehler);
           }
@@ -294,6 +295,13 @@ window.joltFahrten = (function () {
           : "Aufzeichnung läuft. Das Auto antwortet noch nicht – jolt liest "
             + "den Ladestand, sobald du fährst.", "hinweis");
       } else {
+        if (dongleSpaeter) {
+          // Der Dongle kann noch kommen: Das Auto wird oft erst jetzt
+          // eingeschaltet. jolt klopft von selbst an, statt auf den Knopf
+          // zu warten - und gibt nach einigen Versuchen auf.
+          window.joltLive.dongleNutzen();
+          window.joltLive.dongleWiederverbinden();
+        }
         K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
           + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
       }

@@ -69,6 +69,8 @@ async function lauf(szenario) {
       positionVerfolgen: () => { aufrufe.positionVerfolgen++; aufrufe.reihenfolge.push("position"); },
       fahrzustandStart: (z) => { aufrufe.zustand = z; aufrufe.reihenfolge.push("zustand"); },
       dongleNutzen: () => { aufrufe.dongleNutzen++; },
+      dongleWiederverbinden: () => { aufrufe.wiederverbinden = (aufrufe.wiederverbinden || 0) + 1; },
+      handshakeSicher: async () => obd.verbunden() && (await obd.handshake()),
     },
   };
   const kontext = {
@@ -118,16 +120,19 @@ async function lauf(szenario) {
 
   console.log("\nDie Verbindung ist weg");
   r = await lauf({ verbindungWeg: true });
-  pruefe(r.aufrufe.dongleNutzen === 0,
-         "ist der Dongle wirklich nicht mehr da, gilt er als nicht vorhanden",
+  pruefe(r.aufrufe.dongleNutzen === 1 && r.aufrufe.wiederverbinden === 1,
+         "ist die Verbindung weg, gilt der Dongle als nicht da - jolt versucht es von selbst weiter",
          String(r.aufrufe.dongleNutzen));
   pruefe(/Ladestand unterwegs/.test(r.meldungen.join(" ")),
          "und der Ladestand kommt von Hand", r.meldungen.join(" | "));
 
   console.log("\nKein Dongle");
   r = await lauf({ verbundenNachAnschliessen: false });
-  pruefe(r.aufrufe.dongleNutzen === 0 && r.gesendet.length === 1,
+  pruefe(r.gesendet.length === 1,
          "ohne Verbindung läuft die Aufzeichnung ohne Dongle weiter");
+  pruefe(r.aufrufe.dongleNutzen === 1 && r.aufrufe.wiederverbinden === 1,
+         "und jolt klopft von selbst wieder an, statt auf den Knopf zu warten",
+         JSON.stringify(r.aufrufe));
   pruefe(r.aufrufe.zustand === "faehrt",
          "der Zustand gilt auch dann - er sagt nur, ob gelesen werden darf, "
          + "falls später doch ein Dongle verbunden wird");
