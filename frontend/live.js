@@ -223,7 +223,7 @@ window.joltLive = (function () {
     try {
       if (window.joltAnzeige) {
         window.joltAnzeige.melden(z, { spur: verbrauchsspur, werte: werteStand,
-                                       neben: nebenverbrauch });
+                                       neben: nebenverbrauch, plan: z.plan || plan });
       }
     }
     catch (e) { console.log("[anzeige]", e && e.message); }

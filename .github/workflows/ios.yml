@@ -27,6 +27,8 @@ on:
       - "tools/ios_symbol.sh"
       - "tools/ios_widget.sh"
       - "tools/ios_widget.rb"
+      - "tools/ios_carplay.sh"
+      - "tools/ios_carplay.rb"
       - "plugins/**"
       - "ios-native/**"
       - "tools/ios-app-icon.png"
@@ -41,6 +43,8 @@ on:
       - "tools/ios_symbol.sh"
       - "tools/ios_widget.sh"
       - "tools/ios_widget.rb"
+      - "tools/ios_carplay.sh"
+      - "tools/ios_carplay.rb"
       - "plugins/**"
       - "ios-native/**"
       - "tools/ios-app-icon.png"
@@ -110,6 +114,13 @@ jobs:
       # kennt es nicht; dieses Skript haengt es ein.
       - name: Live Activity einbauen
         run: bash tools/ios_widget.sh ios/App
+
+      # Die CarPlay-Szene: zweite Szene in der Info.plist, AppDelegate, und der
+      # Entitlement - hier immer **mit**, damit der Simulatorbau den ganzen Weg
+      # prueft. Im signierten Bau (ios-testflight.yml) ist der Entitlement ein
+      # Schalter, bis er im Developer-Portal fuer die App-ID eingeschaltet ist.
+      - name: CarPlay-Szene einbauen
+        run: bash tools/ios_carplay.sh ios/App true
 
       # Auf GitHubs macOS-Abbild ist xcbeautify normalerweise vorhanden. Das
       # "normalerweise" ist der Grund fuer diese Zeile: Faellt es einmal aus

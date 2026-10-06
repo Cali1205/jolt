@@ -342,6 +342,40 @@ pruefe(n === null, "NaN und Text werden Luecken");
 pruefe(stand().neben === null && stand({ werte: null }).neben === null,
        "ohne Werte: null");
 
+console.log("\nLadestopps fuer CarPlay");
+const plan3 = { stopps: [
+  { name: "Ionity Bad Rappenau", km_auf_route: 141.2, ankunft_soc: 18.6, abfahrt_soc: 80,
+    ladezeit_minuten: 24.6, betreiber: "Ionity", max_kw: 350 },
+  { name: "Fastned", km_auf_route: 260, ankunft_soc: 15, abfahrt_soc: 70, ladezeit_minuten: 21 },
+  { name: "Schon vorbei", km_auf_route: 40, ankunft_soc: 30, abfahrt_soc: 80, ladezeit_minuten: 20 },
+  { name: "Ohne Daten", km_auf_route: 300 },
+] };
+let sl = A.modell(geplant, JETZT, { plan: plan3 }).stoppListe;
+pruefe(sl && sl.length === 3 && sl[0].name === "Ionity Bad Rappenau",
+       "die Stopps vor einem, in Fahrtrichtung; was schon hinter einem liegt, fehlt",
+       JSON.stringify(sl && sl.map((x) => x.name)));
+pruefe(sl[0].km === 41.2 && sl[0].kmText === "41 km",
+       "Entfernung vom jetzigen Standort (Kilometer 100), nicht vom Start", JSON.stringify(sl[0]));
+pruefe(sl[0].ankunftSocText === "19 %" && sl[0].abfahrtSocText === "80 %"
+       && sl[0].ladezeitText === "25 min" && sl[0].betreiber === "Ionity" && sl[0].leistungKw === 350,
+       "Ladestand bei Ankunft und Abfahrt, Ladezeit, Betreiber, Leistung", JSON.stringify(sl[0]));
+pruefe(sl[2].name === "Ohne Daten" && sl[2].ankunftSocText === null && sl[2].ladezeitText === null
+       && sl[2].betreiber === null && sl[2].leistungKw === null,
+       "ein Stopp ohne Angaben bekommt Luecken statt erfundener Werte", JSON.stringify(sl[2]));
+const viele = { stopps: Array.from({ length: 20 }, (_, i) => ({ name: "S" + i, km_auf_route: 110 + i * 10 })) };
+pruefe(A.modell(geplant, JETZT, { plan: viele }).stoppListe.length === 8,
+       "hoechstens acht - mehr passt in keine Vorlage");
+pruefe(A.modell(geplant, JETZT).stoppListe === null
+       && A.modell(geplant, JETZT, { plan: { stopps: [] } }).stoppListe === null
+       && A.modell(geplant, JETZT, { plan: null }).stoppListe === null,
+       "ohne Plan oder ohne Stopps: null");
+pruefe(A.modell({ ist_soc: 70 }, JETZT, { plan: plan3 }).stoppListe === null,
+       "eine Aufzeichnung ohne Plan zeigt keine Stopps, auch wenn ein alter Plan mitkommt");
+pruefe(A.modell({ ...geplant, km_auf_route: null }, JETZT, { plan: plan3 }).stoppListe === null,
+       "ohne Position auf der Route keine Entfernung - und deshalb keine Liste");
+const grosse = JSON.stringify(A.modell(geplant, JETZT, { plan: plan3 })).length;
+pruefe(grosse < 3000, "das ganze Modell bleibt klein (unter 3 KB)", String(grosse));
+
 console.log("\nNatives Ziel: die Live Activity");
 function frischeSeite(huelle) {
   const w = huelle ? { joltBlePlugin: huelle } : {};

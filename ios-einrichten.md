@@ -205,6 +205,33 @@ in 2 hinzufügen. Bis 100 interne Tester, ohne Prüfung.
 
 ---
 
+## CarPlay EV Charging einschalten
+
+Apple hat den Entitlement dem Konto zugeteilt. Damit die App ihn benutzen darf,
+muss er **zusätzlich** für die App-ID eingeschaltet sein – sonst bricht der
+signierte Bau beim Export ab (Profil passt nicht zu den Berechtigungen der App).
+Bis dahin baut alles wie bisher; die CarPlay-Szene ist im Bau schon enthalten,
+CarPlay bietet sie nur nicht an.
+
+1. [Identifiers](https://developer.apple.com/account/resources/identifiers/list)
+   → die App-ID `de.thesmarthome.jolt` öffnen.
+2. Bei den Capabilities **CarPlay EV Charging** ankreuzen (steht dort nur, wenn
+   Apple den Antrag angenommen hat), speichern.
+3. Im Repository unter *Settings → Secrets and variables → Actions → Variables*
+   die Variable `CARPLAY_ENTITLEMENT` mit dem Wert `true` anlegen. Dann bauen
+   alle Läufe von `ios-testflight.yml` den Entitlement mit ein. Für einen
+   einzelnen Lauf geht auch das Häkchen **carplay** beim Starten von Hand.
+4. Den Workflow starten. Mit der automatischen Signatur legt Apple das Profil
+   mit der neuen Berechtigung beim Export selbst an; bei der manuellen Signatur
+   muss das Profil (Schritt 4) nach dem Einschalten neu erzeugt werden.
+
+Zum Testen: iPhone per kabellosem CarPlay verbinden, jolt erscheint auf dem
+CarPlay-Startbildschirm. Eine Aufzeichnung, die auf dem iPhone läuft, füllt die
+Liste („Jetzt“, bei geplanter Fahrt auch „Ladestopps“); ohne laufende Fahrt
+steht dort „Keine laufende Fahrt“.
+
+---
+
 ## Wenn etwas schiefgeht
 
 | Meldung | Ursache |
@@ -218,6 +245,7 @@ in 2 hinzufügen. Bis 100 interne Tester, ohne Prüfung.
 | `Das Profil enthält eine Geräteliste` | Development-/Ad-hoc-Profil statt App Store (Schritt 4). |
 | `No signing certificate "Apple Distribution" found` | Das Zertifikat im Profil ist nicht das aus der `.p12`. Beide aus demselben Durchgang. |
 | `Erwartet: zwei Stellen mit 'CODE_SIGN_STYLE = Automatic;'` | Capacitor hat seine Vorlage geändert; `tools/ios_signatur.sh` anpassen. |
+| `Provisioning profile … doesn't include the com.apple.developer.carplay-charging entitlement` | Der Entitlement ist in der App, aber nicht im Profil: „CarPlay EV Charging“ für die App-ID einschalten (siehe oben) oder das Häkchen / die Variable `CARPLAY_ENTITLEMENT` ausschalten. |
 | `Invalid App ID` bei `cap add ios` | Bindestrich oder Ziffer am Segmentanfang in `appId`. |
 | Upload `Unable to authenticate` | Key-ID/Issuer-ID vertauscht oder Rolle des Schlüssels zu schwach (Schritt 6). |
 | Upload `bundle version must be higher` | Build-Nummer = Lauf-Nummer × 10 + Versuch; sie sinkt nur, wenn der Workflow gelöscht und neu angelegt wurde. Dann die Nummer in `ios-testflight.yml` um einen festen Betrag anheben. |

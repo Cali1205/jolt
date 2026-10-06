@@ -180,6 +180,38 @@ window.joltAnzeige = (function () {
     };
   }
 
+  /* Die Ladestopps der Fahrt, die noch vor einem liegen - für die CarPlay-Liste.
+   *
+   * Entfernung vom jetzigen Standort aus, nicht vom Start: Wer am Steuer sitzt,
+   * fragt "wie weit noch", nicht "bei welchem Kilometer". Ohne Position auf der
+   * Route gibt es keine Entfernung, und eine erfundene waere schlimmer als
+   * keine Liste. Hoechstens acht: Mehr passt in keine Vorlage. */
+  const STOPPS_MAX = 8;
+
+  function stoppListeModell(plan, km) {
+    if (km === null || !plan || !Array.isArray(plan.stopps)) return null;
+    const aus = [];
+    for (const s of plan.stopps) {
+      if (!s || !ist(s.km_auf_route)) continue;
+      if (s.km_auf_route < km - 0.5) continue;          // schon vorbei
+      const bis = Math.max(0, s.km_auf_route - km);
+      const an = ist(s.ankunft_soc) ? Math.round(s.ankunft_soc) : null;
+      const ab = ist(s.abfahrt_soc) ? Math.round(s.abfahrt_soc) : null;
+      const min = ist(s.ladezeit_minuten) ? Math.round(s.ladezeit_minuten) : null;
+      aus.push({
+        name: typeof s.name === "string" && s.name ? s.name : "Ladestopp",
+        km: Math.round(bis * 10) / 10, kmText: kmText(bis),
+        ankunftSoc: an, ankunftSocText: an === null ? null : `${zahl(an)} %`,
+        abfahrtSocText: ab === null ? null : `${zahl(ab)} %`,
+        ladezeitMin: min, ladezeitText: min === null ? null : `${zahl(min)} min`,
+        betreiber: typeof s.betreiber === "string" && s.betreiber ? s.betreiber : null,
+        leistungKw: ist(s.max_kw) ? Math.round(s.max_kw) : null,
+      });
+      if (aus.length >= STOPPS_MAX) break;
+    }
+    return aus.length ? aus : null;
+  }
+
   /* Das Modell zu einem Zustand - oder null, wenn es nichts zu zeigen gibt.
    *
    * Fehlt etwas, fehlt es im Modell: kein Ladestopp bei einer Aufzeichnung,
@@ -251,6 +283,7 @@ window.joltAnzeige = (function () {
     const zusatz = extras || {};
     m.verlauf = verlaufModell(zusatz.spur, stand);
     m.neben = nebenModell(zusatz.werte, zusatz.neben, stand);
+    m.stoppListe = hatPlan ? stoppListeModell(zusatz.plan, km) : null;
     return m;
   }
 

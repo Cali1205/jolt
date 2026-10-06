@@ -73,7 +73,7 @@ def teil_symbol() -> None:
 def teil_skripte() -> None:
     pruefe.abschnitt("Skripte")
     for name in ("ios_info_plist.sh", "ios_symbol.sh", "ios_signatur.sh",
-                 "ios_widget.sh"):
+                 "ios_widget.sh", "ios_carplay.sh"):
         ergebnis = subprocess.run(
             ["bash", "-n", os.path.join(WURZEL, "tools", name)],
             capture_output=True, text=True)
@@ -275,7 +275,9 @@ def teil_live_activity() -> None:
               "naechster_stopp:{name:'X',km_auf_route:141,geplant_soc:19,erwartet_soc:17.6}}")
     # Eine Fahrt von siebzig Minuten, damit Verlauf, Balken und Rekuperation
     # alle Felder tragen, und Messwerte für die Nebenverbraucher.
-    extras = ("{spur:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
+    extras = ("{plan:{stopps:[{name:'Ionity',km_auf_route:141,ankunft_soc:19,"
+              "abfahrt_soc:80,ladezeit_minuten:25,betreiber:'Ionity',max_kw:350}]},"
+              "spur:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
               "for(let t=-4200000;t<=0;t+=12000){s.push({zeit:1e12+t,gps:km,netto:n,entl:e,gel:g});"
               "km+=0.233;n+=0.035;e+=0.042;g+=0.007}return s})(),"
               "werte:{nebenverbrauch_kw:{wert:1.8,zeit:1e12},ptc_strom_a:{wert:5,zeit:1e12},"
@@ -298,7 +300,8 @@ def teil_live_activity() -> None:
     zuordnung = {"JoltAnzeige": modell, "Soc": modell["soc"], "Stopp": modell["stopp"],
                  "Zeile": modell["reserve"], "Verlauf": modell["verlauf"],
                  "Fenster": modell["verlauf"]["fenster"][0],
-                 "Rekup": modell["verlauf"]["rekup"], "Neben": modell["neben"]}
+                 "Rekup": modell["verlauf"]["rekup"], "Neben": modell["neben"],
+                 "Listenstopp": (modell["stoppListe"] or [{}])[0]}
     for struktur, vorhanden in zuordnung.items():
         # Die Vorlage ist voll besetzt, also muss jedes Feld, das Swift
         # kennt, im Modell stehen - ein Tippfehler im Namen (kwh100 gegen
@@ -313,6 +316,74 @@ def teil_live_activity() -> None:
         pruefe("text" in modell[name], f"{name} trägt den Text, den Swift liest")
 
 
+def teil_carplay() -> None:
+    """Die CarPlay-Szene: Namen, Vorlagen, Schalter.
+
+    Ob CarPlay sie anzeigt, entscheidet erst ein Auto (oder der CarPlay
+    Simulator auf dem Mac). Hier steht, was vorher falsch sein koennte: ein
+    Klassenname in der Info.plist, der in Swift anders heisst - iOS fände
+    dann keine Szene und meldete nichts -, eine Vorlage, die die Kategorie
+    nicht erlaubt (Apple lehnt die App dann bei der Pruefung ab), und ein
+    Entitlement, der den signierten Bau bricht, solange er im Portal fehlt.
+    """
+    pruefe.abschnitt("CarPlay-Szene")
+    delegate = lesen("plugins", "jolt-anzeige", "ios", "Sources",
+                     "JoltAnzeigePlugin", "JoltCarPlaySceneDelegate.swift")
+    sh = lesen("tools", "ios_carplay.sh")
+    rb = lesen("tools", "ios_carplay.rb")
+    name = re.search(r"@objc\((\w+)\)", delegate)
+    pruefe(name and name.group(1) in sh,
+           "die Info.plist nennt die Klasse, die Swift unter diesem Namen anmeldet",
+           name.group(1) if name else "kein @objc(...)")
+    pruefe("CPTemplateApplicationSceneDelegate" in delegate
+           and "didConnect interfaceController" in delegate
+           and "setRootTemplate" in delegate,
+           "die Klasse ist ein CarPlay-Szenen-Delegate und setzt eine Wurzelvorlage")
+    pruefe("CPTemplateApplicationSceneSessionRoleApplication" in sh
+           and "CPTemplateApplicationSceneSessionRoleApplication" in rb,
+           "Info.plist und AppDelegate sprechen von derselben Szenenrolle")
+    pruefe("UIApplicationSupportsMultipleScenes true" in sh,
+           "mehrere Szenen sind an - ohne das bekommt CarPlay keine eigene")
+    erlaubt = ("CPListTemplate", "CPInformationTemplate", "CPGridTemplate",
+               "CPTabBarTemplate", "CPPointOfInterestTemplate", "CPAlertTemplate",
+               "CPActionSheetTemplate")
+    benutzt = set(re.findall(r"\bCP\w*Template\b", delegate))
+    unerlaubt = sorted(t for t in benutzt
+                       if t not in erlaubt and t != "CPTemplateApplicationScene"
+                       and t != "CPTemplate")
+    pruefe(not unerlaubt,
+           "nur Vorlagen, die die Kategorie EV charging erlaubt (keine Karte, "
+           "keine Suche, keine Navigation)", str(unerlaubt))
+    pruefe("CPMapTemplate" not in delegate and "CPNavigationSession" not in delegate,
+           "ausdruecklich keine Kartenvorlage und keine Navigationssitzung")
+    plugin = lesen("plugins", "jolt-anzeige", "ios", "Sources",
+                   "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
+    pruefe("JoltAnzeigeStore.shared.setzen(zustand)" in plugin
+           and "JoltAnzeigeStore.shared.setzen(nil)" in plugin
+           and "JoltAnzeigeStore.shared.beobachten" in delegate,
+           "das Plugin fuettert den Speicher, die Szene liest und beobachtet ihn")
+    pruefe("stoppListe = nil" in plugin,
+           "die Live Activity bekommt die Stoppliste nicht (4-KB-Grenze)")
+    pruefe("com.apple.developer.carplay-charging" in rb,
+           "der Entitlement der Kategorie EV charging")
+    pruefe("CODE_SIGN_ENTITLEMENTS" in rb and 'entitlement = (ARGV[1] || "false") == "true"' in rb,
+           "und er wird nur auf Verlangen eingetragen")
+
+    ios = lesen(".github", "workflows", "ios.yml")
+    fliegen = lesen(".github", "workflows", "ios-testflight.yml")
+    pruefe("tools/ios_carplay.sh ios/App true" in ios,
+           "der Simulatorbau prueft den ganzen Weg, mit Entitlement")
+    pruefe("tools/ios_carplay.sh" in fliegen and "inputs.carplay" in fliegen
+           and "CARPLAY_ENTITLEMENT" in fliegen,
+           "der signierte Bau schaltet ihn ueber ein Häkchen oder eine "
+           "Repository-Variable - bis er im Portal eingeschaltet ist, bleibt er aus")
+    pruefe(re.search(r"carplay:\s*\n\s+description:.*?default: false", fliegen, re.S) is not None,
+           "und das Häkchen steht auf aus")
+    doku = lesen("ios-einrichten.md")
+    pruefe("CarPlay EV Charging" in doku and "CARPLAY_ENTITLEMENT" in doku,
+           "die Anleitung erklaert, wie er im Portal eingeschaltet wird")
+
+
 def main() -> int:
     teil_app_id()
     teil_symbol()
@@ -320,6 +391,7 @@ def main() -> int:
     teil_signatur()
     teil_workflows()
     teil_live_activity()
+    teil_carplay()
     return pruefe.bilanz(
         "Nicht geprüft (nur mit Apple-Konto und Mac-Läufer prüfbar): ob das "
         "Zertifikat zum Profil passt, ob xcodebuild das Projekt signiert und "
