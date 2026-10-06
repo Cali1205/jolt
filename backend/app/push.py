@@ -28,7 +28,10 @@ import base64
 import json
 import logging
 import os
+import ipaddress
+import socket
 import threading
+from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -140,10 +143,37 @@ def _als_abo(abo: models.PushAbo) -> dict:
 # Versand
 # ---------------------------------------------------------------------------
 
+def endpoint_erlaubt(endpoint: str) -> bool:
+    """Ob der Server diese Adresse als Push-Dienst anrufen darf.
+
+    Der Endpunkt kommt vom Browser, also von jedem, der Zugang hat - und der
+    Server ruft ihn später selbst an (SSRF). Deshalb: nur https, und der Name
+    muss auf öffentliche Adressen zeigen. Loopback, private Netze, link-local
+    (Cloud-Metadaten 169.254.169.254) und die Docker-Namen wie `db` fallen
+    damit heraus. Nicht auflösbar heisst abgelehnt.
+    """
+    try:
+        teile = urlsplit(endpoint)
+        host = teile.hostname
+        if teile.scheme != "https" or not host or teile.username or teile.password:
+            return False
+        adressen = {a[4][0] for a in socket.getaddrinfo(host, teile.port or 443,
+                                                        proto=socket.IPPROTO_TCP)}
+    except (ValueError, OSError):
+        return False
+    if not adressen:
+        return False
+    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in adressen)
+
+
 def _echt_senden(abo: models.PushAbo, nachricht: bytes) -> int:
     """Der wirkliche Versand an den Push-Dienst. Gibt den HTTP-Status zurück."""
     from pywebpush import WebPushException, webpush
 
+    # Auch beim Senden prüfen: Ein altes Abo oder ein Name, der inzwischen
+    # woanders hinzeigt, darf den Server nicht ins eigene Netz schicken.
+    if not endpoint_erlaubt(abo.endpoint):
+        return 0
     try:
         antwort = webpush(
             subscription_info=_als_abo(abo), data=nachricht,

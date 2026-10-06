@@ -131,8 +131,17 @@ def teil_live() -> None:
         except Exception as fehler:      # noqa: BLE001
             return type(fehler).__name__
 
-    pruefe(ws_ergebnis('{"token": "' + token + '"}') == {"typ": "bereit"},
-           "der WebSocket nimmt den Token als erste Nachricht an und meldet 'bereit'")
+    from app.routers import live as live_router
+    echt = live_router._sitzung_existiert
+    live_router._sitzung_existiert = lambda _id: True     # Sitzung 1 gibt es hier nicht
+    try:
+        pruefe(ws_ergebnis('{"token": "' + token + '"}') == {"typ": "bereit"},
+               "der WebSocket nimmt den Token als erste Nachricht an und meldet 'bereit'")
+    finally:
+        live_router._sitzung_existiert = echt
+    pruefe(ws_ergebnis('{"token": "' + token + '"}') == "WebSocketDisconnect",
+           "eine Sitzung, die es nicht gibt, wird nicht in den Verteiler aufgenommen "
+           "(Bug-Scan #55, Punkt 7)")
     pruefe(ws_ergebnis('{"token": "falsch"}') == "WebSocketDisconnect",
            "mit falschem Token wird er geschlossen")
     pruefe(ws_ergebnis("kein json") == "WebSocketDisconnect",
@@ -289,6 +298,62 @@ def teil_eventloop() -> None:
                f"{name} reicht seine Datenbankarbeit an den Threadpool")
 
 
+def teil_55() -> None:
+    """Bug-Scan #55: SSRF über den Push-Endpunkt, Kanal-Obergrenze, Simulation."""
+    import asyncio
+    import socket
+    from app import push
+    from app.live import kanal
+
+    pruefe.abschnitt("Push-Endpunkt (SSRF)")
+    antworten = {"push.example.org": "93.184.216.34", "intern.example": "10.0.0.5",
+                 "lokal.example": "127.0.0.1", "meta.example": "169.254.169.254",
+                 "db": "172.18.0.2"}
+    echt = socket.getaddrinfo
+
+    def falsch(host, port, *a, **k):
+        if host in antworten:
+            return [(2, 1, 6, "", (antworten[host], port))]
+        if host.replace(".", "").isdigit():
+            return [(2, 1, 6, "", (host, port))]
+        raise socket.gaierror("unbekannt")
+    socket.getaddrinfo = falsch
+    try:
+        for url, erwartet, text in (
+                ("https://push.example.org/abo", True, "ein öffentlicher https-Dienst"),
+                ("http://push.example.org/abo", False, "http statt https"),
+                ("https://intern.example/abo", False, "ein Name, der auf 10.x zeigt"),
+                ("https://lokal.example/abo", False, "ein Name, der auf Loopback zeigt"),
+                ("https://169.254.169.254/latest", False, "die Cloud-Metadaten-Adresse"),
+                ("https://db:5432/", False, "der Docker-Name der Datenbank"),
+                ("https://nirgendwo.example/", False, "ein nicht auflösbarer Name"),
+                ("https://u:p@push.example.org/", False, "Zugangsdaten in der Adresse"),
+                ("ftp://push.example.org/", False, "ein anderes Schema")):
+            pruefe(push.endpoint_erlaubt(url) is erwartet, text)
+    finally:
+        socket.getaddrinfo = echt
+
+    pruefe.abschnitt("Kanal-Obergrenze")
+
+    async def fuellen():
+        kanal._verbindungen.clear()
+        ergebnisse = [await kanal.anmelden(99, object())
+                      for _ in range(kanal.MAX_JE_SITZUNG + 1)]
+        kanal._verbindungen.clear()
+        return ergebnisse
+    ergebnisse = asyncio.run(fuellen())
+    pruefe(all(ergebnisse[:-1]) and ergebnisse[-1] is False,
+           "mehr als %d Zuschauer je Sitzung werden abgewiesen" % kanal.MAX_JE_SITZUNG)
+
+    pruefe.abschnitt("Simulation nur einmal je Fahrt")
+    quelle = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                               "backend", "app", "routers", "live.py"),
+                  encoding="utf-8").read()
+    pruefe("if sitzung_id in _simulationen" in quelle and "_task_halten(" in quelle,
+           "ein zweiter Start für dieselbe Fahrt wird abgelehnt, und die Aufgabe "
+           "wird festgehalten")
+
+
 def main() -> int:
     teil_passwort()
     teil_client_ip()
@@ -296,6 +361,7 @@ def main() -> int:
     teil_eventloop()
     teil_limit()
     teil_live()
+    teil_55()
     return pruefe.bilanz()
 
 

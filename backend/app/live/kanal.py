@@ -21,9 +21,17 @@ _verbindungen: dict[int, set] = {}
 _sperre = asyncio.Lock()
 
 
-async def anmelden(sitzung_id: int, websocket) -> None:
+MAX_JE_SITZUNG = 10
+
+
+async def anmelden(sitzung_id: int, websocket) -> bool:
+    """Nimmt die Verbindung auf; False, wenn die Sitzung schon voll ist."""
     async with _sperre:
-        _verbindungen.setdefault(sitzung_id, set()).add(websocket)
+        offene = _verbindungen.setdefault(sitzung_id, set())
+        if len(offene) >= MAX_JE_SITZUNG:
+            return False
+        offene.add(websocket)
+        return True
 
 
 async def abmelden(sitzung_id: int, websocket) -> None:

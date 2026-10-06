@@ -46,6 +46,9 @@ def abo_anlegen(abo: Abo, db: Session = Depends(get_db)):
     if not push.ist_eingerichtet():
         raise HTTPException(409, "Es ist kein VAPID-Schlüssel gesetzt - "
                                  "Benachrichtigungen sind aus.")
+    if not push.endpoint_erlaubt(abo.endpoint):
+        raise HTTPException(422, "Der Endpunkt muss eine https-Adresse eines "
+                                 "öffentlichen Push-Dienstes sein.")
     push.abo_speichern(db, abo.endpoint, abo.p256dh, abo.auth, abo.geraet)
     return {"ok": True}
 
