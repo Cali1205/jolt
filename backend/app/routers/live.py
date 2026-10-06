@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import (APIRouter, Depends, HTTPException, Query, Request,
                      WebSocket, WebSocketDisconnect)
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from .. import deps, models, push, security
@@ -27,6 +27,11 @@ log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/live", tags=["live"])
 
 
+# Die Messung des Dongles hat knapp zwanzig Werte; das Vierfache ist Luft.
+ROHWERTE_MAX_SCHLUESSEL = 80
+ROHWERTE_MAX_BYTES = 8000
+
+
 class Messpunkt(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
@@ -36,11 +41,33 @@ class Messpunkt(BaseModel):
     # von Hand dazu. Ohne diese Punkte gäbe es unterwegs weder Zeitfaktor
     # noch Ankunftsprognose.
     soc: float | None = Field(default=None, ge=0, le=100)
-    tempo_kmh: float | None = None
-    aussentemp_c: float | None = None
+    # Grenzen, die kein Auto verlässt: Ein Wert aus einem kaputten Logger
+    # (Einheit vertauscht, Überlauf) würde sonst ungeprüft in die Kalibrierung
+    # laufen und den Lernfaktor verziehen.
+    tempo_kmh: float | None = Field(default=None, ge=0, le=500,
+                                    allow_inf_nan=False)
+    aussentemp_c: float | None = Field(default=None, ge=-80, le=70,
+                                       allow_inf_nan=False)
     # Alles Weitere, was die Quelle liefert - wird nur aufbewahrt, nicht
     # verrechnet. Siehe models.LivePunkt.rohwerte.
     rohwerte: dict | None = None
+
+    @field_validator("rohwerte")
+    @classmethod
+    def _rohwerte_begrenzen(cls, wert):
+        """Aufbewahrt wird es je Punkt als JSON - also muss es klein bleiben.
+
+        Ein Stapel hat bis zu 500 Punkte; ohne Grenze liesse sich mit einer
+        einzigen Anfrage Datenbank und Speicher füllen.
+        """
+        if wert is None:
+            return wert
+        if len(wert) > ROHWERTE_MAX_SCHLUESSEL:
+            raise ValueError(f"höchstens {ROHWERTE_MAX_SCHLUESSEL} Rohwerte je Punkt")
+        if len(json.dumps(wert, default=str)) > ROHWERTE_MAX_BYTES:
+            raise ValueError(f"Rohwerte höchstens {ROHWERTE_MAX_BYTES} Zeichen")
+        return wert
+
     # Zeitpunkt der **Messung**. Fehlt er, gilt der Eingang. Gesetzt wird er
     # von einem Gerät, das einen Funkloch-Puffer nachreicht - sonst lägen alle
     # nachgereichten Punkte auf derselben Sekunde, und der Zeitfaktor wäre
@@ -100,6 +127,27 @@ def _sitzung_holen(db: Session, sitzung_id: int) -> models.LiveSitzung:
     return sitzung
 
 
+def _laufende_sitzung_holen(db: Session, sitzung_id: int) -> models.LiveSitzung:
+    sitzung = _sitzung_holen(db, sitzung_id)
+    if not sitzung.laeuft:
+        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
+    return sitzung
+
+
+def _fahrzeug_zum_token(db: Session, token: str):
+    return (db.query(models.Fahrzeug)
+            .filter(models.Fahrzeug.logger_token == token).one_or_none())
+
+
+def _laufende_sitzung_zum_fahrzeug(db: Session, fahrzeug_id: int):
+    return (db.query(models.LiveSitzung)
+            .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
+            .filter(models.Fahrt.fahrzeug_id == fahrzeug_id,
+                    models.LiveSitzung.laeuft.is_(True))
+            .order_by(models.LiveSitzung.id.desc())
+            .first())
+
+
 async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
                              punkt: quellen.Rohpunkt,
                              neu_planen: bool = True) -> dict:
@@ -109,7 +157,11 @@ async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
     Dann wird weder umgeplant noch an die Zuschauer gesendet - ein Zustand
     von vor zehn Minuten liesse die Anzeige zurückspringen.
     """
-    zustand = live_sitzung.messpunkt_aufnehmen(
+    # Im Threadpool: `messpunkt_aufnehmen` rechnet und schreibt synchron, und
+    # in einem `async def` hielte das den Event-Loop an - ein Stapel von 500
+    # Punkten liess jede andere Anfrage und jeden WebSocket warten.
+    zustand = await run_in_threadpool(
+        live_sitzung.messpunkt_aufnehmen,
         db, sitzung, punkt.lat, punkt.lon, punkt.soc,
         punkt.tempo_kmh, punkt.aussentemp_c, zeit=punkt.zeit,
         rohwerte=punkt.rohwerte, neu_planen=neu_planen)
@@ -189,9 +241,7 @@ async def punkt_melden(sitzung_id: int, messpunkt: Messpunkt,
     liessen. Ein Gerät im Auto ohne Anmeldung nimmt `/melden` mit dem
     Logger-Token seines Fahrzeugs.
     """
-    sitzung = _sitzung_holen(db, sitzung_id)
-    if not sitzung.laeuft:
-        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
+    sitzung = await run_in_threadpool(_laufende_sitzung_holen, db, sitzung_id)
     return await _punkt_verarbeiten(db, sitzung, quellen.Rohpunkt(
         lat=messpunkt.lat, lon=messpunkt.lon, soc=messpunkt.soc,
         tempo_kmh=messpunkt.tempo_kmh, aussentemp_c=messpunkt.aussentemp_c,
@@ -213,9 +263,7 @@ async def punkte_melden(sitzung_id: int, stapel: MesspunktStapel,
     Alles oder nichts: Ein ungültiger Zeitstempel lehnt den ganzen Stapel ab,
     bevor irgendetwas geschrieben wurde.
     """
-    sitzung = _sitzung_holen(db, sitzung_id)
-    if not sitzung.laeuft:
-        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
+    sitzung = await run_in_threadpool(_laufende_sitzung_holen, db, sitzung_id)
     jetzt = datetime.utcnow()
     geprueft = [(_zeit_pruefen(p.zeit) or jetzt, i, p)
                 for i, p in enumerate(stapel.punkte)]
@@ -340,9 +388,7 @@ async def logger_melden(meldung: LoggerMeldung, request: Request,
     if security.melden_gesperrt(request):
         raise HTTPException(429, "Zu viele ungültige Logger-Token. "
                                  "Später erneut versuchen.")
-    fahrzeug = (db.query(models.Fahrzeug)
-                .filter(models.Fahrzeug.logger_token == meldung.token)
-                .one_or_none())
+    fahrzeug = await run_in_threadpool(_fahrzeug_zum_token, db, meldung.token)
     if not fahrzeug:
         # Ein falsches Token ist ein Fehler - sonst liesse sich nicht
         # unterscheiden, ob der Logger falsch eingerichtet ist oder ob nur
@@ -359,12 +405,8 @@ async def logger_melden(meldung: LoggerMeldung, request: Request,
         # falsch schickt, und der soll ungefiltert beim Einrichtenden ankommen.
         raise HTTPException(400, str(fehler))
 
-    sitzung = (db.query(models.LiveSitzung)
-               .join(models.Fahrt, models.LiveSitzung.fahrt_id == models.Fahrt.id)
-               .filter(models.Fahrt.fahrzeug_id == fahrzeug.id,
-                       models.LiveSitzung.laeuft.is_(True))
-               .order_by(models.LiveSitzung.id.desc())
-               .first())
+    sitzung = await run_in_threadpool(_laufende_sitzung_zum_fahrzeug, db,
+                                      fahrzeug.id)
     if not sitzung:
         return {"aufgenommen": False, "fahrzeug": fahrzeug.name,
                 "grund": "Zu diesem Fahrzeug läuft gerade keine Fahrt."}
@@ -478,11 +520,12 @@ async def simulieren(sitzung_id: int,
     Der Verbrauch merkt das kaum, die Ankunftszeit sehr wohl - und damit
     lässt sich der Auslöser prüfen, den der Verbrauch allein nie auslöst.
     """
-    sitzung = _sitzung_holen(db, sitzung_id)
-    if not sitzung.laeuft:
-        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
-    if not (sitzung.fahrt.energieprofil or []):
-        raise HTTPException(409, "Zur Fahrt gibt es kein Energieprofil.")
+    def pruefen():
+        sitzung = _laufende_sitzung_holen(db, sitzung_id)
+        if not (sitzung.fahrt.energieprofil or []):
+            raise HTTPException(409, "Zur Fahrt gibt es kein Energieprofil.")
+
+    await run_in_threadpool(pruefen)
 
     asyncio.create_task(simulator.abspielen(
         SessionLocal, sitzung_id, mehrverbrauch, takt_s,

@@ -54,12 +54,21 @@ def client_ip(request: Request) -> str:
 
     Bei Docker-Port-Publishing sieht der Container sonst nur das Gateway -
     alle Nutzer teilten sich dann einen Zähler.
+
+    **Von rechts lesen, nicht von links.** Ein Proxy hängt die Adresse, die er
+    selbst gesehen hat, an `X-Forwarded-For` an; was davor steht, hat der
+    Client geschrieben. Der erste Eintrag ist deshalb frei wählbar - wer ihn
+    bei jeder Anfrage wechselt, hätte jedes Mal einen frischen Zähler und das
+    Rate-Limit samt Anmeldebremse wäre wirkungslos. Gilt ist der erste Eintrag
+    von rechts, der nicht selbst ein vertrauter Proxy ist.
     """
     peer = request.client.host if request.client else "unbekannt"
     if peer in TRUSTED_PROXIES:
         weitergereicht = request.headers.get("x-forwarded-for", "")
-        if weitergereicht:
-            return weitergereicht.split(",")[0].strip()
+        eintraege = [e.strip() for e in weitergereicht.split(",") if e.strip()]
+        for eintrag in reversed(eintraege):
+            if eintrag not in TRUSTED_PROXIES:
+                return eintrag
     return peer
 
 
