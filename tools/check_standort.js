@@ -59,6 +59,15 @@ const kontext = {
 vm.createContext(kontext);
 vm.runInContext(quelle, kontext);
 const live = fenster.joltLive;
+
+/* Das Anzeigemodell (frontend/anzeige.js): live.js meldet ihm jeden Zustand und
+ * das Ende der Fahrt. Hier nur ein Mitschreiber - das Modell selbst prueft
+ * tools/check_anzeige.js. */
+const anzeige = { melden: [], beenden: 0, wirft: false };
+fenster.joltAnzeige = {
+  melden: (z) => { if (anzeige.wirft) throw new Error("Anzeige kaputt"); anzeige.melden.push(z); },
+  beenden: () => { anzeige.beenden++; },
+};
 const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Die Meldesperre (12 s Wanduhr) laeuft sonst im Test mit.
@@ -153,9 +162,28 @@ function plugin({ verzoegerungMs = 0, ablehnen = false, verfuegbar = true } = {}
          "ein anderer Fehler bleibt still - Tunnel gibt es",
          meldungen.slice(vorher).map((m) => m.t).join(" | "));
 
+  console.log("\nAnzeigemodell");
+  pruefe(anzeige.melden.length >= 1 && anzeige.melden[0].typ === "zustand",
+         "jeder Zustand, den der Server liefert, geht auch ans Anzeigemodell - "
+         + "fuer CarPlay und Widget", String(anzeige.melden.length));
+  const postsVor = anzeige.melden.length;
+  anzeige.wirft = true;
+  let ok = true;
+  try {
+    p.rueckruf({ latitude: 52.6, longitude: 13.5, altitude: null, speed: 20, time: Date.now() });
+    await warte(30);
+  } catch (e) { ok = false; }
+  pruefe(ok, "ein Fehler im Anzeigemodell reisst die Oberflaeche nicht mit");
+  anzeige.wirft = false;
+  pruefe(anzeige.melden.length === postsVor, "(der Fehler kam vor dem Mitschreiben an)");
+
   console.log("\nBeenden");
+  const beendenVor = anzeige.beenden;
   await live.beenden();
   await warte(10);
+  pruefe(anzeige.beenden === beendenVor + 1,
+         "am Ende der Fahrt wird das Anzeigemodell abgemeldet - die Anzeige im "
+         + "Auto soll verschwinden", String(anzeige.beenden - beendenVor));
   pruefe(p.entfernt.length === 1 && p.entfernt[0] === "wacher-1",
          "der Watcher wird entfernt - sonst läuft die Ortung ohne Fahrt " +
          "weiter und kostet Akku", JSON.stringify(p.entfernt));

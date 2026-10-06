@@ -7,8 +7,9 @@ import logging
 import os
 import time
 
-from fastapi import FastAPI
-from fastapi.responses import (FileResponse, HTMLResponse,
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 
@@ -36,6 +37,23 @@ app = FastAPI(title="jolt",
               openapi_url="/api/openapi.json" if _docs else None)
 
 app.add_middleware(SecurityMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validierung(request: Request, fehler: RequestValidationError):
+    """422 ohne den Eingabewert.
+
+    Pydantic hängt jedem Fehler die abgelehnte Eingabe an. Ist das `NaN` oder
+    `Infinity` (Pythons JSON-Parser nimmt beides an), scheitert FastAPIs
+    Standardantwort beim Serialisieren - der Client bekam einen 500er, und
+    zwar ausgerechnet für die Eingabe, die abgelehnt werden sollte. Ohnehin
+    gehört der Wert nicht in die Antwort: Er stünde so im Protokoll jedes
+    Proxys, auch wenn er ein Passwort-Feld war.
+    """
+    return JSONResponse(
+        {"detail": [{"loc": list(e.get("loc", ())), "msg": e.get("msg", ""),
+                     "type": e.get("type", "")} for e in fehler.errors()]},
+        status_code=422)
 
 for router in ALLE_ROUTER:
     app.include_router(router)
@@ -97,7 +115,8 @@ def _mit_version(html: str, dateien) -> str:
 # Sorte Findigkeit, die beim nächsten Umbau still danebenliegt.
 INDEX_DATEIEN = ("ble-plugin.js", "obd-ble-nativ.js", "messwerte.js",
                  "obd-kern.js",
-                 "core.js", "karte.js", "route.js", "live.js",
+                 "core.js", "karte.js", "route.js", "anzeige.js", "live.js",
+                 "einstellungen.js",
                  "fahrten.js", "fahrzeug.js", "app.js")
 
 

@@ -1225,6 +1225,14 @@ def main() -> int:
     pruefe(b'"/static/core.js"' not in inhalt,
            "und zwar alle, nicht nur einige",
            "core.js steht ohne Version im HTML")
+    # Der Fall, der bei einem neuen Skript immer wieder droht: Es steht im HTML,
+    # aber nicht in INDEX_DATEIEN (backend/app/main.py) - dann bleibt es bis zu
+    # vier Stunden im Cache haengen. Deshalb geprueft wird *jeder* Verweis.
+    import re as _re
+    ohne_version = _re.findall(rb'src="(/static/[^"?]+\.js)"', inhalt)
+    pruefe(not ohne_version,
+           "kein einziger Skriptverweis in index.html ohne Version - ein neues "
+           "Skript gehoert in INDEX_DATEIEN", str(ohne_version))
 
     # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
     # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim

@@ -26,6 +26,11 @@ LOGIN_MAX = int(os.environ.get("LOGIN_LIMIT_PER_15MIN", "10"))
 _sperre = threading.Lock()
 _treffer: dict[str, deque] = defaultdict(deque)
 _login_treffer: dict[str, deque] = defaultdict(deque)
+# Fehlversuche mit einem falschen Logger-Token an /api/live/melden. Der Pfad
+# ist vom allgemeinen Limit ausgenommen (er bekommt Messpunkte im Sekundentakt),
+# also braucht das Durchprobieren von Tokens ein eigenes.
+_melden_fehler: dict[str, deque] = defaultdict(deque)
+MELDEN_FEHLER_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 
 # Der Live-Endpunkt bekommt im Sekundentakt Messpunkte. Ein Limit von 120
 # Anfragen je Minute wäre dafür genau falsch: Es würde ausgerechnet die
@@ -49,12 +54,21 @@ def client_ip(request: Request) -> str:
 
     Bei Docker-Port-Publishing sieht der Container sonst nur das Gateway -
     alle Nutzer teilten sich dann einen Zähler.
+
+    **Von rechts lesen, nicht von links.** Ein Proxy hängt die Adresse, die er
+    selbst gesehen hat, an `X-Forwarded-For` an; was davor steht, hat der
+    Client geschrieben. Der erste Eintrag ist deshalb frei wählbar - wer ihn
+    bei jeder Anfrage wechselt, hätte jedes Mal einen frischen Zähler und das
+    Rate-Limit samt Anmeldebremse wäre wirkungslos. Gilt ist der erste Eintrag
+    von rechts, der nicht selbst ein vertrauter Proxy ist.
     """
     peer = request.client.host if request.client else "unbekannt"
     if peer in TRUSTED_PROXIES:
         weitergereicht = request.headers.get("x-forwarded-for", "")
-        if weitergereicht:
-            return weitergereicht.split(",")[0].strip()
+        eintraege = [e.strip() for e in weitergereicht.split(",") if e.strip()]
+        for eintrag in reversed(eintraege):
+            if eintrag not in TRUSTED_PROXIES:
+                return eintrag
     return peer
 
 
@@ -105,6 +119,24 @@ def login_limit(request: Request) -> None:
     """Eigenes, enges Limit für den Login - gegen das Durchprobieren."""
     if not _zaehlen(_login_treffer, client_ip(request), LOGIN_WINDOW, LOGIN_MAX):
         raise HTTPException(429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
+
+
+def melden_gesperrt(request: Request) -> bool:
+    """True, wenn diese Adresse zu oft ein falsches Logger-Token geschickt hat."""
+    jetzt = time.time()
+    with _sperre:
+        _abgelaufene_entfernen(_melden_fehler, jetzt, LOGIN_WINDOW, None)
+        warteschlange = _melden_fehler.get(client_ip(request))
+        if not warteschlange:
+            return False
+        _verfallen(warteschlange, jetzt, LOGIN_WINDOW)
+        return len(warteschlange) >= MELDEN_FEHLER_MAX
+
+
+def melden_fehler_zaehlen(request: Request) -> None:
+    """Einen Fehlversuch vermerken - nur falsche Token, nicht jede Meldung."""
+    with _sperre:
+        _melden_fehler[client_ip(request)].append(time.time())
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):

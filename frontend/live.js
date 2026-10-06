@@ -187,9 +187,13 @@ window.joltLive = (function () {
     const schema = location.protocol === "https:" ? "wss" : "ws";
     steckdose = new WebSocket(`${schema}://${location.host}/api/live/${sitzungId}/ws`);
 
+    // Ein Browser kann beim WebSocket keine Header setzen; der Token geht
+    // deshalb als erste Nachricht. Erst die Antwort "bereit" heisst, dass der
+    // Server ihn angenommen hat - vorher gilt die Verbindung nicht als
+    // stehend, und die Wartezeit bleibt, wie sie ist.
     steckdose.onopen = () => {
-      verbindungAnzeigen("verbunden", "#57c98a");
-      versuch = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
+      try { steckdose.send(JSON.stringify({ token: K.token() })); }
+      catch (e) { /* onclose baut neu auf */ }
     };
     steckdose.onclose = () => {
       if (K.zustand.sitzungId === sitzungId) neuVerbinden(sitzungId, versuch + 1);
@@ -199,6 +203,11 @@ window.joltLive = (function () {
     steckdose.onmessage = (nachricht) => {
       let daten;
       try { daten = JSON.parse(nachricht.data); } catch (e) { return; }
+      if (daten.typ === "bereit") {
+        verbindungAnzeigen("verbunden", "#57c98a");
+        versuch = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
+        return;
+      }
       if (daten.typ === "ende") {
         verbindungAnzeigen("Fahrt beendet", "#8a97a5");
         return;
@@ -208,6 +217,11 @@ window.joltLive = (function () {
   }
 
   function zustandAnzeigen(z) {
+    // Das Anzeigemodell für alles ausserhalb dieser Oberfläche (CarPlay,
+    // Widget): wenige Zahlen, gedrosselt. Ein Fehler dort darf die Anzeige
+    // hier nie mitreissen.
+    try { if (window.joltAnzeige) window.joltAnzeige.melden(z); }
+    catch (e) { console.log("[anzeige]", e && e.message); }
     const fahrt = K.zustand.fahrt;
     const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
 
@@ -2165,6 +2179,9 @@ window.joltLive = (function () {
     K.zustand.sitzungId = null;
     K.sitzungMerken(null);
     fahrzustandStart("steht");
+    // Die Fahrt ist zu Ende: Die Anzeige im Auto soll verschwinden.
+    try { if (window.joltAnzeige) window.joltAnzeige.beenden(); }
+    catch (e) { console.log("[anzeige]", e && e.message); }
     plan = null;
     const kasten = document.getElementById("live-aenderung");
     if (kasten) kasten.hidden = true;

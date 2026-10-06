@@ -132,3 +132,8 @@ jobs:
       # sie wird gerade dann gebraucht, wenn im Auto etwas nicht stimmt.
       - name: Dongle-Diagnose pruefen
         run: node tools/check_diagnose.js
+
+      # Das Anzeigemodell fuer CarPlay und Widget: wenige Zahlen, gedrosselt,
+      # ohne erfundene Felder - ohne Swift und ohne Mac pruefbar.
+      - name: Anzeigemodell pruefen
+        run: node tools/check_anzeige.js

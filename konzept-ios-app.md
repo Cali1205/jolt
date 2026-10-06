@@ -256,10 +256,31 @@ nicht ausschliessen.
   dürfen nur Ladesäulen erscheinen; bis zu fünf Ebenen tief.
 - Für alle: Nichts darf zum Griff zum iPhone auffordern, jeder Ablauf muss ohne
   iPhone möglich sein, nichts Unzusammenhängendes (Einstellungen, Konto).
-- Welche Vorlage in welcher Kategorie erlaubt ist, steht in einer Tabelle des
-  Leitfadens, deren Häkchen sich nicht aus dem Text lesen lassen. **Vor dem
-  Antrag im PDF nachsehen**, ob die Informationsvorlage (für „nächster Stopp")
-  und die Listenvorlage (für die Stopps) in der gewählten Kategorie stehen.
+- **Welche Vorlagen es gibt** (Tabelle des Leitfadens, Seite 14, als Bild
+  gelesen — im Text sind die Häkchen nicht zu erkennen):
+
+  | Vorlage | Driving task | EV charging |
+  |---|---|---|
+  | Information (wenige Zeilen, Schaltflächen) | ja | ja |
+  | Liste, Raster (bis acht Einträge), Tab-Leiste | ja | ja |
+  | Point of interest (Orte) | ja | ja |
+  | Alarm, Aktionsblatt | ja | ja |
+  | Suche | nein | iOS 27 |
+  | Karte | nein | nein (nur Navigation) |
+  | Tiefe der Vorlagen | 2, ab iOS 26.4: 3 | 5 |
+  | Aktualisierung der Daten | höchstens alle 10 s | keine Grenze genannt |
+
+  Für jolt reicht **in beiden** Kategorien das, was gebraucht wird: eine
+  Informationsvorlage („nächster Stopp") und eine Liste der Stopps.
+- **Empfehlung: EV charging.** Der Kern von jolt ist die Planung von Ladestopps;
+  das ist die Aufgabe der Kategorie. Dazu kommen fünf statt zwei bis drei
+  Ebenen (Stoppliste → Stopp → Ausweichstandort), keine genannte
+  Aktualisierungsgrenze und die Vorlage für Orte für „nächste Ladesäule". Die
+  Bedingung ist, dass die App „mehr leistet als eine Liste von Ladesäulen" und
+  auf Karten nur Ladesäulen zeigt — beides trifft zu. **Das Risiko:** Apple
+  entscheidet nach dem Antrag, und ein späterer Wechsel der Kategorie hiesse
+  vermutlich einen neuen Antrag (Annahme, nicht im Leitfaden belegt). Driving
+  task wäre der Rückfall, mit engeren Grenzen.
 - Ablauf: Antrag unter developer.apple.com/carplay, Zusatzvereinbarung
   zustimmen, Apple prüft und ordnet dem Entwicklerkonto das Entitlement zu,
   danach neues Provisionierungsprofil mit der CarPlay-Fähigkeit.
@@ -358,7 +379,7 @@ Byte-Formeln anzufassen.
 | 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
 | 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | eingebaut (`@capacitor-community/background-geolocation`), **ungeprüft auf dem Gerät** |
 | 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | erledigt (`live.js`, Stapel-Endpunkt `/punkte`) |
-| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | offen — **kann jetzt beginnen** |
+| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | **erledigt:** `frontend/anzeige.js` (reine Funktion, gedrosselter Sender) und `tools/check_anzeige.js`; `live.js` meldet Zustand und Fahrtende, ein Plugin setzt später nur noch das Ziel |
 | 8 | CarPlay-Antrag bei Apple (Kategorie wählen, Vorlagen im Leitfaden prüfen) | Entitlement für Weg B | offen — **kann jetzt beginnen**, hängt an keiner Zeile Code |
 | 9 | Weg A: Plugin, Live Activity, Widget-Ziel in der CI, Signatur | Ladestand und nächster Stopp im CarPlay-Dashboard | offen, hängt an 7 (und an dem Versuch mit der Signatur) |
 | 10 | Weg B: CarPlay-Szene mit Vorlagen | Liste der Ladestopps im Auto | offen, hängt an 7 und an der Freigabe |
@@ -450,8 +471,12 @@ ob sie sich bauen lässt — was nicht wenig ist, aber eben noch nichts fährt.
 - **Ob Apple das CarPlay-Entitlement erteilt**, und für welche Kategorie
   (Driving task oder EV charging; eine App bekommt eine). Davon hängt nur Weg B
   ab, Weg A nicht.
-- **Ob das Fahrzeug CarPlay hat** (kabelgebunden oder kabellos) **und welche
-  iOS-Version das iPhone hat.** Weg A braucht iOS 26.
+- ~~Ob das Fahrzeug CarPlay hat und welche iOS-Version das iPhone hat.~~
+  **Beantwortet (5.10.2026): kabelloses CarPlay, neueste iOS-Version.** Weg A ist
+  damit möglich. Kabellos heisst, dass das iPhone in der Tasche bleibt und
+  gesperrt ist — genau der Fall, in dem Widget-Daten hinter Datenschutzklasse A
+  oder B nichts zeigen. Daten und Anzeige gehören deshalb in eine ungeschützte
+  Ablage.
 - **Ob die Capacitor-Vorlage das iPhone-Fenster schon als Szene führt**, wie es
   ein CarPlay-Szenen-Manifest voraussetzt (Weg B).
 - **Ob die automatische Signatur über den API-Schlüssel eine zweite App-ID für

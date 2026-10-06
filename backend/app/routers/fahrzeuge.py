@@ -1,7 +1,9 @@
+import math
 import secrets
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from .. import deps, models
@@ -13,34 +15,60 @@ router = APIRouter(prefix="/api/fahrzeuge", tags=["fahrzeuge"],
                    dependencies=[Depends(deps.aktuelle_sitzung)])
 
 
+class Strompreis(BaseModel):
+    """Ein Preis für Säulen, deren Name das Muster enthält."""
+    muster: str = Field(max_length=80)
+    eur_kwh: float = Field(ge=0, le=5, allow_inf_nan=False)
+
+
 class FahrzeugEingabe(BaseModel):
-    name: str
-    akku_brutto_kwh: float = Field(gt=0)
-    akku_netto_kwh: float = Field(gt=0)
-    leermasse_kg: float = 1800.0
-    zuladung_kg: float = 150.0
-    c_w: float = 0.28
-    stirnflaeche_m2: float = 2.30
-    c_rr: float = 0.010
+    """Grenzen mit Luft nach oben: Sie fangen Tippfehler und kaputte Clients,
+    nicht ungewöhnliche Fahrzeuge. Null oder Negatives im Fahrwiderstand ergab
+    sonst Division durch null oder NaN im Verbrauchsmodell."""
+    name: str = Field(min_length=1, max_length=120)
+    akku_brutto_kwh: float = Field(gt=0, le=1000, allow_inf_nan=False)
+    akku_netto_kwh: float = Field(gt=0, le=1000, allow_inf_nan=False)
+    leermasse_kg: float = Field(default=1800.0, gt=0, le=20000, allow_inf_nan=False)
+    zuladung_kg: float = Field(default=150.0, ge=0, le=10000, allow_inf_nan=False)
+    c_w: float = Field(default=0.28, gt=0, le=2, allow_inf_nan=False)
+    stirnflaeche_m2: float = Field(default=2.30, gt=0, le=20, allow_inf_nan=False)
+    c_rr: float = Field(default=0.010, ge=0, le=0.1, allow_inf_nan=False)
     # Höchstgeschwindigkeit in km/h; None = keine Grenze im Modell.
     max_tempo_kmh: float | None = Field(default=None, ge=30, le=300)
     eta_antrieb: float = Field(default=0.88, gt=0, le=1)
     eta_rekup: float = Field(default=0.70, ge=0, le=1)
-    p_neben_w: float = 350.0
+    p_neben_w: float = Field(default=350.0, ge=0, le=20000, allow_inf_nan=False)
     waermepumpe: bool = True
     reserve_soc: float = Field(default=10.0, ge=0, le=50)
     ziel_soc: float = Field(default=20.0, ge=0, le=100)
-    max_ladeleistung_kw: float = 150.0
-    steckertyp: str = "CCS"
+    max_ladeleistung_kw: float = Field(default=150.0, gt=0, le=1500,
+                                       allow_inf_nan=False)
+    steckertyp: str = Field(default="CCS", max_length=40)
     # Namen oder Namensteile, die der Ladeplan bevorzugt - kein harter Filter.
-    bevorzugte_betreiber: list[str] = []
+    bevorzugte_betreiber: list[Annotated[str, Field(max_length=80)]] = Field(
+        default=[], max_length=50)
     # Was eine Kilowattstunde kostet. Am Fahrzeug, weil der Preis am Vertrag
     # hängt und nicht an der Säule - siehe laden/preise.py.
     strompreis_eur_kwh: float = Field(default=0.59, ge=0, le=5)
     # [{"muster": "Ionity", "eur_kwh": 0.39}, ...]
-    strompreise: list[dict] = []
+    strompreise: list[Strompreis] = Field(default=[], max_length=50)
     # [[soc, kw], ...] - leer heisst "Kurve unverändert lassen"
-    ladekurve: list[list[float]] = []
+    ladekurve: list[list[float]] = Field(default=[], max_length=100)
+
+    @field_validator("ladekurve")
+    @classmethod
+    def _kurve_gueltig(cls, kurve):
+        for eintrag in kurve:
+            if len(eintrag) < 2:
+                continue
+            soc, kw = eintrag[0], eintrag[1]
+            if not (math.isfinite(soc) and math.isfinite(kw)):
+                raise ValueError("Ladekurve enthält keine endliche Zahl")
+            if not 0 <= soc <= 100:
+                raise ValueError("Ladestand der Ladekurve liegt ausserhalb 0-100 %")
+            if not 0 <= kw <= 1500:
+                raise ValueError("Ladeleistung der Ladekurve liegt ausserhalb 0-1500 kW")
+        return kurve
 
 
 def _als_dict(fahrzeug: models.Fahrzeug) -> dict:
