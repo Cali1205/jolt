@@ -462,8 +462,13 @@ function befehl(text, grenze_ms = 15000) {
    * Zeitablauf bei `0100` die Reihe ab, und ausgerechnet das darauf folgende
    * `ATDP` lief nie. Genau der Befehl hätte gesagt, ob überhaupt ein
    * Protokoll gefunden wurde. */
+  /* Welche Befehle der letzten Reihe gescheitert sind - damit eine Meldung
+   * "Handshake unvollständig" sagen kann, woran es lag. */
+  let reiheFehler = [];
+
   async function reihe(befehle) {
     let alles_gut = true;
+    reiheFehler = [];
     for (const b of befehle) {
       const sauber = b.trim();
       if (!sauber) continue;
@@ -472,6 +477,7 @@ function befehl(text, grenze_ms = 15000) {
       } catch (fehler) {
         melde("FEHLER " + fehler.message + " - weiter mit dem nächsten Befehl");
         alles_gut = false;
+        reiheFehler.push(`${sauber}: ${fehler.message}`);
         // Eine verspätete Antwort auf den abgelaufenen Befehl darf nicht dem
         // nächsten zugeschlagen werden.
         puffer = "";
@@ -1051,6 +1057,7 @@ function befehl(text, grenze_ms = 15000) {
     anschliessen,
     wiederverbinden,
     handshake: () => gesperrt(() => reihe(HANDSHAKE)),
+    reiheFehler: () => reiheFehler.slice(),
     trennen,
     befehl,
     reihe,

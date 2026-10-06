@@ -227,6 +227,23 @@ async function runde(kmh, nordM = 0) {
          "und nach drei weiteren Minuten Stillstand ist der Dongle getrennt",
          live.fahrzustand());
 
+  console.log("\nHandshake unvollständig");
+  const handshakeAlt = obd.handshake;
+  let versuche = 0;
+  obd.verbundenFlag = true;
+  obd.handshake = async () => { versuche++; return versuche >= 2; };
+  pruefe(await live.handshakeSicher() === true && versuche === 2,
+         "ein unvollständiger Handshake wird einmal wiederholt");
+  versuche = 0;
+  obd.handshake = async () => { versuche++; return false; };
+  pruefe(await live.handshakeSicher() === true && versuche === 2,
+         "bleibt er unvollständig, der Dongle aber verbunden, gilt er als benutzbar");
+  obd.verbundenFlag = false;
+  pruefe(await live.handshakeSicher() === false,
+         "ohne Verbindung gilt er nicht");
+  obd.handshake = handshakeAlt;
+  obd.verbundenFlag = true;
+
   console.log("\nOhne Automatik");
   live.autoSetzen(false);
   obd.verbundenFlag = true;

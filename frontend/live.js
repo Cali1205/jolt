@@ -1389,14 +1389,32 @@ window.joltLive = (function () {
       // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt worden,
       // verbindet er ohne Berührung.
       await window.joltObd.anschliessen();
-      if (window.joltObd.verbunden() && await window.joltObd.handshake()) {
-        return true;
-      }
+      if (await handshakeSicher()) return true;
     } catch (fehler) {
       console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
     }
     dongle = false;
     return false;
+  }
+
+  /* Den Handshake schicken, im Zweifel zweimal.
+   *
+   * Der ELM antwortet auf das erste ATZ nach dem Verbinden oft erst nach
+   * Sekunden, oder eine Antwort kommt zu spät und trifft den nächsten Befehl.
+   * Die Reihe läuft trotzdem weiter und konfiguriert den Dongle - nur das
+   * Urteil "unvollständig" war bisher endgültig, und mit ihm gab der Start
+   * den Dongle auf, obwohl er verbunden war und Werte lieferte. Deshalb: ein
+   * zweiter Durchlauf, und wer danach verbunden ist, wird genutzt.
+   * Gibt zurück, ob der Dongle benutzbar ist; die Gründe stehen im Protokoll. */
+  async function handshakeSicher() {
+    const O = window.joltObd;
+    for (let versuch = 1; versuch <= 2; versuch++) {
+      if (!O.verbunden()) return false;
+      if (await O.handshake()) return true;
+      console.log("[obd] Handshake unvollständig (Versuch " + versuch + "):",
+                  (O.reiheFehler ? O.reiheFehler() : []).join("; "));
+    }
+    return O.verbunden();
   }
 
   async function dongleVerbinden() {
@@ -1415,9 +1433,7 @@ window.joltLive = (function () {
       dongleNutzen();
       await window.joltObd.anschliessen();
       if (!window.joltObd.verbunden()) throw new Error("keine Verbindung");
-      if (!(await window.joltObd.handshake())) {
-        throw new Error("Handshake unvollständig");
-      }
+      if (!(await handshakeSicher())) throw new Error("keine Verbindung");
       K.melden("Dongle verbunden – ab jetzt kommen die Werte aus dem Auto.",
                "hinweis");
     } catch (fehler) {
@@ -2503,6 +2519,7 @@ window.joltLive = (function () {
   return { einrichten, starten, beenden, verbinden, positionVerfolgen,
            dongleNutzen, verlaufZeichnen,
            fahrzustand: () => fahrZustand, fahrzustandStart, lesenErlaubt, dongleVerbinden,
-           spannungPruefen, benachrichtigungenEinrichten,
+           spannungPruefen, benachrichtigungenEinrichten, handshakeSicher,
+           dongleWiederverbinden,
            autoSetzen: (an) => { autoModus = !!an; } };
 })();
