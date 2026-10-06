@@ -137,3 +137,8 @@ jobs:
       # ohne erfundene Felder - ohne Swift und ohne Mac pruefbar.
       - name: Anzeigemodell pruefen
         run: node tools/check_anzeige.js
+
+      # Die Karte sprang beim Kneifen und Ziehen: Gesten gegen eine Attrappe der
+      # Leinwand, ohne Browser.
+      - name: Kartenbedienung pruefen
+        run: node tools/check_karte.js
