@@ -44,11 +44,6 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
     /// Objekt, damit die Brücke nichts umformt - gelesen wird es hier genau
     /// einmal, mit denselben Schlüsseln wie in anzeige.js.
     @objc func aktualisieren(_ call: CAPPluginCall) {
-        #if canImport(ActivityKit)
-        guard #available(iOS 16.2, *) else {
-            call.reject("Live Activities brauchen iOS 16.2")
-            return
-        }
         guard let text = call.getString("json"), let daten = text.data(using: .utf8) else {
             call.reject("json fehlt")
             return
@@ -60,9 +55,22 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Anzeigemodell nicht lesbar: \(error.localizedDescription)")
             return
         }
+        // Erst für CarPlay, mit der Liste der Stopps - unabhängig davon, ob die
+        // Live Activity gelingt (sie darf nur im Vordergrund beginnen).
+        JoltAnzeigeStore.shared.setzen(zustand)
+
+        #if canImport(ActivityKit)
+        guard #available(iOS 16.2, *) else {
+            call.reject("Live Activities brauchen iOS 16.2")
+            return
+        }
+        // Die Live Activity trägt höchstens 4 KB; die Stoppliste gehört nur in
+        // die CarPlay-Vorlage.
+        var fuerActivity = zustand
+        fuerActivity.stoppListe = nil
         Task {
             do {
-                try await self.setzen(zustand)
+                try await self.setzen(fuerActivity)
                 call.resolve()
             } catch {
                 call.reject("Live Activity: \(error.localizedDescription)")
@@ -74,6 +82,7 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func beenden(_ call: CAPPluginCall) {
+        JoltAnzeigeStore.shared.setzen(nil)
         #if canImport(ActivityKit)
         guard #available(iOS 16.2, *) else {
             call.resolve()

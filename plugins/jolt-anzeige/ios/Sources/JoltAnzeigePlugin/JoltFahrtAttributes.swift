@@ -8,9 +8,6 @@
 // Schlüssel. Was dort fehlt (kein Plan, kein Ladestopp), ist hier nil.
 import Foundation
 
-#if canImport(ActivityKit)
-import ActivityKit
-
 public struct JoltAnzeige: Codable, Hashable {
     public struct Soc: Codable, Hashable {
         public var prozent: Double
@@ -70,9 +67,25 @@ public struct JoltAnzeige: Codable, Hashable {
         public var batterieText: String?
     }
 
+    /// Ein Ladestopp der Fahrt, wie die CarPlay-Liste ihn zeigt. Die Live
+    /// Activity bekommt ihn nicht: Sie darf höchstens 4 KB tragen.
+    public struct Listenstopp: Codable, Hashable {
+        public var name: String
+        public var km: Double
+        public var kmText: String
+        public var ankunftSoc: Int?
+        public var ankunftSocText: String?
+        public var abfahrtSocText: String?
+        public var ladezeitMin: Int?
+        public var ladezeitText: String?
+        public var betreiber: String?
+        public var leistungKw: Int?
+    }
+
     public var kurz: String
     public var verlauf: Verlauf?
     public var neben: Neben?
+    public var stoppListe: [Listenstopp]?
     public var soc: Soc?
     public var stopp: Stopp?
     public var reserve: Zeile?
@@ -81,6 +94,9 @@ public struct JoltAnzeige: Codable, Hashable {
     /// Millisekunden seit 1970, wie JavaScript sie liefert.
     public var stand: Double
 }
+
+#if canImport(ActivityKit)
+import ActivityKit
 
 @available(iOS 16.2, *)
 public struct JoltFahrtAttributes: ActivityAttributes {

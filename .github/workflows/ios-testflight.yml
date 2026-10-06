@@ -29,6 +29,15 @@ name: iOS TestFlight
 # Minuten Mac-Zeit mit einer Xcode-Meldung ueber ein fehlendes Zertifikat.
 on:
   workflow_dispatch:
+    inputs:
+      carplay:
+        description: >-
+          CarPlay-Entitlement einbauen. Nur ankreuzen, wenn "CarPlay EV
+          Charging" im Developer-Portal fuer die App-ID eingeschaltet ist -
+          sonst bricht der Export ab. Dauerhaft: Repository-Variable
+          CARPLAY_ENTITLEMENT = true.
+        type: boolean
+        default: false
   push:
     tags: ["ios-*"]
 
@@ -188,6 +197,18 @@ jobs:
             echo "::warning::Manuelle Signatur: fuer die Live Activity (<App-ID>.widget) gibt es kein Profil - der Export wird scheitern. Automatisch signieren oder ein zweites Profil ergaenzen."
           fi
           bash tools/ios_widget.sh ios/App "$APPLE_TEAM_ID"
+
+      # Die CarPlay-Szene (Info.plist, AppDelegate) kommt immer; der
+      # **Entitlement** nur, wenn er im Portal fuer die App-ID eingeschaltet
+      # ist. Steht er in der App und nicht im Profil, scheitert der Export mit
+      # einer Meldung ueber ein nicht passendes Profil.
+      - name: CarPlay-Szene einbauen
+        shell: bash
+        env:
+          CARPLAY: ${{ inputs.carplay == true || vars.CARPLAY_ENTITLEMENT == 'true' }}
+        run: |
+          echo "CarPlay-Entitlement: $CARPLAY"
+          bash tools/ios_carplay.sh ios/App "$CARPLAY"
 
       # Der API-Schluessel liegt dort, wo xcodebuild ihn erwartet. Er wird in
       # beiden Betriebsarten gebraucht: zum Hochladen immer, zum Anlegen von
