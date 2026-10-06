@@ -808,12 +808,14 @@ table.kurve input { padding: 6px 8px; }
         <p class="leer" style="padding-top:0">Im Stand fragt jolt das Auto nichts
           und trennt den Dongle – ein abgeschlossenes Auto löst sonst die
           Alarmanlage aus. Dieselbe Einstellung wie in der Live-Ansicht.</p>
+        <button class="tat neben" id="einst-verbinden">Dongle verbinden</button>
         <button class="tat neben" id="einst-trennen">Dongle trennen</button>
         <button class="tat neben" id="einst-vergessen">Gemerktes Gerät vergessen</button>
-        <p class="leer" style="padding-top:6px">Verbunden wird in der Live-Ansicht
-          (Knopf „Dongle verbinden“) oder auf <a href="/obd">der Diagnoseseite</a>.
-          Das Gerät vergessen heisst: Beim nächsten Verbinden fragt jolt wieder,
-          welcher Dongle es sein soll.</p>
+        <p class="leer" style="padding-top:6px" id="einst-verbinden-stand"></p>
+        <p class="leer" style="padding-top:6px">Verbinden geht hier, in der
+          Live-Ansicht (Knopf „Dongle verbinden“) oder auf
+          <a href="/obd">der Diagnoseseite</a>. Das Gerät vergessen heisst: Beim
+          nächsten Verbinden fragt jolt wieder, welcher Dongle es sein soll.</p>
       </div>
     </details>
 
@@ -875,7 +877,8 @@ table.kurve input { padding: 6px 8px; }
           die Alarmanlage etwas merkt. Zuerst bei <strong>entriegeltem</strong>
           Auto ausprobieren und daneben stehen: <code>ATCSM1</code> schaltet das
           Bestätigen von Frames ab, ob ein Nachbau das wirklich tut, kann jolt
-          nicht prüfen. Nicht während einer Fahrt.</p>
+          nicht prüfen. Nicht während einer Fahrt. Ist kein Dongle verbunden, verbindet der Knopf
+          zuerst – nach dem Parken ist er getrennt.</p>
         <div class="einst-befehl">
           <select id="lausch-protokoll" aria-label="Protokoll">
             <option value="6">11 Bit, 500 kbit/s (6)</option>

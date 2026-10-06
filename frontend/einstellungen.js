@@ -178,6 +178,42 @@ window.joltEinstellungen = (function () {
     el("einst-trennen").disabled = !O.verbunden();
   }
 
+  /* Den Dongle verbinden - erst ohne Dialog (bekanntes Gerät), dann mit.
+   *
+   * Nach dem Parken ist er getrennt (jolt fragt im Stand nichts, damit die
+   * Alarmanlage ruhig bleibt), und hier fehlte bisher jede Möglichkeit, ihn
+   * wieder zu verbinden - die Einstellungen verwiesen auf andere Ansichten.
+   * Wer von hier aus mithören oder einen Befehl senden wollte, stand vor
+   * "Kein Dongle verbunden". Es wird nur verbunden; gelesen wird nichts. */
+  async function dongleVerbinden() {
+    if (!O.verfuegbar()) {
+      throw new Error("Dieser Browser kann kein Bluetooth. In der iOS-App "
+        + "oder in Bluefy geht es.");
+    }
+    if (O.verbunden()) return;
+    await O.anschliessen();
+    if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+  }
+
+  async function verbindenKnopf() {
+    const knopf = el("einst-verbinden");
+    const stand = el("einst-verbinden-stand");
+    knopf.disabled = true;
+    stand.textContent = "verbinde …";
+    try {
+      await dongleVerbinden();
+      stand.textContent = "Verbunden: " + (O.diagnose().verbindung.geraet || "Dongle")
+        + ". Es wird nichts gelesen, solange keine Fahrt läuft.";
+    } catch (fehler) {
+      // Im Text und nicht als Meldung: Eine Meldung verschwindet nach sechs
+      // Sekunden, und wer sie nicht gesehen hat, weiss nicht, warum nichts geschah.
+      stand.textContent = "Nicht verbunden: " + fehler.message;
+    } finally {
+      knopf.disabled = false;
+      aktualisieren();
+    }
+  }
+
   function trennen() {
     // Die Live-Ansicht hält ihren eigenen Zustand (Pause, Auto-Modus); über
     // ihren Knopf läuft das sauber, direkt am Modul bliebe sie im Glauben.
@@ -402,21 +438,22 @@ window.joltEinstellungen = (function () {
   }
 
   async function lauschenStarten() {
-    if (!O.verbunden()) {
-      K.melden("Kein Dongle verbunden.", "warnung");
-      return;
-    }
-    if (fahrtLaeuft()) {
-      K.melden("Eine Fahrt läuft – Mithören unterbricht die Messung. Erst "
-        + "beenden.", "warnung");
-      return;
-    }
     const knopf = el("lausch-start");
     const ziel = el("lausch-ergebnis");
-    knopf.disabled = true;
+    // Jede Rückmeldung steht im Ergebnisfeld - es ist das, worauf man schaut.
     ziel.hidden = false;
-    ziel.textContent = "höre zu …";
+    if (fahrtLaeuft()) {
+      ziel.textContent = "Eine Fahrt läuft – Mithören unterbricht die Messung. "
+        + "Erst die Aufzeichnung beenden.";
+      return;
+    }
+    knopf.disabled = true;
     try {
+      if (!O.verbunden()) {
+        ziel.textContent = "verbinde mit dem Dongle …";
+        await dongleVerbinden();
+      }
+      ziel.textContent = "höre zu … (" + el("lausch-dauer").value / 1000 + " s)";
       const ergebnis = await O.lauschen({
         protokoll: el("lausch-protokoll").value,
         dauer_ms: Number(el("lausch-dauer").value) });
@@ -513,6 +550,7 @@ window.joltEinstellungen = (function () {
     rundenZeigen(d);
     protokollZeigen();
     el("einst-trennen").disabled = !d.verbunden;
+    el("einst-verbinden").disabled = d.verbunden;
     el("diag-fahrt-zeile").hidden = !fahrtLaeuft();
   }
 
@@ -540,6 +578,7 @@ window.joltEinstellungen = (function () {
     K.an("einst-push-aus", "click", pushAbmelden);
     K.an("einst-push-probe", "click", pushProbe);
     K.an("einst-auto", "change", autoUebernehmen);
+    K.an("einst-verbinden", "click", verbindenKnopf);
     K.an("einst-trennen", "click", trennen);
     K.an("einst-vergessen", "click", vergessen);
     K.an("diag-auffaellig", "change", protokollZeigen);

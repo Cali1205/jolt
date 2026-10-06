@@ -147,3 +147,7 @@ jobs:
       # ist das, woran die Alarmanlage haengt.
       - name: Mithoeren pruefen
         run: node tools/check_lauschen.js
+
+      # Verbinden und Mithoeren aus den Einstellungen, vom Tippen bis zum Text.
+      - name: Dongle-Knoepfe der Einstellungen pruefen
+        run: node tools/check_einstellungen.js
