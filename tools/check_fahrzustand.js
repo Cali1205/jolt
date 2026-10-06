@@ -46,7 +46,8 @@ const obd = {
   verfuegbar: () => true,
   anschliessen: async () => { obd.verbundenFlag = true; },
   handshake: async () => true,
-  satzLesen: async () => { obd.gelesen++; return { soc_roh: 180, tempo_kmh: 0 }; },
+  rohAntwort: null,
+  satzLesen: async () => { obd.gelesen++; return obd.rohAntwort ? { ...obd.rohAntwort } : { soc_roh: 180, tempo_kmh: 0 }; },
   volt: null, spannungen: 0,
   spannung: async () => { obd.spannungen++; return obd.volt; },
   socAusRoh: () => ({ hmi: 73 }),
@@ -350,6 +351,37 @@ async function runde(kmh, nordM = 0) {
          JSON.stringify(ohneCan && ohneCan.rohwerte));
   pruefe(Object.keys(ohneCan.rohwerte).join() === "batt_v",
          "und nur sie: Ein Punkt ohne Fahrzeugabfrage behauptet keine Zähler");
+
+  console.log("\nUngueltige Werte aus dem Auto");
+  // Das Tempo-Byte steht bei "ungueltig" auf 255 (in den gespeicherten Fahrten
+  // kommt das vor), die Aussentemperatur b0/2-50 ergibt bei 0xFF 77,5 Grad. Der
+  // Server lehnt beides mit 422 ab - und frueher haette das den ganzen Stapel
+  // gekostet. Hier gehen sie gar nicht erst hinaus.
+  obd.verbundenFlag = true; obd.volt = 14.0;
+  const hinausgegangen = () => K0.letzterBody.punkte[K0.letzterBody.punkte.length - 1];
+  obd.rohAntwort = { soc_roh: 180, tempo_kmh: 255, aussentemp_c: 77.5 };
+  await fix(30, 700); vergeht(1); await fix(30, 720);
+  await runde(50, 740);
+  await warte(20);
+  pruefe(Math.abs(hinausgegangen().tempo_kmh - 50) < 0.01,
+         "255 km/h aus dem Auto bedeuten ungueltig: Es gilt das Tempo des GPS (50)",
+         String(hinausgegangen().tempo_kmh));
+  pruefe(hinausgegangen().aussentemp_c === undefined || hinausgegangen().aussentemp_c === null,
+         "und 77,5 Grad bleiben leer, statt hinauszugehen", String(hinausgegangen().aussentemp_c));
+  pruefe(hinausgegangen().rohwerte && hinausgegangen().rohwerte.tempo_kmh === 255,
+         "die Rohwerte bleiben, wie das Auto sie lieferte - sie sind Befund, keine Rechnung");
+
+  obd.rohAntwort = { soc_roh: 180, tempo_kmh: 88, aussentemp_c: 14 };
+  await runde(50, 760);
+  await warte(20);
+  pruefe(hinausgegangen().tempo_kmh === 88 && hinausgegangen().aussentemp_c === 14,
+         "plausible Werte aus dem Auto schlagen weiter das GPS");
+  obd.rohAntwort = { soc_roh: 180, tempo_kmh: 0, aussentemp_c: -60 };
+  await runde(50, 780);
+  await warte(20);
+  pruefe(hinausgegangen().tempo_kmh === 0 && hinausgegangen().aussentemp_c === -60,
+         "auch 0 km/h und -60 Grad (noch in den Grenzen)");
+  obd.rohAntwort = null;
 
   Date.now = echtesNow;
   console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.`
