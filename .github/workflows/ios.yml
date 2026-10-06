@@ -25,6 +25,10 @@ on:
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
       - "tools/ios_symbol.sh"
+      - "tools/ios_widget.sh"
+      - "tools/ios_widget.rb"
+      - "plugins/**"
+      - "ios-native/**"
       - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   pull_request:
@@ -35,6 +39,10 @@ on:
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
       - "tools/ios_symbol.sh"
+      - "tools/ios_widget.sh"
+      - "tools/ios_widget.rb"
+      - "plugins/**"
+      - "ios-native/**"
       - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
@@ -83,6 +91,12 @@ jobs:
       # die App beim ersten CoreBluetooth-Zugriff ab.
       - name: Info.plist ergaenzen
         run: bash tools/ios_info_plist.sh ios/App/App/Info.plist
+
+      # Die Live Activity (CarPlay-Dashboard, Sperrbildschirm) ist eine
+      # Widget-Erweiterung, also ein eigenes Ziel im Xcode-Projekt. Es gibt es
+      # in der Vorlage nicht; dieses Skript haengt es ein.
+      - name: Live Activity einbauen
+        run: bash tools/ios_widget.sh ios/App
 
       # Das Symbol der Vorlage ist das Capacitor-Logo.
       - name: App-Symbol ersetzen

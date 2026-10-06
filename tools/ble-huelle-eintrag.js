@@ -10,4 +10,9 @@ import { Capacitor } from '@capacitor/core';
  * `navigator.geolocation`, siehe frontend/live.js. */
 const BackgroundGeolocation = Capacitor.registerPlugin('BackgroundGeolocation');
 
-window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation };
+/* Die Live Activity: nimmt das Anzeigemodell (frontend/anzeige.js) entgegen und
+ * zeigt es auf dem Sperrbildschirm und im CarPlay-Dashboard. Der native Teil
+ * liegt in plugins/jolt-anzeige. */
+const JoltAnzeige = Capacitor.registerPlugin('JoltAnzeige');
+
+window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation, JoltAnzeige };

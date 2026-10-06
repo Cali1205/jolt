@@ -210,9 +210,22 @@ window.joltAnzeige = (function () {
     };
   }
 
-  /* Der Sender der Oberfläche: `live.js` meldet hier jeden Zustand an, ein
-   * Plugin setzt später das Ziel. Bis dahin tut er nichts. */
-  const standard = sender();
+  /* Das Ziel in der iOS-App: die Live Activity (plugins/jolt-anzeige).
+   *
+   * Im Browser und in Bluefy gibt es kein solches Plugin; dort tut das Ziel
+   * nichts, und der Sender meldet nichts weiter. Das Plugin wird erst beim
+   * Senden gesucht, nicht beim Laden: ble-plugin.js steht zwar vor dieser
+   * Datei, aber was beim Laden nicht da ist, soll später nicht fehlen. */
+  function nativesZiel(m) {
+    const huelle = window.joltBlePlugin;
+    if (!huelle || !huelle.JoltAnzeige || !huelle.Capacitor
+        || !huelle.Capacitor.isNativePlatform()) return undefined;
+    if (m === null) return huelle.JoltAnzeige.beenden();
+    return huelle.JoltAnzeige.aktualisieren({ json: JSON.stringify(m) });
+  }
+
+  /* Der Sender der Oberfläche: `live.js` meldet hier jeden Zustand an. */
+  const standard = sender({ ziel: nativesZiel });
 
   return {
     modell, sender,
