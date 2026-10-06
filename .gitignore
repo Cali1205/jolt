@@ -17,4 +17,4 @@ daten/
 # capacitor.config.json - eingecheckt waere es eine zweite Wahrheit, die
 # still von der ersten abweicht.
 node_modules/
-ios/
+/ios/

@@ -176,6 +176,19 @@ jobs:
         if: env.MODUS == 'manuell'
         run: bash tools/ios_signatur.sh ios/App/App.xcodeproj/project.pbxproj "$APPLE_TEAM_ID" "$PROFIL_NAME"
 
+      # Die Live Activity ist ein eigenes Ziel (Widget-Erweiterung) mit eigener
+      # Bundle-Kennung <App-ID>.widget. Sie kommt **nach** der manuellen
+      # Signatur, die genau zwei Stellen im App-Ziel erwartet. Im automatischen
+      # Modus legt Apple Kennung und Profil der Erweiterung beim Export selbst
+      # an; im manuellen gibt es dafuer kein Profil in den Geheimnissen.
+      - name: Live Activity einbauen
+        shell: bash
+        run: |
+          if [ "$MODUS" = "manuell" ]; then
+            echo "::warning::Manuelle Signatur: fuer die Live Activity (<App-ID>.widget) gibt es kein Profil - der Export wird scheitern. Automatisch signieren oder ein zweites Profil ergaenzen."
+          fi
+          bash tools/ios_widget.sh ios/App "$APPLE_TEAM_ID"
+
       # Der API-Schluessel liegt dort, wo xcodebuild ihn erwartet. Er wird in
       # beiden Betriebsarten gebraucht: zum Hochladen immer, zum Anlegen von
       # Zertifikat und Profil im automatischen Modus.

@@ -72,7 +72,8 @@ def teil_symbol() -> None:
 
 def teil_skripte() -> None:
     pruefe.abschnitt("Skripte")
-    for name in ("ios_info_plist.sh", "ios_symbol.sh", "ios_signatur.sh"):
+    for name in ("ios_info_plist.sh", "ios_symbol.sh", "ios_signatur.sh",
+                 "ios_widget.sh"):
         ergebnis = subprocess.run(
             ["bash", "-n", os.path.join(WURZEL, "tools", name)],
             capture_output=True, text=True)
@@ -158,7 +159,8 @@ def teil_workflows() -> None:
     # Beide Abläufe müssen dasselbe Projekt erzeugen, sonst baut der eine
     # etwas anderes, als der andere ausliefert.
     for schritt in ("cap add ios", "tools/ios_info_plist.sh",
-                    "tools/ios_symbol.sh", "cap sync ios"):
+                    "tools/ios_symbol.sh", "tools/ios_widget.sh",
+                    "cap sync ios"):
         pruefe(schritt in ios and schritt in fliegen,
                f"beide Abläufe führen `{schritt}` aus")
 
@@ -196,12 +198,114 @@ def teil_workflows() -> None:
            "der flüchtige Schlüsselbund wird auch nach einem Fehler gelöscht")
 
 
+def swift_felder(text: str) -> dict:
+    """Die Felder jeder `struct` in einer Swift-Datei: Name -> {Feld: optional?}.
+
+    Reicht für die schlichten Wertetypen dieser Datei; ein Parser für
+    Swift ist es nicht."""
+    ergebnis = {}
+    for treffer in re.finditer(r"struct (\w+)[^{]*\{", text):
+        tiefe, i = 1, treffer.end()
+        while i < len(text) and tiefe:
+            tiefe += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        rumpf = text[treffer.end():i]
+        # Geschachtelte Strukturen gehören nicht zu den Feldern der äusseren.
+        flach = re.sub(r"struct \w+[^{]*\{[^{}]*\}", "", rumpf)
+        ergebnis[treffer.group(1)] = {
+            m.group(1): m.group(2).endswith("?")
+            for m in re.finditer(r"public var (\w+): ([\w.]+\??)", flach)}
+    return ergebnis
+
+
+def teil_live_activity() -> None:
+    """Plugin, Widget und Anzeigemodell müssen zusammenpassen.
+
+    Ob die Live Activity in CarPlay erscheint, zeigt nur ein Gerät. Was sich
+    ohne Mac prüfen lässt: dass die Swift-Seite jedes Pflichtfeld, das sie
+    liest, von der JavaScript-Seite auch bekommt - fehlt eines, scheitert das
+    Lesen des Modells, und die Anzeige bleibt leer, ohne dass etwas abstürzt.
+    """
+    pruefe.abschnitt("Live Activity")
+    paket = json.loads(lesen("plugins", "jolt-anzeige", "package.json"))
+    pruefe(paket.get("capacitor", {}).get("ios", {}).get("src") == "ios",
+           "das Plugin meldet sich bei Capacitor als iOS-Plugin an")
+    wurzel = json.loads(lesen("package.json"))
+    pruefe("jolt-anzeige" in wurzel.get("dependencies", {}),
+           "und steht in den Abhängigkeiten - sonst bindet `cap sync` es nicht ein")
+    ignoriert = subprocess.run(["git", "check-ignore", "-q",
+        "plugins/jolt-anzeige/ios/Sources/JoltAnzeigePlugin/JoltAnzeigePlugin.swift"],
+        cwd=WURZEL).returncode == 0
+    pruefe(not ignoriert,
+           "die Plugin-Quellen werden von .gitignore nicht verschluckt - `ios/` "
+           "traf auch plugins/*/ios, und die CI fand die Dateien nicht")
+    plugin = lesen("plugins", "jolt-anzeige", "ios", "Sources",
+                   "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
+    pruefe('jsName = "JoltAnzeige"' in plugin
+           and "registerPlugin('JoltAnzeige')" in lesen("tools", "ble-huelle-eintrag.js"),
+           "der Name im Swift-Plugin ist der, unter dem die Oberfläche es sucht")
+    for methode in ("aktualisieren", "beenden", "verfuegbar"):
+        pruefe(f'CAPPluginMethod(name: "{methode}"' in plugin
+               and f"func {methode}(" in plugin,
+               f"{methode} ist deklariert und umgesetzt - eine nur "
+               f"deklarierte Methode läuft ins Leere")
+    pruefe("JoltAnzeigePlugin" in lesen("plugins", "jolt-anzeige", "Package.swift"),
+           "Package.swift kennt das Ziel des Plugins")
+
+    widget = lesen("ios-native", "JoltWidget", "JoltWidget.swift")
+    pruefe("supplementalActivityFamilies([.small])" in widget,
+           "das Widget meldet die kleine Familie - nur die zeigt CarPlay")
+    pruefe("com.apple.widgetkit-extension" in lesen("ios-native", "JoltWidget", "Info.plist"),
+           "die Erweiterung ist als WidgetKit-Erweiterung ausgewiesen")
+    pruefe("NSSupportsLiveActivities" in lesen("tools", "ios_info_plist.sh"),
+           "die App erlaubt Live Activities - ohne den Schlüssel wirft "
+           "Activity.request, und es erscheint nichts")
+    rb = lesen("tools", "ios_widget.rb")
+    pruefe('"#{app_id}.widget"' in rb and 'dst_subfolder_spec = "13"' in rb
+           and "add_dependency" in rb,
+           "das Skript gibt dem Widget eine eigene Kennung, bettet es in die "
+           "App ein und macht es zur Abhängigkeit")
+    pruefe("JoltFahrtAttributes.swift" in lesen("tools", "ios_widget.sh"),
+           "die gemeinsame Attribute-Datei kommt aus dem Plugin ins Widget - "
+           "eine Quelle, zwei Ziele")
+
+    # JS-Modell gegen Swift-Felder.
+    fixtur = ("{km_auf_route:100,ist_soc:72.1,soc_gemeldet:true,soc_quelle:'gemessen',"
+              "soll_soc:73,rest_km:87.4,reserve_bei_km:160,ankunft_verschiebung_min:12,"
+              "naechster_stopp:{name:'X',km_auf_route:141,geplant_soc:19,erwartet_soc:17.6}}")
+    skript = ("const vm=require('vm'),fs=require('fs');const w={};"
+              "vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),"
+              "{window:w,console,Date,JSON,Math,Number,setTimeout,clearTimeout,Promise});"
+              f"console.log(JSON.stringify(w.joltAnzeige.modell({fixtur},1)))")
+    try:
+        ausgabe = subprocess.run(
+            ["node", "-e", skript, os.path.join(WURZEL, "frontend", "anzeige.js")],
+            capture_output=True, text=True, check=True).stdout
+        modell = json.loads(ausgabe)
+    except (OSError, subprocess.CalledProcessError, ValueError) as fehler:
+        pruefe(False, "das Anzeigemodell lässt sich mit node erzeugen", str(fehler))
+        return
+    felder = swift_felder(lesen("plugins", "jolt-anzeige", "ios", "Sources",
+                                "JoltAnzeigePlugin", "JoltFahrtAttributes.swift"))
+    zuordnung = {"JoltAnzeige": modell, "Soc": modell["soc"], "Stopp": modell["stopp"],
+                 "Zeile": modell["reserve"]}
+    for struktur, vorhanden in zuordnung.items():
+        pflicht = [f for f, optional in felder.get(struktur, {}).items() if not optional]
+        fehlt = [f for f in pflicht if f not in vorhanden]
+        pruefe(struktur in felder and pflicht and not fehlt,
+               f"Swift liest {struktur} mit den Pflichtfeldern {pflicht} - "
+               f"alle kommen aus anzeige.js", str(fehlt))
+    for name in ("ankunft", "rest"):
+        pruefe("text" in modell[name], f"{name} trägt den Text, den Swift liest")
+
+
 def main() -> int:
     teil_app_id()
     teil_symbol()
     teil_skripte()
     teil_signatur()
     teil_workflows()
+    teil_live_activity()
     return pruefe.bilanz(
         "Nicht geprüft (nur mit Apple-Konto und Mac-Läufer prüfbar): ob das "
         "Zertifikat zum Profil passt, ob xcodebuild das Projekt signiert und "

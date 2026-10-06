@@ -227,5 +227,39 @@ try { A.melden(geplant); A.beenden(); A.zielSetzen(null); } catch (e) { ok = fal
 pruefe(ok && A.MIN_ABSTAND_MS === 10000,
        "melden, beenden und zielSetzen laufen ohne Ziel durch; 10 s Mindestabstand");
 
+console.log("\nNatives Ziel: die Live Activity");
+function frischeSeite(huelle) {
+  const w = huelle ? { joltBlePlugin: huelle } : {};
+  const k = { window: w, console: { log() {} }, Date, JSON, Math, Number,
+              setTimeout, clearTimeout, Promise };
+  vm.createContext(k);
+  vm.runInContext(quelle, k);
+  return w.joltAnzeige;
+}
+const aufrufe = [];
+const plugin = {
+  aktualisieren: async (a) => { aufrufe.push(["aktualisieren", a]); },
+  beenden: async () => { aufrufe.push(["beenden"]); },
+};
+let seite = frischeSeite({ JoltAnzeige: plugin, Capacitor: { isNativePlatform: () => true } });
+seite.melden(geplant);
+pruefe(aufrufe.length === 1 && aufrufe[0][0] === "aktualisieren"
+       && typeof aufrufe[0][1].json === "string",
+       "in der iOS-App geht das Modell als JSON-Zeichenkette an das Plugin");
+const gesendet = JSON.parse(aufrufe[0][1].json);
+pruefe(gesendet.version === 1 && gesendet.soc && gesendet.kurz && typeof gesendet.stand === "number",
+       "mit den Schluesseln, die Swift liest (soc, kurz, stand ...)", aufrufe[0][1].json);
+seite.beenden();
+pruefe(aufrufe.length === 2 && aufrufe[1][0] === "beenden",
+       "und am Fahrtende wird die Anzeige beendet");
+aufrufe.length = 0;
+seite = frischeSeite({ JoltAnzeige: plugin, Capacitor: { isNativePlatform: () => false } });
+seite.melden(geplant);
+pruefe(aufrufe.length === 0, "ausserhalb der App (Browser, Bluefy) passiert nichts");
+seite = frischeSeite(null);
+ok = true;
+try { seite.melden(geplant); seite.beenden(); } catch (e) { ok = false; }
+pruefe(ok, "und ohne Plugin-Huelle laeuft alles durch");
+
 console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
 process.exit(fehler ? 1 : 0);

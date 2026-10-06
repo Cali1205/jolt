@@ -51,6 +51,12 @@ setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
 /usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
 
+# **Live Activities.** Ohne diesen Schluessel lehnt ActivityKit jede Anfrage ab
+# (Activity.request wirft), und die Anzeige in CarPlay und auf dem
+# Sperrbildschirm bleibt leer - ohne Hinweis im Protokoll der App.
+/usr/libexec/PlistBuddy -c "Delete :NSSupportsLiveActivities" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivities bool true" "$PLIST"
+
 /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string bluetooth-central" "$PLIST"
@@ -58,4 +64,4 @@ setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
 
 echo "Info.plist ergaenzt:"
 /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E \
-  "NSBluetooth|NSLocation|UIBackgroundModes|ITSApp" -A 2 || true
+  "NSBluetooth|NSLocation|NSSupportsLive|UIBackgroundModes|ITSApp" -A 2 || true

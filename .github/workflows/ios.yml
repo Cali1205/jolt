@@ -25,6 +25,10 @@ on:
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
       - "tools/ios_symbol.sh"
+      - "tools/ios_widget.sh"
+      - "tools/ios_widget.rb"
+      - "plugins/**"
+      - "ios-native/**"
       - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   pull_request:
@@ -35,6 +39,10 @@ on:
       - "capacitor.config.json"
       - "tools/ios_info_plist.sh"
       - "tools/ios_symbol.sh"
+      - "tools/ios_widget.sh"
+      - "tools/ios_widget.rb"
+      - "plugins/**"
+      - "ios-native/**"
       - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
   # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
@@ -90,6 +98,18 @@ jobs:
 
       - name: Abgleichen
         run: npx cap sync ios
+
+      # **Nach** dem Abgleich, nicht davor: `cap sync` liest die Mindestfassung
+      # aus dem ersten IPHONEOS_DEPLOYMENT_TARGET der Projektdatei und schreibt
+      # sie als `.iOS(.vNN)` in CapApp-SPM/Package.swift. Stuende die
+      # Erweiterung (iOS 18) schon darin, kaeme `.v18`, und der Paketmanager
+      # lehnt das ab (tools-version 5.9) - so scheiterten die ersten Laeufe.
+      #
+      # Die Live Activity (CarPlay-Dashboard, Sperrbildschirm) ist eine
+      # Widget-Erweiterung, also ein eigenes Ziel im Xcode-Projekt. Die Vorlage
+      # kennt es nicht; dieses Skript haengt es ein.
+      - name: Live Activity einbauen
+        run: bash tools/ios_widget.sh ios/App
 
       # Auf GitHubs macOS-Abbild ist xcbeautify normalerweise vorhanden. Das
       # "normalerweise" ist der Grund fuer diese Zeile: Faellt es einmal aus
