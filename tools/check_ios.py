@@ -379,6 +379,27 @@ def teil_carplay() -> None:
            "Repository-Variable - bis er im Portal eingeschaltet ist, bleibt er aus")
     pruefe(re.search(r"carplay:\s*\n\s+description:.*?default: false", fliegen, re.S) is not None,
            "und das Häkchen steht auf aus")
+    # Start und Beenden aus CarPlay: Plugin, Szene und Oberflaeche muessen
+    # dieselben Namen sprechen, sonst tut ein Knopf im Auto nichts.
+    fahrten = lesen("frontend", "fahrten.js")
+    for methode in ("bereit", "aktionErgebnis"):
+        pruefe(f'CAPPluginMethod(name: "{methode}"' in plugin
+               and f"func {methode}(" in plugin and f"p.{methode}(" in fahrten,
+               f"{methode}: im Plugin deklariert und umgesetzt, in fahrten.js aufgerufen")
+    pruefe('notifyListeners("carplayAktion"' in plugin and '"carplayAktion"' in fahrten,
+           "das Ereignis heisst auf beiden Seiten carplayAktion")
+    pruefe('aktionAnfordern("starten")' in delegate and 'aktionAnfordern("beenden")' in delegate
+           and 'aktion === "starten"' in fahrten and 'aktion === "beenden"' in fahrten,
+           "Starten und Beenden: dieselben Aktionsnamen in Szene und Oberflaeche")
+    pruefe("CPAlertTemplate" in delegate and "Aufzeichnung beenden?" in delegate,
+           "Beenden fragt vorher nach - ein Tippen aus Versehen schliesst keine Fahrt ab")
+    pruefe("brueckeMelden(true)" in plugin and "guard moeglich" in lesen(
+               "plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
+               "JoltAnzeigeStore.swift"),
+           "ohne geladene Oberflaeche (Kaltstart) wird keine Aktion versprochen - CarPlay sagt es")
+    pruefe("asyncAfter" in delegate and "Keine Antwort von jolt" in delegate,
+           "antwortet die Oberflaeche nicht, bleibt 'wird gestartet' nicht ewig stehen")
+
     doku = lesen("ios-einrichten.md")
     pruefe("CarPlay EV Charging" in doku and "CARPLAY_ENTITLEMENT" in doku,
            "die Anleitung erklaert, wie er im Portal eingeschaltet wird")

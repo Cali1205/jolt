@@ -184,7 +184,12 @@ window.joltFahrten = (function () {
    * nicht, und in beiden Fällen ist eine Aufzeichnung mit von Hand
    * gemeldetem Ladestand besser als keine.
    */
+  // Warum der letzte Start nicht klappte - fuer CarPlay, das keine Meldung
+  // der Oberflaeche sieht und den Grund selbst anzeigen muss.
+  let letzterStartFehler = "";
+
   async function aufzeichnungStarten() {
+    letzterStartFehler = "";
     const knopf = document.getElementById("aufz-start");
     const stand = (text) => {
       const el = document.getElementById("aufz-stand");
@@ -222,7 +227,8 @@ window.joltFahrten = (function () {
       if (!id) {
         K.melden("Erst ein Fahrzeug wählen – ohne das gehört die "
                  + "Aufzeichnung niemandem.", "fehler");
-        return;
+        letzterStartFehler = "Kein Fahrzeug gewählt – in jolt einmal auswählen.";
+        return false;
       }
 
       stand("Standort holen …");
@@ -305,13 +311,95 @@ window.joltFahrten = (function () {
         K.melden("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
           + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
       }
+      // Das zuletzt aufgezeichnete Fahrzeug gilt beim naechsten Mal wieder -
+      // auch fuer den Start aus CarPlay, wo man keines waehlen kann.
+      try { localStorage.setItem("jolt-aufz-fahrzeug", String(id)); } catch (e) { /* ohne Gedaechtnis */ }
+      fahrzeugMelden();
       stand("");
     } catch (fehler) {
       K.melden("Aufzeichnung: " + fehler.message, "fehler");
+      letzterStartFehler = fehler.message || "Start fehlgeschlagen.";
       stand("");
     } finally {
       knopf.disabled = false;
     }
+    return !!K.zustand.sitzungId;
+  }
+
+  /* ---------- CarPlay ----------
+   *
+   * Die CarPlay-Liste (plugins/jolt-anzeige) kann die Aufzeichnung starten und
+   * beenden. Sie ruft hierher ueber ein Ereignis des Plugins und bekommt das
+   * Ergebnis zurueck - schiefgegangenes zeigt CarPlay selbst an, denn die
+   * Meldungen dieser Oberflaeche sieht im Auto niemand.
+   *
+   * Gestartet wird mit dem **zuletzt benutzten Fahrzeug**: Im Auto laesst sich
+   * keines waehlen, und dieselbe Erinnerung nutzt der Start auf dem Telefon. */
+  function carplayPlugin() {
+    const huelle = window.joltBlePlugin;
+    if (!huelle || !huelle.JoltAnzeige || !huelle.Capacitor
+        || !huelle.Capacitor.isNativePlatform()) return null;
+    return huelle.JoltAnzeige;
+  }
+
+  function fahrzeugMelden() {
+    const p = carplayPlugin();
+    if (!p) return;
+    const wahl = document.getElementById("aufz-fahrzeug");
+    const option = wahl && wahl.selectedOptions && wahl.selectedOptions[0];
+    const name = option && wahl.value ? String(option.textContent || "").trim() : "";
+    try {
+      const antwort = p.bereit({ fahrzeug: name });
+      if (antwort && antwort.catch) antwort.catch(() => {});
+    } catch (e) { /* kein Plugin, kein CarPlay */ }
+  }
+
+  async function carplayAktion(aktion) {
+    const p = carplayPlugin();
+    let ok = false, text = "";
+    try {
+      if (aktion === "starten") {
+        if (K.zustand.sitzungId) {
+          ok = true; text = "Die Aufzeichnung läuft schon.";
+        } else if (document.getElementById("aufz-start")
+                   && document.getElementById("aufz-start").disabled) {
+          ok = false; text = "Ein Start läuft gerade.";
+        } else {
+          ok = await aufzeichnungStarten();
+          text = ok ? "" : (letzterStartFehler || "Der Start hat nicht geklappt.");
+        }
+      } else if (aktion === "beenden") {
+        if (!K.zustand.sitzungId) {
+          ok = true; text = "Es läuft keine Aufzeichnung.";
+        } else {
+          await window.joltLive.beenden();
+          ok = !K.zustand.sitzungId;
+          text = ok ? "" : "Das Beenden hat nicht geklappt.";
+        }
+      } else {
+        return;
+      }
+    } catch (fehler) {
+      ok = false;
+      text = (fehler && fehler.message) || "Unbekannter Fehler.";
+    }
+    if (p) {
+      try {
+        const antwort = p.aktionErgebnis({ aktion, ok, text });
+        if (antwort && antwort.catch) antwort.catch(() => {});
+      } catch (e) { /* CarPlay zeigt dann eben nichts */ }
+    }
+    return ok;
+  }
+
+  function carplayAnbinden() {
+    const p = carplayPlugin();
+    if (!p || typeof p.addListener !== "function") return;
+    try {
+      const h = p.addListener("carplayAktion", (e) => carplayAktion(e && e.aktion));
+      if (h && h.catch) h.catch(() => {});
+    } catch (e) { /* ohne Plugin kein CarPlay */ }
+    fahrzeugMelden();
   }
 
   /* Beim Öffnen sagen, was dieser Browser kann - bevor jemand tippt und
@@ -330,6 +418,7 @@ window.joltFahrten = (function () {
 
   function einrichten() {
     K.an("aufz-start", "click", aufzeichnungStarten);
+    carplayAnbinden();
     dongleHinweis();
     const halter = document.getElementById("fahrten-liste");
     if (!halter) return;
@@ -364,5 +453,6 @@ window.joltFahrten = (function () {
     }
   }
 
-  return { einrichten, laden, anzeigen, aufzeichnungStarten };
+  return { einrichten, laden, anzeigen, aufzeichnungStarten,
+           carplayAktion, fahrzeugMelden };
 })();

@@ -26,6 +26,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     private var schnittstelle: CPInterfaceController?
     private var liste: CPListTemplate?
     private var beobachterKennung: UUID?
+    private var ergebnisKennung: UUID?
+    /// "wird gestartet …" bis das Ergebnis da ist.
+    private var laeuft: String?
+    private var laeuftSeit: Date?
 
     /// Ab wann eine Anzeige als veraltet gilt.
     private let frischeSekunden: TimeInterval = 180
@@ -45,7 +49,13 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
         beobachterKennung = JoltAnzeigeStore.shared.beobachten { [weak self] modell in
             guard let self = self else { return }
+            // Kommt eine frische Anzeige, läuft die Aufzeichnung: Das "wird
+            // gestartet" ist erledigt.
+            if self.frisch(modell) != nil { self.laeuft = nil }
             self.liste?.updateSections(self.abschnitte(modell))
+        }
+        ergebnisKennung = JoltAnzeigeStore.shared.ergebnisBeobachten { [weak self] aktion, ok, text in
+            self?.ergebnis(aktion: aktion, ok: ok, text: text)
         }
     }
 
@@ -57,6 +67,11 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             JoltAnzeigeStore.shared.nichtMehrBeobachten(kennung)
         }
         beobachterKennung = nil
+        if let kennung = ergebnisKennung {
+            JoltAnzeigeStore.shared.ergebnisNichtMehrBeobachten(kennung)
+        }
+        ergebnisKennung = nil
+        laeuft = nil
         liste = nil
         schnittstelle = nil
     }
@@ -71,10 +86,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
     private func abschnitte(_ rohmodell: JoltAnzeige?) -> [CPListSection] {
         guard let modell = frisch(rohmodell) else {
-            let leer = CPListItem(
-                text: "Keine laufende Fahrt",
-                detailText: "Starte die Aufzeichnung in jolt")
-            return [CPListSection(items: [leer])]
+            return [CPListSection(
+                items: [startZeile()], header: "Keine laufende Fahrt", sectionIndexTitle: nil)]
         }
 
         var jetzt: [CPListItem] = []
@@ -118,6 +131,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         }
 
         var ergebnis: [CPListSection] = []
+        // Beenden steht zuoberst im eigenen Abschnitt: Wer fertig ist, sucht es
+        // nicht unter den Werten.
+        ergebnis.append(CPListSection(
+            items: [beendenZeile()], header: "Fahrt", sectionIndexTitle: nil))
         if !jetzt.isEmpty {
             ergebnis.append(CPListSection(
                 items: Array(jetzt.prefix(zeilenMax)),
@@ -143,6 +160,103 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         return ergebnis.isEmpty
             ? [CPListSection(items: [CPListItem(text: "Keine Werte", detailText: nil)])]
             : ergebnis
+    }
+
+    // MARK: - Aufzeichnung starten und beenden
+
+    private func startZeile() -> CPListItem {
+        let fahrzeug = JoltAnzeigeStore.shared.fahrzeugName
+        let zeile = CPListItem(
+            text: "Aufzeichnung starten",
+            detailText: laeuft ?? (fahrzeug.map { "Fahrzeug: \($0)" }
+                                   ?? "mit dem zuletzt benutzten Fahrzeug"))
+        zeile.handler = { [weak self] _, abschluss in
+            self?.starten()
+            abschluss()
+        }
+        return zeile
+    }
+
+    private func beendenZeile() -> CPListItem {
+        let zeile = CPListItem(
+            text: "Aufzeichnung beenden",
+            detailText: laeuft ?? "Fahrt abschliessen und speichern")
+        zeile.handler = { [weak self] _, abschluss in
+            self?.beendenFragen()
+            abschluss()
+        }
+        return zeile
+    }
+
+    private func starten() {
+        guard laeuft == nil else { return }
+        guard JoltAnzeigeStore.shared.aktionAnfordern("starten") else {
+            hinweis("jolt läuft auf dem iPhone nicht. Öffne jolt einmal auf dem iPhone, dann geht es von hier.")
+            return
+        }
+        laeuft = "wird gestartet …"
+        aktualisieren()
+        ueberwachen()
+    }
+
+    /// Antwortet die Oberfläche nicht (die App ist eingefroren, das iPhone
+    /// gesperrt), bliebe "wird gestartet …" für immer stehen und sperrte jeden
+    /// weiteren Versuch. Nach 25 Sekunden wird das gesagt.
+    private func ueberwachen() {
+        let marke = Date()
+        laeuftSeit = marke
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
+            guard let self = self, self.laeuftSeit == marke, self.laeuft != nil else { return }
+            self.laeuft = nil
+            self.aktualisieren()
+            self.hinweis("Keine Antwort von jolt. Ist die App auf dem iPhone geöffnet?")
+        }
+    }
+
+    /// Beenden mit Rückfrage: Ein Tippen aus Versehen darf keine Fahrt abschliessen.
+    private func beendenFragen() {
+        guard laeuft == nil else { return }
+        let ja = CPAlertAction(title: "Beenden", style: .destructive) { [weak self] _ in
+            self?.schnittstelle?.dismissTemplate(animated: true, completion: nil)
+            guard let self = self else { return }
+            if JoltAnzeigeStore.shared.aktionAnfordern("beenden") {
+                self.laeuft = "wird beendet …"
+                self.aktualisieren()
+                self.ueberwachen()
+            } else {
+                self.hinweis("jolt läuft auf dem iPhone nicht. Die Aufzeichnung lässt sich dort beenden.")
+            }
+        }
+        let nein = CPAlertAction(title: "Abbrechen", style: .cancel) { [weak self] _ in
+            self?.schnittstelle?.dismissTemplate(animated: true, completion: nil)
+        }
+        let frage = CPAlertTemplate(
+            titleVariants: ["Aufzeichnung beenden?"], actions: [ja, nein])
+        schnittstelle?.presentTemplate(frage, animated: true, completion: nil)
+    }
+
+    /// Die Antwort der Oberfläche. Ein Erfolg zeigt sich von selbst (die
+    /// Anzeige kommt oder verschwindet); nur ein Fehler braucht eine Meldung.
+    private func ergebnis(aktion: String, ok: Bool, text: String) {
+        laeuft = nil
+        laeuftSeit = nil
+        aktualisieren()
+        if !ok {
+            let grund = text.isEmpty ? "Das hat nicht geklappt." : text
+            hinweis((aktion == "starten" ? "Start fehlgeschlagen: " : "Beenden fehlgeschlagen: ") + grund)
+        }
+    }
+
+    private func aktualisieren() {
+        liste?.updateSections(abschnitte(JoltAnzeigeStore.shared.aktuell))
+    }
+
+    private func hinweis(_ text: String) {
+        let ok = CPAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.schnittstelle?.dismissTemplate(animated: true, completion: nil)
+        }
+        let meldung = CPAlertTemplate(titleVariants: [text], actions: [ok])
+        schnittstelle?.presentTemplate(meldung, animated: true, completion: nil)
     }
 
     private func stoppZeile(_ stopp: JoltAnzeige.Listenstopp) -> String {

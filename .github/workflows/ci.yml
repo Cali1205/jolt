@@ -148,6 +148,10 @@ jobs:
       - name: Mithoeren pruefen
         run: node tools/check_lauschen.js
 
+      # Aufzeichnung starten und beenden aus der CarPlay-Liste.
+      - name: CarPlay-Aktionen pruefen
+        run: node tools/check_carplay_aktion.js
+
       # Verbinden und Mithoeren aus den Einstellungen, vom Tippen bis zum Text.
       - name: Dongle-Knoepfe der Einstellungen pruefen
         run: node tools/check_einstellungen.js
