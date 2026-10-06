@@ -83,6 +83,25 @@ window.joltKarte = (function () {
     return bild;
   }
 
+  /* Solange eine Kachel lädt, steht an ihrer Stelle ein Ausschnitt der
+   * gröberen Kachel darüber - unscharf, aber da. Ohne das bleibt beim Zoomen
+   * und Ziehen die Fläche leer, bis das Netz geantwortet hat, und die Karte
+   * "springt" von weiss zu Inhalt. Nur was schon im Speicher liegt wird
+   * genommen; geladen wird dafür nichts. */
+  function ersatzZeichnen(z, x, y, sx, sy, groesse) {
+    for (let dz = 1; dz <= 3 && z - dz >= 0; dz++) {
+      const px = Math.floor(x / Math.pow(2, dz));
+      const py = Math.floor(y / Math.pow(2, dz));
+      const bild = kacheln.get(`${z - dz}/${px}/${py}`);
+      if (!bild || !bild.complete || bild.fehlgeschlagen) continue;
+      const teil = KACHEL / Math.pow(2, dz);
+      const qx = (x - px * Math.pow(2, dz)) * teil;
+      const qy = (y - py * Math.pow(2, dz)) * teil;
+      stift.drawImage(bild, qx, qy, teil, teil, sx, sy, groesse + 0.5, groesse + 0.5);
+      return;
+    }
+  }
+
   function kachelnZeichnen() {
     const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
     const z = Math.round(zoom);
@@ -102,9 +121,12 @@ window.joltKarte = (function () {
         if (y < 0 || y >= anzahl) continue;
         const xUmlauf = ((x % anzahl) + anzahl) % anzahl;   // Datumsgrenze
         const bild = kachelHolen(z, xUmlauf, y);
-        if (!bild.complete || bild.fehlgeschlagen) continue;
         const sx = (x * KACHEL - linksOben.x) * massstab;
         const sy = (y * KACHEL - linksOben.y) * massstab;
+        if (!bild.complete || bild.fehlgeschlagen) {
+          ersatzZeichnen(z, xUmlauf, y, sx, sy, groesse);
+          continue;
+        }
         // Ein halber Pixel Überlappung: sonst blitzen zwischen den Kacheln
         // haarfeine Linien durch, wenn der Massstab nicht ganzzahlig ist.
         stift.drawImage(bild, sx, sy, groesse + 0.5, groesse + 0.5);
@@ -188,60 +210,106 @@ window.joltKarte = (function () {
 
   /* ---------- Bedienung ---------- */
 
+  /* Eine Geste, egal ob ein, zwei oder drei Finger: Schwerpunkt und Abstand
+   * der Finger werden von Schritt zu Schritt verglichen.
+   *
+   *  - Der Schwerpunkt wandert: die Karte wandert mit (Ziehen, und Ziehen mit
+   *    zwei Fingern).
+   *  - Der Abstand ändert sich: gezoomt wird **um den Schwerpunkt**, so dass
+   *    der Punkt unter den Fingern unter den Fingern bleibt.
+   *
+   * Frueher stand hier ein Zweig fuer einen Finger und einer fuer zwei. Beim
+   * Wechsel dazwischen - ein Finger hebt sich nach dem Kneifen - galt noch die
+   * Fingerposition von vor dem Kneifen, und der naechste Schritt schob die
+   * Karte um die ganze Strecke dazwischen: der Sprung. Gezoomt wurde ausserdem
+   * um die Kartenmitte, nicht um die Finger, so dass der Inhalt unter ihnen
+   * wegwanderte. Hier gibt es keinen Zweig: Jedes Hinzukommen und Wegfallen
+   * eines Fingers beginnt die Geste neu (`bezug`), und ein Schritt rechnet nur
+   * gegen den Schritt davor. */
   function bedienungEinrichten() {
-    let zieht = false, letzte = null;
     const zeiger = new Map();
-    let letzterAbstand = 0;
+    let bezug = null;          // {x, y, abstand} beim letzten Schritt
+
+    function lokal(e) {
+      const r = leinwand.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    function lage() {
+      const p = Array.from(zeiger.values());
+      if (!p.length) return null;
+      const x = p.reduce((a, q) => a + q.x, 0) / p.length;
+      const y = p.reduce((a, q) => a + q.y, 0) / p.length;
+      const abstand = p.length >= 2 ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) : 0;
+      return { x, y, abstand };
+    }
 
     leinwand.addEventListener("pointerdown", (e) => {
-      leinwand.setPointerCapture(e.pointerId);
-      zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      zieht = true;
-      letzte = { x: e.clientX, y: e.clientY };
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      try { leinwand.setPointerCapture(e.pointerId); } catch (f) { /* schon weg */ }
+      zeiger.set(e.pointerId, lokal(e));
+      bezug = lage();
     });
 
     leinwand.addEventListener("pointermove", (e) => {
       if (!zeiger.has(e.pointerId)) return;
-      zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-      if (zeiger.size >= 2) {
-        // Kneifen: der Abstand der beiden Finger steuert den Zoom.
-        const [a, b] = Array.from(zeiger.values());
-        const abstand = Math.hypot(a.x - b.x, a.y - b.y);
-        if (letzterAbstand > 0 && abstand > 0) {
-          zoomAendern(Math.log2(abstand / letzterAbstand));
-        }
-        letzterAbstand = abstand;
-        return;
+      zeiger.set(e.pointerId, lokal(e));
+      const jetzt = lage();
+      if (!bezug) { bezug = jetzt; return; }
+      if (jetzt.abstand > 0 && bezug.abstand > 0) {
+        zoomUm(Math.log2(jetzt.abstand / bezug.abstand), bezug.x, bezug.y);
       }
-
-      if (!zieht || !letzte) return;
-      verschieben(letzte.x - e.clientX, letzte.y - e.clientY);
-      letzte = { x: e.clientX, y: e.clientY };
+      verschieben(bezug.x - jetzt.x, bezug.y - jetzt.y);
+      bezug = jetzt;
     });
 
+    // Ein Zeiger, der verloren geht, ohne dass `pointerup` kommt (eine
+    // Systemgeste von iOS, ein Anruf), bliebe sonst fuer immer in der Liste:
+    // Die Karte hielte einen Finger fuer gedrueckt und bliebe im Zoommodus.
     const loslassen = (e) => {
-      zeiger.delete(e.pointerId);
-      if (zeiger.size < 2) letzterAbstand = 0;
-      if (zeiger.size === 0) { zieht = false; letzte = null; }
+      if (!zeiger.delete(e.pointerId)) return;
+      bezug = lage();
     };
     leinwand.addEventListener("pointerup", loslassen);
     leinwand.addEventListener("pointercancel", loslassen);
+    leinwand.addEventListener("lostpointercapture", loslassen);
+    window.addEventListener("blur", () => { zeiger.clear(); bezug = null; });
 
     leinwand.addEventListener("wheel", (e) => {
       e.preventDefault();
-      zoomAendern(e.deltaY < 0 ? 0.5 : -0.5);
+      // Proportional zum Rad: Eine Maus rastet in 100er-Schritten (0,4 Stufen),
+      // ein Trackpad liefert viele kleine, und Kneifen darauf kommt mit ctrlKey.
+      const faktor = e.deltaMode === 1 ? 0.05 : (e.ctrlKey ? 0.01 : 0.004);
+      const delta = Math.max(-1, Math.min(1, -e.deltaY * faktor));
+      const r = leinwand.getBoundingClientRect();
+      zoomUm(delta, e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
   }
 
   function verschieben(dx, dy) {
+    if (!dx && !dy) return;
+    const n = KACHEL * Math.pow(2, zoom);
     const m = nachWelt(mitte.lat, mitte.lon, zoom);
-    mitte = nachGeo(m.x + dx, m.y + dy, zoom);
+    // Nicht ueber den Rand der Welt hinaus: Dort gibt es keine Kacheln, und
+    // die Projektion liefert fuer y ausserhalb von [0, n] unsinnige Breiten.
+    const y = Math.max(0, Math.min(n, m.y + dy));
+    mitte = nachGeo(m.x + dx, y, zoom);
     zeichnenSpaeter();
   }
 
-  function zoomAendern(delta) {
-    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
+  /* Zoomen um einen Punkt auf der Leinwand (Pixel): Der Ort unter diesem
+   * Punkt liegt danach wieder darunter. */
+  function zoomUm(delta, sx, sy) {
+    const neu = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
+    if (neu === zoom) return;
+    const dx = sx - leinwand.clientWidth / 2;
+    const dy = sy - leinwand.clientHeight / 2;
+    const m = nachWelt(mitte.lat, mitte.lon, zoom);
+    const unter = nachGeo(m.x + dx, m.y + dy, zoom);
+    zoom = neu;
+    const u = nachWelt(unter.lat, unter.lon, zoom);
+    const n = KACHEL * Math.pow(2, zoom);
+    mitte = nachGeo(u.x - dx, Math.max(0, Math.min(n, u.y - dy)), zoom);
     zeichnenSpaeter();
   }
 
@@ -298,5 +366,9 @@ window.joltKarte = (function () {
   }
 
   return { erstellen, routeSetzen, markerSetzen, aufRoutePassen, aufPunkt,
-           neuZeichnen: zeichnenSpaeter };
+           neuZeichnen: zeichnenSpaeter,
+           // Fuer die Pruefung (tools/check_karte.js): Ansicht lesen und einen
+           // Punkt in Pixel umrechnen.
+           ansicht: () => ({ mitte: { ...mitte }, zoom }),
+           nachSchirm };
 })();
