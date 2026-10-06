@@ -866,6 +866,30 @@ table.kurve input { padding: 6px 8px; }
           <input type="checkbox" id="diag-fahrt-ok" style="width:auto">
           <span>Trotz laufender Fahrt senden</span>
         </label>
+
+        <h3>Mithören (passiv)</h3>
+        <p class="leer" style="padding-top:0">Hört eine Weile auf dem Bus zu und
+          zeigt, welche Meldungen ohne Anfrage ankommen – und ob sich ihr Inhalt
+          ändert. <strong>Gesendet werden nur AT-Befehle, die im Dongle bleiben,
+          nichts auf den CAN.</strong> Gedacht für ein ladendes Auto, ohne dass
+          die Alarmanlage etwas merkt. Zuerst bei <strong>entriegeltem</strong>
+          Auto ausprobieren und daneben stehen: <code>ATCSM1</code> schaltet das
+          Bestätigen von Frames ab, ob ein Nachbau das wirklich tut, kann jolt
+          nicht prüfen. Nicht während einer Fahrt.</p>
+        <div class="einst-befehl">
+          <select id="lausch-protokoll" aria-label="Protokoll">
+            <option value="6">11 Bit, 500 kbit/s (6)</option>
+            <option value="7">29 Bit, 500 kbit/s (7)</option>
+          </select>
+          <select id="lausch-dauer" aria-label="Dauer">
+            <option value="10000">10 s</option>
+            <option value="30000">30 s</option>
+            <option value="60000">60 s</option>
+          </select>
+          <button class="tat" id="lausch-start" style="margin:0">Mithören</button>
+        </div>
+        <pre id="lausch-ergebnis" class="diag-protokoll" hidden></pre>
+        <button class="tat neben" id="lausch-kopieren" hidden>Ergebnis kopieren</button>
       </div>
     </details>
 

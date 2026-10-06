@@ -142,3 +142,8 @@ jobs:
       # Leinwand, ohne Browser.
       - name: Kartenbedienung pruefen
         run: node tools/check_karte.js
+
+      # Das passive Mithoeren darf nichts auf den CAN senden - was gesendet wird,
+      # ist das, woran die Alarmanlage haengt.
+      - name: Mithoeren pruefen
+        run: node tools/check_lauschen.js
