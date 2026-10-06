@@ -17,7 +17,7 @@ from fastapi import Header, HTTPException
 from sqlalchemy.orm import Session
 
 from . import models
-from .database import get_db
+from .database import SessionLocal, get_db
 from fastapi import Depends
 
 log = logging.getLogger("uvicorn.error")
@@ -41,7 +41,11 @@ def passwort_pruefen(eingabe: str) -> bool:
     # compare_digest statt ==, damit die Laufzeit nichts über das Passwort
     # verrät. Bei einem Heimserver ist das Paranoia mit vernachlässigbaren
     # Kosten - aber es ist die richtige Gewohnheit.
-    return secrets.compare_digest(eingabe or "", erwartet)
+    # Bytes, nicht Strings: compare_digest wirft bei Nicht-ASCII in str einen
+    # TypeError. Ein Passwort mit Umlaut machte den Login zum 500er - und ein
+    # so eingerichtetes APP_PASSWORT hätte nie angenommen werden können.
+    return secrets.compare_digest((eingabe or "").encode("utf-8"),
+                                  erwartet.encode("utf-8"))
 
 
 def sitzung_anlegen(db: Session, geraet: str = "") -> str:
@@ -51,12 +55,13 @@ def sitzung_anlegen(db: Session, geraet: str = "") -> str:
     return token
 
 
-def aktuelle_sitzung(x_token: str = Header(default=""),
-                     db: Session = Depends(get_db)) -> models.Sitzung | None:
-    """Dependency für alles, was Zugang braucht."""
-    if not passwort_gesetzt():
-        return None
+def sitzung_pruefen(x_token: str, db: Session) -> models.Sitzung:
+    """Den Token einer Anmeldung prüfen und die Sitzung fortschreiben.
 
+    Eigene Funktion, weil zwei Wege hineinführen: die Dependency für HTTP
+    (Header `X-Token`) und der WebSocket, der keine Header setzen kann und
+    den Token deshalb als erste Nachricht schickt.
+    """
     if not x_token:
         raise HTTPException(401, "Nicht angemeldet.")
 
@@ -74,6 +79,28 @@ def aktuelle_sitzung(x_token: str = Header(default=""),
         sitzung.zuletzt_gesehen = jetzt
         db.commit()
     return sitzung
+
+
+def aktuelle_sitzung(x_token: str = Header(default=""),
+                     db: Session = Depends(get_db)) -> models.Sitzung | None:
+    """Dependency für alles, was Zugang braucht."""
+    if not passwort_gesetzt():
+        return None
+    return sitzung_pruefen(x_token, db)
+
+
+def token_gueltig(x_token: str) -> bool:
+    """Für den WebSocket: ist dieser Token angemeldet? Ohne Ausnahme."""
+    if not passwort_gesetzt():
+        return True
+    db = SessionLocal()
+    try:
+        sitzung_pruefen(x_token or "", db)
+        return True
+    except HTTPException:
+        return False
+    finally:
+        db.close()
 
 
 def beim_start_warnen() -> None:

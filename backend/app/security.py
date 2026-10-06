@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 # Nur Proxys aus dieser Liste dürfen die Client-IP setzen. Ohne die Prüfung
 # könnte jeder Client den Header fälschen und das Rate-Limit umgehen.
@@ -25,6 +26,11 @@ LOGIN_MAX = int(os.environ.get("LOGIN_LIMIT_PER_15MIN", "10"))
 _sperre = threading.Lock()
 _treffer: dict[str, deque] = defaultdict(deque)
 _login_treffer: dict[str, deque] = defaultdict(deque)
+# Fehlversuche mit einem falschen Logger-Token an /api/live/melden. Der Pfad
+# ist vom allgemeinen Limit ausgenommen (er bekommt Messpunkte im Sekundentakt),
+# also braucht das Durchprobieren von Tokens ein eigenes.
+_melden_fehler: dict[str, deque] = defaultdict(deque)
+MELDEN_FEHLER_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 
 # Der Live-Endpunkt bekommt im Sekundentakt Messpunkte. Ein Limit von 120
 # Anfragen je Minute wäre dafür genau falsch: Es würde ausgerechnet die
@@ -62,10 +68,24 @@ def _verfallen(warteschlange: deque, jetzt: float, fenster: int) -> None:
         warteschlange.popleft()
 
 
-def _zaehlen(eimer: dict, schluessel: str, fenster: int, grenze: int) -> bool:
-    """True, wenn die Anfrage erlaubt ist."""
+# Wie oft abgelaufene Absender aus dem Speicher genommen werden. Der Zähler
+# legt je Absender-IP einen Eintrag an; ohne Aufräumen wüchse er mit jeder IP,
+# die je angefragt hat - und hinter einem Proxy, der den Header nicht
+# überschreibt, mit jedem erfundenen Wert.
+AUFRAEUMEN_ALLE_S = 60
+_zuletzt_aufgeraeumt: dict[int, float] = {}
+
+
+def _zaehlen(eimer: dict, schluessel: str, fenster: int, grenze: int,
+             aufraeumen_ab: float | None = None) -> bool:
+    """True, wenn die Anfrage erlaubt ist.
+
+    `aufraeumen_ab` gibt es nur für die Prüfung: Zeitpunkt der letzten
+    Aufräumrunde, damit sich die Runde ohne Warten auslösen lässt.
+    """
     jetzt = time.time()
     with _sperre:
+        _abgelaufene_entfernen(eimer, jetzt, fenster, aufraeumen_ab)
         warteschlange = eimer[schluessel]
         _verfallen(warteschlange, jetzt, fenster)
         if len(warteschlange) >= grenze:
@@ -74,10 +94,40 @@ def _zaehlen(eimer: dict, schluessel: str, fenster: int, grenze: int) -> bool:
         return True
 
 
+def _abgelaufene_entfernen(eimer: dict, jetzt: float, fenster: int,
+                           zuletzt: float | None) -> None:
+    """Absender ohne Treffer im Fenster löschen - höchstens einmal je Minute."""
+    zuletzt = _zuletzt_aufgeraeumt.get(id(eimer), 0.0) if zuletzt is None else zuletzt
+    if jetzt - zuletzt < AUFRAEUMEN_ALLE_S:
+        return
+    _zuletzt_aufgeraeumt[id(eimer)] = jetzt
+    for schluessel in [k for k, q in eimer.items()
+                       if not q or jetzt - q[-1] > fenster]:
+        del eimer[schluessel]
+
+
 def login_limit(request: Request) -> None:
     """Eigenes, enges Limit für den Login - gegen das Durchprobieren."""
     if not _zaehlen(_login_treffer, client_ip(request), LOGIN_WINDOW, LOGIN_MAX):
         raise HTTPException(429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
+
+
+def melden_gesperrt(request: Request) -> bool:
+    """True, wenn diese Adresse zu oft ein falsches Logger-Token geschickt hat."""
+    jetzt = time.time()
+    with _sperre:
+        _abgelaufene_entfernen(_melden_fehler, jetzt, LOGIN_WINDOW, None)
+        warteschlange = _melden_fehler.get(client_ip(request))
+        if not warteschlange:
+            return False
+        _verfallen(warteschlange, jetzt, LOGIN_WINDOW)
+        return len(warteschlange) >= MELDEN_FEHLER_MAX
+
+
+def melden_fehler_zaehlen(request: Request) -> None:
+    """Einen Fehlversuch vermerken - nur falsche Token, nicht jede Meldung."""
+    with _sperre:
+        _melden_fehler[client_ip(request)].append(time.time())
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -85,9 +135,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         pfad = request.url.path
         if pfad.startswith("/api/") and not pfad.startswith(AUSGENOMMEN):
             if not _zaehlen(_treffer, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
-                raise HTTPException(429, "Zu viele Anfragen.")
+                # Antwort zurückgeben statt `HTTPException` zu werfen: FastAPIs
+                # Ausnahmebehandlung greift in einer Middleware nicht, der
+                # Aufrufer bekam einen 500er mit Traceback im Log.
+                antwort = JSONResponse({"detail": "Zu viele Anfragen."},
+                                       status_code=429)
+                return self._kopfzeilen(request, antwort)
 
-        antwort = await call_next(request)
+        return self._kopfzeilen(request, await call_next(request))
+
+    @staticmethod
+    def _kopfzeilen(request: Request, antwort):
         antwort.headers["X-Content-Type-Options"] = "nosniff"
         antwort.headers["X-Frame-Options"] = "DENY"
         antwort.headers["Referrer-Policy"] = "same-origin"
