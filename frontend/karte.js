@@ -35,6 +35,11 @@ window.joltKarte = (function () {
   let route = [], marker = [];
   const kacheln = new Map();       // "z/x/y" -> Image
   let zeichnenGeplant = false;
+  // Folgt die Ansicht dem Inhalt (Strecke, Auto, Stopps)? Gilt, bis jemand die
+  // Karte anfasst: Wer verschiebt, will sie nicht von der naechsten Meldung
+  // zurueckgeholt bekommen.
+  let folgen = true;
+  let passenKnopf = null;
 
   /* ---------- Projektion (Web Mercator) ---------- */
 
@@ -249,6 +254,7 @@ window.joltKarte = (function () {
       try { leinwand.setPointerCapture(e.pointerId); } catch (f) { /* schon weg */ }
       zeiger.set(e.pointerId, lokal(e));
       bezug = lage();
+      folgenSetzen(false);
     });
 
     leinwand.addEventListener("pointermove", (e) => {
@@ -281,6 +287,7 @@ window.joltKarte = (function () {
       // ein Trackpad liefert viele kleine, und Kneifen darauf kommt mit ctrlKey.
       const faktor = e.deltaMode === 1 ? 0.05 : (e.ctrlKey ? 0.01 : 0.004);
       const delta = Math.max(-1, Math.min(1, -e.deltaY * faktor));
+      folgenSetzen(false);
       const r = leinwand.getBoundingClientRect();
       zoomUm(delta, e.clientX - r.left, e.clientY - r.top);
     }, { passive: false });
@@ -313,6 +320,106 @@ window.joltKarte = (function () {
     zeichnenSpaeter();
   }
 
+  /* ---------- Auf den Inhalt passen ---------- */
+
+  // Was die Ansicht zeigen soll: die Strecke, und von den Markern alles, was
+  // zur Fahrt gehoert. Ladesaeulen am Rand nicht - sie wuerden die Karte auf
+  // Land und Leute herauszoomen.
+  const MARKER_FUER_ANSICHT = ["auto", "start", "ziel", "stopp", "reserve"];
+  const RAND_PX = 36;
+  // Unter diesem Anteil der Ansicht ist der Inhalt zu klein, um ihn dort zu lassen.
+  const MINDEST_ANTEIL = 0.35;
+
+  function inhaltPunkte() {
+    const punkte = route.map((p) => [p[1], p[0]]);      // [lat, lon]
+    for (const m of marker) {
+      if (MARKER_FUER_ANSICHT.indexOf(m.typ) !== -1) punkte.push([m.lat, m.lon]);
+    }
+    return punkte.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  }
+
+  /* Die Ansicht so waehlen, dass der Inhalt hineinpasst.
+   *
+   * `erzwingen`: immer neu waehlen. Sonst nur, wenn es noetig ist - der
+   * Inhalt ragt aus der Ansicht, oder er fuellt weniger als ein Drittel davon.
+   * Dazwischen bleibt die Ansicht stehen: Waechst die Spur einer Aufzeichnung,
+   * soll die Karte nicht bei jeder Meldung ein wenig zoomen und wandern. */
+  function inhaltPassen(erzwingen) {
+    if (!leinwand || !folgen) return;
+    const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
+    if (breite < 50 || hoehe < 50) return;      // versteckt: spaeter noch einmal
+    const punkte = inhaltPunkte();
+    if (!punkte.length) return;
+
+    // Umrandung in Weltkoordinaten der Stufe 0: dort ist Mercator linear.
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [lat, lon] of punkte) {
+      const w = nachWelt(lat, lon, 0);
+      minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x);
+      minY = Math.min(minY, w.y); maxY = Math.max(maxY, w.y);
+    }
+    const w0 = maxX - minX, h0 = maxY - minY;
+
+    if (!erzwingen) {
+      const f = Math.pow(2, zoom);
+      const sichtbarB = breite - 2 * RAND_PX, sichtbarH = hoehe - 2 * RAND_PX;
+      const m = nachWelt(mitte.lat, mitte.lon, 0);
+      const links = (minX - m.x) * f + breite / 2, rechts = (maxX - m.x) * f + breite / 2;
+      const oben = (minY - m.y) * f + hoehe / 2, unten = (maxY - m.y) * f + hoehe / 2;
+      const drin = links >= RAND_PX / 2 && rechts <= breite - RAND_PX / 2
+        && oben >= RAND_PX / 2 && unten <= hoehe - RAND_PX / 2;
+      const anteil = Math.max(w0 * f / sichtbarB, h0 * f / sichtbarH);
+      // Ein einzelner Punkt (Beginn einer Aufzeichnung) hat keine Ausdehnung:
+      // da genuegt es, wenn er im Bild ist.
+      if (drin && (anteil >= MINDEST_ANTEIL || (w0 === 0 && h0 === 0))) return;
+    }
+
+    let neu;
+    if (w0 < 1e-9 && h0 < 1e-9) {
+      neu = 15;                                  // ein Punkt: Strassenebene
+    } else {
+      const faktor = Math.min((breite - 2 * RAND_PX) / Math.max(w0, 1e-9),
+                              (hoehe - 2 * RAND_PX) / Math.max(h0, 1e-9));
+      // In Viertelstufen abrunden: stabil gegen das Hin und Her bei jeder
+      // Kleinigkeit, und die Strecke passt sicher hinein.
+      neu = Math.floor(Math.log2(faktor) * 4) / 4;
+    }
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, neu));
+    mitte = nachGeo((minX + maxX) / 2 * Math.pow(2, zoom),
+                    (minY + maxY) / 2 * Math.pow(2, zoom), zoom);
+    zeichnenSpaeter();
+  }
+
+  function knopfAnzeigen() {
+    if (!passenKnopf) return;
+    // Nur anbieten, wenn es etwas zu zeigen gibt und die Ansicht nicht schon folgt.
+    passenKnopf.hidden = folgen || inhaltPunkte().length === 0;
+  }
+
+  function folgenSetzen(an) {
+    folgen = an;
+    knopfAnzeigen();
+  }
+
+  function knopfEinrichten() {
+    const halter = leinwand.parentElement;
+    if (!halter || !document.createElement) return;
+    passenKnopf = document.createElement("button");
+    passenKnopf.type = "button";
+    passenKnopf.textContent = "Auf Strecke zoomen";
+    passenKnopf.hidden = true;
+    passenKnopf.style.cssText = "position:absolute;top:8px;right:8px;z-index:2;"
+      + "padding:6px 10px;border-radius:8px;border:1px solid #ffffff33;"
+      + "background:#101418cc;color:#e6ebf0;font:600 12px system-ui,sans-serif;"
+      + "cursor:pointer";
+    passenKnopf.addEventListener("click", () => {
+      folgenSetzen(true);
+      inhaltPassen(true);
+    });
+    if (halter.style && !halter.style.position) halter.style.position = "relative";
+    halter.appendChild(passenKnopf);
+  }
+
   /* ---------- Öffentlich ---------- */
 
   function erstellen(id) {
@@ -320,53 +427,58 @@ window.joltKarte = (function () {
     if (!leinwand) return false;
     stift = leinwand.getContext("2d");
     bedienungEinrichten();
-    window.addEventListener("resize", zeichnenSpaeter);
+    knopfEinrichten();
+    // Eine andere Breite (Drehen, Umhaengen in eine andere Ansicht) ist ein
+    // anderer Ausschnitt: Folgt die Karte dem Inhalt, passt sie neu.
+    window.addEventListener("resize", neuZeichnen);
     zeichnenSpaeter();
     return true;
   }
 
+  function neuZeichnen() {
+    inhaltPassen(true);
+    zeichnenSpaeter();
+  }
+
   function routeSetzen(geometrie) {
-    route = geometrie || [];
+    const neu = geometrie || [];
+    // Eine kuerzere Strecke als zuvor ist eine neue (andere Fahrt, andere
+    // Planung): Dort beginnt das Folgen von vorn, auch wenn die vorige
+    // Ansicht von Hand verschoben wurde. Eine wachsende Spur bleibt, wie sie ist.
+    const neueFahrt = neu.length < route.length || route.length === 0;
+    if (neueFahrt) folgenSetzen(true);
+    route = neu;
+    // Eine neue Strecke wird immer neu eingepasst; sonst bliebe ihr erster
+    // Punkt in der weiten Ansicht der vorigen stehen.
+    inhaltPassen(neueFahrt);
+    knopfAnzeigen();
     zeichnenSpaeter();
   }
 
   function markerSetzen(liste) {
     marker = liste || [];
+    inhaltPassen(false);
+    knopfAnzeigen();
     zeichnenSpaeter();
   }
 
-  /** Zoom und Mitte so wählen, dass die ganze Route hineinpasst. */
-  function aufRoutePassen(rand) {
+  /** Zoom und Mitte so waehlen, dass die ganze Route hineinpasst - und die
+   *  Ansicht folgt dem Inhalt wieder. */
+  function aufRoutePassen() {
     if (!leinwand || route.length < 2) return;
-    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
-    for (const p of route) {
-      minLat = Math.min(minLat, p[1]); maxLat = Math.max(maxLat, p[1]);
-      minLon = Math.min(minLon, p[0]); maxLon = Math.max(maxLon, p[0]);
-    }
-    mitte = { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
-
-    const breite = leinwand.clientWidth - (rand || 40);
-    const hoehe = leinwand.clientHeight - (rand || 40);
-    for (let z = MAX_ZOOM; z >= MIN_ZOOM; z--) {
-      const a = nachWelt(maxLat, minLon, z);
-      const b = nachWelt(minLat, maxLon, z);
-      if (Math.abs(b.x - a.x) <= breite && Math.abs(b.y - a.y) <= hoehe) {
-        zoom = z;
-        break;
-      }
-      zoom = MIN_ZOOM;
-    }
-    zeichnenSpaeter();
+    folgenSetzen(true);
+    inhaltPassen(true);
   }
 
   function aufPunkt(lat, lon, z) {
+    folgenSetzen(false);
     mitte = { lat, lon };
     if (z) zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
     zeichnenSpaeter();
   }
 
   return { erstellen, routeSetzen, markerSetzen, aufRoutePassen, aufPunkt,
-           neuZeichnen: zeichnenSpaeter,
+           neuZeichnen,
            // Fuer die Pruefung (tools/check_karte.js): Ansicht lesen und einen
            // Punkt in Pixel umrechnen.
            ansicht: () => ({ mitte: { ...mitte }, zoom }),
