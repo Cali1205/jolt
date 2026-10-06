@@ -1892,11 +1892,35 @@ window.joltLive = (function () {
     return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
   }
 
+  /* Werte, die der Server annimmt - sonst keine.
+   *
+   * Der Server lehnt seit der Absicherung (Bug-Scan #49) Unmögliches mit 422
+   * ab: Tempo ausserhalb 0 bis 500 km/h, Aussentemperatur ausserhalb -80 bis
+   * 70 °C. Das Auto liefert dafür Anlass genug: Das Tempo-Byte steht bei
+   * "ungültig" auf 255 (in den gespeicherten Fahrten kommt das vor), und die
+   * Aussentemperatur `b0 / 2 - 50` ergibt bei 0xFF 77,5 °C. Ein solcher Wert
+   * darf nicht den Punkt kosten, zu dem er gehört - und erst recht nicht den
+   * Stapel. Hier wird er zu "nicht gemessen".
+   *
+   * 250 km/h statt 500: 255 ist der Platzhalter des Autos, und kein
+   * Fahrzeug, das jolt kennt, fährt 250. */
+  function tempoOderNull(wert) {
+    return (typeof wert === "number" && Number.isFinite(wert)
+            && wert >= 0 && wert <= 250) ? wert : null;
+  }
+
+  function temperaturOderNull(wert) {
+    return (typeof wert === "number" && Number.isFinite(wert)
+            && wert >= -80 && wert <= 70) ? wert : null;
+  }
+
   async function positionMelden(coords, zeitMs) {
     if (!K.zustand.sitzungId) return;
     const nutzlast = {
       lat: coords.latitude, lon: coords.longitude,
-      tempo_kmh: coords.speed === null ? null : coords.speed * 3.6,
+      // Aus dem Fix: m/s, und -1 oder null, wenn das Gerät es nicht weiss.
+      tempo_kmh: tempoOderNull(typeof coords.speed === "number"
+                               ? coords.speed * 3.6 : null),
       // Wann gemessen wurde, nicht wann es ankommt - sonst wären alle
       // nachgereichten Punkte aus einem Funkloch auf dieselbe Sekunde datiert.
       zeit: new Date(zeitMs || Date.now()).toISOString(),
@@ -1922,11 +1946,13 @@ window.joltLive = (function () {
         const wert = window.joltObd.socAusRoh(roh.soc_roh);
         nutzlast.soc = Math.round(wert.hmi * 10) / 10;
         nutzlast.rohwerte = roh;
-        // Was das Auto selbst misst, schlägt jede Vorhersage.
-        if (typeof roh.tempo_kmh === "number") nutzlast.tempo_kmh = roh.tempo_kmh;
-        if (typeof roh.aussentemp_c === "number") {
-          nutzlast.aussentemp_c = roh.aussentemp_c;
-        }
+        // Was das Auto selbst misst, schlägt jede Vorhersage - wenn es
+        // plausibel ist. Ein "ungültig" (255 km/h, 77,5 °C) lässt das Tempo des
+        // GPS stehen und die Temperatur leer.
+        const autoTempo = tempoOderNull(roh.tempo_kmh);
+        if (autoTempo !== null) nutzlast.tempo_kmh = autoTempo;
+        const autoTemp = temperaturOderNull(roh.aussentemp_c);
+        if (autoTemp !== null) nutzlast.aussentemp_c = autoTemp;
       } catch (fehler) {
         // Eine Runde ohne Ladestand ist immer noch eine Positionsmeldung -
         // und die trägt Zeitfaktor und Ankunftsprognose weiter.
@@ -1967,12 +1993,17 @@ window.joltLive = (function () {
    * schützt vor einem Speicher, der ewig wächst; dann gehen die ältesten. */
   const PUFFER_MAX = 2000;
   const STAPEL_MAX = 100;
+  // Wie viele Punkte der nächste Stapel hat. Gleich STAPEL_MAX, ausser der
+  // Server hat gerade einen Stapel abgelehnt: dann wird halbiert, bis der
+  // eine schlechte Punkt feststeht.
+  let stapelGroesse = STAPEL_MAX;
   let puffer = [];
   let pufferSitzung = null;
   let pufferLauf = null;
   let pufferNochmal = false;
   let ohneNetzGemeldet = false;
   let nachgereicht = 0;
+  let abgelehnt = 0;              // vom Server abgelehnte Einzelpunkte
 
   function pufferSpeicher(id) { return "jolt-puffer-" + id; }
 
@@ -2017,7 +2048,7 @@ window.joltLive = (function () {
       pufferNochmal = false;
       const id = K.zustand.sitzungId;
       while (id && puffer.length && K.zustand.sitzungId === id) {
-        const stapel = puffer.slice(0, STAPEL_MAX);
+        const stapel = puffer.slice(0, stapelGroesse);
         let zustand;
         try {
           zustand = await K.api(`/api/live/${id}/punkte`,
@@ -2029,10 +2060,21 @@ window.joltLive = (function () {
             // senden hiesse, dieselbe Ablehnung bis in alle Ewigkeit zu holen.
             puffer = [];
           } else if (status === 422) {
-            // Der Server hält diesen Stapel für ungültig - etwa einen
-            // Zeitstempel von vor mehr als zwei Tagen. Er würde nie
-            // angenommen und verstopfte alles dahinter.
-            puffer.splice(0, stapel.length);
+            // Der Server hält den Stapel für ungültig - ein Punkt darin, etwa
+            // mit einem Zeitstempel von vor mehr als zwei Tagen. Der ganze
+            // Stapel würde nie angenommen und verstopfte alles dahinter.
+            //
+            // Hier wurde früher der Stapel verworfen: wegen eines schlechten
+            // Punktes bis zu neunundneunzig gute. Jetzt wird halbiert, bis der
+            // eine Punkt feststeht; nur der fliegt raus. Das kostet bei hundert
+            // Punkten höchstens sieben weitere Anfragen.
+            if (stapel.length > 1) {
+              stapelGroesse = Math.ceil(stapel.length / 2);
+            } else {
+              puffer.splice(0, 1);
+              stapelGroesse = STAPEL_MAX;
+              abgelehnt += 1;
+            }
           } else if (!ohneNetzGemeldet) {
             ohneNetzGemeldet = true;
             K.melden("Keine Verbindung zu jolt – die Messpunkte werden "
@@ -2060,6 +2102,18 @@ window.joltLive = (function () {
         }
       }
     } while (pufferNochmal);
+    // Nach einer Ablehnung geht es in kleinen Stapeln weiter, bis der schlechte
+    // Punkt gefunden ist (dann ist die Grösse wieder voll) - oder bis nichts
+    // mehr wartet. Ein Wachsen nach jedem Erfolg träfe den schlechten Punkt
+    // immer wieder: Das kostete bei 13 Punkten sieben abgelehnte Anfragen
+    // statt vier.
+    stapelGroesse = STAPEL_MAX;
+    if (abgelehnt > 0) {
+      K.melden(`${abgelehnt} Messpunkt${abgelehnt === 1 ? " wurde" : "e wurden"} `
+        + "vom Server abgelehnt und verworfen - die übrigen sind angekommen.",
+        "hinweis");
+      abgelehnt = 0;
+    }
   }
 
   window.addEventListener("online", () => {

@@ -20,6 +20,8 @@ const speicher = {};
 const meldungen = [];
 let netz = true;           // false = "Server nicht erreichbar"
 let nextStatus = null;     // erzwungener HTTP-Status
+let schlechteZeit = null;  // ein Stapel mit diesem Punkt wird mit 422 abgelehnt
+let abgelehnteAnfragen = 0;
 const posts = [];          // was beim Server ankam
 
 const leer = () => new Proxy(function () { return ""; }, {
@@ -33,6 +35,11 @@ const K0 = {
     if (!netz) throw new Error("Server nicht erreichbar.");
     if (nextStatus) {
       const e = new Error("HTTP " + nextStatus); e.status = nextStatus; throw e;
+    }
+    if (schlechteZeit && opt.body && opt.body.punkte
+        && opt.body.punkte.some((p) => p.zeit === schlechteZeit)) {
+      abgelehnteAnfragen++;
+      const e = new Error("HTTP 422"); e.status = 422; throw e;
     }
     posts.push({ pfad, body: opt.body });
     return { typ: "zustand", n: posts.length };
@@ -70,12 +77,12 @@ const live = fenster.joltLive;
 
 const warte = (ms) => new Promise((r) => setTimeout(r, ms));
 let t = Date.now() - 600000;
-async function punkt() {
+async function punkt(geschwindigkeit = null) {
   t += 12000;
   // Die Sperre gegen zu haeufige Meldungen umgehen: jede Meldung ist 12 s
   // spaeter nach Messzeit, aber der Takt in der Funktion nutzt die Wanduhr.
   kontext.Date = Date;
-  geoCallback({ coords: { latitude: 52, longitude: 10, speed: null,
+  geoCallback({ coords: { latitude: 52, longitude: 10, speed: geschwindigkeit,
                           altitude: null }, timestamp: t });
   await warte(20);
 }
@@ -148,6 +155,75 @@ async function punkt() {
   const neu = posts.slice(vor).map((p) => p.body.punkte.length);
   pruefe(neu.length === 3 && neu[0] === 100 && neu[1] === 100 && neu[2] === 51,
          "251 Punkte gehen in Stapeln zu 100", JSON.stringify(neu));
+
+  console.log("\nEin schlechter Punkt im Stapel");
+  // Der Server lehnt seit der Absicherung Unmoegliches mit 422 ab. Frueher
+  // flog dann der ganze Stapel raus - wegen eines Punktes bis zu 99 gute.
+  netz = false;
+  const messzeiten = [];
+  for (let i = 0; i < 12; i++) { await punkt(); messzeiten.push(new Date(t).toISOString()); }
+  schlechteZeit = messzeiten[5];
+  netz = true;
+  abgelehnteAnfragen = 0;
+  meldungen.length = 0;
+  const vorStapel = posts.length;
+  await punkt();                       // 13 Punkte warten: Stapel mit dem schlechten
+  const angekommen = posts.slice(vorStapel).flatMap((x) => x.body.punkte.map((p) => p.zeit));
+  pruefe(angekommen.length === 12 && !angekommen.includes(schlechteZeit),
+         "genau der schlechte Punkt fehlt, die zwoelf anderen sind angekommen",
+         `${angekommen.length} angekommen, schlechter dabei: ${angekommen.includes(schlechteZeit)}`);
+  pruefe(JSON.stringify(angekommen) === JSON.stringify([...angekommen].sort()),
+         "in Messreihenfolge");
+  pruefe(abgelehnteAnfragen >= 1 && abgelehnteAnfragen <= 5,
+         "durch Halbieren gefunden - wenige Anfragen, nicht eine je Punkt",
+         String(abgelehnteAnfragen));
+  pruefe(!speicher["jolt-puffer-7"], "und nichts bleibt liegen");
+  pruefe(meldungen.some((m) => /1 Messpunkt wurde vom Server abgelehnt/.test(m)),
+         "der Nutzer erfaehrt, dass einer verworfen wurde", JSON.stringify(meldungen));
+  schlechteZeit = null;
+  // Danach geht es mit voller Stapelgroesse weiter.
+  netz = false;
+  for (let i = 0; i < 150; i++) await punkt();
+  netz = true;
+  const vor2 = posts.length;
+  await punkt();
+  const gr = posts.slice(vor2).map((x) => x.body.punkte.length);
+  pruefe(gr[0] === 100, "danach wieder volle Stapel zu 100", JSON.stringify(gr));
+
+  console.log("\nDer einzige Punkt ist schlecht");
+  netz = false;
+  await punkt();
+  schlechteZeit = new Date(t).toISOString();
+  netz = true;
+  abgelehnteAnfragen = 0;
+  const vor3 = posts.length;
+  schlechteZeit = new Date(t).toISOString();
+  // Der Punkt ist schon im Puffer: er wird gesendet, abgelehnt, verworfen.
+  await punkt();                       // dieser zweite geht durch
+  pruefe(abgelehnteAnfragen >= 1 && !speicher["jolt-puffer-7"],
+         "ein einzelner abgelehnter Punkt wird verworfen und verstopft nichts",
+         String(abgelehnteAnfragen));
+  schlechteZeit = null;
+
+  console.log("\nWerte, die der Server ablehnen wuerde");
+  const jungster = () => { const b = posts[posts.length - 1].body.punkte;
+                          return b[b.length - 1]; };
+  netz = true;
+  await punkt(25);
+  pruefe(Math.abs(jungster().tempo_kmh - 90) < 1e-9, "25 m/s sind 90 km/h", String(jungster().tempo_kmh));
+  await punkt(null);
+  pruefe(jungster().tempo_kmh === null, "kein Tempo bleibt leer");
+  await punkt(-1);
+  pruefe(jungster().tempo_kmh === null,
+         "-1 (das Geraet weiss es nicht) wird nicht als Rueckwaertsfahrt gesendet",
+         String(jungster().tempo_kmh));
+  await punkt(300);
+  pruefe(jungster().tempo_kmh === null,
+         "1080 km/h sind ein Messfehler und gehen nicht hinaus", String(jungster().tempo_kmh));
+  await punkt(NaN);
+  pruefe(jungster().tempo_kmh === null, "NaN auch nicht");
+  await punkt(250 / 3.6);
+  pruefe(jungster().tempo_kmh !== null, "250 km/h sind noch gueltig");
 
   Date.now = echtesNow;
   console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
