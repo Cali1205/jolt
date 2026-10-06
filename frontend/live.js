@@ -220,7 +220,12 @@ window.joltLive = (function () {
     // Das Anzeigemodell für alles ausserhalb dieser Oberfläche (CarPlay,
     // Widget): wenige Zahlen, gedrosselt. Ein Fehler dort darf die Anzeige
     // hier nie mitreissen.
-    try { if (window.joltAnzeige) window.joltAnzeige.melden(z); }
+    try {
+      if (window.joltAnzeige) {
+        window.joltAnzeige.melden(z, { spur: verbrauchsspur, werte: werteStand,
+                                       neben: nebenverbrauch });
+      }
+    }
     catch (e) { console.log("[anzeige]", e && e.message); }
     const fahrt = K.zustand.fahrt;
     const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
@@ -1619,6 +1624,9 @@ window.joltLive = (function () {
         : null;
       verbrauchsspur.push({
         zeit: jetzt, km: roh.km_stand, netto,
+        // Die beiden Zähler einzeln, für die Rekuperation der Anzeige.
+        entl: typeof roh.entladen_kwh === "number" ? roh.entladen_kwh : null,
+        gel: typeof roh.geladen_kwh === "number" ? roh.geladen_kwh : null,
         // Die GPS-Strecke wird in `zustandAnzeigen` nachgetragen, sobald
         // die Position dieses Punktes bekannt ist.
         gps: null,

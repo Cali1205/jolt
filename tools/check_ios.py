@@ -214,7 +214,7 @@ def swift_felder(text: str) -> dict:
         flach = re.sub(r"struct \w+[^{]*\{[^{}]*\}", "", rumpf)
         ergebnis[treffer.group(1)] = {
             m.group(1): m.group(2).endswith("?")
-            for m in re.finditer(r"public var (\w+): ([\w.]+\??)", flach)}
+            for m in re.finditer(r"public var (\w+): ([\w.\[\]]+\??)", flach)}
     return ergebnis
 
 
@@ -273,10 +273,18 @@ def teil_live_activity() -> None:
     fixtur = ("{km_auf_route:100,ist_soc:72.1,soc_gemeldet:true,soc_quelle:'gemessen',"
               "soll_soc:73,rest_km:87.4,reserve_bei_km:160,ankunft_verschiebung_min:12,"
               "naechster_stopp:{name:'X',km_auf_route:141,geplant_soc:19,erwartet_soc:17.6}}")
+    # Eine Fahrt von siebzig Minuten, damit Verlauf, Balken und Rekuperation
+    # alle Felder tragen, und Messwerte für die Nebenverbraucher.
+    extras = ("{spur:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
+              "for(let t=-4200000;t<=0;t+=12000){s.push({zeit:1e12+t,gps:km,netto:n,entl:e,gel:g});"
+              "km+=0.233;n+=0.035;e+=0.042;g+=0.007}return s})(),"
+              "werte:{nebenverbrauch_kw:{wert:1.8,zeit:1e12},ptc_strom_a:{wert:5,zeit:1e12},"
+              "spannung_v:{wert:380,zeit:1e12},kompressor_w:{wert:450,zeit:1e12},"
+              "batterie_c:{wert:27,zeit:1e12}}}")
     skript = ("const vm=require('vm'),fs=require('fs');const w={};"
               "vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),"
               "{window:w,console,Date,JSON,Math,Number,setTimeout,clearTimeout,Promise});"
-              f"console.log(JSON.stringify(w.joltAnzeige.modell({fixtur},1)))")
+              f"console.log(JSON.stringify(w.joltAnzeige.modell({fixtur},1e12,{extras})))")
     try:
         ausgabe = subprocess.run(
             ["node", "-e", skript, os.path.join(WURZEL, "frontend", "anzeige.js")],
@@ -288,13 +296,19 @@ def teil_live_activity() -> None:
     felder = swift_felder(lesen("plugins", "jolt-anzeige", "ios", "Sources",
                                 "JoltAnzeigePlugin", "JoltFahrtAttributes.swift"))
     zuordnung = {"JoltAnzeige": modell, "Soc": modell["soc"], "Stopp": modell["stopp"],
-                 "Zeile": modell["reserve"]}
+                 "Zeile": modell["reserve"], "Verlauf": modell["verlauf"],
+                 "Fenster": modell["verlauf"]["fenster"][0],
+                 "Rekup": modell["verlauf"]["rekup"], "Neben": modell["neben"]}
     for struktur, vorhanden in zuordnung.items():
-        pflicht = [f for f, optional in felder.get(struktur, {}).items() if not optional]
-        fehlt = [f for f in pflicht if f not in vorhanden]
-        pruefe(struktur in felder and pflicht and not fehlt,
-               f"Swift liest {struktur} mit den Pflichtfeldern {pflicht} - "
-               f"alle kommen aus anzeige.js", str(fehlt))
+        # Die Vorlage ist voll besetzt, also muss jedes Feld, das Swift
+        # kennt, im Modell stehen - ein Tippfehler im Namen (kwh100 gegen
+        # kwh_100) macht sonst aus einem Pflichtfeld ein Lesefehler und aus
+        # einem optionalen eine Anzeige, die nie etwas zeigt.
+        alle = list(felder.get(struktur, {}))
+        fehlt = [f for f in alle if f not in vorhanden]
+        pruefe(struktur in felder and alle and not fehlt,
+               f"Swift liest {struktur} ({', '.join(alle)}) - jedes Feld "
+               f"kommt aus anzeige.js", str(fehlt))
     for name in ("ankunft", "rest"):
         pruefe("text" in modell[name], f"{name} trägt den Text, den Swift liest")
 
