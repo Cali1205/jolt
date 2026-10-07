@@ -379,6 +379,79 @@ window.joltAnzeige = (function () {
     };
   }
 
+  /* ---------- Verläufe für die Kacheln ----------
+   *
+   * Die Kacheln "Ladestand", "Nebenverbraucher" und "Rekuperation" zeigen eine
+   * Linie: die letzten dreissig Minuten. Das Modell trägt nur den Wert von
+   * jetzt, also merkt sich dieser Teil die Stichproben. Eine Lücke von mehr
+   * als drei Minuten beginnt die Reihe neu - das ist eine andere Fahrt.
+   * Reine Funktion auf einem Zustand, den der Aufrufer hält: so lässt sie sich
+   * ohne Uhr prüfen. */
+  const REIHE_FENSTER_MS = 30 * 60000;
+  const REIHE_LUECKE_MS = 3 * 60000;
+
+  function reihenAnfuegen(reihen, m, jetzt) {
+    const r = reihen || { punkte: [] };
+    const letzter = r.punkte[r.punkte.length - 1];
+    if (letzter && jetzt - letzter.zeit > REIHE_LUECKE_MS) r.punkte = [];
+    r.punkte.push({
+      zeit: jetzt,
+      soc: m && m.soc && ist(m.soc.prozent) ? m.soc.prozent : null,
+      neben: m && m.neben && ist(m.neben.kw) ? m.neben.kw : null,
+      rekup: m && m.verlauf && m.verlauf.rekup && ist(m.verlauf.rekup.prozent)
+        ? m.verlauf.rekup.prozent : null,
+    });
+    r.punkte = r.punkte.filter((p) => jetzt - p.zeit <= REIHE_FENSTER_MS);
+    return r;
+  }
+
+  /* Die Reihen je Kachel; weniger als zwei Punkte sind keine Linie. */
+  function reihenAuszug(reihen) {
+    const aus = {};
+    for (const name of ["soc", "neben", "rekup"]) {
+      const w = ((reihen && reihen.punkte) || []).map((p) => p[name]).filter(ist);
+      aus[name] = w.length >= 2 ? w : null;
+    }
+    return aus;
+  }
+
+  /* ---------- Stil der CarPlay-Kacheln ----------
+   *
+   * "klassisch": Swift zeichnet wie bisher. "a" und "b": die Bilder kommen aus
+   * kacheln.js und gehen im Modell mit. */
+  const STIL_SCHLUESSEL = "jolt-carplay-stil";
+  const STILE = ["klassisch", "a", "b"];
+
+  function stilLesen() {
+    try {
+      const s = window.localStorage.getItem(STIL_SCHLUESSEL);
+      return STILE.includes(s) ? s : "klassisch";
+    } catch (e) { return "klassisch"; }
+  }
+
+  let stilWahl = stilLesen();
+  let reihenZustand = null;
+  let letztesModell = null;
+
+  /* Das Modell mit Stil und Kachelbildern - was das Plugin bekommt. Die
+   * Bilder stehen nicht im Modell des Senders: Der Vergleich "hat sich etwas
+   * geändert" soll nicht an Pixeln hängen, und die Live Activity trägt
+   * höchstens 4 KB (das Plugin lässt sie dort weg). */
+  function mitBildern(m, jetzt) {
+    reihenZustand = reihenAnfuegen(reihenZustand, m, jetzt);
+    const aus = Object.assign({}, m, { stil: stilWahl });
+    if (stilWahl !== "klassisch" && window.joltKacheln) {
+      try {
+        aus.kachelBilder = window.joltKacheln.bilder(stilWahl, m, reihenAuszug(reihenZustand));
+      } catch (fehler) {
+        // Ohne Bilder zeichnet Swift selbst - eine Kachel, die nicht gelingt,
+        // darf die Anzeige nicht kosten.
+        console.log("[anzeige] Kacheln nicht gezeichnet:", fehler && fehler.message);
+      }
+    }
+    return aus;
+  }
+
   /* Das Ziel in der iOS-App: die Live Activity (plugins/jolt-anzeige).
    *
    * Im Browser und in Bluefy gibt es kein solches Plugin; dort tut das Ziel
@@ -389,15 +462,34 @@ window.joltAnzeige = (function () {
     const huelle = window.joltBlePlugin;
     if (!huelle || !huelle.JoltAnzeige || !huelle.Capacitor
         || !huelle.Capacitor.isNativePlatform()) return undefined;
-    if (m === null) return huelle.JoltAnzeige.beenden();
-    return huelle.JoltAnzeige.aktualisieren({ json: JSON.stringify(m) });
+    if (m === null) {
+      letztesModell = null;
+      reihenZustand = null;
+      return huelle.JoltAnzeige.beenden();
+    }
+    letztesModell = m;
+    return huelle.JoltAnzeige.aktualisieren(
+      { json: JSON.stringify(mitBildern(m, Date.now())) });
+  }
+
+  /* Den Stil wählen - und die Anzeige gleich neu schicken, damit die
+   * Umstellung im Auto zu sehen ist und nicht erst nach der nächsten Meldung. */
+  function stilSetzen(stil) {
+    if (!STILE.includes(stil)) return false;
+    stilWahl = stil;
+    try { window.localStorage.setItem(STIL_SCHLUESSEL, stil); } catch (e) { /* nur diese Sitzung */ }
+    if (letztesModell) {
+      try { nativesZiel(letztesModell); } catch (e) { /* kein Ziel */ }
+    }
+    return true;
   }
 
   /* Der Sender der Oberfläche: `live.js` meldet hier jeden Zustand an. */
   const standard = sender({ ziel: nativesZiel });
 
   return {
-    modell, sender,
+    modell, sender, reihenAnfuegen, reihenAuszug, mitBildern,
+    stil: () => stilWahl, stilSetzen, STILE,
     melden: (z, extras) => standard.melden(z, extras),
     beenden: () => standard.beenden(),
     zielSetzen: (f) => standard.zielSetzen(f),

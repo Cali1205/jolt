@@ -283,21 +283,31 @@ def teil_live_activity() -> None:
               "werte:{nebenverbrauch_kw:{wert:1.8,zeit:1e12},ptc_strom_a:{wert:5,zeit:1e12},"
               "spannung_v:{wert:380,zeit:1e12},kompressor_w:{wert:450,zeit:1e12},"
               "batterie_c:{wert:27,zeit:1e12}}}")
-    skript = ("const vm=require('vm'),fs=require('fs');const w={};"
-              "vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),"
-              "{window:w,console,Date,JSON,Math,Number,setTimeout,clearTimeout,Promise});"
-              f"console.log(JSON.stringify(w.joltAnzeige.modell({fixtur},1e12,{extras})))")
+    # Gesendet wird nicht das reine Modell, sondern `mitBildern`: dazu kommen
+    # `stil` und `kachelBilder`. Mit Stil "a" und einer Attrappe der Leinwand.
+    skript = ("const vm=require('vm'),fs=require('fs'),p=require('path');"
+              "const w={localStorage:{getItem:()=>'a',setItem(){}}};w.window=w;"
+              "w.document={createElement:()=>({getContext:()=>new Proxy({},{get:(z,n)=>"
+              "n==='measureText'?()=>({width:10}):n==='createLinearGradient'?()=>({addColorStop(){}}):()=>{},"
+              "set:()=>true}),toDataURL:()=>'data:image/png;base64,QUJD'})};"
+              "const k={window:w,document:w.document,console,Date,JSON,Math,Number,setTimeout,clearTimeout,Promise};"
+              "vm.createContext(k);"
+              "for(const f of ['kacheln.js','anzeige.js'])"
+              "vm.runInContext(fs.readFileSync(p.join(process.argv[1],f),'utf8'),k);"
+              f"const m=w.joltAnzeige.modell({fixtur},1e12,{extras});"
+              "console.log(JSON.stringify({modell:m,gesendet:w.joltAnzeige.mitBildern(m,1e12)}))")
     try:
         ausgabe = subprocess.run(
-            ["node", "-e", skript, os.path.join(WURZEL, "frontend", "anzeige.js")],
+            ["node", "-e", skript, os.path.join(WURZEL, "frontend")],
             capture_output=True, text=True, check=True).stdout
-        modell = json.loads(ausgabe)
+        roh = json.loads(ausgabe)
+        modell, gesendet = roh["modell"], roh["gesendet"]
     except (OSError, subprocess.CalledProcessError, ValueError) as fehler:
         pruefe(False, "das Anzeigemodell lässt sich mit node erzeugen", str(fehler))
         return
     felder = swift_felder(lesen("plugins", "jolt-anzeige", "ios", "Sources",
                                 "JoltAnzeigePlugin", "JoltFahrtAttributes.swift"))
-    zuordnung = {"JoltAnzeige": modell, "Soc": modell["soc"], "Stopp": modell["stopp"],
+    zuordnung = {"JoltAnzeige": gesendet, "Soc": modell["soc"], "Stopp": modell["stopp"],
                  "Zeile": modell["reserve"], "Verlauf": modell["verlauf"],
                  "Fenster": modell["verlauf"]["fenster"][0],
                  "Rekup": modell["verlauf"]["rekup"], "Neben": modell["neben"],
@@ -314,6 +324,24 @@ def teil_live_activity() -> None:
                f"kommt aus anzeige.js", str(fehlt))
     for name in ("ankunft", "rest"):
         pruefe("text" in modell[name], f"{name} trägt den Text, den Swift liest")
+
+    # Die Kachelbilder: sieben Plätze, und die Swift-Seite benutzt dieselben
+    # Namen. Ein Tippfehler hier hiesse: Die Bilder kämen an und würden nie
+    # angezeigt, ohne Fehlermeldung.
+    platz = ["soc", "ankunft", "reserve", "verbrauch", "neben", "rekup", "stopps"]
+    pruefe(sorted(gesendet.get("kachelBilder", {})) == sorted(platz),
+           "die Oberfläche liefert Bilder für genau die sieben Kachelplätze")
+    szene = lesen("plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
+                  "JoltCarPlaySceneDelegate.swift")
+    pruefe(all(f'bild("{n}")' in szene for n in platz),
+           "und die CarPlay-Szene fragt jeden dieser Plätze ab",
+           str([n for n in platz if f'bild("{n}")' not in szene]))
+    plugin = lesen("plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
+                   "JoltAnzeigePlugin.swift")
+    pruefe("fuerActivity.kachelBilder = nil" in plugin,
+           "die Live Activity bekommt die Bilder nicht - sie darf höchstens 4 KB tragen")
+    pruefe("CPGridTemplate.maximumGridButtonImageSize" in szene,
+           "Bilder werden auf die Grösse begrenzt, die CarPlay für Kacheln zulässt")
 
 
 def teil_carplay() -> None:

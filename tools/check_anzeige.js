@@ -410,5 +410,89 @@ ok = true;
 try { seite.melden(geplant); seite.beenden(); } catch (e) { ok = false; }
 pruefe(ok, "und ohne Plugin-Huelle laeuft alles durch");
 
+console.log("\nKacheln fuer CarPlay: Stil und Bilder");
+{
+  const speicher = {};
+  function seiteMitKacheln(vorab) {
+    const aufrufe2 = [];
+    const f = { localStorage: {
+      getItem: (k) => (k in speicher ? speicher[k] : null),
+      setItem: (k, v) => { speicher[k] = String(v); } } };
+    f.window = f;
+    f.document = { createElement: () => ({
+      getContext: () => new Proxy({}, { get: (z, n) => (n === "measureText" ? () => ({ width: 10 })
+        : (n === "createLinearGradient" ? () => ({ addColorStop() {} }) : () => {})),
+        set: () => true }),
+      toDataURL: () => "data:image/png;base64,QUJD" }) };
+    f.joltBlePlugin = { Capacitor: { isNativePlatform: () => true },
+      JoltAnzeige: { aktualisieren: (a) => { aufrufe2.push(["aktualisieren", a]); return Promise.resolve(); },
+                     beenden: () => { aufrufe2.push(["beenden"]); return Promise.resolve(); } } };
+    const k2 = { window: f, document: f.document, console: { log() {} }, Date, JSON, Math, Number, setTimeout,
+                 clearTimeout, Promise };
+    vm.createContext(k2);
+    // Der gemerkte Stil wird beim Laden gelesen: erst vorbereiten, dann laden.
+    if (vorab) vorab(speicher);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "frontend", "kacheln.js"), "utf8"), k2);
+    vm.runInContext(quelle, k2);
+    return { A2: f.joltAnzeige, aufrufe2, f };
+  }
+
+  // Reihen
+  const { A2 } = seiteMitKacheln();
+  let r = null;
+  const mit = (soc, neben, rekup) => ({ soc: soc === null ? null : { prozent: soc },
+    neben: neben === null ? null : { kw: neben },
+    verlauf: rekup === null ? null : { rekup: { prozent: rekup } } });
+  r = A2.reihenAnfuegen(r, mit(70, 1.5, 20), JETZT);
+  r = A2.reihenAnfuegen(r, mit(69, 1.8, 21), JETZT + 20000);
+  pruefe(JSON.stringify(A2.reihenAuszug(r).soc) === "[70,69]" && A2.reihenAuszug(r).neben.length === 2,
+         "die Reihen sammeln die Stichproben der Kacheln");
+  pruefe(A2.reihenAuszug(A2.reihenAnfuegen(null, mit(70, null, null), JETZT)).soc === null,
+         "ein einziger Punkt ist keine Linie");
+  r = A2.reihenAnfuegen(r, mit(60, 1, 10), JETZT + 20000 + 4 * 60000);
+  pruefe(A2.reihenAuszug(r).soc === null,
+         "eine Luecke von ueber drei Minuten beginnt die Reihe neu - es ist eine andere Fahrt");
+  let lang = null;
+  for (let i = 0; i < 100; i++) lang = A2.reihenAnfuegen(lang, mit(50 + i / 10, 1, 1), JETZT + i * 60000 * 1.5);
+  const spanne = lang.punkte[lang.punkte.length - 1].zeit - lang.punkte[0].zeit;
+  pruefe(spanne <= 30 * 60000, "die Reihe haelt hoechstens dreissig Minuten");
+  pruefe(A2.reihenAuszug(A2.reihenAnfuegen(null, mit(null, null, null), JETZT)).soc === null
+         && A2.reihenAuszug(A2.reihenAnfuegen(null, null, JETZT)).neben === null,
+         "fehlende Werte stoeren nicht");
+
+  // Stil
+  pruefe(A2.stil() === "klassisch", "ohne Wahl gilt 'klassisch' - bisheriges Verhalten");
+  pruefe(A2.stilSetzen("quatsch") === false && A2.stil() === "klassisch",
+         "ein unbekannter Stil wird abgelehnt");
+
+  // Senden in der App
+  let s1 = seiteMitKacheln();
+  let gesendet1 = JSON.parse(JSON.stringify(s1.A2.mitBildern(m, JETZT)));
+  pruefe(gesendet1.stil === "klassisch" && gesendet1.kachelBilder === undefined,
+         "Stil 'klassisch': keine Bilder im Modell - Swift zeichnet");
+  s1.A2.stilSetzen("a");
+  gesendet1 = JSON.parse(JSON.stringify(s1.A2.mitBildern(m, JETZT + 20000)));
+  const platzNamen = ["soc", "ankunft", "reserve", "verbrauch", "neben", "rekup", "stopps"];
+  pruefe(gesendet1.stil === "a" && platzNamen.every((n) => typeof gesendet1.kachelBilder[n] === "string"),
+         "Stil 'a': ein Bild je Kachelplatz im Modell", JSON.stringify(Object.keys(gesendet1.kachelBilder || {})));
+  pruefe(speicher["jolt-carplay-stil"] === "a", "die Wahl wird auf dem Geraet gemerkt");
+  pruefe(s1.A2.stil() === "a", "und gilt");
+  const s2 = seiteMitKacheln((sp) => { sp["jolt-carplay-stil"] = "b"; });
+  pruefe(s2.A2.stil() === "b", "nach einem Neuladen gilt die gemerkte Wahl");
+
+  // Beim Wechsel wird gleich neu gesendet
+  const s3 = seiteMitKacheln();
+  s3.A2.melden(geplant);                       // geht als erstes hinaus
+  const vorher = s3.aufrufe2.length;
+  s3.A2.stilSetzen("b");
+  pruefe(s3.aufrufe2.length === vorher + 1 && JSON.parse(s3.aufrufe2[vorher][1].json).stil === "b",
+         "ein Wechsel des Stils schickt die Anzeige sofort neu - sichtbar im Auto, nicht erst nach der naechsten Meldung");
+  const mitB = JSON.parse(s3.aufrufe2[vorher][1].json);
+  pruefe(mitB.soc && mitB.kurz && Object.keys(mitB.kachelBilder).length === 7,
+         "mit dem vollen Modell und sieben Bildern");
+  pruefe(JSON.stringify(A.modell(geplant, JETZT)).indexOf("kachelBilder") === -1,
+         "das Modell des Senders traegt keine Bilder: Der Vergleich 'hat sich etwas geaendert' haengt nicht an Pixeln");
+}
+
 console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
 process.exit(fehler ? 1 : 0);

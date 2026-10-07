@@ -57,7 +57,13 @@ public final class JoltAnzeigeStore {
         let alle = Array(beobachter.values)
         sperre.unlock()
 
-        if let modell = modell, let daten = try? JSONEncoder().encode(modell) {
+        // Die Kachelbilder bleiben aussen vor: Sie sind knapp 200 KB gross und
+        // kommen alle paar Sekunden neu. Abgelegt wird der Stand nur für den
+        // Kaltstart, und der gilt nach drei Minuten ohnehin nicht mehr -
+        // bis die Oberfläche das nächste Mal meldet, zeichnet Swift selbst.
+        var zuSichern = modell
+        zuSichern?.kachelBilder = nil
+        if let sicher = zuSichern, let daten = try? JSONEncoder().encode(sicher) {
             UserDefaults.standard.set(daten, forKey: schluessel)
         } else {
             UserDefaults.standard.removeObject(forKey: schluessel)

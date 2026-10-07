@@ -1273,6 +1273,9 @@ def main() -> int:
            and 'id="ansicht-einstellungen"' in seite_text
            and "/static/einstellungen.js" in seite_text,
            "die Einstellungen haben Reiter, Abschnitt und Skript")
+    pruefe("/static/kacheln.js" in seite_text and "/static/kacheln.js" in sw_text
+           and client.get("/static/kacheln.js").status_code == 200,
+           "die gezeichneten CarPlay-Kacheln werden ausgeliefert und stehen im Gerüst")
     pruefe(client.get("/static/einstellungen.js").status_code == 200
            and "/static/einstellungen.js" in sw_text,
            "das Skript wird ausgeliefert und steht im Gerüst des Service Workers")

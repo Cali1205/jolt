@@ -82,6 +82,16 @@ public struct JoltAnzeige: Codable, Hashable {
         public var leistungKw: Int?
     }
 
+    /// Die Darstellung der CarPlay-Kacheln: "klassisch" (Swift zeichnet), "a"
+    /// oder "b" (die Oberfläche liefert die Bilder). Fehlt das Feld, gilt
+    /// "klassisch".
+    public var stil: String?
+    /// Je Kachelplatz ein PNG in Base64, von der Oberfläche gezeichnet
+    /// (frontend/kacheln.js): soc, ankunft, reserve, verbrauch, neben, rekup,
+    /// stopps. Nur für CarPlay - die Live Activity darf höchstens 4 KB tragen
+    /// und bekommt sie nicht.
+    public var kachelBilder: [String: String]?
+
     public var kurz: String
     public var verlauf: Verlauf?
     public var neben: Neben?

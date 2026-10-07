@@ -84,6 +84,7 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
         // die CarPlay-Vorlage.
         var fuerActivity = zustand
         fuerActivity.stoppListe = nil
+        fuerActivity.kachelBilder = nil
         Task {
             do {
                 try await self.setzen(fuerActivity)
