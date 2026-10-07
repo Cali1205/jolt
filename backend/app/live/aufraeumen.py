@@ -40,6 +40,7 @@ from datetime import datetime, timedelta
 
 from .. import models
 from ..energie import kalibrierung, ladephasen
+from ..geo import haversine_m
 from . import aufzeichnung
 
 log = logging.getLogger("uvicorn.error")
@@ -71,6 +72,64 @@ FEHLSTART_MINUTEN = 20
 TAKT_SEKUNDEN = 5 * 60
 
 
+# Steht das Auto am Ende laenger als das, war es vergessen worden: Man steigt
+# aus, geht weg und beendet die Fahrt erst spaeter. Alles ab dem letzten
+# Fahren wird verworfen. Zehn Minuten sind mehr als jede Ampel, jeder
+# Bahnuebergang und jeder Stau, der sich noch bewegt.
+STAND_VERWERFEN_MINUTEN = 10
+
+# Ab dieser mittleren Geschwindigkeit zwischen zwei Messpunkten gilt das Auto
+# als fahrend. Zu Fuss kommt man auf 5 km/h, und GPS-Rauschen im Stand liegt
+# darunter; wer mit dem Telefon in der Hand weggeht, faehrt nicht.
+FAHREN_KMH = 12.0
+
+
+def stand_am_ende_abschneiden(db, sitzung) -> dict | None:
+    """Die Zeit nach dem letzten Fahren verwerfen, wenn sie lang genug war.
+
+    Der Anwendungsfall: Aussteigen und vergessen, die Fahrt zu beenden. Das
+    Telefon liegt dann Stunden in der Tasche, die Messpunkte vom Parkplatz
+    und vom Weg zur Wohnung hängen an der Strecke, und beim Lernen zaehlt
+    jede dieser Minuten als Standverbrauch mit.
+
+    Gefahren wird nach dem Weg zwischen zwei Messpunkten (Strecke durch Zeit),
+    nicht nach `tempo_kmh`: Das fehlt auf iOS regelmaessig. Nur das **Ende**
+    wird gekuerzt. Eine Ladepause mitten in der Fahrt bleibt, wie sie ist -
+    danach geht es ja weiter.
+    """
+    punkte = list(sitzung.punkte)
+    if len(punkte) < 3:
+        return None
+
+    letzte_fahrt = None
+    for davor, danach in zip(punkte, punkte[1:]):
+        dt = (danach.zeit - davor.zeit).total_seconds()
+        if dt <= 0:
+            continue
+        kmh = haversine_m(davor.lat, davor.lon, danach.lat, danach.lon) / dt * 3.6
+        if kmh >= FAHREN_KMH or (danach.tempo_kmh or 0) >= FAHREN_KMH:
+            letzte_fahrt = danach
+    # Nie gefahren: Das ist eine andere Geschichte (Fehlstart), kein Rest.
+    if letzte_fahrt is None:
+        return None
+
+    stand = punkte[-1].zeit - letzte_fahrt.zeit
+    if stand < timedelta(minutes=STAND_VERWERFEN_MINUTEN):
+        return None
+
+    weg = [p for p in punkte if p.zeit > letzte_fahrt.zeit]
+    for p in weg:
+        sitzung.punkte.remove(p)
+        db.delete(p)
+    sitzung.beendet = letzte_fahrt.zeit
+    db.flush()
+    ergebnis = {"verworfen_punkte": len(weg),
+                "verworfen_minuten": round(stand.total_seconds() / 60)}
+    log.info("Sitzung %s: %s min Stand am Ende verworfen (%s Messpunkte).",
+             sitzung.id, ergebnis["verworfen_minuten"], len(weg))
+    return ergebnis
+
+
 def beenden_und_lernen(db, sitzung) -> dict:
     """Eine Sitzung ordentlich zu Ende bringen: Strecke bauen, dann lernen.
 
@@ -87,6 +146,10 @@ def beenden_und_lernen(db, sitzung) -> dict:
     ergebnis: dict = {"aufzeichnung": None, "gelernt": None,
                       "nicht_gelernt": None}
     fahrt = sitzung.fahrt
+
+    # Zuerst kuerzen: Strecke und Lernen sollen das Ende der Fahrt nie sehen,
+    # nur die Fahrt selbst.
+    ergebnis["stand_verworfen"] = stand_am_ende_abschneiden(db, sitzung)
 
     if fahrt is not None and fahrt.aufzeichnung and not fahrt.geometrie:
         try:
