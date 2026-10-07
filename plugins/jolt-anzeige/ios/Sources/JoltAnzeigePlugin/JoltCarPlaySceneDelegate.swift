@@ -40,6 +40,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         didConnect interfaceController: CPInterfaceController
     ) {
         schnittstelle = interfaceController
+        aufnehmen(JoltAnzeigeStore.shared.aktuell)
         let vorlage = CPGridTemplate(
             title: "jolt",
             gridButtons: kacheln(JoltAnzeigeStore.shared.aktuell))
@@ -51,6 +52,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             // Kommt eine frische Anzeige, läuft die Aufzeichnung: Das "wird
             // gestartet" ist erledigt.
             if self.frisch(modell) != nil { self.laeuft = nil }
+            self.aufnehmen(modell)
             self.gitter?.updateGridButtons(self.kacheln(modell))
         }
         ergebnisKennung = JoltAnzeigeStore.shared.ergebnisBeobachten { [weak self] aktion, ok, text in
@@ -83,10 +85,15 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         return alter <= frischeSekunden ? modell : nil
     }
 
-    /// Die Werte als Kacheln, in der Reihenfolge der früheren Liste: Fahrt
-    /// (Beenden), Ladestand, Verbrauch, Rekuperation, Ankunft, Reserve,
-    /// Nebenverbraucher, Ladestopps. Mehr als acht Kacheln nimmt CarPlay
-    /// nicht; fehlt ein Wert, fehlt die Kachel.
+    /// Die Kacheln haben **feste Plätze**; fehlt ein Wert, bleibt der Platz
+    /// mit einem Strich stehen. Sonst rückten die übrigen nach, sobald ein
+    /// Wert kommt oder geht, und man müsste im Fahren neu suchen.
+    ///
+    ///   oben:   Beenden | Ladestand (mit Verlauf) | Ankunft | Reserve
+    ///   unten:  Verbrauch (Balken) | Nebenverbraucher (Verlauf)
+    ///           | Rekuperation (Verlauf) | Ladestopps
+    ///
+    /// Mehr als acht Kacheln nimmt CarPlay nicht.
     private func kacheln(_ rohmodell: JoltAnzeige?) -> [CPGridButton] {
         guard let modell = frisch(rohmodell) else {
             return [startKachel()]
@@ -95,57 +102,118 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
         if let soc = modell.soc {
             ergebnis.append(kachel(
-                titel: "Ladestand", wert: soc.text, klein: quelleText(soc.quelle)))
-        }
-        if let verlauf = modell.verlauf {
-            let fenster = verlauf.fenster.filter { $0.kwh100 != nil }
-            if !fenster.isEmpty || verlauf.balken != nil {
-                // Oben der Wert des kürzesten Fensters, darunter die letzten
-                // dreissig Minuten in Balken zu fünf Minuten.
-                ergebnis.append(kachel(
-                    titel: "kWh/100 km",
-                    wert: fenster.first?.text ?? "–",
-                    klein: fenster.first.map { fensterName($0.min) },
-                    balken: verlauf.balken,
-                    handler: { [weak self] in self?.verbrauchZeigen(fenster) }))
-            }
-            if let rekup = verlauf.rekup {
-                ergebnis.append(kachel(
-                    titel: "Rekuperation",
-                    wert: "\(rekup.prozent) %",
-                    klein: "über \(rekup.minuten) min"))
-            }
+                titel: "Ladestand", wert: soc.text, klein: nil,
+                linie: reihe("soc")))
+        } else {
+            ergebnis.append(leereKachel("Ladestand"))
         }
         if let ankunft = modell.ankunft {
             ergebnis.append(kachel(titel: "Ankunft", wert: ankunft.text, klein: nil))
+        } else {
+            ergebnis.append(leereKachel("Ankunft"))
         }
         if let reserve = modell.reserve {
             ergebnis.append(kachel(titel: "Reserve", wert: reserve.text, klein: "in"))
+        } else {
+            ergebnis.append(leereKachel("Reserve"))
         }
+
+        let fenster = (modell.verlauf?.fenster ?? []).filter { $0.kwh100 != nil }
+        if !fenster.isEmpty || modell.verlauf?.balken != nil {
+            // Oben der Wert des kürzesten Fensters, darunter die letzten
+            // dreissig Minuten in Balken zu fünf Minuten.
+            ergebnis.append(kachel(
+                titel: "kWh/100 km",
+                wert: fenster.first?.text ?? "–",
+                klein: fenster.first.map { fensterName($0.min) },
+                balken: modell.verlauf?.balken,
+                handler: { [weak self] in self?.verbrauchZeigen(fenster) }))
+        } else {
+            ergebnis.append(leereKachel("kWh/100 km"))
+        }
+
+        var teile: [String] = []
         if let neben = modell.neben {
-            var teile: [String] = []
             if let text = neben.text { teile.append("Neben \(text)") }
             if let heizung = neben.heizungText { teile.append("Heizung \(heizung)") }
             if let klima = neben.klimaText { teile.append("Klima \(klima)") }
             if let akku = neben.batterieText { teile.append("Akku \(akku)") }
-            if !teile.isEmpty {
-                ergebnis.append(kachel(
-                    titel: "Nebenverbraucher",
-                    wert: neben.text ?? neben.heizungText ?? neben.klimaText
-                        ?? neben.batterieText ?? "–",
-                    klein: nil,
-                    handler: { [weak self] in self?.nebenZeigen(teile) }))
-            }
         }
+        if let neben = modell.neben, !teile.isEmpty {
+            ergebnis.append(kachel(
+                titel: "Nebenverbraucher",
+                wert: neben.text ?? neben.heizungText ?? neben.klimaText
+                    ?? neben.batterieText ?? "–",
+                klein: nil,
+                linie: reihe("neben"),
+                handler: { [weak self] in self?.nebenZeigen(teile) }))
+        } else {
+            ergebnis.append(leereKachel("Nebenverbraucher"))
+        }
+
+        if let rekup = modell.verlauf?.rekup {
+            ergebnis.append(kachel(
+                titel: "Rekuperation",
+                wert: "\(rekup.prozent) %",
+                klein: nil,
+                linie: reihe("rekup")))
+        } else {
+            ergebnis.append(leereKachel("Rekuperation"))
+        }
+
         // Eine Aufzeichnung ohne Plan hat keine Stopps: Das ist kein Fehler,
-        // die Kachel fehlt dann einfach.
+        // der Platz bleibt dann leer.
         if let stopps = modell.stoppListe, !stopps.isEmpty {
             ergebnis.append(kachel(
                 titel: "Ladestopps", wert: "\(stopps.count)", klein: nil,
                 handler: { [weak self] in self?.stoppsZeigen(stopps) }))
+        } else {
+            ergebnis.append(leereKachel("Ladestopps"))
         }
         return Array(ergebnis.prefix(8))
     }
+
+    private func leereKachel(_ titel: String) -> CPGridButton {
+        kachel(titel: titel, wert: "–", klein: nil)
+    }
+
+    // MARK: - Verläufe
+
+    /// Die letzten dreissig Minuten je Wert. Sie leben so lange wie die App
+    /// (nicht nur die Szene): Wer CarPlay zwischendurch trennt, soll beim
+    /// Verbinden nicht bei null anfangen. Eine Lücke von mehr als drei Minuten
+    /// beginnt die Reihe neu - das ist eine andere Fahrt.
+    private static var reihen: [String: [(zeit: Date, wert: Double)]] = [:]
+
+    private func aufnehmen(_ rohmodell: JoltAnzeige?) {
+        guard let modell = frisch(rohmodell) else { return }
+        merken("soc", modell.soc?.prozent)
+        merken("neben", modell.neben?.kw)
+        merken("rekup", modell.verlauf?.rekup.map { Double($0.prozent) })
+    }
+
+    private func merken(_ name: String, _ wert: Double?) {
+        guard let wert = wert else { return }
+        let jetzt = Date()
+        var liste = JoltCarPlaySceneDelegate.reihen[name] ?? []
+        if let letzte = liste.last, jetzt.timeIntervalSince(letzte.zeit) > frischeSekunden {
+            liste = []
+        }
+        // Höchstens ein Punkt je 20 Sekunden: Die Anzeige kommt öfter.
+        if let letzte = liste.last, jetzt.timeIntervalSince(letzte.zeit) < 20 {
+            liste[liste.count - 1] = (jetzt, wert)
+        } else {
+            liste.append((jetzt, wert))
+        }
+        liste.removeAll { jetzt.timeIntervalSince($0.zeit) > 1800 }
+        JoltCarPlaySceneDelegate.reihen[name] = liste
+    }
+
+    private func reihe(_ name: String) -> [Double]? {
+        guard let liste = JoltCarPlaySceneDelegate.reihen[name], liste.count >= 2 else { return nil }
+        return liste.map { $0.wert }
+    }
+
 
     private func stoppsZeigen(_ stopps: [JoltAnzeige.Listenstopp]) {
         let zeilen: [CPListItem] = stopps.prefix(zeilenMax).map { stopp in
@@ -182,17 +250,19 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
     private func kachel(titel: String, wert: String, klein: String?,
                         balken: [Double?]? = nil,
+                        linie: [Double]? = nil,
                         handler: (() -> Void)? = nil) -> CPGridButton {
         CPGridButton(
             titleVariants: [titel],
-            image: kachelBild(wert: wert, klein: klein, balken: balken),
+            image: kachelBild(wert: wert, klein: klein, balken: balken, linie: linie),
             handler: handler.map { aufruf -> ((CPGridButton) -> Void) in { _ in aufruf() } })
     }
 
     /// Eine Kachel als Bild: grosser Wert, darunter eine kleine Zeile oder
     /// ein Balkendiagramm. CarPlay zeichnet für Kacheln nur ein Bild und einen
     /// Titel; alles andere muss ins Bild.
-    private func kachelBild(wert: String, klein: String?, balken: [Double?]?) -> UIImage {
+    private func kachelBild(wert: String, klein: String?, balken: [Double?]?,
+                            linie: [Double]?) -> UIImage {
         let seite: CGFloat = 120
         let groesse = CGSize(width: seite, height: seite)
         let traits = schnittstelle?.carTraitCollection ?? UITraitCollection.current
@@ -202,7 +272,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         let gedaempft = UIColor.secondaryLabel.resolvedColor(with: traits)
         let balkenFarbe = UIColor.systemGreen.resolvedColor(with: traits)
         let flaeche = UIColor.tertiarySystemFill.resolvedColor(with: traits)
-        let mitBalken = balken?.contains(where: { $0 != nil }) ?? false
+        // "mitBalken" heisst: ein Diagramm unter dem Wert (Balken oder Linie).
+        let mitBalken = (balken?.contains(where: { $0 != nil }) ?? false) || linie != nil
 
         return UIGraphicsImageRenderer(size: groesse, format: format).image { _ in
             flaeche.setFill()
@@ -223,7 +294,26 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                 at: CGPoint(x: (seite - masse.width) / 2, y: mitBalken ? 6 : 24),
                 withAttributes: attribute)
 
-            if mitBalken, let balken = balken {
+            if let linie = linie, linie.count >= 2 {
+                let tief = linie.min() ?? 0
+                let hoch = linie.max() ?? 1
+                let spanne = max(hoch - tief, 0.0001)
+                let unten: CGFloat = seite - 12
+                let platz: CGFloat = 46
+                let schritt = (seite - 20) / CGFloat(linie.count - 1)
+                let pfad = UIBezierPath()
+                for (i, eintrag) in linie.enumerated() {
+                    // Eine flache Linie liegt in der Mitte, nicht am Boden.
+                    let anteil = hoch - tief < 0.0001 ? 0.5 : (eintrag - tief) / spanne
+                    let p = CGPoint(x: 10 + CGFloat(i) * schritt,
+                                    y: unten - platz * CGFloat(anteil))
+                    if i == 0 { pfad.move(to: p) } else { pfad.addLine(to: p) }
+                }
+                pfad.lineWidth = 3
+                pfad.lineJoinStyle = .round
+                balkenFarbe.setStroke()
+                pfad.stroke()
+            } else if mitBalken, let balken = balken {
                 let werte = balken.compactMap { $0 }
                 let spitze = max(werte.max() ?? 1, 1)
                 let unten: CGFloat = seite - 10
