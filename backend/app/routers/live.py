@@ -496,6 +496,7 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
 
     db.commit()
     return {"ok": True, "aufzeichnung": gebaut,
+            "stand_verworfen": ergebnis.get("stand_verworfen"),
             "nicht_gelernt": nicht_gelernt,
             "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
             # None heisst "diese Fahrt war nicht verwertbar" - zu kurz, oder

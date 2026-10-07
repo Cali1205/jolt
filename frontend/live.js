@@ -2278,6 +2278,11 @@ window.joltLive = (function () {
     document.getElementById("live-inhalt").hidden = true;
     document.getElementById("live-leer").hidden = false;
     gelerntesMelden(ergebnis);
+    if (ergebnis && ergebnis.stand_verworfen) {
+      K.melden(`Die letzten ${ergebnis.stand_verworfen.verworfen_minuten} min `
+        + "Stillstand wurden verworfen - die Fahrt endet beim letzten Fahren.",
+        "hinweis");
+    }
   }
 
   /* Was jolt aus der Fahrt gelernt hat - und warum nicht, wenn nicht.

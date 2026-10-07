@@ -9,11 +9,10 @@ import UIKit
 /// wird, was das Anzeigemodell der Oberfläche liefert - dasselbe, das auch die
 /// Live Activity speist:
 ///
-///   Liste "jolt"
-///     Abschnitt "Jetzt":     Ladestand, Verbrauch, Ankunft, Reserve,
-///                            Nebenverbraucher, Rekuperation
-///     Abschnitt "Ladestopps": die Stopps der Fahrt - Antippen öffnet eine
-///                            Informationsseite zum Stopp
+///   Kacheln "jolt" (CPGridTemplate, höchstens acht)
+///     Fahrt beenden, Ladestand, Verbrauch (mit Balken), Rekuperation,
+///     Ankunft, Reserve, Nebenverbraucher, Ladestopps
+///     Ladestopps und Verbrauch öffnen eine Seite; ein Stopp ihre Informationsseite
 ///
 /// Fehlt etwas, fehlt die Zeile. Ist die Anzeige älter als drei Minuten oder
 /// leer, steht dort, dass keine Fahrt läuft - und nichts, was nach einem
@@ -24,7 +23,7 @@ import UIKit
 @objc(JoltCarPlaySceneDelegate)
 public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var schnittstelle: CPInterfaceController?
-    private var liste: CPListTemplate?
+    private var gitter: CPGridTemplate?
     private var beobachterKennung: UUID?
     private var ergebnisKennung: UUID?
     /// "wird gestartet …" bis das Ergebnis da ist.
@@ -41,10 +40,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         didConnect interfaceController: CPInterfaceController
     ) {
         schnittstelle = interfaceController
-        let vorlage = CPListTemplate(
+        let vorlage = CPGridTemplate(
             title: "jolt",
-            sections: abschnitte(JoltAnzeigeStore.shared.aktuell))
-        liste = vorlage
+            gridButtons: kacheln(JoltAnzeigeStore.shared.aktuell))
+        gitter = vorlage
         interfaceController.setRootTemplate(vorlage, animated: false, completion: nil)
 
         beobachterKennung = JoltAnzeigeStore.shared.beobachten { [weak self] modell in
@@ -52,7 +51,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             // Kommt eine frische Anzeige, läuft die Aufzeichnung: Das "wird
             // gestartet" ist erledigt.
             if self.frisch(modell) != nil { self.laeuft = nil }
-            self.liste?.updateSections(self.abschnitte(modell))
+            self.gitter?.updateGridButtons(self.kacheln(modell))
         }
         ergebnisKennung = JoltAnzeigeStore.shared.ergebnisBeobachten { [weak self] aktion, ok, text in
             self?.ergebnis(aktion: aktion, ok: ok, text: text)
@@ -72,7 +71,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         }
         ergebnisKennung = nil
         laeuft = nil
-        liste = nil
+        gitter = nil
         schnittstelle = nil
     }
 
@@ -84,38 +83,44 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         return alter <= frischeSekunden ? modell : nil
     }
 
-    private func abschnitte(_ rohmodell: JoltAnzeige?) -> [CPListSection] {
+    /// Die Werte als Kacheln, in der Reihenfolge der früheren Liste: Fahrt
+    /// (Beenden), Ladestand, Verbrauch, Rekuperation, Ankunft, Reserve,
+    /// Nebenverbraucher, Ladestopps. Mehr als acht Kacheln nimmt CarPlay
+    /// nicht; fehlt ein Wert, fehlt die Kachel.
+    private func kacheln(_ rohmodell: JoltAnzeige?) -> [CPGridButton] {
         guard let modell = frisch(rohmodell) else {
-            return [CPListSection(
-                items: [startZeile()], header: "Keine laufende Fahrt", sectionIndexTitle: nil)]
+            return [startKachel()]
         }
+        var ergebnis: [CPGridButton] = [beendenKachel()]
 
-        var jetzt: [CPListItem] = []
         if let soc = modell.soc {
-            jetzt.append(CPListItem(
-                text: "Ladestand \(soc.text)",
-                detailText: quelleText(soc.quelle)))
+            ergebnis.append(kachel(
+                titel: "Ladestand", wert: soc.text, klein: quelleText(soc.quelle)))
         }
         if let verlauf = modell.verlauf {
-            let teile = verlauf.fenster
-                .filter { $0.kwh100 != nil }
-                .map { "\(fensterName($0.min)) \($0.text)" }
-            if !teile.isEmpty {
-                jetzt.append(CPListItem(
-                    text: "Verbrauch kWh/100 km",
-                    detailText: teile.joined(separator: " · ")))
+            let fenster = verlauf.fenster.filter { $0.kwh100 != nil }
+            if !fenster.isEmpty || verlauf.balken != nil {
+                // Oben der Wert des kürzesten Fensters, darunter die letzten
+                // dreissig Minuten in Balken zu fünf Minuten.
+                ergebnis.append(kachel(
+                    titel: "kWh/100 km",
+                    wert: fenster.first?.text ?? "–",
+                    klein: fenster.first.map { fensterName($0.min) },
+                    balken: verlauf.balken,
+                    handler: { [weak self] in self?.verbrauchZeigen(fenster) }))
             }
             if let rekup = verlauf.rekup {
-                jetzt.append(CPListItem(
-                    text: "Rekuperation \(rekup.prozent) %",
-                    detailText: "über \(rekup.minuten) min"))
+                ergebnis.append(kachel(
+                    titel: "Rekuperation",
+                    wert: "\(rekup.prozent) %",
+                    klein: "über \(rekup.minuten) min"))
             }
         }
         if let ankunft = modell.ankunft {
-            jetzt.append(CPListItem(text: "Ankunft", detailText: ankunft.text))
+            ergebnis.append(kachel(titel: "Ankunft", wert: ankunft.text, klein: nil))
         }
         if let reserve = modell.reserve {
-            jetzt.append(CPListItem(text: "Reserve", detailText: "in \(reserve.text)"))
+            ergebnis.append(kachel(titel: "Reserve", wert: reserve.text, klein: "in"))
         }
         if let neben = modell.neben {
             var teile: [String] = []
@@ -124,68 +129,149 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             if let klima = neben.klimaText { teile.append("Klima \(klima)") }
             if let akku = neben.batterieText { teile.append("Akku \(akku)") }
             if !teile.isEmpty {
-                jetzt.append(CPListItem(
-                    text: "Nebenverbraucher",
-                    detailText: teile.joined(separator: " · ")))
+                ergebnis.append(kachel(
+                    titel: "Nebenverbraucher",
+                    wert: neben.text ?? neben.heizungText ?? neben.klimaText
+                        ?? neben.batterieText ?? "–",
+                    klein: nil,
+                    handler: { [weak self] in self?.nebenZeigen(teile) }))
             }
-        }
-
-        var ergebnis: [CPListSection] = []
-        // Beenden steht zuoberst im eigenen Abschnitt: Wer fertig ist, sucht es
-        // nicht unter den Werten.
-        ergebnis.append(CPListSection(
-            items: [beendenZeile()], header: "Fahrt", sectionIndexTitle: nil))
-        if !jetzt.isEmpty {
-            ergebnis.append(CPListSection(
-                items: Array(jetzt.prefix(zeilenMax)),
-                header: "Jetzt",
-                sectionIndexTitle: nil))
-        }
-
-        if let stopps = modell.stoppListe, !stopps.isEmpty {
-            let zeilen: [CPListItem] = stopps.prefix(zeilenMax).map { stopp in
-                let item = CPListItem(text: stopp.name, detailText: stoppZeile(stopp))
-                item.handler = { [weak self] _, abschluss in
-                    self?.stoppZeigen(stopp)
-                    abschluss()
-                }
-                return item
-            }
-            ergebnis.append(CPListSection(
-                items: zeilen, header: "Ladestopps", sectionIndexTitle: nil))
         }
         // Eine Aufzeichnung ohne Plan hat keine Stopps: Das ist kein Fehler,
-        // der Abschnitt fehlt dann einfach.
+        // die Kachel fehlt dann einfach.
+        if let stopps = modell.stoppListe, !stopps.isEmpty {
+            ergebnis.append(kachel(
+                titel: "Ladestopps", wert: "\(stopps.count)", klein: nil,
+                handler: { [weak self] in self?.stoppsZeigen(stopps) }))
+        }
+        return Array(ergebnis.prefix(8))
+    }
 
-        return ergebnis.isEmpty
-            ? [CPListSection(items: [CPListItem(text: "Keine Werte", detailText: nil)])]
-            : ergebnis
+    private func stoppsZeigen(_ stopps: [JoltAnzeige.Listenstopp]) {
+        let zeilen: [CPListItem] = stopps.prefix(zeilenMax).map { stopp in
+            let item = CPListItem(text: stopp.name, detailText: stoppZeile(stopp))
+            item.handler = { [weak self] _, abschluss in
+                self?.stoppZeigen(stopp)
+                abschluss()
+            }
+            return item
+        }
+        let seite = CPListTemplate(
+            title: "Ladestopps", sections: [CPListSection(items: zeilen)])
+        schnittstelle?.pushTemplate(seite, animated: true, completion: nil)
+    }
+
+    private func verbrauchZeigen(_ fenster: [JoltAnzeige.Fenster]) {
+        let punkte = fenster.map {
+            CPInformationItem(title: "letzte \(fensterName($0.min))",
+                              detail: "\($0.text) kWh/100 km")
+        }
+        let seite = CPInformationTemplate(
+            title: "Verbrauch", layout: .leading, items: punkte, actions: [])
+        schnittstelle?.pushTemplate(seite, animated: true, completion: nil)
+    }
+
+    private func nebenZeigen(_ teile: [String]) {
+        let punkte = teile.map { CPInformationItem(title: $0, detail: nil) }
+        let seite = CPInformationTemplate(
+            title: "Nebenverbraucher", layout: .leading, items: punkte, actions: [])
+        schnittstelle?.pushTemplate(seite, animated: true, completion: nil)
+    }
+
+    // MARK: - Kacheln zeichnen
+
+    private func kachel(titel: String, wert: String, klein: String?,
+                        balken: [Double?]? = nil,
+                        handler: (() -> Void)? = nil) -> CPGridButton {
+        CPGridButton(
+            titleVariants: [titel],
+            image: kachelBild(wert: wert, klein: klein, balken: balken),
+            handler: handler.map { aufruf -> ((CPGridButton) -> Void) in { _ in aufruf() } })
+    }
+
+    /// Eine Kachel als Bild: grosser Wert, darunter eine kleine Zeile oder
+    /// ein Balkendiagramm. CarPlay zeichnet für Kacheln nur ein Bild und einen
+    /// Titel; alles andere muss ins Bild.
+    private func kachelBild(wert: String, klein: String?, balken: [Double?]?) -> UIImage {
+        let seite: CGFloat = 120
+        let groesse = CGSize(width: seite, height: seite)
+        let traits = schnittstelle?.carTraitCollection ?? UITraitCollection.current
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = traits.displayScale > 0 ? traits.displayScale : 2
+        let schrift = UIColor.label.resolvedColor(with: traits)
+        let gedaempft = UIColor.secondaryLabel.resolvedColor(with: traits)
+        let balkenFarbe = UIColor.systemGreen.resolvedColor(with: traits)
+        let flaeche = UIColor.tertiarySystemFill.resolvedColor(with: traits)
+        let mitBalken = balken?.contains(where: { $0 != nil }) ?? false
+
+        return UIGraphicsImageRenderer(size: groesse, format: format).image { _ in
+            flaeche.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: groesse),
+                         cornerRadius: 14).fill()
+
+            // Wert: so gross wie möglich, ohne den Rand zu berühren.
+            var punkt: CGFloat = mitBalken ? 32 : 40
+            var attribute: [NSAttributedString.Key: Any] = [:]
+            repeat {
+                attribute = [.font: UIFont.systemFont(ofSize: punkt, weight: .semibold),
+                             .foregroundColor: schrift]
+                punkt -= 2
+            } while (wert as NSString).size(withAttributes: attribute).width > seite - 12
+                && punkt > 12
+            let masse = (wert as NSString).size(withAttributes: attribute)
+            (wert as NSString).draw(
+                at: CGPoint(x: (seite - masse.width) / 2, y: mitBalken ? 6 : 24),
+                withAttributes: attribute)
+
+            if mitBalken, let balken = balken {
+                let werte = balken.compactMap { $0 }
+                let spitze = max(werte.max() ?? 1, 1)
+                let unten: CGFloat = seite - 10
+                let platz: CGFloat = 50
+                let anzahl = CGFloat(balken.count)
+                let luecke: CGFloat = 4
+                let breite = (seite - 20 - luecke * (anzahl - 1)) / anzahl
+                for (i, eintrag) in balken.enumerated() {
+                    let x = 10 + CGFloat(i) * (breite + luecke)
+                    guard let eintrag = eintrag else {
+                        // Lücke: Stand, kein Verbrauch null.
+                        gedaempft.setFill()
+                        UIBezierPath(rect: CGRect(x: x, y: unten - 2, width: breite, height: 2)).fill()
+                        continue
+                    }
+                    let hoehe = max(3, platz * CGFloat(max(eintrag, 0) / spitze))
+                    balkenFarbe.setFill()
+                    UIBezierPath(roundedRect: CGRect(x: x, y: unten - hoehe, width: breite, height: hoehe),
+                                 cornerRadius: 2).fill()
+                }
+            } else if let klein = klein {
+                let a: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 15, weight: .regular),
+                    .foregroundColor: gedaempft]
+                let w = (klein as NSString).size(withAttributes: a).width
+                (klein as NSString).draw(
+                    at: CGPoint(x: max(6, (seite - w) / 2), y: seite - 38), withAttributes: a)
+            }
+        }
     }
 
     // MARK: - Aufzeichnung starten und beenden
 
-    private func startZeile() -> CPListItem {
+    private func startKachel() -> CPGridButton {
         let fahrzeug = JoltAnzeigeStore.shared.fahrzeugName
-        let zeile = CPListItem(
-            text: "Aufzeichnung starten",
-            detailText: laeuft ?? (fahrzeug.map { "Fahrzeug: \($0)" }
-                                   ?? "mit dem zuletzt benutzten Fahrzeug"))
-        zeile.handler = { [weak self] _, abschluss in
-            self?.starten()
-            abschluss()
-        }
-        return zeile
+        return kachel(
+            titel: "Aufzeichnung starten",
+            wert: laeuft == nil ? "Start" : "…",
+            klein: laeuft ?? fahrzeug,
+            handler: { [weak self] in self?.starten() })
     }
 
-    private func beendenZeile() -> CPListItem {
-        let zeile = CPListItem(
-            text: "Aufzeichnung beenden",
-            detailText: laeuft ?? "Fahrt abschliessen und speichern")
-        zeile.handler = { [weak self] _, abschluss in
-            self?.beendenFragen()
-            abschluss()
-        }
-        return zeile
+    private func beendenKachel() -> CPGridButton {
+        kachel(
+            titel: "Aufzeichnung beenden",
+            wert: laeuft == nil ? "Ende" : "…",
+            klein: laeuft,
+            handler: { [weak self] in self?.beendenFragen() })
     }
 
     private func starten() {
@@ -248,7 +334,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     }
 
     private func aktualisieren() {
-        liste?.updateSections(abschnitte(JoltAnzeigeStore.shared.aktuell))
+        gitter?.updateGridButtons(kacheln(JoltAnzeigeStore.shared.aktuell))
     }
 
     private func hinweis(_ text: String) {
