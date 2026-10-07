@@ -119,7 +119,7 @@ def _mit_version(html: str, dateien) -> str:
 # Sorte Findigkeit, die beim nächsten Umbau still danebenliegt.
 INDEX_DATEIEN = ("ble-plugin.js", "obd-ble-nativ.js", "messwerte.js",
                  "obd-kern.js",
-                 "core.js", "karte.js", "route.js", "anzeige.js", "live.js",
+                 "core.js", "karte.js", "route.js", "kacheln.js", "anzeige.js", "live.js",
                  "einstellungen.js",
                  "fahrten.js", "fahrzeug.js", "app.js")
 

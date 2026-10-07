@@ -554,7 +554,53 @@ window.joltEinstellungen = (function () {
     el("diag-fahrt-zeile").hidden = !fahrtLaeuft();
   }
 
+  /* ---------- CarPlay-Darstellung ---------- */
+
+  /* Die Kacheln beider Stile mit Probewerten - dieselben Zeichenfunktionen
+   * wie im Auto, nur ohne den Umweg über CarPlay. */
+  function carplayZeigen() {
+    const kacheln = window.joltKacheln;
+    const anzeige = window.joltAnzeige;
+    if (!kacheln || !anzeige) return;
+    const wahl = el("einst-carplay-stil");
+    if (!wahl.options.length) {
+      for (const stil of kacheln.STILE) {
+        const o = document.createElement("option");
+        o.value = stil.id; o.textContent = stil.name;
+        wahl.appendChild(o);
+      }
+    }
+    wahl.value = anzeige.stil();
+    const namen = { klassisch: "klassisch", a: "A – Instrument", b: "B – Telemetrie" };
+    el("einst-carplay-kurz").textContent = namen[anzeige.stil()] || anzeige.stil();
+
+    const probe = kacheln.probe();
+    const werte = kacheln.daten(probe.m, probe.reihen);
+    for (const stil of ["a", "b"]) {
+      const behaelter = el("vorschau-" + stil);
+      if (!behaelter || behaelter.childElementCount) continue;     // einmal genügt
+      for (const slot of kacheln.SLOTS) {
+        const leinwand = kacheln.browserCanvas(kacheln.SEITE * 2);
+        const c = leinwand.getContext("2d");
+        c.scale(2, 2);
+        kacheln.zeichnen(stil, slot, werte[slot] || null, c);
+        leinwand.title = slot;
+        behaelter.appendChild(leinwand);
+      }
+    }
+  }
+
+  function carplayStilWaehlen() {
+    const stil = el("einst-carplay-stil").value;
+    if (window.joltAnzeige && window.joltAnzeige.stilSetzen(stil)) {
+      K.melden("CarPlay-Darstellung: " + el("einst-carplay-stil").selectedOptions[0].textContent
+        + ". Gilt ab der nächsten Meldung im Auto.", "hinweis");
+      carplayZeigen();
+    }
+  }
+
   function oeffnen() {
+    carplayZeigen();
     serverZeigen();
     pushZeigen();
     dongleEinstellungenZeigen();
@@ -573,6 +619,7 @@ window.joltEinstellungen = (function () {
   }
 
   function einrichten() {
+    K.an("einst-carplay-stil", "change", carplayStilWaehlen);
     K.an("einst-abmelden", "click", abmelden);
     K.an("einst-push-an", "click", pushAktivieren);
     K.an("einst-push-aus", "click", pushAbmelden);

@@ -155,3 +155,8 @@ jobs:
       # Verbinden und Mithoeren aus den Einstellungen, vom Tippen bis zum Text.
       - name: Dongle-Knoepfe der Einstellungen pruefen
         run: node tools/check_einstellungen.js
+
+      # Die gezeichneten CarPlay-Kacheln: kein Text ueber den Rand, keine
+      # Kachel stuerzt ohne Wert ab, die Farben melden den richtigen Zustand.
+      - name: CarPlay-Kacheln pruefen
+        run: node tools/check_kacheln.js

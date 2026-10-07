@@ -138,6 +138,17 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Alle Messwerte stehen live im Dashboard, samt Alter je Wert: Eine
   eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
   und wie, steht weiter unten.
+- **CarPlay-Darstellung in zwei Stilen** — die Kacheln des CarPlay-Dashboards
+  sind Bilder, und `frontend/kacheln.js` zeichnet sie im Canvas: **A –
+  Instrument** (Zeigerbogen mit Skala für Ladestand und Rekuperation, Balken
+  über einer Mittellinie, Ankunft mit Pfeil, Reichweitenleiste) und **B –
+  Telemetrie** (Zahlen links, LED-Segmentleisten, Ankunft als Abweichung von
+  Null, Stopps als Streckenband, Verläufe als Fläche). Farben folgen dem
+  Zustand (Ladestand unter 35 % gelb, unter 20 % rot, …). Gewählt wird in den
+  Einstellungen; dort zeigt eine Vorschau beide Stile mit Probewerten. Die
+  Bilder reisen als PNG im Anzeigemodell (`kachelBilder`) zur CarPlay-Szene;
+  ohne Bild zeichnet Swift wie bisher. Weil sie in der Oberfläche entstehen,
+  ist eine Änderung am Aussehen eine Änderung am Server, kein neuer App-Bau.
 - **Einstellungen und Dongle-Diagnose** — der Reiter „Einstellungen“ sammelt,
   was man selten braucht: Konto und Server, Benachrichtigungen, die
   Dongle-Optionen (nur beim Fahren lesen, trennen, Gerät vergessen) und den

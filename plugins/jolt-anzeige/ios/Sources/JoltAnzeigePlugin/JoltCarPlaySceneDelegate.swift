@@ -100,23 +100,28 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             return [leereKachel("Keine laufende Fahrt")]
         }
         var ergebnis: [CPGridButton] = []
+        /// Das Bild, das die Oberfläche für diesen Platz gezeichnet hat (Stil
+        /// "a" oder "b"); nil heisst: Swift zeichnet wie bisher.
+        func bild(_ platz: String) -> UIImage? { fertigesBild(platz, modell) }
 
         if let soc = modell.soc {
             ergebnis.append(kachel(
                 titel: "Ladestand", wert: soc.text, klein: nil,
-                linie: reihe("soc")))
+                linie: reihe("soc"), bild: bild("soc")))
         } else {
-            ergebnis.append(leereKachel("Ladestand"))
+            ergebnis.append(leereKachel("Ladestand", bild: bild("soc")))
         }
         if let ankunft = modell.ankunft {
-            ergebnis.append(kachel(titel: "Ankunft", wert: ankunft.text, klein: nil))
+            ergebnis.append(kachel(titel: "Ankunft", wert: ankunft.text, klein: nil,
+                                   bild: bild("ankunft")))
         } else {
-            ergebnis.append(leereKachel("Ankunft"))
+            ergebnis.append(leereKachel("Ankunft", bild: bild("ankunft")))
         }
         if let reserve = modell.reserve {
-            ergebnis.append(kachel(titel: "Reserve", wert: reserve.text, klein: "in"))
+            ergebnis.append(kachel(titel: "Reserve", wert: reserve.text, klein: "in",
+                                   bild: bild("reserve")))
         } else {
-            ergebnis.append(leereKachel("Reserve"))
+            ergebnis.append(leereKachel("Reserve", bild: bild("reserve")))
         }
 
         let fenster = (modell.verlauf?.fenster ?? []).filter { $0.kwh100 != nil }
@@ -128,9 +133,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                 wert: fenster.first?.text ?? "–",
                 klein: fenster.first.map { fensterName($0.min) },
                 balken: modell.verlauf?.balken,
+                bild: bild("verbrauch"),
                 handler: { [weak self] in self?.verbrauchZeigen(fenster) }))
         } else {
-            ergebnis.append(leereKachel("kWh/100 km"))
+            ergebnis.append(leereKachel("kWh/100 km", bild: bild("verbrauch")))
         }
 
         var teile: [String] = []
@@ -147,9 +153,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                     ?? neben.batterieText ?? "–",
                 klein: nil,
                 linie: reihe("neben"),
+                bild: bild("neben"),
                 handler: { [weak self] in self?.nebenZeigen(teile) }))
         } else {
-            ergebnis.append(leereKachel("Nebenverbraucher"))
+            ergebnis.append(leereKachel("Nebenverbraucher", bild: bild("neben")))
         }
 
         if let rekup = modell.verlauf?.rekup {
@@ -157,9 +164,10 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                 titel: "Rekuperation",
                 wert: "\(rekup.prozent) %",
                 klein: nil,
-                linie: reihe("rekup")))
+                linie: reihe("rekup"),
+                bild: bild("rekup")))
         } else {
-            ergebnis.append(leereKachel("Rekuperation"))
+            ergebnis.append(leereKachel("Rekuperation", bild: bild("rekup")))
         }
 
         // Eine Aufzeichnung ohne Plan hat keine Stopps: Das ist kein Fehler,
@@ -167,15 +175,49 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         if let stopps = modell.stoppListe, !stopps.isEmpty {
             ergebnis.append(kachel(
                 titel: "Ladestopps", wert: "\(stopps.count)", klein: nil,
+                bild: bild("stopps"),
                 handler: { [weak self] in self?.stoppsZeigen(stopps) }))
         } else {
-            ergebnis.append(leereKachel("Ladestopps"))
+            ergebnis.append(leereKachel("Ladestopps", bild: bild("stopps")))
         }
         return Array(ergebnis.prefix(8))
     }
 
-    private func leereKachel(_ titel: String) -> CPGridButton {
-        kachel(titel: titel, wert: "–", klein: nil)
+    private func leereKachel(_ titel: String, bild: UIImage? = nil) -> CPGridButton {
+        kachel(titel: titel, wert: "–", klein: nil, bild: bild)
+    }
+
+    /// Das fertige Bild der Oberfläche für einen Kachelplatz - oder nil, wenn
+    /// keines mitkam (Stil "klassisch", ältere Oberfläche, Bild nicht lesbar).
+    /// In dem Fall zeichnet `kachelBild` wie bisher.
+    private func fertigesBild(_ platz: String, _ modell: JoltAnzeige) -> UIImage? {
+        guard modell.stil != nil, modell.stil != "klassisch",
+              let text = modell.kachelBilder?[platz],
+              let daten = Data(base64Encoded: text),
+              let bild = UIImage(data: daten, scale: 2) else { return nil }
+        return begrenzt(bild)
+    }
+
+    /// CarPlay zeigt Kachelbilder höchstens in einer bestimmten Grösse; ein
+    /// grösseres würde das System verkleinern oder abschneiden. Hier wird es
+    /// vorher passend verkleinert, mit dem Seitenverhältnis.
+    ///
+    /// Die Grenze nennt iOS erst ab 26 (`maximumGridButtonImageSize`); davor
+    /// bleibt das Bild, wie es ist - 120 Punkte, so gross wie das, was
+    /// `kachelBild` immer schon gezeichnet hat.
+    private func begrenzt(_ bild: UIImage) -> UIImage {
+        guard #available(iOS 26.0, *) else { return bild }
+        let grenze = CPGridTemplate.maximumGridButtonImageSize
+        guard grenze.width > 0, grenze.height > 0,
+              bild.size.width > grenze.width || bild.size.height > grenze.height
+        else { return bild }
+        let faktor = min(grenze.width / bild.size.width, grenze.height / bild.size.height)
+        let ziel = CGSize(width: bild.size.width * faktor, height: bild.size.height * faktor)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = bild.scale
+        return UIGraphicsImageRenderer(size: ziel, format: format).image { _ in
+            bild.draw(in: CGRect(origin: .zero, size: ziel))
+        }
     }
 
     // MARK: - Verläufe
@@ -252,10 +294,11 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     private func kachel(titel: String, wert: String, klein: String?,
                         balken: [Double?]? = nil,
                         linie: [Double]? = nil,
+                        bild: UIImage? = nil,
                         handler: (() -> Void)? = nil) -> CPGridButton {
         CPGridButton(
             titleVariants: [titel],
-            image: kachelBild(wert: wert, klein: klein, balken: balken, linie: linie),
+            image: bild ?? kachelBild(wert: wert, klein: klein, balken: balken, linie: linie),
             handler: handler.map { aufruf -> ((CPGridButton) -> Void) in { _ in aufruf() } })
     }
 

@@ -161,6 +161,11 @@ pre.diag-protokoll .raus { color: var(--akzent); }
 pre.diag-protokoll .rein { color: #7fd3a0; }
 pre.diag-protokoll .auff { color: var(--schlecht); }
 pre.diag-protokoll .zeit { color: var(--gedaempft); }
+.kachel-vorschau { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.kachel-vorschau canvas { width: 100%; height: auto; display: block;
+  border-radius: 14%; background: #05080c; }
+@media (max-width: 420px) { .kachel-vorschau { grid-template-columns: repeat(3, 1fr); } }
+
 
 /* Die eine Zahl, die im Fahren zählt: Reicht es? Alles andere ist Beiwerk,
    und Beiwerk gehört nicht in dieselbe Grösse wie die Antwort. */
@@ -798,6 +803,28 @@ table.kurve input { padding: 6px 8px; }
       </div>
     </details>
 
+    <details class="einst" id="einst-carplay">
+      <summary>CarPlay-Darstellung <span class="einst-kurz" id="einst-carplay-kurz">–</span></summary>
+      <div class="einst-inhalt">
+        <p class="leer" style="padding-top:0">Die Kacheln im CarPlay-Dashboard
+          sind Bilder. Zwei Stile zum Ausprobieren – die Vorschau unten zeigt
+          sie mit Probewerten, so wie sie im Auto erscheinen. Die Umstellung
+          gilt sofort, sobald eine Fahrt läuft.</p>
+        <label for="einst-carplay-stil">Stil im Auto</label>
+        <select id="einst-carplay-stil"></select>
+        <h3>A – Instrument</h3>
+        <div class="kachel-vorschau" id="vorschau-a"></div>
+        <h3>B – Telemetrie</h3>
+        <div class="kachel-vorschau" id="vorschau-b"></div>
+        <p class="leer" style="padding-top:6px">Rot, gelb, grün folgen dem Zustand:
+          Ladestand unter 35&nbsp;% gelb, unter 20&nbsp;% rot; Ankunft ab
+          +2&nbsp;min gelb, ab +15&nbsp;min rot; Reserve unter 100&nbsp;km gelb,
+          unter 40&nbsp;km rot. Fehlt ein Wert, bleibt der Platz leer.
+          <strong>Klassisch</strong> heisst: Das iPhone zeichnet die Kacheln
+          selbst, wie bisher.</p>
+      </div>
+    </details>
+
     <details class="einst">
       <summary>Dongle</summary>
       <div class="einst-inhalt">
@@ -933,6 +960,7 @@ table.kurve input { padding: 6px 8px; }
 <script src="/static/core.js"></script>
 <script src="/static/karte.js"></script>
 <script src="/static/route.js"></script>
+<script src="/static/kacheln.js"></script>
 <script src="/static/anzeige.js"></script>
 <script src="/static/live.js"></script>
 <script src="/static/fahrten.js"></script>
