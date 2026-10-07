@@ -226,7 +226,16 @@ def verwaiste_beenden(db) -> list[dict]:
 
         # Gelernt wird auch hier - eine vergessene Fahrt ist keine schlechtere
         # Messung als eine ordentlich beendete.
-        ergebnis.update(beenden_und_lernen(db, sitzung))
+        # Eine Sitzung, an der das Lernen scheitert, darf die uebrigen nicht
+        # aufhalten - sonst probiert jede Runde dieselbe zuerst und kommt nie
+        # weiter. Sie ist beendet; was fehlschlug, steht im Log.
+        try:
+            with db.begin_nested():
+                ergebnis.update(beenden_und_lernen(db, sitzung))
+        except Exception as fehler:      # noqa: BLE001
+            log.warning("Verwaiste Sitzung %s nicht abzuschliessen: %s",
+                        sitzung.id, fehler)
+            ergebnis["fehler"] = str(fehler)
 
         beendet.append(ergebnis)
         log.info("Verwaiste Sitzung %s nach %s min Stille beendet: %s",
