@@ -45,6 +45,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             title: "jolt",
             gridButtons: kacheln(JoltAnzeigeStore.shared.aktuell))
         gitter = vorlage
+        vorlage.trailingNavigationBarButtons = leiste(JoltAnzeigeStore.shared.aktuell)
         interfaceController.setRootTemplate(vorlage, animated: false, completion: nil)
 
         beobachterKennung = JoltAnzeigeStore.shared.beobachten { [weak self] modell in
@@ -53,7 +54,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             // gestartet" ist erledigt.
             if self.frisch(modell) != nil { self.laeuft = nil }
             self.aufnehmen(modell)
-            self.gitter?.updateGridButtons(self.kacheln(modell))
+            self.anzeigen(modell)
         }
         ergebnisKennung = JoltAnzeigeStore.shared.ergebnisBeobachten { [weak self] aktion, ok, text in
             self?.ergebnis(aktion: aktion, ok: ok, text: text)
@@ -89,16 +90,16 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     /// mit einem Strich stehen. Sonst rückten die übrigen nach, sobald ein
     /// Wert kommt oder geht, und man müsste im Fahren neu suchen.
     ///
-    ///   oben:   Beenden | Ladestand (mit Verlauf) | Ankunft | Reserve
+    ///   oben:   Ladestand (mit Verlauf) | Ankunft | Reserve (Start/Beenden: Titelleiste)
     ///   unten:  Verbrauch (Balken) | Nebenverbraucher (Verlauf)
     ///           | Rekuperation (Verlauf) | Ladestopps
     ///
     /// Mehr als acht Kacheln nimmt CarPlay nicht.
     private func kacheln(_ rohmodell: JoltAnzeige?) -> [CPGridButton] {
         guard let modell = frisch(rohmodell) else {
-            return [startKachel()]
+            return [leereKachel("Keine laufende Fahrt")]
         }
-        var ergebnis: [CPGridButton] = [beendenKachel()]
+        var ergebnis: [CPGridButton] = []
 
         if let soc = modell.soc {
             ergebnis.append(kachel(
@@ -347,22 +348,26 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
     // MARK: - Aufzeichnung starten und beenden
 
-    private func startKachel() -> CPGridButton {
-        let fahrzeug = JoltAnzeigeStore.shared.fahrzeugName
-        return kachel(
-            titel: "Aufzeichnung starten",
-            wert: laeuft == nil ? "Start" : "…",
-            klein: laeuft ?? fahrzeug,
-            handler: { [weak self] in self?.starten() })
+    /// Start und Beenden als kleine Schaltfläche in der Titelleiste: Sie
+    /// brauchen keine Kachel, und der Platz gehört den Werten. Beenden fragt
+    /// nach, ein Tippen aus Versehen schliesst nichts ab.
+    private func leiste(_ rohmodell: JoltAnzeige?) -> [CPBarButton] {
+        if let text = laeuft {
+            let warten = CPBarButton(title: text, handler: nil)
+            warten.isEnabled = false
+            return [warten]
+        }
+        if frisch(rohmodell) != nil {
+            return [CPBarButton(title: "Beenden") { [weak self] _ in self?.beendenFragen() }]
+        }
+        return [CPBarButton(title: "Start") { [weak self] _ in self?.starten() }]
     }
 
-    private func beendenKachel() -> CPGridButton {
-        kachel(
-            titel: "Aufzeichnung beenden",
-            wert: laeuft == nil ? "Ende" : "…",
-            klein: laeuft,
-            handler: { [weak self] in self?.beendenFragen() })
+    private func anzeigen(_ modell: JoltAnzeige?) {
+        gitter?.updateGridButtons(kacheln(modell))
+        gitter?.trailingNavigationBarButtons = leiste(modell)
     }
+
 
     private func starten() {
         guard laeuft == nil else { return }
@@ -424,7 +429,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     }
 
     private func aktualisieren() {
-        gitter?.updateGridButtons(kacheln(JoltAnzeigeStore.shared.aktuell))
+        anzeigen(JoltAnzeigeStore.shared.aktuell)
     }
 
     private func hinweis(_ text: String) {
