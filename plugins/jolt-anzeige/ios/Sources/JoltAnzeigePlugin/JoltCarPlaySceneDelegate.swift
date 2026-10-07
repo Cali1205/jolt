@@ -201,7 +201,12 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     /// CarPlay zeigt Kachelbilder höchstens in einer bestimmten Grösse; ein
     /// grösseres würde das System verkleinern oder abschneiden. Hier wird es
     /// vorher passend verkleinert, mit dem Seitenverhältnis.
+    ///
+    /// Die Grenze nennt iOS erst ab 26 (`maximumGridButtonImageSize`); davor
+    /// bleibt das Bild, wie es ist - 120 Punkte, so gross wie das, was
+    /// `kachelBild` immer schon gezeichnet hat.
     private func begrenzt(_ bild: UIImage) -> UIImage {
+        guard #available(iOS 26.0, *) else { return bild }
         let grenze = CPGridTemplate.maximumGridButtonImageSize
         guard grenze.width > 0, grenze.height > 0,
               bild.size.width > grenze.width || bild.size.height > grenze.height
