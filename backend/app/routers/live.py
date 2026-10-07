@@ -203,6 +203,7 @@ def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     for alt in db.query(models.LiveSitzung).filter_by(fahrt_id=fahrt_id,
                                                       laeuft=True).all():
         alt.laeuft = False
+        alt.beendet = datetime.utcnow()
 
     sitzung = models.LiveSitzung(fahrt_id=fahrt_id)
 
@@ -480,6 +481,14 @@ def beenden(sitzung_id: int, db: Session = Depends(get_db)):
     nicht dauerhaft verbiegt.
     """
     sitzung = _sitzung_holen(db, sitzung_id)
+    # Zweimal beenden (Wiederholung nach Funkloch, Doppeltippen, oder das
+    # Aufraeumen war schneller) darf nicht zweimal lernen: Der Korrekturfaktor
+    # des Fahrzeugs wuerde aus derselben Fahrt doppelt fortgeschrieben.
+    if not sitzung.laeuft:
+        return {"ok": True, "bereits_beendet": True, "aufzeichnung": None,
+                "stand_verworfen": None, "nicht_gelernt": None,
+                "verbrauchsfaktor": round(sitzung.verbrauchsfaktor, 3),
+                "gelernt": None}
     sitzung.laeuft = False
     sitzung.beendet = datetime.utcnow()
 
