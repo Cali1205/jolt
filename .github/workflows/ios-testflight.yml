@@ -254,6 +254,23 @@ jobs:
             ${EXTRA[@]+"${EXTRA[@]}"} \
             | xcbeautify --renderer github-actions
 
+      # Das unsignierte Archiv traegt keine Entitlements: Der Export signiert
+      # nur mit dem, was er in der App findet, und der Bau ist gruen, obwohl
+      # CarPlay fehlt. Deshalb die Entitlements vor dem Export ad hoc in die
+      # archivierte App schreiben (der Export signiert danach neu, behaelt sie
+      # aber) und ins Protokoll legen, damit man es nachlesen kann.
+      - name: Entitlements ins Archiv
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PFAD="$RUNNER_TEMP/jolt.xcarchive/Products/Applications/App.app"
+          ENT="ios/App/App/App.entitlements"
+          if [ -f "$ENT" ] && [ "$MODUS" = "automatisch" ]; then
+            codesign --force --sign - --entitlements "$ENT" "$APP_PFAD"
+          fi
+          echo "Entitlements der archivierten App:"
+          codesign -d --entitlements :- "$APP_PFAD" 2>&1 || true
+
       # `destination: upload` laesst xcodebuild den Bau gleich nach App Store
       # Connect schicken - ohne altool und ohne zweiten Schritt. Die
       # Anmeldung laeuft ueber den API-Schluessel, nicht ueber ein
