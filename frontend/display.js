@@ -292,7 +292,7 @@ window.joltDisplay = (function () {
    *    the newest is sent,
    *  - unchanged (apart from `stand`) is not sent - except as a heartbeat
    *    after `heartbeatMs`,
-   *  - `beenden()` reports `null`: the trip is over, the display should
+   *  - `finish()` reports `null`: the trip is over, the display should
    *    disappear,
    *  - a target that is missing or fails aborts nothing: the UI keeps
    *    running, even if the car sees nothing of it. */
@@ -450,51 +450,7 @@ window.joltDisplay = (function () {
     return result;
   }
 
-  /* The native plugin (plugins/jolt-anzeige) still reads the German keys of the
-   * display model. toNative() translates them at the border, so the rest of
-   * this file can stay English. */
-  const NATIVE_KEYS = {
-    "arrival": "ankunft",
-    "arrivalSoc": "ankunftSoc",
-    "arrivalSocText": "ankunftSocText",
-    "as_of": "stand",
-    "aux": "neben",
-    "bar": "balken",
-    "chargeTimeMin": "ladezeitMin",
-    "chargeTimeText": "ladezeitText",
-    "climateKw": "klimaKw",
-    "climateText": "klimaText",
-    "consumption": "verbrauch",
-    "departureSocText": "abfahrtSocText",
-    "heatingKw": "heizungKw",
-    "heatingText": "heizungText",
-    "history": "verlauf",
-    "look": "stil",
-    "mins": "minuten",
-    "operator": "betreiber",
-    "percent": "prozent",
-    "planned": "geplant",
-    "powerKw": "leistungKw",
-    "regen": "rekup",
-    "short": "kurz",
-    "source": "quelle",
-    "stop": "stopp",
-    "stopList": "stoppListe",
-    "stops": "stopps",
-    "tileImages": "kachelBilder",
-    "timeframe": "fenster"
-  };
-  function toNative(value) {
-    if (Array.isArray(value)) return value.map(toNative);
-    if (value && typeof value === "object") {
-      const out = {};
-      for (const key of Object.keys(value)) out[NATIVE_KEYS[key] || key] = toNative(value[key]);
-      return out;
-    }
-    return value;
-  }
-
-  /* The target in the iOS app: the Live Activity (plugins/jolt-anzeige).
+  /* The target in the iOS app: the Live Activity (plugins/jolt-display).
    *
    * In the browser and in Bluefy there is no such plugin; there the target
    * does nothing, and the sender reports nothing further. The plugin is only
@@ -502,16 +458,16 @@ window.joltDisplay = (function () {
    * file, but what is not there at load time should not be missing later. */
   function nativeTarget(m) {
     const shell = window.joltBlePlugin;
-    if (!shell || !shell.JoltAnzeige || !shell.Capacitor
+    if (!shell || !shell.JoltDisplay || !shell.Capacitor
         || !shell.Capacitor.isNativePlatform()) return undefined;
     if (m === null) {
       lastModel = null;
       seriesListState = null;
-      return shell.JoltAnzeige.beenden();
+      return shell.JoltDisplay.finish();
     }
     lastModel = m;
-    return shell.JoltAnzeige.aktualisieren(
-      { json: JSON.stringify(toNative(withImages(m, Date.now()))) });
+    return shell.JoltDisplay.refresh(
+      { json: JSON.stringify(withImages(m, Date.now())) });
   }
 
   /* Choose the style - and resend the display right away, so the change
@@ -530,7 +486,7 @@ window.joltDisplay = (function () {
   const defaultSender = sender({ destination: nativeTarget });
 
   return {
-    model, sender, seriesListAppend, seriesListExcerpt, withImages, toNative,
+    model, sender, seriesListAppend, seriesListExcerpt, withImages,
     look: () => styleChoice, setStyle, STYLES,
     report: (z, extras) => defaultSender.report(z, extras),
     finish: () => defaultSender.finish(),

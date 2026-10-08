@@ -328,7 +328,7 @@ window.joltTrips = (function () {
 
   /* ---------- CarPlay ----------
    *
-   * The CarPlay list (plugins/jolt-anzeige) can start and stop the recording.
+   * The CarPlay list (plugins/jolt-display) can start and stop the recording.
    * It calls in here via an event of the plugin and gets the result back -
    * CarPlay displays anything that went wrong itself, because nobody in the
    * car sees this UI's messages.
@@ -337,15 +337,9 @@ window.joltTrips = (function () {
    * and the start on the phone uses the same memory. */
   function carplayPlugin() {
     const shell = window.joltBlePlugin;
-    if (!shell || !shell.JoltAnzeige || !shell.Capacitor
+    if (!shell || !shell.JoltDisplay || !shell.Capacitor
         || !shell.Capacitor.isNativePlatform()) return null;
-    // The native plugin speaks German; this wrapper translates at the border.
-    const native = shell.JoltAnzeige;
-    return {
-      addListener: (name, fn) => native.addListener(name, (e) => fn(e && { action: e.aktion })),
-      ready: (a) => native.bereit({ fahrzeug: a.vehicle }),
-      aktionErgebnis: (a) => native.aktionErgebnis({ aktion: a.action, ok: a.ok, text: a.text }),
-    };
+    return shell.JoltDisplay;
   }
 
   function reportVehicle() {
@@ -360,7 +354,7 @@ window.joltTrips = (function () {
     } catch (e) { /* no plugin, no CarPlay */ }
   }
 
-  async function carplayAktion(action) {
+  async function carplayAction(action) {
     const p = carplayPlugin();
     let ok = false, text = "";
     try {
@@ -391,7 +385,7 @@ window.joltTrips = (function () {
     }
     if (p) {
       try {
-        const response = p.aktionErgebnis({ action, ok, text });
+        const response = p.actionResult({ action, ok, text });
         if (response && response.catch) response.catch(() => {});
       } catch (e) { /* CarPlay then simply shows nothing */ }
     }
@@ -402,7 +396,7 @@ window.joltTrips = (function () {
     const p = carplayPlugin();
     if (!p || typeof p.addListener !== "function") return;
     try {
-      const h = p.addListener("carplayAktion", (e) => carplayAktion(e && e.action));
+      const h = p.addListener("carplayAction", (e) => carplayAction(e && e.action));
       if (h && h.catch) h.catch(() => {});
     } catch (e) { /* no plugin, no CarPlay */ }
     reportVehicle();
@@ -460,5 +454,5 @@ window.joltTrips = (function () {
   }
 
   return { set_up, load, show, startRecording,
-           carplayAktion, reportVehicle };
+           carplayAction, reportVehicle };
 })();

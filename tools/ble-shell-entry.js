@@ -12,7 +12,7 @@ const BackgroundGeolocation = Capacitor.registerPlugin('BackgroundGeolocation');
 
 /* The Live Activity: takes the display model (frontend/display.js) and
  * shows it on the lock screen and in the CarPlay dashboard. The native part
- * lives in plugins/jolt-anzeige. */
-const JoltAnzeige = Capacitor.registerPlugin('JoltAnzeige');
+ * lives in plugins/jolt-display. */
+const JoltDisplay = Capacitor.registerPlugin('JoltDisplay');
 
-window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation, JoltAnzeige };
+window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation, JoltDisplay };
