@@ -1,437 +1,438 @@
-# jolt — Konzept
+# jolt — Concept
 
-Ein Routenplaner für Elektroautos, dessen eigentliche Aufgabe nicht das Planen
-ist, sondern das **Nachführen**.
-
----
-
-## 1. Das Problem
-
-Jeder Ladeplaner rechnet beim Losfahren einen Plan: hier laden, so lange, dann
-weiter. Der Plan ist zu diesem Zeitpunkt korrekt. Nach achtzig Kilometern ist er
-es nicht mehr.
-
-Dafür genügen Kleinigkeiten, die sich alle in dieselbe Richtung addieren:
-
-- Man fährt 135 statt der angenommenen 120 km/h.
-- Es sind 2 °C statt der 15 °C, mit denen die Herstellerangabe entstand.
-- Gegenwind mit 25 km/h.
-- Die Heizung läuft, die Batterie ist kalt und nimmt am Schnelllader nicht die
-  versprochenen 150 kW.
-- Der Rasthof, der im Plan steht, hat vier Ladepunkte und alle sind belegt.
-
-Jeder dieser Punkte kostet für sich genommen wenige Prozent. Zusammen
-verschieben sie den Ankunfts-SoC am nächsten Stopp um zehn bis zwanzig
-Prozentpunkte — und das ist genau die Größenordnung, in der aus „entspannt
-ankommen" ein Schleichen mit 90 km/h auf dem Standstreifen wird.
-
-Der übliche Umgang damit ist ein großzügiger Puffer: Man plant mit 20 % Restladung
-statt 8 %. Das funktioniert, kostet aber bei jeder Fahrt Zeit — der Puffer wird
-an der Säule bezahlt, im steilsten Teil der Ladekurve zwar nicht, aber die
-zusätzlichen Stopps summieren sich.
-
-**Die These von jolt:** Wer den Plan während der Fahrt an der Wirklichkeit
-nachzieht, braucht den Puffer nicht. Nicht der bessere Startplan ist die Lösung,
-sondern der Plan, der merkt, dass er falsch geworden ist.
+A route planner for electric cars whose real job is not planning but
+**keeping the plan up to date**.
 
 ---
 
-## 2. Was jolt anders macht
+## 1. The problem
 
-### 2.1 Verbrauch wird gerechnet, nicht geschätzt
+Every charging planner computes a plan when you set off: charge here, for this
+long, then drive on. At that moment the plan is correct. After eighty
+kilometers it no longer is.
 
-Fast alle Planer arbeiten mit einem pauschalen Verbrauch in kWh/100 km, oft mit
-einem Schieberegler für „Fahrstil". Das ist der Grund, warum sie im Winter und
-in den Bergen danebenliegen: Ein Pauschalwert kann nicht wissen, dass die
-nächsten 40 km 900 Höhenmeter bergauf führen.
+Small things are enough, and they all add up in the same direction:
 
-jolt zerlegt die Route in Segmente und rechnet je Segment die Physik:
+- You drive 135 instead of the assumed 120 km/h.
+- It is 2 °C instead of the 15 °C at which the manufacturer's figure was
+  measured.
+- A 25 km/h headwind.
+- The heating is on, the battery is cold and does not take the promised 150 kW
+  at the fast charger.
+- The rest stop in the plan has four charging points and all of them are
+  occupied.
+
+Taken alone, each of these costs a few percent. Together they shift the arrival
+SoC at the next stop by ten to twenty percentage points — and that is exactly
+the order of magnitude in which "arriving relaxed" turns into crawling along
+the hard shoulder at 90 km/h.
+
+The usual way to deal with this is a generous buffer: you plan with 20 %
+remaining charge instead of 8 %. That works, but it costs time on every trip —
+the buffer is paid for at the charger; not in the steepest part of the charging
+curve, but the additional stops add up.
+
+**jolt's thesis:** If you keep adjusting the plan to reality while driving, you
+do not need the buffer. The solution is not a better starting plan but a plan
+that notices when it has become wrong.
+
+---
+
+## 2. What jolt does differently
+
+### 2.1 Consumption is calculated, not estimated
+
+Almost all planners work with a flat consumption in kWh/100 km, often with a
+slider for "driving style". That is why they are off in winter and in the
+mountains: a flat value cannot know that the next 40 km climb 900 meters.
+
+jolt splits the route into segments and calculates the physics for each one:
 
 ```
 F_roll  = c_rr · m · g · cos(θ)
-F_luft  = ½ · ρ(T, h) · c_w · A · (v + v_gegen)²
-F_steig = m · g · sin(θ)
+F_air   = ½ · ρ(T, h) · c_w · A · (v + v_head)²
+F_slope = m · g · sin(θ)
 
-E_segment = (F_roll + F_luft + F_steig) · s / η_antrieb      wenn > 0
-E_segment = (F_roll + F_luft + F_steig) · s · η_rekup        wenn < 0
-E_neben   = P_hvac(T_außen) · t_segment
+E_segment = (F_roll + F_air + F_slope) · s / η_drive         if > 0
+E_segment = (F_roll + F_air + F_slope) · s · η_regen         if < 0
+E_aux     = P_hvac(T_outside) · t_segment
 ```
 
-Drei Dinge, die daran wichtig sind und die ein Pauschalwert nicht leisten kann:
+Three important points that a flat value cannot capture:
 
-**Das `v²` beim Luftwiderstand.** Der Unterschied zwischen 110 und 130 km/h ist
-nicht 18 % mehr Luftwiderstand, sondern 40 %. Weil der Luftwiderstand auf der
-Autobahn den größten Anteil am Verbrauch hat, ist die Tempowahl der stärkste
-Hebel, den der Fahrer hat — und der einzige, den er *während* der Fahrt noch
-betätigen kann. Ein Planer, der das nicht abbildet, kann auf die Frage „schaffe
-ich es noch, wenn ich 110 fahre?" nicht antworten. Genau diese Frage stellt man
-sich aber bei 12 % Restladung.
+**The `v²` in the air drag.** The difference between 110 and 130 km/h is not
+18 % more air drag but 40 %. Because air drag accounts for the largest share of
+consumption on the motorway, the choice of speed is the strongest lever the
+driver has — and the only one he can still pull *while* driving. A planner that
+does not model this cannot answer the question "will I still make it if I drive
+110?". But that is exactly the question you ask yourself at 12 % remaining
+charge.
 
-**Die Höhe.** `sin(θ)` ist bei 5 % Steigung nur 0,05 — aber bei 1,5 t Fahrzeug
-sind das 735 N zusätzliche Kraft, mehr als Roll- und Luftwiderstand zusammen.
-Bergauf verbraucht ein E-Auto dramatisch mehr; bergab holt es einen Teil über
-Rekuperation zurück, aber eben nur einen Teil (`η_rekup` ≈ 0,7). Über einen Pass
-ist die Bilanz deutlich negativ, obwohl man am Ende wieder auf Ausgangshöhe ist.
-Deshalb braucht das Modell ein echtes Höhenprofil und nicht nur eine Distanz.
+**The elevation.** `sin(θ)` is only 0.05 at a 5 % gradient — but for a 1.5 t
+vehicle that is 735 N of additional force, more than rolling and air resistance
+combined. Uphill an EV uses dramatically more; downhill it gets part of it back
+through regeneration, but only part (`η_regen` ≈ 0.7). Over a mountain pass the
+balance is clearly negative, even though you end up back at the starting
+altitude. That is why the model needs a real elevation profile and not just a
+distance.
 
-**Die Nebenverbraucher.** `P_hvac` ist bei 20 °C fast null und bei −5 °C zwischen
-2 und 4 kW. Entscheidend ist, dass diese Leistung an der **Zeit** hängt, nicht an
-der Strecke: Im Stau kostet die Heizung genauso viel wie bei 130 km/h, nur ohne
-zurückgelegte Kilometer. Das ist der Grund, warum Winterfahrten mit Stau die
-Prognose am härtesten treffen.
+**The auxiliary loads.** `P_hvac` is almost zero at 20 °C and between 2 and
+4 kW at −5 °C. What matters is that this power depends on **time**, not on
+distance: in a traffic jam the heating costs just as much as at 130 km/h, only
+without any kilometers covered. That is why winter trips with traffic jams hit
+the forecast hardest.
 
-### 2.2 Das Modell lernt das eigene Auto
+### 2.2 The model learns your own car
 
-Die Physik oben braucht Fahrzeugparameter — `c_w`, Stirnfläche, Rollwiderstand,
-Wirkungsgrad. Die kennt niemand genau, und sie ändern sich mit Reifen, Dachbox,
-Beladung und Alter der Batterie.
+The physics above needs vehicle parameters — `c_w`, frontal area, rolling
+resistance, efficiency. Nobody knows these exactly, and they change with tires,
+roof box, load and battery age.
 
-Deshalb hat jedes Fahrzeug einen **Korrekturfaktor**, der aus echten Fahrten
-gewonnen wird: prognostizierte kWh gegen tatsächlich verbrauchte kWh. Nach
-einigen Fahrten kennt jolt das konkrete Auto besser als jede Datenbank — inklusive
-der Dachbox, die seit Ostern oben ist.
+That is why every vehicle has a **correction factor** that is derived from real
+trips: predicted kWh against kWh actually used. After a few trips jolt knows the
+specific car better than any database — including the roof box that has been on
+top since Easter.
 
-Genau hier docken die OBD2-Logger an: Sie liefern die
-Ist-Werte, aus denen der Faktor entsteht.
+This is exactly where the OBD2 loggers come in: they supply the actual values
+from which the factor is derived.
 
-### 2.3 Der Plan wird während der Fahrt nachgezogen
+### 2.3 The plan is adjusted while driving
 
-Das ist die Live-Funktion, und sie ist der Grund für dieses Projekt.
+This is the live function, and it is the reason for this project.
 
-Während der Fahrt kommen laufend Messpunkte herein: Position, SoC, Tempo,
-Außentemperatur. jolt vergleicht daraus fortwährend zwei Zahlen:
+While driving, measurement points keep coming in: position, SoC, speed, outside
+temperature. jolt continuously compares two numbers:
 
-- **Soll-SoC** — was der Plan an dieser Stelle vorhergesagt hat.
-- **Ist-SoC** — was das Auto meldet.
+- **Target SoC** — what the plan predicted at this point.
+- **Actual SoC** — what the car reports.
 
-Aus der Abweichung über die letzten Kilometer entsteht ein laufender
-Verbrauchsfaktor, mit dem der Rest der Strecke neu gerechnet wird. Neu geplant
-wird nicht bei jeder Messung, sondern wenn einer dieser Auslöser greift:
+From the deviation over the last few kilometers a running consumption factor is
+derived, with which the rest of the route is recalculated. Replanning does not
+happen on every measurement, but when one of these triggers fires:
 
-| Auslöser | Schwelle |
+| Trigger | Threshold |
 |---|---|
-| Prognostizierter Ankunfts-SoC am nächsten Stopp weicht ab | > 5 Prozentpunkte |
-| Prognose fällt unter die Reserve | sofort |
-| Nächster Ladepunkt meldet sich als belegt oder defekt | sofort |
-| Fahrzeug verlässt die geplante Route | > 500 m für > 1 min |
-| Ankunftszeit verschiebt sich (Stau) | > 10 min |
+| Predicted arrival SoC at the next stop deviates | > 5 percentage points |
+| Forecast falls below the reserve | immediately |
+| Next charging point reports as occupied or faulty | immediately |
+| Vehicle leaves the planned route | > 500 m for > 1 min |
+| Arrival time shifts (traffic jam) | > 10 min |
 
-Der Grund für Schwellen statt „jedes Mal": Ein Plan, der sich alle 30 Sekunden
-ändert, ist kein Plan. Wer gerade beschlossen hat, in 40 km Pause zu machen,
-soll das nicht dreimal umwerfen müssen. Eine Änderung muss etwas bedeuten.
+The reason for thresholds instead of "every time": a plan that changes every 30
+seconds is not a plan. Someone who has just decided to take a break in 40 km
+should not have to throw that over three times. A change has to mean something.
 
-### 2.4 Die Ladekurve ist keine Zahl
+### 2.4 The charging curve is not a single number
 
-„150 kW Ladeleistung" ist eine Spitzenangabe, die zwischen 20 und 40 % SoC gilt.
-Bei 70 % sind es vielleicht noch 60 kW, bei 85 % noch 35. Wer den Unterschied
-ignoriert, plant zu wenige, zu lange Stopps.
+"150 kW charging power" is a peak figure that applies between 20 and 40 % SoC.
+At 70 % it may be only 60 kW, at 85 % only 35. Anyone who ignores the
+difference plans too few, too long stops.
 
-jolt hinterlegt je Fahrzeug eine Kurve als Stützstellen `(SoC %, kW)` und
-interpoliert dazwischen. Die tatsächliche Leistung ist dann
+jolt stores a curve per vehicle as support points `(SoC %, kW)` and
+interpolates between them. The actual power is then
 
 ```
-P = min( Kurve(SoC), P_max_Ladepunkt, P_max_Fahrzeug ) · f_temperatur
+P = min( curve(SoC), P_max_chargepoint, P_max_vehicle ) · f_temperature
 ```
 
-Daraus folgt eine Regel, die den Zeitgewinn bringt: **Lieber zweimal kurz von
-10 auf 55 % als einmal lang von 10 auf 90 %.** Die letzten 30 Prozentpunkte
-kosten oft mehr Zeit als die ersten sechzig. Der Optimierer (Abschnitt 4) nutzt
-das aus; als Nutzer sieht man nur, dass die Stopps kürzer sind als erwartet.
+This gives a rule that saves time: **better twice briefly from 10 to 55 % than
+once for a long time from 10 to 90 %.** The last 30 percentage points often
+cost more time than the first sixty. The optimizer (section 4) exploits this;
+as a user you only notice that the stops are shorter than expected.
 
 ---
 
-## 3. Woher die Daten kommen
+## 3. Where the data comes from
 
-| Zweck | Quelle | Anmerkung |
+| Purpose | Source | Note |
 |---|---|---|
-| Route + Höhenprofil | openrouteservice | 2 500 Anfragen/Tag kostenlos, `elevation=true` liefert Höhe pro Stützpunkt |
-| Ladesäulen Deutschland | Bundesnetzagentur-Ladesäulenregister (CSV) | amtlich, vollständig, ohne Schlüssel |
-| Ladesäulen international | Open Charge Map | freier API-Schlüssel, 300 000+ Ladepunkte |
-| Temperatur und Wind | Open-Meteo | ohne Schlüssel |
-| Live-SoC | zunächst manuell / Simulator | vorbereitet für OBD2-Logger und Hersteller-APIs |
+| Route + elevation profile | openrouteservice | 2,500 requests/day free, `elevation=true` returns the elevation per waypoint |
+| Chargers in Germany | Bundesnetzagentur charging station register (CSV) | official, complete, no key needed |
+| Chargers worldwide | Open Charge Map | free API key, 300,000+ charging points |
+| Temperature and wind | Open-Meteo | no key needed |
+| Live SoC | manual / simulator at first | prepared for OBD2 loggers and manufacturer APIs |
 
-Das Routing liegt hinter einem schmalen Interface (`RoutingProvider`). Ein
-selbstgehostetes **Valhalla** ist damit später nur ein zweiter Adapter, kein
-Umbau — relevant, sobald das Tageskontingent von 2 500 Anfragen eng wird oder
-die Live-Neuplanung häufiger rechnet.
+Routing sits behind a narrow interface (`RoutingProvider`). A self-hosted
+**Valhalla** is therefore later just a second adapter, not a rebuild — relevant
+as soon as the daily quota of 2,500 requests gets tight or live replanning
+calculates more often.
 
-### Verfügbarkeit ist das ungelöste Problem
+### Availability is the unsolved problem
 
-Echte Belegungsdaten öffentlicher Ladesäulen sind in Deutschland nicht frei
-verfügbar. Wer sie hat, hat sie über **OCPI**-Verträge mit Betreibern oder über
-kommerzielle Aggregatoren. Das ist für ein Privatprojekt vorerst verschlossen.
+Real occupancy data for public chargers is not freely available in Germany.
+Whoever has it has it through **OCPI** contracts with operators or through
+commercial aggregators. For a private project that is closed off for now.
 
-jolt geht deshalb ehrlich damit um, statt Verfügbarkeit vorzutäuschen:
+jolt therefore handles this honestly instead of faking availability:
 
-1. `Verfuegbarkeit` ist ein Interface. Eine OCPI-Anbindung ist später ein
-   Adapter, kein Umbau.
-2. Solange keine Daten da sind, zählt **Redundanz**: Ein Standort mit acht
-   Ladepunkten wird einem mit zwei vorgezogen, auch wenn er zwei Minuten Umweg
-   kostet. Das ist die beste verfügbare Näherung an „da ist wahrscheinlich was
-   frei".
-3. Der Nutzer kann in der App melden, dass ein Standort belegt ist. Das gilt
-   für die laufende Fahrt und löst sofort eine Neuplanung aus.
-4. Zu jedem Stopp wird ein **Ausweichstandort** mitgeplant, der ohne Nachladen
-   erreichbar bleibt. Wenn vor Ort alles belegt ist, muss niemand neu suchen.
+1. The availability source (`AvailabilitySource`) is an interface. An OCPI
+   connection is later an adapter, not a rebuild.
+2. As long as no data is available, **redundancy** counts: a site with eight
+   charging points is preferred over one with two, even if it costs two minutes
+   of detour. That is the best available approximation of "there is probably
+   something free".
+3. The user can report in the app that a site is occupied. This applies to the
+   current trip and triggers replanning immediately.
+4. For every stop a **fallback site** is planned as well, which stays reachable
+   without recharging. If everything on site is occupied, nobody has to search
+   anew.
 
 ---
 
-## 4. Die Ladestopp-Planung
+## 4. Charging stop planning
 
-*(Implementiert in `backend/app/charging/optimizer.py`, geprüft von
+*(Implemented in `backend/app/charging/optimizer.py`, tested by
 `tools/check_optimizer.py`.)*
 
-Die Aufgabe: Finde die Folge von Ladestopps und Lademengen, die die
-**Gesamtreisezeit** minimiert, unter der Nebenbedingung, dass der SoC nie unter
-die Reserve fällt und am Ziel der gewünschte Ziel-SoC erreicht ist.
+The task: find the sequence of charging stops and charge amounts that minimizes
+the **total travel time**, subject to the constraints that the SoC never falls
+below the reserve and that the desired target SoC is reached at the
+destination.
 
-Das ist kein kürzester Weg, sondern ein kürzester Weg mit einer kontinuierlichen
-Entscheidungsvariablen je Knoten (wie viel wird geladen). Der Weg dahin:
+This is not a shortest path, but a shortest path with one continuous decision
+variable per node (how much is charged). The way there:
 
-**Schritt 1 — Kandidaten.** Alle Ladepunkte im Korridor um die Route, gefiltert
-nach Steckertyp und Mindestleistung. Je Kandidat der Umweg in Minuten
-(Abfahrt + Zufahrt + Rückweg). Kandidaten mit mehr als ~10 min Umweg fallen
-raus; sie gewinnen die Zeit an der Säule fast nie zurück.
+**Step 1 — Candidates.** All charging points in the corridor around the route,
+filtered by connector type and minimum power. For each candidate the detour in
+minutes (leaving + approach + return). Candidates with more than ~10 min detour
+are dropped; they almost never win back the time at the charger.
 
-**Schritt 2 — Graph.** Knoten = Start, Kandidaten (geordnet nach Fortschritt
-entlang der Route), Ziel. Eine Kante `i → j` existiert, wenn die Etappe mit
-voller nutzbarer Batterie überhaupt fahrbar ist. Kantenkosten = Fahrzeit +
-Umwegzeit; der Energiebedarf der Etappe kommt aus dem Verbrauchsmodell.
+**Step 2 — Graph.** Nodes = start, candidates (ordered by progress along the
+route), destination. An edge `i → j` exists if the leg is drivable at all with
+a full usable battery. Edge cost = driving time + detour time; the energy
+demand of the leg comes from the consumption model.
 
-**Schritt 3 — Suche.** Dijkstra über den Zustand `(Ladepunkt, Ankunfts-SoC)`.
-Weil der SoC kontinuierlich ist, wird je Knoten eine **Pareto-Front** von
-Labels `(Zeit, SoC)` geführt: Ein Label wird verworfen, wenn ein anderes
-gleichzeitig früher *und* mit mehr Ladung dort ist. Das hält die Zustandsmenge
-klein, ohne den SoC grob zu diskretisieren.
+**Step 3 — Search.** Dijkstra over the state `(charging point, arrival SoC)`.
+Because the SoC is continuous, a **Pareto front** of labels `(time, SoC)` is
+kept per node: a label is discarded if another one is there both earlier *and*
+with more charge. This keeps the set of states small without coarsely
+discretizing the SoC.
 
-Die Ladezeit an einem Knoten folgt aus der Ladekurve:
+The charging time at a node follows from the charging curve:
 
 ```
-t_laden(SoC_an → SoC_ab) = ∫ (E_akku / P(s)) ds
+t_charge(SoC_in → SoC_out) = ∫ (E_battery / P(s)) ds
 ```
 
-**Schritt 4 — Nachoptimierung.** Die Lösung wird lokal verschoben: Ladehübe
-wandern in den steilen Teil der Kurve (grob 10–60 %), soweit die Reserve das
-zulässt. Typischerweise werden dadurch Stopps kürzer und manchmal einer mehr —
-in Summe schneller.
+**Step 4 — Post-optimization.** The solution is shifted locally: charging
+strokes move into the steep part of the curve (roughly 10–60 %), as far as the
+reserve allows. Typically this makes stops shorter and sometimes adds one —
+faster overall.
 
-**Schritt 5 — Ausweichstandorte.** Zu jedem Stopp wird der beste Alternativstopp
-bestimmt, der ohne Nachladen noch erreichbar ist.
+**Step 5 — Fallback sites.** For every stop the best alternative stop that is
+still reachable without recharging is determined.
 
-### Warum nicht einfach gierig?
+### Why not simply greedy?
 
-Ein gieriger Planer („fahr, bis die Reserve erreicht ist, lade dort, wo du gerade
-bist") ist einfach und in der Ebene brauchbar. Er scheitert an zwei Stellen
-systematisch: vor langen Lücken ohne Schnelllader, wo man *vorher* mehr hätte
-laden müssen, und bei der Wahl zwischen einem 50-kW- und einem 300-kW-Standort
-zwanzig Kilometer später. Beides sind genau die Fälle, in denen ein Planer sich
-lohnt — deshalb der Aufwand mit der Pareto-Front.
+A greedy planner ("drive until the reserve is reached, charge wherever you
+happen to be") is simple and usable on flat terrain. It fails systematically in
+two places: before long gaps without a fast charger, where you should have
+charged more *beforehand*, and when choosing between a 50 kW and a 300 kW site
+twenty kilometers later. Both are exactly the cases in which a planner is worth
+having — hence the effort with the Pareto front.
 
 ---
 
-## 5. Aufbau
+## 5. Structure
 
-Bewusst dieselben Konventionen wie `nest`: FastAPI + SQLAlchemy + Alembic,
-PostgreSQL im Docker mit SQLite-Fallback für die lokale Entwicklung, eine
-Vanilla-JS-PWA ohne Build-Schritt, deutschsprachige Kommentare, die das *Warum*
-festhalten.
+Deliberately the same conventions as `nest`: FastAPI + SQLAlchemy + Alembic,
+PostgreSQL in Docker with an SQLite fallback for local development, a
+vanilla-JS PWA without a build step, English comments that record the *why*.
 
 ```
 backend/app/
-  routing/    provider.py (Interface) · ors.py · corridor.py
-  energie/    model.py · weather.py · calibration.py
-  laden/      curves.py · chargers_import.py · availability.py
+  routing/    provider.py (interface) · ors.py · corridor.py
+  energy/     model.py · weather.py · calibration.py
+  charging/   curves.py · chargers_import.py · availability.py
   live/       session.py · channel.py (WebSocket) · simulator.py
-  routers/    auth · fahrzeuge · route · saeulen · live
+  routers/    auth · vehicles · route · chargers · live
 frontend/     index.html · map.js · route.js · vehicle.js · live.js
 tools/        import_bnetza.py · import_ocm.py · check_model.py · check_backend.py
 ```
 
-**Kein PostGIS.** Der einzige Geo-Query, den jolt braucht, ist „alle Ladepunkte
-im Korridor um eine Polyline". Das löst ein Index auf `(lat, lon)` mit
-Bounding-Box-Vorfilter und anschließender Haversine-Rechnung bei rund 150 000
-deutschen Ladepunkten in Millisekunden — und erhält den SQLite-Fallback, der die
-lokale Entwicklung ohne laufenden Postgres möglich macht. PostGIS bleibt die
-Option, sobald Isochronen dazukommen.
+**No PostGIS.** The only geo query jolt needs is "all charging points in the
+corridor around a polyline". An index on `(lat, lon)` with a bounding-box
+pre-filter followed by a haversine calculation solves that in milliseconds for
+around 150,000 German charging points — and it keeps the SQLite fallback that
+makes local development possible without a running Postgres. PostGIS remains
+the option as soon as isochrones are added.
 
 ---
 
-## 6. Stufen
+## 6. Stages
 
-**Stufe 1 — was jetzt da ist**
+**Stage 1 — what is there now**
 
-- Fahrzeugprofile mit Ladekurve, inklusive Vorlagen gängiger Modelle
-- Ladesäulen-Import von Bundesnetzagentur und Open Charge Map, idempotent
-- Route mit Höhenprofil, Wetter entlang der Strecke
-- Das Verbrauchsmodell, vollständig — inklusive Reichweitenmarke auf der Karte:
-  der Punkt, an dem der SoC die Reserve erreicht
-- Ladepunkte im Korridor mit Umwegzeit
-- Live-Gerüst: Messpunkt-Endpunkt, WebSocket, Fahrt-Simulator, Ist gegen Soll
-  in der PWA
+- Vehicle profiles with charging curve, including templates for common models
+- Charger import from Bundesnetzagentur and Open Charge Map, idempotent
+- Route with elevation profile, weather along the route
+- The consumption model, complete — including a range marker on the map: the
+  point at which the SoC reaches the reserve
+- Charging points in the corridor with detour time
+- Live scaffolding: measurement-point endpoint, WebSocket, trip simulator,
+  actual against target in the PWA
 
-**Stufe 2 — der Optimierer** *(steht)*
+**Stage 2 — the optimizer** *(done)*
 
-Abschnitt 4 in Code: Kandidatengraph, Pareto-Dijkstra, Nachoptimierung,
-Ausweichstandorte. Als `POST /api/fahrten/{id}/ladeplan` und als Ladeplan in
-der PWA.
+Section 4 in code: candidate graph, Pareto Dijkstra, post-optimization,
+fallback sites. As `POST /api/fahrten/{id}/ladeplan` and as a charging plan in
+the PWA.
 
-Zwei Dinge sind dabei anders gekommen als geplant:
+Two things turned out differently than planned:
 
-- Die Etappenprüfung schaut nicht auf die Bilanz am Etappenende, sondern auf
-  den **grössten kumulierten Bedarf innerhalb der Etappe**. Über einen Pass
-  sieht die Bilanz am Ende harmlos aus, weil die Rekuperation auf der Abfahrt
-  einen Teil zurückholt — oben wäre der Akku trotzdem leer. Ohne diese
-  Unterscheidung plant der Optimierer Etappen, die in der Mitte nicht machbar
-  sind.
-- Der Ausweichstandort darf **in die Reserve hineingehen**, bis zur Hälfte.
-  Der Plan selbst rührt sie nie an; er kommt überall mit mindestens
-  `reserve_soc` an. Ein Ausweichstandort, der die volle Reserve stehen lassen
-  muss, wäre deshalb fast nie erreichbar — und die Reserve ist genau für
-  diesen Fall da. Gibt es keinen, sagt der Plan das, statt die Lücke zu
-  verschweigen.
+- The leg check does not look at the balance at the end of the leg, but at the
+  **largest cumulative demand within the leg**. Over a pass the balance at the
+  end looks harmless, because regeneration on the descent gives some of it
+  back — but at the top the battery would still be empty. Without this
+  distinction the optimizer plans legs that are not feasible in the middle.
+- The fallback site may **dip into the reserve**, up to half of it. The plan
+  itself never touches it; it arrives everywhere with at least `reserve_soc`.
+  A fallback site that has to leave the full reserve untouched would therefore
+  almost never be reachable — and the reserve is there for exactly this case.
+  If there is none, the plan says so instead of concealing the gap.
 
-**Stufe 3 — die Live-Neuplanung** *(steht)*
+**Stage 3 — live replanning** *(done)*
 
-Die Auslöser aus 2.3 vollständig, in `live/session.py`; die Umplanung selbst in
-`live/replanning.py`. Neu geplant wird die **Reststrecke** ab der aktuellen
-Position mit dem aktuellen Ladestand — für den Optimierer aus Stufe 2 ist das
-dieselbe Aufgabe wie vor der Abfahrt, nur mit besseren Zahlen.
+The triggers from 2.3 in full, in `live/session.py`; the replanning itself in
+`live/replanning.py`. What is replanned is the **remaining distance** from the
+current position with the current charge level — for the optimizer from stage 2
+this is the same task as before departure, just with better numbers.
 
-Drei Dinge sind dabei dazugekommen, die im Konzept so nicht standen:
+Three things were added that were not in the concept:
 
-- Ein zweiter Faktor für die **Zeit**. Der Verbrauchsfaktor sieht einen Stau
-  nicht: Wer steht, verbraucht je Kilometer sogar etwas mehr, aber die
-  Ankunftszeit verschiebt sich um ein Vielfaches davon. Ohne eigene Zahl wäre
-  der Auslöser „Ankunftszeit verschiebt sich" nicht zu haben — und jede
-  Ankunftszeit im umgeplanten Ladeplan wäre die aus dem alten Plan.
-- Eine **Sperre** gegen zu häufiges Umplanen. Die Schwellen aus 2.3 sagen,
-  *wann* etwas nicht mehr stimmt — sie sagen nicht, wann es wieder stimmt. Eine
-  Abweichung von acht Prozentpunkten besteht bei der nächsten Messung immer
-  noch, und bei der übernächsten auch. Ohne Sperre rechnete deshalb jede
-  einzelne Messung neu. Dringende Gründe (Säule belegt, Reserve reicht nicht)
-  gehen immer durch, alles andere erst wieder nach zehn Kilometern.
-- Der Simulator bekam eine **simulierte Uhr**. Er spielt Stunden in Sekunden
-  ab; gegen die echte Uhr gemessen wäre jeder Zeitfaktor Unsinn. Mit
-  simulierten Zeitstempeln lässt sich stattdessen ein Stau durchspielen — und
-  damit genau der Auslöser prüfen, den der Verbrauch nie auslöst.
+- A second factor for **time**. The consumption factor does not see a traffic
+  jam: someone who is standing even uses a little more per kilometer, but the
+  arrival time shifts by a multiple of that. Without a number of its own, the
+  trigger "arrival time shifts" would not be available — and every arrival time
+  in the replanned charging plan would be the one from the old plan.
+- A **lockout** against replanning too often. The thresholds from 2.3 say
+  *when* something is no longer right — they do not say when it is right again.
+  A deviation of eight percentage points is still there at the next
+  measurement, and at the one after that. Without a lockout, every single
+  measurement would therefore recalculate. Urgent reasons (charger occupied,
+  reserve not sufficient) always go through, everything else only again after
+  ten kilometers.
+- The simulator got a **simulated clock**. It plays back hours in seconds;
+  measured against the real clock, any time factor would be nonsense. With
+  simulated timestamps a traffic jam can be played through instead — and thus
+  exactly the trigger that consumption never fires can be tested.
 
-Dazu **Web Push** (`push.py`): Eine Planänderung erreicht das Telefon auch mit
-dunklem Bildschirm, weil der Service Worker sie entgegennimmt, wenn die Seite
-längst geschlossen ist. Ohne VAPID-Schlüssel ist die Funktion aus — dieselbe
-Haltung wie bei `ORS_API_KEY` und `APP_PASSWORT`: Was nicht eingerichtet ist,
-wird nicht vorgetäuscht.
+In addition **Web Push** (`push.py`): a plan change reaches the phone even with
+a dark screen, because the service worker receives it when the page has long
+been closed. Without a VAPID key the feature is off — the same attitude as with
+`ORS_API_KEY` and `APP_PASSWORT`: what is not set up is not faked.
 
-Eine Entscheidung, die dabei zählt: **Ein totes Abo wird gelöscht, ein
-gestörtes nicht.** Ein Browser, der die Erlaubnis entzogen hat, antwortet mit
-404 oder 410; das Abo ist dann endgültig wertlos. Eine 500 des Push-Dienstes
-sagt dagegen nichts über das Abo aus — wer es dabei wegwirft, schaltet die
-Benachrichtigungen bei der ersten Störung dauerhaft ab, und niemand merkt,
-warum sie nicht mehr kommen.
+One decision that matters here: **a dead subscription is deleted, a disturbed
+one is not.** A browser that has revoked the permission answers with 404 or 410;
+the subscription is then permanently worthless. A 500 from the push service, on
+the other hand, says nothing about the subscription — anyone who throws it away
+for that turns notifications off permanently at the first disturbance, and
+nobody notices why they no longer arrive.
 
-**Stufe 4 — echte Fahrzeugdaten** *(steht)*
+**Stage 4 — real vehicle data** *(done)*
 
-Anbindung der OBD2-Logger bzw. einer Hersteller-API. Das Datenmodell
-(`LiveSitzung` / `LivePunkt`) nimmt sie unverändert entgegen — an *dieser*
-Stelle ändert sich tatsächlich nichts.
+Connecting the OBD2 loggers or a manufacturer API. The data model
+(`LiveSession` / `LivePoint`) accepts them unchanged — at *this* point nothing
+actually changes.
 
-Der Weg dorthin brauchte aber sehr wohl eine Ergänzung, und zwar eine, die
-beim Entwurf übersehen wurde: Messpunkte kamen ausschliesslich über
-`/api/live/{sitzung_id}/punkt` herein. Das passt zur PWA, die die Fahrt selbst
-gestartet hat und die ID deshalb kennt — aber nicht zu einem Gerät, das im
-Auto verbaut ist und beim Anschalten einfach zu senden beginnt. Die
-Sitzungs-ID entsteht erst beim Losfahren und wechselt mit jeder Fahrt; ein
-Dongle kann sie nicht wissen. Deshalb trägt jetzt das *Fahrzeug* ein
-langlebiges Logger-Token, und `POST /api/live/melden` sucht dessen laufende
-Sitzung selbst.
+The way there did need an addition, though, one that was overlooked in the
+design: measurement points came in exclusively via
+`/api/live/{session_id}/punkt`. That suits the PWA, which started the trip
+itself and therefore knows the ID — but not a device installed in the car that
+simply starts sending when it is switched on. The session ID only comes into
+being at departure and changes with every trip; a dongle cannot know it. That
+is why the *vehicle* now carries a long-lived logger token, and
+`POST /api/live/melden` (report) finds its running session itself.
 
-Ein ELM327 liest den Ladestand eines MEB-Fahrzeugs nicht über die genormten
-OBD2-PIDs — die sind auf Verbrennungsmotoren gemünzt —, sondern über
-herstellerspezifische UDS-Abfragen. Der Ladestand steht auf Service `0x22`,
-DID `028C`, Rohwert durch 2,5.
+An ELM327 does not read the charge level of an MEB vehicle via the standardized
+OBD2 PIDs — those are geared to combustion engines — but via
+manufacturer-specific UDS queries. The charge level is at service `0x22`, DID
+`028C`, raw value divided by 2.5.
 
-Die Adresse dagegen ist **nicht** der naheliegende 11-Bit-Header `7E5`,
-sondern eine 29-Bit-Kennung: `0x17FC007B` fragen, `0x17FE007B` antwortet, und
-beim ELM327 heisst das `ATSP7` · `ATCP17` · `ATSHFC007B` · `ATCRA17FE007B`.
-Bis das feststand, kam auf jede Abfrage `NO DATA` — die Vermutung mit dem
-`7E5` hat mehrere Anläufe gekostet. Welche Werte es sonst noch gibt und
-welche Fallstricke dazugehören, steht in der README unter „Was das Auto
-hergibt".
+The address, on the other hand, is **not** the obvious 11-bit header `7E5`, but
+a 29-bit identifier: ask `0x17FC007B`, `0x17FE007B` answers, and on the ELM327
+that reads `ATSP7` · `ATCP17` · `ATSHFC007B` · `ATCRA17FE007B`. Until that was
+established, every query returned `NO DATA` — the guess with `7E5` cost several
+attempts. Which other values there are and which pitfalls come with them is
+described in the README under "Was das Auto hergibt" (what the car gives up).
 
-Dafür steht `live/quellen/` analog zu `routing/provider.py`: eine Datei je
-Format, die auf einen `Rohpunkt` normalisiert. Mitgeliefert sind jolts
-eigenes Format und das von Iternio (ABRP), weil letzteres im Umfeld der
-Elektroauto-Logger ein Quasi-Standard ist. **Die Übersetzung kennt kein
-Netz** — sie bekommt ein geparstes Objekt und gibt einen `Rohpunkt` zurück.
-Ob der aus einem POST kam, aus einer Abfrage bei einem fremden Dienst oder
-aus einer Datei, ist eine Frage des Transports. Genau deshalb lässt sich ein
-neues Format anhand einer aufgezeichneten Antwort einbauen, ohne im Auto zu
-sitzen, und `check_sources.py` läuft ohne alles.
+For this there is `live/sources/`, analogous to `routing/provider.py`: one file
+per format, normalizing to a `RawPoint`. jolt's own format and that of Iternio
+(ABRP) are included, because the latter is a de facto standard among electric
+car loggers. **The translation knows no network** — it receives a parsed object
+and returns a `RawPoint`. Whether that came from a POST, from a query to a
+third-party service or from a file is a question of transport. That is exactly
+why a new format can be added from a recorded response without sitting in the
+car, and `check_sources.py` runs without anything else.
 
-**Den Transport gibt es inzwischen, und er kommt ohne fremde Cloud aus.**
+**The transport exists by now, and it manages without a third-party cloud.**
 
-Erwogen war die ABRP-App als Sensortreiber plus deren Telemetrie-API — für
-ein iPhone schien das der einzige Weg, denn Car Scanner exportiert dort nur
-Aufzeichnungsdateien. Ein Umweg über einen fremden Dienst wäre es trotzdem
-gewesen, und die Alternative — ein ESP32-Dongle mit eigener Verbindung —
-hätte kein GPS gehabt.
+The ABRP app as sensor driver plus its telemetry API had been considered — for
+an iPhone that seemed the only way, because Car Scanner only exports recording
+files there. It would still have been a detour via a third-party service, and
+the alternative — an ESP32 dongle with its own connection — would have had no
+GPS.
 
-Gebaut wurde ein dritter Weg: **Web Bluetooth**, direkt aus der PWA. Der
-Browser spricht selbst mit dem BLE-Dongle, das Telefon liefert die Position
-dazu, und niemand sonst sieht die Daten. Auf iOS braucht es dafür den Browser
-**Bluefy** — Safari kennt Web Bluetooth nicht —, und `requestDevice` verlangt
-zwingend eine Nutzergeste. Beides sind Einschränkungen, aber keine, die einen
-fremden Dienst nötig machen.
+What was built is a third way: **Web Bluetooth**, directly from the PWA. The
+browser itself talks to the BLE dongle, the phone supplies the position, and
+nobody else sees the data. On iOS this needs the **Bluefy** browser — Safari
+does not support Web Bluetooth — and `requestDevice` strictly requires a user
+gesture. Both are restrictions, but not ones that make a third-party service
+necessary.
 
-Was dabei nicht vorgesehen war und doch entscheidend wurde: Das Fahrzeug
-spricht auf **zwei Rahmenbreiten** (Klima und Akku auf 11 Bit, alles andere
-auf 29), und ohne die drei Flusskontroll-Befehle scheitert jede Antwort, die
-nicht in einen CAN-Rahmen passt — stumm. Vier der interessantesten Werte
-fehlten deshalb monatelang, ohne dass irgendwo stand, dass sie fehlen.
+What was not foreseen and nevertheless turned out to be decisive: the vehicle
+speaks with **two frame widths** (climate and battery on 11 bit, everything
+else on 29), and without the three flow-control commands every response that
+does not fit into one CAN frame fails — silently. Four of the most interesting
+values were therefore missing for months, without anything saying anywhere that
+they were missing.
 
-`live/quellen/` bleibt trotzdem richtig: Ein Logger, der ein fremdes Format
-spricht, meldet weiterhin über `POST /api/live/melden` — der Weg über Web
-Bluetooth ist eine Quelle mehr, nicht die einzige.
+`live/sources/` is nevertheless still right: a logger that speaks a foreign
+format continues to report via `POST /api/live/melden` — the Web Bluetooth route
+is one source more, not the only one.
 
-**Stufe 5 — Kalibrierung aus echten Fahrten** *(steht)*
+**Stage 5 — calibration from real trips** *(done)*
 
-Der Korrekturfaktor aus 2.2, gefüttert aus abgeschlossenen Fahrten. Er wird
-beim Beenden einer Live-Sitzung fortgeschrieben, gedämpft und nur, wenn die
-Fahrt lang genug und der gemessene Faktor plausibel war.
+The correction factor from 2.2, fed from completed trips. It is updated when a
+live session ends, damped, and only if the trip was long enough and the measured
+factor was plausible.
 
-Was dabei erst der Praxistest zeigte: **Ladeabschnitte müssen heraus.** Die
-erste Fassung nahm Ladestand am Anfang minus am Ende — wer unterwegs vierzig
-Prozentpunkte nachlädt, sieht damit einen Verlust, der um vierzig zu klein
-ist. Der gelernte Faktor fiel entsprechend zu niedrig aus, und weil er in den
-Plausibilitätsgrenzen blieb, fiel es nicht auf. Aus einer Fahrt mit
-29 kWh/100 km lernte das Fahrzeug 12.
+What only the field test showed: **charging sections have to come out.** The
+first version took charge level at the start minus at the end — anyone who
+recharges forty percentage points along the way sees a loss that is forty too
+small. The learned factor turned out correspondingly too low, and because it
+stayed within the plausibility limits, nobody noticed. From a trip with
+29 kWh/100 km the vehicle learned 12.
 
-**Stufe 6 — messen statt schätzen** *(steht)*
+**Stage 6 — measuring instead of estimating** *(done)*
 
-Nicht vorgesehen, aber aus der ersten echten Aufzeichnung erzwungen: An zu
-vielen Stellen stand eine Schätzung, wo das Fahrzeug die Zahl selbst kennt.
+Not planned, but forced by the first real recording: in too many places there
+was an estimate where the vehicle itself knows the number.
 
-- **Strecke** aus dem Kilometerstand statt aus dem GPS. Bei einer Grösse mit
-  der Strecke im Nenner ist das der Unterschied zwischen brauchbar und
-  irreführend.
-- **Energie** aus den Lebensdauerzählern statt aus dem Ladestand. Ein
-  Ladestandsschritt sind 339 Wh, ein Zählerschritt 0,117 — fast
-  dreitausendmal feiner. Erst damit ist ein Verbrauchsbalken je Minute eine
-  Messung statt Rauschen.
-- **Akkukapazität** vom Fahrzeug statt aus dem Prospekt. Beim ID.Buzz 73,8
-  statt 77 kWh nach 60 000 km; an dieser Zahl hängt jede Umrechnung zwischen
-  Prozent und Kilowattstunden.
+- **Distance** from the odometer instead of from GPS. For a quantity with the
+  distance in the denominator, that is the difference between usable and
+  misleading.
+- **Energy** from the lifetime counters instead of from the charge level. One
+  charge-level step is 339 Wh, one counter step 0.117 — almost three thousand
+  times finer. Only with that is a consumption bar per minute a measurement
+  instead of noise.
+- **Battery capacity** from the vehicle instead of from the brochure. For the
+  ID.Buzz 73.8 instead of 77 kWh after 60,000 km; every conversion between
+  percent and kilowatt-hours hangs on this number.
 
-Der Grundsatz dahinter gilt über den OBD2-Teil hinaus: Wo eine gemessene und
-eine angenommene Zahl zur Wahl stehen, gewinnt die gemessene — und wo keine
-gemessene da ist, soll die Oberfläche es sagen, statt die Annahme wie eine
-Messung aussehen zu lassen.
+The principle behind it applies beyond the OBD2 part: where a measured and an
+assumed number are available, the measured one wins — and where no measured one
+is available, the interface should say so instead of making the assumption look
+like a measurement.
 
 ---
 
-## 7. Was jolt bewusst nicht wird
+## 7. What jolt deliberately does not become
 
-- **Kein Navigationsgerät.** Die Abbiegehinweise macht das Telefon oder das Auto.
-  jolt beantwortet, *wo und wie lange* geladen wird — der Rest ist gelöst.
-- **Keine Bezahlfunktion.** Ladekarten und Roaming sind ein eigenes Geschäft.
-- **Keine Fremdnutzer.** Selbstgehostet, für die eigenen Fahrzeuge. Das erlaubt
-  einfache Auth und In-Memory-Zustand statt einer Nutzerverwaltung.
+- **Not a navigation device.** The turn-by-turn directions come from the phone
+  or the car. jolt answers *where and for how long* to charge — the rest is
+  solved.
+- **No payment function.** Charging cards and roaming are a business of their
+  own.
+- **No outside users.** Self-hosted, for your own vehicles. That allows simple
+  auth and in-memory state instead of user management.

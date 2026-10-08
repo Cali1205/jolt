@@ -1,62 +1,60 @@
-# CarPlay-Antrag für jolt (Entwurf)
+# CarPlay application for jolt (draft)
 
-Schritt 8 aus [`konzept-ios-app.md`](konzept-ios-app.md). Der Antrag gilt **Weg B**
-(eigene CarPlay-App mit Vorlagen). Weg A, die Live Activity im CarPlay-Dashboard,
-braucht keinen Antrag und läuft schon.
+Step 8 of [`konzept-ios-app.md`](konzept-ios-app.md). The application is for
+**route B** (own CarPlay app with templates). Route A, the Live Activity on the
+CarPlay dashboard, needs no application and is already running.
 
-Quelle für Kategorien und Regeln: Apples *CarPlay Developer Guide* (Stand
-8.6.2026). Was dort nicht steht, ist unten als **offen** gekennzeichnet.
+Source for categories and rules: Apple's *CarPlay Developer Guide* (as of
+8 June 2026). Whatever is not stated there is marked **open** below.
 
-## Was du tun musst
+## What you have to do
 
-1. Auf <https://developer.apple.com/carplay/> den Antrag stellen (Abschnitt
-   „Request CarPlay entitlement"). Es braucht das Konto, mit dem die App in
-   App Store Connect liegt; die Team-ID steht in `APPLE_TEAM_ID`.
-2. Die Kategorie **EV charging** wählen (Entitlement
-   `com.apple.developer.carplay-charging`). Rückfall: **Driving task**.
-3. Den englischen Text unten in das Beschreibungsfeld einfügen. Ich habe nur
-   aufgeschrieben, was jolt heute kann oder was in diesem Antrag als Plan
-   ausdrücklich so benannt ist.
-4. Apple prüft und ordnet dem Konto das Entitlement zu. Danach braucht das
-   Provisionierungsprofil die CarPlay-Fähigkeit; mit der automatischen
-   Signatur (`-allowProvisioningUpdates`) legt Apple das beim Export an, das
-   ist aber **ungeprüft**.
+1. Submit the application at <https://developer.apple.com/carplay/> (section
+   "Request CarPlay entitlement"). It needs the account under which the app is
+   in App Store Connect; the Team ID is in `APPLE_TEAM_ID`.
+2. Choose the category **EV charging** (entitlement
+   `com.apple.developer.carplay-charging`). Fallback: **Driving task**.
+3. Paste the English text below into the description field. I wrote down only
+   what jolt can do today or what this application explicitly names as a plan.
+4. Apple reviews it and assigns the entitlement to the account. After that the
+   provisioning profile needs the CarPlay capability; with automatic signing
+   (`-allowProvisioningUpdates`) Apple creates it during export, but this is
+   **untested**.
 
-## Entscheidung: EV charging oder Driving task
+## Decision: EV charging or Driving task
 
 | | EV charging | Driving task |
 |---|---|---|
-| Passt zu jolt | Der Kern ist die Planung von Ladestopps | Nur „Aufgaben, die bei der Fahrt helfen" |
-| Tiefe der Vorlagen | 5 Ebenen | 2, ab iOS 26.4: 3 |
-| Aktualisierung | keine Grenze genannt | höchstens alle 10 s |
-| Bedingung | App muss mehr leisten als eine Liste von Ladesäulen; auf Karten nur Ladesäulen | keine Karte, keine Ortssuche |
-| Risiko | Apple lehnt ab, wenn es nach einer reinen Ladesäulenliste aussieht | enger, aber unkritisch |
+| Fit for jolt | The core is planning charging stops | Only "tasks that help while driving" |
+| Template depth | 5 levels | 2, from iOS 26.4: 3 |
+| Update rate | no limit stated | at most every 10 s |
+| Condition | App must do more than a list of charging stations; maps may show only charging stations | no map, no place search |
+| Risk | Apple rejects it if it looks like a plain charging-station list | narrower, but uncritical |
 
-Empfehlung: **EV charging.** jolt plant die Route, rechnet den Ladestand und wählt
-die Ladestopps; die Ladesäulen sind das Ergebnis, nicht der Inhalt. Das ist genau
-die Abgrenzung, die der Leitfaden verlangt.
+Recommendation: **EV charging.** jolt plans the route, calculates the state of
+charge and chooses the charging stops; the charging stations are the result, not
+the content. That is exactly the distinction the guide requires.
 
-## Was in CarPlay erscheinen soll (und was nicht)
+## What should appear in CarPlay (and what not)
 
-Alle Vorlagen sind feste Vorlagen von iOS; jolt zeichnet nichts selbst.
+All templates are fixed iOS templates; jolt draws nothing itself.
 
-| Bildschirm | Vorlage | Inhalt |
+| Screen | Template | Content |
 |---|---|---|
-| Start | Information | Ladestand, nächster Ladestopp (Name, Entfernung, erwarteter Ladestand bei Ankunft), Ankunftsverschiebung gegenüber dem Plan |
-| Stopps | Liste | Die geplanten Ladestopps der laufenden Fahrt, mit Entfernung und Ladestand bei Ankunft |
-| Stopp | Information | Betreiber, Leistung, Anschlüsse, Ladezeit laut Plan |
-| Ausweichen | Liste / Point of Interest | Alternativen in der Nähe, wenn der geplante Stopp nicht erreichbar ist |
+| Start | Information | State of charge, next charging stop (name, distance, expected state of charge on arrival), arrival shift relative to the plan |
+| Stops | List | The planned charging stops of the current trip, with distance and state of charge on arrival |
+| Stop | Information | Operator, power, connectors, charging time according to the plan |
+| Alternatives | List / Point of Interest | Nearby alternatives if the planned stop cannot be reached |
 
-**Nicht** in CarPlay: Planung einer neuen Route (das passiert vor der Fahrt auf
-dem iPhone), Einstellungen, Fahrzeugdaten, Diagramme, Konto.
+**Not** in CarPlay: planning a new route (that happens before the drive on the
+iPhone), settings, vehicle data, charts, account.
 
-**Offen:** Apple verlangt, dass „jeder Ablauf ohne iPhone möglich" ist. Heute wird
-die Fahrt auf dem iPhone geplant oder die Aufzeichnung dort gestartet. Damit
-CarPlay allein genügt, bräuchte es in CarPlay eine **Auswahl gespeicherter
-Fahrten** (Liste). Das ist nicht gebaut und gehört in Schritt 10; im Antrag
-steht es als Plan.
+**Open:** Apple requires that "every flow is possible without the iPhone". Today
+the trip is planned on the iPhone or the recording is started there. For CarPlay
+alone to suffice, CarPlay would need a **selection of saved trips** (list). That
+is not built and belongs in step 10; in the application it is stated as a plan.
 
-## Englischer Text für das Antragsformular
+## English text for the application form
 
 > **App name:** jolt
 >
@@ -103,21 +101,21 @@ steht es als Plan.
 >
 > **Contact:** r.schillinger@gmail.com
 
-## Was ich nicht wissen kann
+## What I cannot know
 
-- Ob Apple eine App akzeptiert, die noch nicht im App Store ist und von einem
-  einzelnen Haushalt genutzt wird. Der Leitfaden nennt dafür keine Bedingung, aber
-  die Prüfung ist Apples Entscheidung. Der Absatz „Distribution" ist deshalb
-  ehrlich gehalten und nicht geschönt.
-- Ob ein späterer Wechsel der Kategorie einen neuen Antrag braucht
-  (Annahme: ja).
-- Wie lange die Prüfung dauert.
+- Whether Apple accepts an app that is not yet in the App Store and is used by a
+  single household. The guide names no condition for this, but the review is
+  Apple's decision. The "Distribution" paragraph is therefore kept honest and
+  not embellished.
+- Whether a later change of category needs a new application
+  (assumption: yes).
+- How long the review takes.
 
-## Wenn der Antrag durch ist
+## Once the application is approved
 
-1. Entitlement `com.apple.developer.carplay-charging` im Provisionierungsprofil.
-2. CarPlay-Szene (Szenen-Delegate) im Plugin, Szenen-Manifest über
-   `tools/ios_info_plist.sh`, Entitlement per `CODE_SIGN_ENTITLEMENTS`.
-3. Die Vorlagen füllt dasselbe Anzeigemodell (`frontend/display.js`), das schon
-   die Live Activity speist.
-4. Prüfen: im CarPlay Simulator (Mac) oder im Fahrzeug über TestFlight.
+1. Entitlement `com.apple.developer.carplay-charging` in the provisioning profile.
+2. CarPlay scene (scene delegate) in the plugin, scene manifest via
+   `tools/ios_info_plist.sh`, entitlement via `CODE_SIGN_ENTITLEMENTS`.
+3. The templates are filled by the same display model (`frontend/display.js`)
+   that already feeds the Live Activity.
+4. Verify: in the CarPlay Simulator (Mac) or in the vehicle via TestFlight.
