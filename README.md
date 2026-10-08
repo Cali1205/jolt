@@ -1,660 +1,658 @@
-# jolt — Routenplaner für Elektroautos
+# jolt — route planner for electric cars
 
-Plant Ladestopps und **zieht den Plan während der Fahrt nach**. Das ist der
-Punkt: Ein Plan, der bei Abfahrt gerechnet wurde, ist nach achtzig Kilometern
-falsch — Tempo, Temperatur, Wind und Stau addieren sich in dieselbe Richtung.
-Wer das merkt, braucht keinen Sicherheitspuffer von zwanzig Prozent.
+Plans charging stops and **updates the plan while you drive**. That is the
+point: a plan calculated at departure is wrong after eighty kilometres — speed,
+temperature, wind and traffic all add up in the same direction. Anyone who
+notices that does not need a twenty percent safety buffer.
 
-**Stack:** FastAPI + PostgreSQL (Docker, SQLite-Fallback lokal) · Vanilla-JS-PWA
-ohne Build-Schritt · openrouteservice fürs Routing mit Höhenprofil ·
-Bundesnetzagentur und Open Charge Map für die Ladepunkte · Open-Meteo fürs Wetter
+**Stack:** FastAPI + PostgreSQL (Docker, local SQLite fallback) · vanilla-JS PWA
+with no build step · openrouteservice for routing with elevation profile ·
+Bundesnetzagentur and Open Charge Map for the charge points · Open-Meteo for the weather
 
-Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
-**[konzept-routenplaner.md](konzept-routenplaner.md)**.
+The detailed concept with the reasoning behind every decision is in
+**[konzept-routenplaner.md](konzept-routenplaner.md)** (in German).
 
 ---
 
-## Was jolt heute kann
+## What jolt can do today
 
-- **Verbrauch physikalisch rechnen** statt pauschal in kWh/100 km — Luft-
-  widerstand mit v², Steigung aus dem Höhenprofil, Rekuperation mit realistischem
-  Wirkungsgrad, Heizung nach Zeit statt nach Strecke. Der Unterschied zwischen
-  110 und 130 km/h sind 40 % Luftwiderstand, nicht 18; das muss ein Planer
-  abbilden können, sonst ist er Kosmetik.
-- **Fahrzeugprofile mit Ladekurve** — inklusive Vorlagen, damit niemand am
-  ersten Tag einen cw-Wert raten muss.
-- **Ladesäulen importieren** aus dem amtlichen Register der Bundesnetzagentur
-  und aus Open Charge Map. Beide Importe sind idempotent.
-- **Reichweitenmarke auf der Karte** — der Punkt, an dem der Ladestand die
-  Reserve erreicht. Schon ohne Ladestopp-Planung die Antwort auf die Frage,
-  die vor der Abfahrt zählt.
-- **Ladepunkte im Korridor** mit Umwegzeit in Minuten, sortiert nach
-  Fortschritt entlang der Route.
-- **Eigene Fahrten als Routenkandidaten.** Geometrisch erzeugte Umwege taugen
-  nichts (alle zwölf verloren auf der Messstrecke), die Route, die gewann, kam
-  aus zwei Punkten der **gefahrenen** Strecke. Passt eine frühere Fahrt zu Start
-  und Ziel — vorwärts, rückwärts oder als Teilstück, aufgezeichnet oder geplant
-  und gefahren —, wählt jolt Zwischenpunkte entlang des gefahrenen Pfads (alle
-  25 km, höchstens 20, nie auf Pausen und Ladeplätzen, die als Zwischenpunkt
-  einen Abstecher erzwängen) und lässt das Routing sie abfahren. Das Ergebnis
-  ist eine Strasse und eine weitere Variante, die am fertigen Ladeplan gegen die
-  schnellste antritt. Kosten: höchstens zwei Routing-Anfragen, und nur wenn
-  etwas passt. Abschaltbar mit dem Haken „Meine gefahrenen Strecken mitrechnen".
-- **TomTom als Berater.** OpenRouteService bleibt die Quelle jeder gespeicherten
-  Route (Höhe und Tempo je Teilstück braucht das Verbrauchsmodell, TomTom
-  liefert beides nicht). TomTom beantwortet zwei Fragen, die dieser Dienst nicht
-  kennt: *Welche Wege gibt es noch?* (bis zu fünf Alternativen, ohne die
-  100-km-Grenze) und *Was kostet der Verkehr?* (je Route, aus dem Live-Verkehr).
-  Nur Vorschläge, die kein anderer zugleich kürzer und schneller übertrifft,
-  werden nachgefahren — bei vier von fünf gemessenen Strecken war jede
-  Alternative überholt, das spart die meisten Anfragen. Die
-  Verkehrsverzögerung wird je fertiger Route abgefragt, indem Zwischenpunkte
-  TomTom auf dieselbe Strasse zwingen, und geht in die Rangfolge ein
-  („insgesamt schnellste" rechnet Verkehr mit); sie steht an jeder Variantenkarte
-  und, auch bei einer einzelnen Route, als Kachel bei den Kennzahlen. Zu einer
-  aus der Liste geladenen Fahrt gibt es keine — ein Verkehr von gestern wäre
-  schlimmer als keiner. **Gespeichert wird nichts von
-  TomTom**: Dessen Bedingungen erlauben Ergebnisse nur kurzzeitig im
-  Zwischenspeicher und verbieten abgeleitete Datenbanken. Aus einem Vorschlag
-  werden nur Zwischenpunkte, die das Routing abfährt; die Verzögerung steht in
-  der Antwort an den Browser und sonst nirgends. Scheitert TomTom, läuft die
-  Planung ohne weiter. Der Schlüssel steht in der Adresse, deshalb wird nie die
-  Ausnahme selbst geloggt.
-- **Abfahrtszeit.** Leer heisst jetzt; mit einer Zeit gelten Verkehr und Wetter
-  für sie. Der Verkehr kommt zeitabhängig prognostiziert von TomTom (`departAt`):
-  Freitag um vier ist eine andere Strasse die schnellste als Sonntag um drei
-  (gemessen auf Reutlingen - Hamburg: 723 statt 712 km), und der Verkehr kostet
-  +28 statt +5 Minuten. Das Wetter ist die stündliche Vorhersage, **je
-  Stützpunkt für die Stunde der Ankunft dort** (Abfahrt plus Anteil der
-  Fahrzeit); eine Fahrt morgen früh wird nicht mit dem Wetter von heute
-  Nachmittag gerechnet, die Heizung ist der grösste Einzelposten der Kälte. Die
-  Zeit geht als UTC mit Z hinaus, nie als Ortszeit ohne Zone. Abgelehnt wird
-  Vergangenheit (mehr als zehn Minuten zurück) und alles über 60 Tage; das Wetter
-  reicht nur 15 Tage, danach gilt das aktuelle, und das steht im Log.
-  **Der Verkehr ist der ganze Einfluss** — Reisezeit mit Verkehr minus Reisezeit
-  bei freiem Fluss —, nicht das Feld `trafficDelayInSeconds`: Das meint nur die
-  Echtzeit-Verzögerung und stand für Freitag 16 Uhr bei +6,5 min (zeitabhängig
-  sind es 28), in 90 Tagen bei 0,0. Für „jetzt" ist es dadurch die vollständigere
-  Zahl (+21 statt +12,9 min auf Reutlingen - Hamburg).
-- **Ladestopps planen** — die zeitoptimale Folge von Stopps und Lademengen:
-  Pareto-Dijkstra über `(Ladepunkt, Ankunfts-SoC)`, anschliessend wandern die
-  Ladehübe auf feinem Raster in den steilen Teil der Ladekurve. Zu jedem Stopp
-  steht der Ausweichstandort dabei, der ohne Nachladen noch erreichbar ist.
-  Eine Etappe gilt nur als fahrbar, wenn der Ladestand *unterwegs* über der
-  Reserve bleibt — über einen Pass sieht die Bilanz am Ende sonst harmlos aus.
-  **Ein Halt kostet fünf Minuten, bevor das erste Elektron fliesst** —
-  einparken, Kabel, freischalten. Ohne diesen Posten ist die Zielfunktion
-  blind für die Anzahl der Stopps, und weil ein Akku bei 10 % viel schneller
-  lädt als bei 60 %, wird es dann immer günstiger, dieselbe Energie auf viele
-  kurze Halte zu verteilen. Der Planer tat das auch: zehn Stopps statt vier,
-  sechs davon unter vier Minuten — rechnerisch optimal und in Wirklichkeit
-  eine Dreiviertelstunde langsamer.
-- **Live-Nachführung** — Messpunkte herein, Ist gegen Soll, laufender
-  Verbrauchsfaktor, und die Reserve-Marke wandert mit. Ein Simulator spielt
-  die Fahrt mit einstellbarem Mehrverbrauch *und* einstellbarer Fahrzeit ab,
-  damit sich das ohne Auto prüfen lässt.
-- **Mit dem gemessenen Tempo rechnen statt mit dem geratenen.** Der Regler vor
-  der Abfahrt ist eine Schätzung; das Telefon weiss es besser. Solange noch
-  kein Ladestand gemeldet wurde, wird die Reststrecke deshalb nicht skaliert,
-  sondern **neu gerechnet** — mit dem tatsächlich gefahrenen Tempo und dem
-  Wetter von jetzt statt von der Abfahrt. Ein Faktor täte es hier nicht:
-  Luftwiderstand geht mit v², Rollwiderstand nahezu linear, die
-  Nebenverbraucher gar nicht mit dem Tempo, sondern mit der Zeit — und die
-  *sinkt*, wenn man schneller fährt. Sobald ein gemessener Verbrauch vorliegt,
-  gilt der, denn er enthält die Wirkung des Tempos schon.
-- **Umplanen während der Fahrt** — das eigentliche Ziel des Projekts. Greift
-  einer der Auslöser, wird die Reststrecke ab der aktuellen Position neu
-  geplant: mit dem gemessenen Verbrauch, der gemessenen Fahrzeit und dem
-  Ladestand, der wirklich da ist. Ändert sich dabei etwas, sagt jolt es in
-  einem Satz — und sonst schweigt es.
+- **Calculate consumption physically** instead of a flat kWh/100 km — air
+  drag with v², gradient from the elevation profile, regeneration with realistic
+  efficiency, heating by time rather than by distance. The difference between
+  110 and 130 km/h is 40 % more air drag, not 18; a planner has to be able to
+  model that, otherwise it is cosmetics.
+- **Vehicle profiles with charging curve** — including templates, so nobody has
+  to guess a drag coefficient (cw) on day one.
+- **Import chargers** from the official register of the Bundesnetzagentur
+  and from Open Charge Map. Both imports are idempotent.
+- **Range marker on the map** — the point where the state of charge reaches the
+  reserve. Even without charging-stop planning, this is the answer to the
+  question that matters before departure.
+- **Charge points in the corridor** with detour time in minutes, sorted by
+  progress along the route.
+- **Your own trips as route candidates.** Geometrically generated detours are
+  worthless (all twelve lost on the test route); the route that won came
+  from two points of the **driven** track. If an earlier trip fits start
+  and destination — forwards, backwards or as a section, recorded or planned
+  and driven — jolt picks waypoints along the driven path (every
+  25 km, at most 20, never at breaks and charging sites that would force a
+  detour as a waypoint) and has the routing follow them. The result
+  is one road and one more variant, which competes against the fastest one on
+  the finished charging plan. Cost: at most two routing requests, and only if
+  something fits. Can be switched off with the checkbox „Meine gefahrenen Strecken mitrechnen" ("Include my driven routes").
+- **TomTom as an advisor.** OpenRouteService remains the source of every stored
+  route (the consumption model needs elevation and speed per segment, TomTom
+  provides neither). TomTom answers two questions this service does not
+  know: *What other ways are there?* (up to five alternatives, without the
+  100 km limit) and *What does the traffic cost?* (per route, from live traffic).
+  Only suggestions that no other route beats in both distance and time
+  are followed up — on four of five measured routes every
+  alternative was beaten, which saves most of the requests. The
+  traffic delay is queried for each finished route by using waypoints to force
+  TomTom onto the same road, and it enters the ranking
+  („insgesamt schnellste" — "fastest overall" — includes traffic); it is shown on every variant card
+  and, even for a single route, as a tile next to the key figures. For a
+  trip loaded from the list there is none — traffic from yesterday would be
+  worse than none. **Nothing from TomTom is stored**:
+  its terms only allow results to be cached briefly and forbid derived
+  databases. A suggestion only turns into waypoints that the routing follows; the delay is in
+  the response to the browser and nowhere else. If TomTom fails, planning
+  continues without it. The key is part of the URL, which is why the
+  exception itself is never logged.
+- **Departure time.** Empty means now; with a time, traffic and weather apply
+  to it. Traffic comes as a time-dependent forecast from TomTom (`departAt`):
+  on Friday at four a different road is the fastest than on Sunday at three
+  (measured on Reutlingen - Hamburg: 723 instead of 712 km), and traffic costs
+  +28 instead of +5 minutes. The weather is the hourly forecast, **per
+  waypoint for the hour of arrival there** (departure plus a share of the
+  travel time); a trip tomorrow morning is not calculated with today's
+  afternoon weather, and heating is the biggest single item in the cold. The
+  time goes out as UTC with a Z, never as local time without a zone. Rejected are
+  the past (more than ten minutes back) and anything beyond 60 days; the weather
+  only reaches 15 days, after that the current weather applies, and that is noted in the log.
+  **Traffic is the whole effect** — travel time with traffic minus travel time
+  in free flow — not the field `trafficDelayInSeconds`: that only means the
+  real-time delay and was at +6.5 min for Friday 4 pm (time-dependent
+  it is 28), at 0.0 in 90 days. For "now" this makes it the more complete
+  number (+21 instead of +12.9 min on Reutlingen - Hamburg).
+- **Plan charging stops** — the time-optimal sequence of stops and charge amounts:
+  Pareto Dijkstra over `(charge point, arrival SoC)`, after which the charging
+  increments are shifted on a fine grid into the steep part of the charging curve.
+  For every stop the fallback location is shown that is still reachable
+  without charging. A leg only counts as drivable if the state of charge
+  *en route* stays above the reserve — over a pass the balance at the end
+  looks harmless otherwise.
+  **A stop costs five minutes before the first electron flows** —
+  parking, cable, authorisation. Without this item the objective function is
+  blind to the number of stops, and because a battery charges much faster at 10 %
+  than at 60 %, it then always becomes cheaper to spread the same energy over many
+  short stops. The planner did exactly that: ten stops instead of four,
+  six of them under four minutes — optimal on paper and in reality
+  three quarters of an hour slower.
+- **Live tracking** — measurement points in, actual against planned, running
+  consumption factor, and the reserve marker moves along. A simulator replays
+  the trip with adjustable extra consumption *and* adjustable travel time,
+  so this can be tested without a car.
+- **Calculate with the measured speed instead of the guessed one.** The slider
+  before departure is an estimate; the phone knows better. As long as no
+  state of charge has been reported yet, the remaining distance is therefore not scaled
+  but **recalculated** — with the speed actually driven and the
+  weather of now instead of at departure. A factor would not do here:
+  air drag goes with v², rolling resistance almost linearly, the
+  auxiliary loads not with speed at all but with time — and that
+  *drops* when you drive faster. As soon as a measured consumption is available,
+  that one applies, because it already contains the effect of speed.
+- **Replanning while driving** — the actual goal of the project. If one
+  of the triggers fires, the remaining route is replanned from the current position:
+  with the measured consumption, the measured travel time and the
+  state of charge that is really there. If something changes, jolt says so in
+  one sentence — and otherwise stays silent.
 
-| Auslöser | Schwelle |
+| Trigger | Threshold |
 |---|---|
-| Nächster Ladepunkt als belegt gemeldet | sofort |
-| Reserve wird vor dem Ziel erreicht | sofort |
-| Mehr als 500 m neben der Route | ab 1 Minute |
-| Ankunfts-Ladestand am nächsten Stopp weicht ab | > 5 Prozentpunkte |
-| Ankunftszeit verschiebt sich (Stau) | > 10 Minuten |
+| Next charge point reported as occupied | immediately |
+| Reserve will be reached before the destination | immediately |
+| More than 500 m off the route | after 1 minute |
+| Arrival state of charge at the next stop deviates | > 5 percentage points |
+| Arrival time shifts (traffic jam) | > 10 minutes |
 
-- **Benachrichtigung aufs Telefon**, wenn sich der Plan ändert — auch bei
-  dunklem Bildschirm, über Web Push. Und nur dann: Eine Meldung, die bei jeder
-  Messung kommt, schaltet man nach zehn Minuten ab.
-- **Lernen aus gefahrenen Fahrten** — am Ende jeder Fahrt wird der
-  Korrekturfaktor des Fahrzeugs fortgeschrieben, gedämpft, damit eine einzelne
-  Fahrt mit Dachbox ihn nicht dauerhaft verbiegt. Ladeabschnitte fallen dabei
-  heraus: Wer unterwegs vierzig Prozentpunkte nachlädt, sieht am Ende einen
-  Verlust, der um diese vierzig zu klein ist.
-- **Fahrten aufzeichnen statt planen** — der Weg für den Fall, für den sich
-  Planen nicht lohnt: eine bekannte kurze Strecke, ein paarmal gefahren, ist
-  die sauberste Messung überhaupt. Strecke, Höhenprofil und Prognose entstehen
-  hinterher aus den Messpunkten. Vergisst man das Beenden, macht der Server es
-  selbst — bei einer Aufzeichnung wäre es sonst Totalverlust, denn bis dahin
-  ist die Fahrt eine Hülle mit leerer Geometrie. Eine Ladepause verlängert die
-  Frist, sonst zerschneidet das Aufräumen die Fahrt, die gleich weitergeht.
-- **Den Dongle direkt lesen** — über Web Bluetooth, ohne Zwischen-App. Auf iOS
-  braucht es dafür den Browser **Bluefy**; Safari kennt Web Bluetooth nicht —
-  oder die native App über TestFlight, die ohne Mac per GitHub Actions gebaut
-  wird ([`ios-einrichten.md`](ios-einrichten.md)).
-  Alle Messwerte stehen live im Dashboard, samt Alter je Wert: Eine
-  eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
-  und wie, steht weiter unten.
-- **CarPlay-Darstellung in zwei Stilen** — die Kacheln des CarPlay-Dashboards
-  sind Bilder, und `frontend/tiles.js` zeichnet sie im Canvas: **A –
-  Instrument** (Zeigerbogen mit Skala für Ladestand und Rekuperation, Balken
-  über einer Mittellinie, Ankunft mit Pfeil, Reichweitenleiste) und **B –
-  Telemetrie** (Zahlen links, LED-Segmentleisten, Ankunft als Abweichung von
-  Null, Stopps als Streckenband, Verläufe als Fläche). Farben folgen dem
-  Zustand (Ladestand unter 35 % gelb, unter 20 % rot, …). Gewählt wird in den
-  Einstellungen; dort zeigt eine Vorschau beide Stile mit Probewerten. Die
-  Bilder reisen als PNG im Anzeigemodell (`kachelBilder`) zur CarPlay-Szene;
-  ohne Bild zeichnet Swift wie bisher. Weil sie in der Oberfläche entstehen,
-  ist eine Änderung am Aussehen eine Änderung am Server, kein neuer App-Bau.
-- **Einstellungen und Dongle-Diagnose** — der Reiter „Einstellungen“ sammelt,
-  was man selten braucht: Konto und Server, Benachrichtigungen, die
-  Dongle-Optionen (nur beim Fahren lesen, trennen, Gerät vergessen) und den
-  Speicher (wartende Messpunkte, App-Cache zurücksetzen). Die **Dongle-Diagnose**
-  zeigt live: Verbindung (Zugang, Gerät, Abrisse), je Messgrösse letzten Wert,
-  Alter, Treffer (`ok`), leere Antworten und Ausfälle samt Antwortzeit, die
-  Rundenstatistik, das Protokoll des Dongles (filterbar auf Auffälliges), eine
-  Befehlskonsole und einen **Bericht zum Kopieren** — der Weg, einem anderen zu
-  zeigen, warum ein Wert fehlt. Der Dongle-Baustein führt dafür selbst Buch
-  (`joltObd.diagnose()`), unabhängig davon, welche Ansicht ihn verbunden hat.
-- **Die Strecke aus dem Kilometerstand** statt aus dem GPS. Bei
-  Zwölf-Sekunden-Takt liegen bei Landstrassentempo hundertsechzig Meter
-  zwischen zwei Punkten, und die Luftlinie schneidet jede Kurve ab; ein
-  Funkloch reisst gleich ein ganzes Stück heraus. Der Zähler im Auto kennt
-  beides nicht. Weil der Verbrauch in kWh **pro hundert Kilometer** gerechnet
-  wird, wandert der Fehler sonst direkt in den Korrekturfaktor.
-- **Verbrauch aus den Energiezählern des Fahrzeugs.** Sie zählen über die
-  Lebensdauer, was in den Akku hinein- und was herausgegangen ist; ihre
-  Differenz über ein Stück Fahrt ist die verbrauchte Energie — mit 0,117 Wh
-  Auflösung statt der 339 Wh eines Ladestandsschritts. Fast dreitausendmal
-  feiner, und deshalb zeigt der Balkenplot den Verbrauch je **Minute** statt
-  je fünf.
-- **Die gemessene Akkukapazität schlägt die Prospektangabe.** Im Profil steht,
-  was der Hersteller für ein neues Fahrzeug angibt; das Auto meldet, was
-  dieser Akku heute kann — beim ID.Buzz 73,8 statt 77 kWh nach 60 000 km. An
-  dieser Zahl hängt jede Umrechnung zwischen Ladestand und Kilowattstunden.
-- **Ladezeit gegen Kosten abwägen.** Ein Zeitwert in Euro je Stunde macht
-  beides vergleichbar: Wer zehn Minuten länger lädt, dafür aber einen Stopp
-  spart und beim günstigeren Anbieter steht, fährt vielleicht besser. Dazu ein
-  Bonus für grosse Ladeparks (das Risiko, vor einer belegten Säule zu stehen,
-  sinkt mit der Anzahl) und für bevorzugte Anbieter — beides als Gewicht, nie
-  als Ausschluss.
-- **Anschluss für einen Logger im Auto** — ein Gerät, das fest im Fahrzeug
-  sitzt, kann die Sitzungs-ID einer Fahrt nicht kennen; die entsteht erst beim
-  Losfahren in der App und wechselt mit jeder Fahrt. Es weist sich deshalb mit
-  einem langlebigen **Logger-Token des Fahrzeugs** aus (`POST
-  /api/live/melden`), und jolt sucht die laufende Fahrt selbst. Steht das Auto,
-  ist das kein Fehler, sondern eine Antwort mit `aufgenommen: false` — ein
-  unbeaufsichtigtes Gerät, das auf Fehlerantworten stösst, protokolliert Fehler
-  oder schaltet sich ab.
+- **Notification to the phone** when the plan changes — even with the screen
+  dark, via Web Push. And only then: a message that comes with every
+  measurement gets switched off after ten minutes.
+- **Learning from driven trips** — at the end of each trip the vehicle's
+  correction factor is updated, damped so that a single
+  trip with a roof box does not bend it permanently. Charging sections are excluded:
+  anyone who recharges forty percentage points on the way sees a loss at the end
+  that is too small by those forty.
+- **Record trips instead of planning them** — the path for the case where
+  planning is not worth it: a known short route, driven a few times, is
+  the cleanest measurement there is. Route, elevation profile and forecast are created
+  afterwards from the measurement points. If you forget to end it, the server does it
+  itself — with a recording it would otherwise be a total loss, because until then
+  the trip is a shell with empty geometry. A charging break extends the
+  deadline, otherwise the cleanup cuts apart a trip that is about to continue.
+- **Read the dongle directly** — via Web Bluetooth, without an intermediate app. On iOS
+  this requires the browser **Bluefy**; Safari does not support Web Bluetooth —
+  or the native app via TestFlight, which is built without a Mac by GitHub Actions
+  ([`ios-einrichten.md`](ios-einrichten.md)).
+  All readings are shown live in the dashboard, with the age of each value: a
+  frozen display otherwise looks like a running one. What the car delivers
+  and how is described further below.
+- **CarPlay display in two styles** — the tiles of the CarPlay dashboard
+  are images, and `frontend/tiles.js` draws them on a canvas: **A –
+  Instrument** (pointer arc with scale for state of charge and regeneration, bars
+  over a centre line, arrival with arrow, range bar) and **B –
+  Telemetry** (numbers on the left, LED segment bars, arrival as deviation from
+  zero, stops as a route band, histories as area). Colours follow the
+  state (state of charge below 35 % yellow, below 20 % red, …). The style is chosen in the
+  settings; there a preview shows both styles with sample values. The
+  images travel as PNG in the display model (`tileImages`) to the CarPlay scene;
+  without an image Swift draws as before. Because they are created in the UI,
+  a change to the look is a change on the server, not a new app build.
+- **Settings and dongle diagnostics** — the „Einstellungen" ("Settings") tab collects
+  what is rarely needed: account and server, notifications, the
+  dongle options (read only while driving, disconnect, forget device) and the
+  storage (pending measurement points, reset app cache). The **dongle diagnostics**
+  show live: connection (access, device, drops), per measured quantity the last value,
+  age, hits (`ok`), empty responses and failures including response time, the
+  round statistics, the dongle's log (filterable to anything unusual), a
+  command console and a **report to copy** — the way to show somebody else
+  why a value is missing. The dongle module keeps its own books for this
+  (`joltObd.diagnose()`), regardless of which view connected it.
+- **Distance from the odometer** instead of from GPS. At a
+  twelve-second interval there are a hundred and sixty metres between two points at
+  country-road speed, and the straight line cuts off every curve; a
+  dead zone tears out a whole stretch at once. The counter in the car knows
+  neither. Because consumption is calculated in kWh **per hundred kilometres**,
+  the error would otherwise go straight into the correction factor.
+- **Consumption from the vehicle's energy counters.** They count over the
+  lifetime what went into and out of the battery; their
+  difference over a stretch of the trip is the energy consumed — with 0.117 Wh
+  resolution instead of the 339 Wh of one state-of-charge step. Almost three thousand times
+  finer, which is why the bar plot shows consumption per **minute** instead of
+  per five.
+- **The measured battery capacity beats the brochure figure.** The profile holds
+  what the manufacturer states for a new vehicle; the car reports what
+  this battery can do today — on the ID.Buzz 73.8 instead of 77 kWh after 60,000 km. Every
+  conversion between state of charge and kilowatt-hours hangs on this number.
+- **Weigh charging time against cost.** A time value in euros per hour makes
+  both comparable: anyone who charges ten minutes longer but saves a stop
+  and stands at the cheaper provider may come out ahead. In addition a
+  bonus for large charging parks (the risk of standing in front of an occupied charger
+  falls with the number of points) and for preferred providers — both as a weight, never
+  as an exclusion.
+- **Connection for an in-car logger** — a device permanently installed in the
+  vehicle cannot know the session ID of a trip; it only comes into being when
+  you set off in the app and changes with every trip. It therefore identifies itself with
+  a long-lived **logger token of the vehicle** (`POST
+  /api/live/melden`, "melden" = report), and jolt finds the running trip itself. If the car is
+  parked, that is not an error but a response with `aufgenommen: false` ("recorded: false") — an
+  unattended device that meets error responses logs errors
+  or switches itself off.
 
-- **Anhänger und Höchstgeschwindigkeit.** Ein Anhänger gehört zur Fahrt und
-  bringt Masse *und* eine eigene Luftwiderstandsfläche (c_w mal A in m²) mit —
-  keine Verbiegung des cw-Werts vom Auto. Dazu eine harte Tempo-Grenze, an der
-  Fahrt (Gespann: 100 km/h) und am Fahrzeug; es gilt die kleinere. Der
-  Tempo-Regler stösst daran an, statt mit 165 km/h zu rechnen, und die
-  Fahrzeit wird um das gestreckt, was die Grenze kostet. Aufzeichnungen sind
-  davon ausgenommen (gefahren ist gefahren), und aus einer Fahrt mit Anhänger
-  lernt jolt keinen Fahrzeugfaktor. Die Vorgaben für die Fläche sind
-  Schätzwerte, bis eine aufgezeichnete Fahrt sie bestätigt.
-- **Der Dongle fragt nur beim Fahren.** Ob das Auto verriegelt ist, lässt sich
-  nicht erfahren, ohne es zu fragen — und das Fragen löst bei verriegeltem Auto
-  die Alarmanlage aus. jolt schliesst deshalb aus der Bewegung des Telefons:
-  ab 15 km/h (zweimal hintereinander) sitzt man im Auto, dann wird gelesen und
-  der Dongle bei Bedarf wieder verbunden; nach zehn Sekunden Stillstand wird
-  nichts mehr gefragt (die Verbindung bleibt, Ampel und Stau kosten keinen
-  Neuaufbau); wer mehr als 25 m weggeht oder drei Minuten steht, dessen Dongle
-  wird getrennt. Ein Fehlversuch ohne Dongle in Reichweite (Fahrrad, Bus) hört
-  nach acht Versuchen bis zum nächsten Halt auf. Die Zähler im Auto laufen über
-  die Lebensdauer, eine Lücke im Stand kostet deshalb keinen Verbrauch. Abschalten
-  lässt sich das mit dem Haken „Dongle nur beim Fahren lesen".
-  **Das frühere Signal ist die 12-V-Spannung:** `ATRV` misst der ELM-Chip selbst,
-  es geht kein Rahmen auf den CAN-Bus, jolt darf es also auch am abgeschlossenen
-  Auto fragen. Solange das Auto an ist oder lädt, hält der DC/DC-Wandler die
-  Spannung oben; geht es aus, fällt sie binnen Sekunden — vor dem Abschliessen.
-  Zwei niedrige Werte hintereinander im Stand, verglichen mit dem Mittel der
-  letzten Fahrt (keine feste Schwelle), trennen den Dongle sofort. Die Spannung
-  steht als `batt_v` an jedem Messpunkt, damit sich die Schwelle an echten
-  Fahrten nachprüfen lässt — auch an Punkten ohne Fahrzeugabfrage, denn gerade im
-  Stand fällt sie beim Ausschalten. Eine Aufzeichnung behält den Dongle, auch wenn
-  das Auto beim Start noch schläft und die erste Abfrage nicht beantwortet.
-  Lädt das Auto verriegelt, bleibt die Spannung oben;
-  dann gelten Stand und Weg. Nicht erfassbar bleibt, wer im ersten Moment nach
-  dem Anhalten abschliesst, ohne dass das Auto je „aus" war.
-- **Standort bei gesperrtem iPhone** — in der iOS-App über das Plugin
-  `@capacitor-community/background-geolocation` (`CLLocationManager` mit
-  Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren
-  einfriert. Die Messpunkte laufen dabei durch dieselbe Warteschlange. Eine
-  ältere App ohne das Plugin fällt auf den Browser-Standort zurück. Bisher nur
-  gegen Attrappen geprüft (`tools/check_location.js`); ob iOS die App wirklich
-  am Leben hält, zeigt eine Fahrt.
-- **Messpunkte puffern** — jeder Punkt trägt seine Messzeit und geht zuerst in
-  eine Warteschlange (`localStorage`), von dort in Stapeln zu 100 an
-  `POST /api/live/{id}/punkte`. Ohne Netz bleiben die Punkte liegen und gehen
-  später in Messreihenfolge hinaus; geplant wird nur beim letzten Punkt eines
-  Stapels, weil ein Plan ab einer Position von vor zehn Minuten beim Erscheinen
-  veraltet wäre.
+- **Trailer and top speed.** A trailer belongs to the trip and
+  brings mass *and* its own drag area (c_w times A in m²) —
+  no bending of the car's cw. In addition a hard speed limit, on the
+  trip (combination: 100 km/h) and on the vehicle; the smaller one applies. The
+  speed slider runs into it instead of calculating with 165 km/h, and the
+  travel time is stretched by what the limit costs. Recordings are
+  exempt (driven is driven), and jolt does not learn a vehicle factor
+  from a trip with a trailer. The defaults for the area are
+  estimates until a recorded trip confirms them.
+- **The dongle only asks while driving.** Whether the car is locked cannot
+  be found out without asking it — and asking a locked car sets
+  off the alarm. jolt therefore infers from the phone's movement:
+  from 15 km/h (twice in a row) you are in the car, then it reads and
+  reconnects the dongle if needed; after ten seconds of standstill
+  nothing is asked any more (the connection stays, traffic lights and jams cost no
+  reconnect); anyone who walks away more than 25 m or stands for three minutes has their dongle
+  disconnected. A failed attempt with no dongle in range (bicycle, bus) stops
+  after eight attempts until the next halt. The counters in the car run over
+  the lifetime, so a gap at standstill costs no consumption. This can be switched
+  off with the checkbox „Dongle nur beim Fahren lesen" ("Read dongle only while driving").
+  **The earlier signal is the 12 V voltage:** `ATRV` is measured by the ELM chip itself,
+  no frame goes onto the CAN bus, so jolt may ask it even on a locked
+  car. As long as the car is on or charging, the DC/DC converter keeps the
+  voltage up; when it goes off, it drops within seconds — before locking.
+  Two low values in a row at standstill, compared with the mean of the
+  last trip (no fixed threshold), disconnect the dongle immediately. The voltage
+  is stored as `batt_v` on every measurement point, so that the threshold can be checked against real
+  trips — also on points without a vehicle query, because it is precisely at
+  standstill that it drops on switch-off. A recording keeps the dongle even if
+  the car is still asleep at the start and does not answer the first query.
+  If the car charges locked, the voltage stays up;
+  then standstill and distance apply. What cannot be detected is someone who locks in the first moment after
+  stopping without the car ever having been "off".
+- **Location with a locked iPhone** — in the iOS app via the plugin
+  `@capacitor-community/background-geolocation` (`CLLocationManager` with
+  background mode) instead of `watchPosition`, which the WebView freezes on
+  locking. The measurement points go through the same queue. An
+  older app without the plugin falls back to the browser location. So far only
+  tested against mocks (`tools/check_location.js`); whether iOS really keeps the app
+  alive is shown by a drive.
+- **Buffer measurement points** — every point carries its measurement time and first goes into
+  a queue (`localStorage`), from there in batches of 100 to
+  `POST /api/live/{id}/punkte` ("punkte" = points). Without a network the points stay put and later go out
+  in measurement order; planning happens only at the last point of a
+  batch, because a plan from a position ten minutes old would be
+  outdated by the time it appears.
 
-**Noch nicht da**: Belegungsdaten der Ladepunkte (es gibt sie inzwischen, siehe
-„Nächste Schritte") und eine Auswertung, ob der Hintergrund-Standort auf dem iPhone wirklich
-durchläuft.
+**Not there yet**: occupancy data for the charge points (it exists by now, see
+„Next steps") and an evaluation of whether the background location on the iPhone really
+keeps running.
 
 ---
 
-## Loslegen
+## Getting started
 
-### Lokal, ohne alles
+### Locally, with nothing
 
 ```bash
 pip install -r backend/requirements.txt
 cd backend && python -m uvicorn app.main:app --reload --port 8322
 ```
 
-Läuft gegen SQLite und ohne API-Schlüssel. Ohne `ORS_API_KEY` rechnet jolt mit
-**erfundenen Demo-Routen** — die Kette lässt sich damit vollständig durchspielen,
-aber die Strecke ist die Luftlinie. Die Oberfläche sagt es an jeder Stelle dazu.
+Runs against SQLite and without an API key. Without `ORS_API_KEY` jolt calculates with
+**made-up demo routes** — the whole chain can be played through,
+but the route is the straight line. The UI says so at every point.
 
-### Mit echten Routen
+### With real routes
 
-Kostenlosen Schlüssel holen (2.500 Anfragen/Tag):
+Get a free key (2,500 requests/day):
 <https://openrouteservice.org/dev/#/signup>
 
 ```bash
 export ORS_API_KEY=…
 ```
 
-### Im Docker
+### In Docker
 
 ```bash
-cp .env.example .env      # DB_PASSWORD, APP_PASSWORT und ORS_API_KEY eintragen
+cp .env.example .env      # enter DB_PASSWORD, APP_PASSWORT and ORS_API_KEY
 docker compose up --build
 ```
 
-Danach unter <http://localhost:8322>. Die Datenbank liegt auf dem Host unter
-`/opt/docker/jolt/db` — bei Bedarf in `docker-compose.yml` anpassen.
+Then at <http://localhost:8322>. The database lives on the host under
+`/opt/docker/jolt/db` — adjust in `docker-compose.yml` if needed.
 
-### Ladesäulen importieren
+### Import chargers
 
-Die Datei „Ladesäulenregister" (CSV) von der [Ladesäulenkarte der
-Bundesnetzagentur](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/E-Mobilitaet/Ladesaeulenkarte/start.html)
-herunterladen, dann:
+Download the file „Ladesäulenregister" (CSV) from the [charging station map of the
+Bundesnetzagentur](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/E-Mobilitaet/Ladesaeulenkarte/start.html),
+then:
 
 ```bash
 ./tools/import_bnetza.py ladesaeulenregister.csv
-OCM_API_KEY=… ./tools/import_ocm.py AT,CH 5000 50   # optional, fürs Ausland
+OCM_API_KEY=… ./tools/import_ocm.py AT,CH 5000 50   # optional, for other countries
 ```
 
-Ohne diesen Schritt bleibt die Liste „Ladepunkte entlang der Route" leer — die
-Tabelle ist bei einer frischen Installation schlicht noch nicht gefüllt.
+Without this step the list „Ladepunkte entlang der Route" ("Charge points along the route") stays empty — the
+table is simply not yet filled on a fresh installation.
 
-`import_ocm.py` fragt Open Charge Map länderweise ab. Bei einem grossen Land
-(z.B. Frankreich) blättert OCMs `offset`-Pagination bei sehr vielen Treffern
-nicht zuverlässig weiter — ein Teil der Ladepunkte bleibt dann unerreichbar,
-egal wie hoch das Limit steht. Für gezielt eine Strecke gibt es die
-Alternative `import_ocm_route.py`, die stattdessen mehrere kleinere Umkreise
-entlang der tatsächlichen Routen-Geometrie abfragt:
+`import_ocm.py` queries Open Charge Map country by country. For a large country
+(e.g. France) OCM's `offset` pagination does not reliably continue when there are very many
+hits — some of the charge points then remain unreachable,
+no matter how high the limit is set. For one specific route there is the
+alternative `import_ocm_route.py`, which instead queries several smaller radii
+along the actual route geometry:
 
 ```bash
-OCM_API_KEY=… ./tools/import_ocm_route.py <fahrt_id> 30 50   # Umkreis 30 km, ab 50 kW
+OCM_API_KEY=… ./tools/import_ocm_route.py <trip_id> 30 50   # radius 30 km, from 50 kW
 ```
 
-Die `fahrt_id` steht in der Antwort von `GET /api/fahrten`, nachdem die
-Strecke einmal in der App berechnet wurde.
+The `trip_id` is in the response of `GET /api/fahrten` ("fahrten" = trips) once the
+route has been calculated in the app.
 
-### Benachrichtigungen aufs Telefon
+### Notifications to the phone
 
 ```bash
-./tools/push_keyname.py      # erzeugt ein VAPID-Schlüsselpaar
+./tools/push_keyname.py      # generates a VAPID key pair
 ```
 
-Die drei ausgegebenen Zeilen in die `.env` übernehmen und jolt neu starten.
-Danach fragt die App beim Start einer Live-Fahrt einmal nach der Erlaubnis.
-Ob es funktioniert, sagt `POST /api/push/probe` — die Nachricht muss auf dem
-Gerät ankommen, auch bei dunklem Bildschirm.
+Copy the three output lines into `.env` and restart jolt.
+After that the app asks for permission once when a live trip starts.
+Whether it works is told by `POST /api/push/probe` — the message must arrive on the
+device, even with the screen dark.
 
-Zwei Dinge, an denen es sonst scheitert: Der Browser gibt Benachrichtigungen
-nur über **HTTPS** frei (`localhost` ausgenommen), und die App muss auf iOS
-zum Home-Bildschirm hinzugefügt sein. Der **private** Schlüssel bleibt auf dem
-Server; wer ihn hat, kann im Namen dieser Installation an die angemeldeten
-Geräte senden.
+Two things it otherwise fails on: the browser only allows notifications
+over **HTTPS** (`localhost` excepted), and on iOS the app must have been
+added to the home screen. The **private** key stays on the
+server; whoever has it can send to the registered devices in the name of this
+installation.
 
 ---
 
-## Konfiguration
+## Configuration
 
-| Variable | Bedeutung |
+| Variable | Meaning |
 |---|---|
-| `DATABASE_URL` | Fehlt sie, wird SQLite benutzt (`jolt_dev.db`). |
-| `APP_PASSWORT` | Zugang zur App. **Leer heisst: kein Login.** Steht beim Start als Warnung im Log. |
-| `ORS_API_KEY` | openrouteservice. Fehlt er, greift das Demo-Routing. |
-| `OCM_API_KEY` | Nur für den Open-Charge-Map-Import. |
-| `TOMTOM_API_KEY` | Optional. TomTom als Berater für Alternativen und Verkehr. Ohne ihn läuft die Planung wie bisher. |
-| `VAPID_PRIVATE_KEY` | Web Push. Fehlt er, sind Benachrichtigungen aus. |
-| `VAPID_PUBLIC_KEY` | Derselbe Schlüssel, öffentliche Hälfte — der Browser braucht ihn. |
-| `VAPID_SUBJECT` | `mailto:` oder `https:` — wen der Push-Dienst erreicht. |
-| `TRUSTED_PROXIES` | IPs des Reverse Proxy, die `X-Forwarded-For` setzen dürfen. |
-| `RATE_LIMIT_PER_MIN` | Anfragen je Minute und IP (Standard 120). |
-| `ENABLE_API_DOCS` | `1` schaltet `/api/docs` frei. Standard: aus. |
+| `DATABASE_URL` | If missing, SQLite is used (`jolt_dev.db`). |
+| `APP_PASSWORT` | Access to the app (password). **Empty means: no login.** Appears as a warning in the log at startup. |
+| `ORS_API_KEY` | openrouteservice. If missing, demo routing applies. |
+| `OCM_API_KEY` | Only for the Open Charge Map import. |
+| `TOMTOM_API_KEY` | Optional. TomTom as advisor for alternatives and traffic. Without it planning works as before. |
+| `VAPID_PRIVATE_KEY` | Web Push. If missing, notifications are off. |
+| `VAPID_PUBLIC_KEY` | The same key, public half — the browser needs it. |
+| `VAPID_SUBJECT` | `mailto:` or `https:` — whom the push service can reach. |
+| `TRUSTED_PROXIES` | IPs of the reverse proxy that may set `X-Forwarded-For`. |
+| `RATE_LIMIT_PER_MIN` | Requests per minute and IP (default 120). |
+| `ENABLE_API_DOCS` | `1` enables `/api/docs`. Default: off. |
 
 ---
 
-## Prüfen
+## Checks
 
-Alle Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
-
-```bash
-./tools/check_model.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
-./tools/check_optimizer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
-./tools/check_sources.py    # Fremde Meldeformate übersetzen - und Schrott ablehnen
-./tools/check_replanning.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
-./tools/check_push.py       # Web Push: Schlüssel, Verschlüsselung, Abos, Aufräumen
-node tools/check_buffer.js  # Messpunkt-Warteschlange im Frontend: Funkloch, Nachreichen
-./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
-```
-
-`check_model.py` prüft nicht auf feste Zahlen, sondern auf die Verhältnisse,
-die gelten müssen — etwa dass 130 km/h mehr als 10 % über 110 km/h liegen, aber
-unter dem reinen v²-Faktor, oder dass ein Pass mehr kostet als die Ebene, obwohl
-man wieder auf Ausgangshöhe ankommt.
-
-`check_optimizer.py` glaubt dem Planer nichts: Ein zweiter, unabhängiger
-Nachrechner fährt jeden fertigen Plan Kilometer für Kilometer ab und sieht nach,
-ob der Ladestand irgendwo unter die Reserve fällt. Geprüft wird ausserdem gegen
-die beiden Fälle, an denen ein gieriger Planer scheitert — eine lange Lücke ohne
-Schnelllader und die Wahl zwischen einer nahen schwachen und einer weiteren
-starken Säule.
-
-`check_sources.py` prüft vor allem das, was schiefgeht. Eine Meldung, die
-stimmt, ist der langweilige Fall; interessant sind das fehlende Feld, der
-Zeitstempel in Millisekunden statt Sekunden und der aus dem Jahr 1970, wenn
-ein Kleinstrechner ohne Netz startet. Fremde Daten sind bis zum Beweis des
-Gegenteils kaputt, und ein Übersetzer, der das nicht abfängt, verlagert den
-Fehler nur — er landet dann als 500er im Log oder, schlimmer, als stiller
-Unsinn im Energieprofil.
-
-`check_replanning.py` prüft jeden Auslöser einzeln — über seiner Schwelle muss
-er greifen, darunter schweigen; ein Auslöser, der immer feuert, ist so nutzlos
-wie einer, der es nie tut. Danach die ganze Kette: Fahrt rechnen, Ladepunkte
-anlegen, mit Mehrverbrauch und mit Stau abspielen und nachsehen, ob der Plan
-sich ändert, gültig bleibt und sich *nicht* bei jeder Messung ändert.
-
-Zuletzt eine Fahrt, in der wirklich **geladen** wird. Der Simulator tut das
-nie — sein Ladestand fällt monoton bis null —, und deshalb blieb der
-Normalfall jeder Langstrecke ungeprüft: anhalten, laden, weiterfahren. Das
-Energieprofil führt ausschliesslich Fahrzeit; die Ladezeit steht im Plan. Wer
-die Wanduhr ungefiltert dagegen hält, meldet nach dem ersten Ladestopp eine
-Verspätung in Höhe der Ladedauer — dauerhaft, denn aufgeholt wird sie nie.
-Der Auslöser „Ankunft verschiebt sich" stünde damit für den Rest der Fahrt
-über seiner Schwelle. Eine Meldung, die immer kommt, schaltet man ab.
-
-`check_push.py` prüft alles vor dem Netzsprung — und der Rundlauf durch die
-Verschlüsselung ist der Kern: Die Nutzlast wird für ein nachgebautes
-Browser-Abo verschlüsselt und mit dessen privatem Schlüssel wieder
-entschlüsselt. Kommt der Klartext zurück, stimmt der Pfad nach RFC 8291. Was
-das Skript **nicht** prüft, ist der Sprung zum Push-Dienst selbst; dafür gibt
-es `POST /api/push/probe` mit einem echten Gerät.
-
-`check_backend.py` fährt eine simulierte Strecke mit 25 % Mehrverbrauch und
-prüft, dass die Reserve-Marke nach vorn rückt. Das ist der Prüfstein der
-Live-Funktion. Dazu hält es fest, was die Prüfskripte selbst nicht sehen
-könnten: dass jeder Verweis im HTML eine Version trägt (der Cache-Fehler war
-viermal da), dass jeder ausgelesene Messwert eine Beschriftung hat, und dass
-jedes Werkzeug in `tools/` das Paket in **beiden** Layouten findet — im Repo
-unter `backend/app`, im Image daneben als `app`.
+All scripts run without a network, without Postgres and without API keys:
 
 ```bash
-ORS_API_KEY=… ./tools/probelauf.py   # kein Prüfskript, ein Probelauf
+./tools/check_model.py     # physics: air density, v², gradient, pass, cold, charging curve
+./tools/check_optimizer.py # charging plan: reserve, gaps, charger choice, fallback
+./tools/check_sources.py    # translate foreign report formats - and reject junk
+./tools/check_replanning.py  # live: triggers one by one, replanning across the whole chain
+./tools/check_push.py       # Web Push: keys, encryption, subscriptions, cleanup
+node tools/check_buffer.js  # measurement-point queue in the frontend: dead zone, resubmission
+./tools/check_backend.py    # whole chain: schema, import, route, corridor, charging plan, live
 ```
 
-`probelauf.py` ist ein anderes Werkzeug als die sechs darüber, und der
-Unterschied ist der Zweck. Ein Prüfskript sichert, was man schon weiss; dieser
-Lauf soll finden, woran noch niemand gedacht hat. Er behauptet nichts, er
-fährt eine echte Route mit echten Ladepunkten ab, zeichnet danach eine Fahrt
-auf, wie der Dongle sie schickt — mit Ladepause, Funkloch und Werten, die
-einzeln ausfallen — und zeigt am Ende, was dabei nicht stimmt.
+`check_model.py` does not check against fixed numbers but against the ratios
+that must hold — for instance that 130 km/h is more than 10 % above 110 km/h, but
+below the pure v² factor, or that a pass costs more than flat ground, even though
+you arrive back at the starting altitude.
 
-Er hat sich gelohnt: Vier Fehler kamen dabei heraus, die keiner der sechs
-Prüfläufe gesehen hatte, weil sie alle mit kurzen Fahrten **ohne Ladestopp**
-arbeiten. Der teuerste war ein gelernter Faktor, der bei jeder Fahrt mit
-Ladestopp zu niedrig ausfiel — und weil er in den Plausibilitätsgrenzen blieb,
-fiel es nicht auf.
+`check_optimizer.py` does not trust the planner: a second, independent
+recalculator drives every finished plan kilometre by kilometre and checks
+whether the state of charge falls below the reserve anywhere. It also checks against
+the two cases where a greedy planner fails — a long gap without
+a fast charger and the choice between a near weak and a farther
+strong charger.
 
-Ohne Auto prüfen lässt sich noch mehr: Unter `/obd` liest „Alle Werte prüfen"
-einmal den vollständigen Satz und hält jeden Wert gegen das, was physikalisch
-plausibel wäre. Der schärfste Teil ist der **Kreuzvergleich** — Entladezähler
-geteilt durch Kilometerstand ergibt den Lebensdauerverbrauch, und trifft der
-12 bis 40 kWh/100 km, stimmen beide Formeln. Zwei unabhängig gelesene Werte
-prüfen sich gegenseitig, im Stand. Genau so ist ein Vorzeichenfehler
-aufgeflogen, den die Bereichsprüfung durchgelassen hatte.
+`check_sources.py` mainly checks what goes wrong. A report that
+is correct is the boring case; the interesting ones are the missing field, the
+timestamp in milliseconds instead of seconds and the one from 1970 when
+a microcomputer without a network starts. Foreign data is broken until proven
+otherwise, and a translator that does not catch this only moves
+the error — it then ends up as a 500 in the log or, worse, as silent
+nonsense in the energy profile.
+
+`check_replanning.py` checks every trigger individually — above its threshold
+it must fire, below it stay silent; a trigger that always fires is as useless
+as one that never does. Then the whole chain: calculate a trip, create charge points,
+replay with extra consumption and with traffic jams, and see whether the plan
+changes, stays valid and does *not* change at every measurement.
+
+Last, a trip in which charging really **happens**. The simulator never does that
+— its state of charge falls monotonically to zero — and so the
+normal case of every long trip went unchecked: stop, charge, drive on. The
+energy profile contains driving time exclusively; the charging time is in the plan. Anyone who
+holds the wall clock against it unfiltered reports, after the first charging stop,
+a delay equal to the charging duration — permanently, because it is never made up.
+The trigger „Ankunft verschiebt sich" ("Arrival shifts") would then stand above its threshold for the rest of
+the trip. A message that always comes gets switched off.
+
+`check_push.py` checks everything before the network hop — and the round trip through
+the encryption is the core: the payload is encrypted for a rebuilt
+browser subscription and decrypted again with its private key. If the plaintext
+comes back, the path according to RFC 8291 is right. What the script
+does **not** check is the hop to the push service itself; for that there
+is `POST /api/push/probe` with a real device.
+
+`check_backend.py` drives a simulated route with 25 % extra consumption and
+checks that the reserve marker moves forward. That is the touchstone of the
+live feature. In addition it records what the check scripts themselves could not
+see: that every reference in the HTML carries a version (the cache bug was
+there four times), that every read measured value has a label, and that
+every tool in `tools/` finds the package in **both** layouts — in the repo
+under `backend/app`, in the image next to it as `app`.
+
+```bash
+ORS_API_KEY=… ./tools/probelauf.py   # not a check script, a trial run ("Probelauf")
+```
+
+`probelauf.py` is a different tool from the six above, and the
+difference is the purpose. A check script secures what you already know; this
+run is meant to find what nobody has thought of yet. It asserts nothing, it
+drives a real route with real charge points, then records a trip
+the way the dongle sends it — with a charging break, dead zone and values that
+fail individually — and at the end shows what is not right.
+
+It paid off: four bugs came out of it that none of the six
+check runs had seen, because they all work with short trips **without a charging stop**.
+The most expensive was a learned factor that came out too low on every trip
+with a charging stop — and because it stayed within the plausibility limits,
+nobody noticed.
+
+Even more can be checked without a car: under `/obd`, „Alle Werte prüfen" ("Check all values") reads
+the complete set once and holds each value against what would be physically
+plausible. The sharpest part is the **cross-check** — discharge counter
+divided by odometer gives the lifetime consumption, and if that lands within
+12 to 40 kWh/100 km, both formulas are right. Two independently read values
+check each other, at standstill. That is exactly how a sign error came to light
+that the range check had let through.
 
 ---
 
-## Aufbau
+## Structure
 
 ```
-konzept-routenplaner.md   Das Konzept mit der Begründung jeder Entscheidung
+konzept-routenplaner.md   The concept with the reasoning behind every decision
 backend/app/
-  geo.py      Haversine und Peilung - kennt nichts, wird von allen gebraucht
+  geo.py      Haversine and bearing - knows nothing, needed by everyone
   models.py   SQLAlchemy · database.py · deps.py · security.py
-  energie/    model.py (Physik) · profile.py · weather.py
-              calibration.py · charge_phases.py (Fahrt- und Ladeabschnitte)
-  routing/    provider.py (Interface) · ors.py · demo.py · corridor.py
-  laden/      optimizer.py · curves.py · prices.py · availability.py
+  energy/     model.py (physics) · profile.py · weather.py
+              calibration.py · charge_phases.py (driving and charging sections)
+  routing/    provider.py (interface) · ors.py · demo.py · corridor.py
+  charging/   optimizer.py · curves.py · prices.py · availability.py
               chargers_import.py
   live/       session.py · replanning.py · recording.py · cleanup.py
               channel.py (WebSocket) · simulator.py
-              quellen/  fremde Meldeformate übersetzen (jolt.py · abrp.py)
-  push.py     Web Push: Schlüssel, Abos, Versand
-  routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
-frontend/     index.html · core.js · app.js · map.js (eigene Schiebekarte)
+              sources/  translate foreign report formats (jolt.py · abrp.py)
+  push.py     Web Push: keys, subscriptions, sending
+  routers/    auth · vehicles · route (incl. /ladeplan) · chargers · live · push
+frontend/     index.html · core.js · app.js · map.js (own pan-and-zoom map)
               route.js · live.js · trips.js · vehicle.js
-              obd.html · obd-core.js · obd.js  (Dongle, eigene Seite)
-              sw.js (Offline-Gerüst und Push-Empfang)
+              obd.html · obd-core.js · obd.js  (dongle, separate page)
+              sw.js (offline shell and push receiving)
 tools/        import_bnetza.py · import_ocm.py · import_ocm_route.py
-              push_keyname.py · examine.py (Gerüst der Prüfskripte)
+              push_keyname.py · examine.py (framework of the check scripts)
               check_model.py · check_optimizer.py · check_sources.py
               check_replanning.py · check_push.py · check_backend.py
-              probelauf.py (kein Prüfskript - siehe „Prüfen")
+              probelauf.py (not a check script - see „Checks")
 ```
 
-**Die Schichten greifen nur nach unten.** `geo` ganz unten (kennt nichts),
-darüber `energie`, `routing`, `laden`, `live`, und obenauf die Router. Der
-Import-Graph ist zyklenfrei; `geo.py` liegt bewusst neben `models` und nicht
-in einer der Schichten, weil sonst `routing` für eine Entfernung in die Physik
-greifen müsste oder umgekehrt.
+**The layers only reach downward.** `geo` at the very bottom (knows nothing),
+above it `energy`, `routing`, `charging`, `live`, and on top the routers. The
+import graph is free of cycles; `geo.py` deliberately sits next to `models` and not
+in one of the layers, because otherwise `routing` would have to reach into the physics
+for a distance, or vice versa.
 
-**Der Dongle hat eine eigene Seite.** `/obd` funktioniert nur in einem Browser
-mit Web Bluetooth, und ein Bedienelement, das in Safari stumm bleibt, hat in
-der Hauptoberfläche nichts verloren. `obd-core.js` ist der Baustein — die
-Liste der Messwerte, der Handshake, das Zusammensetzen mehrteiliger Antworten;
-`obd.js` ist die Diagnoseseite darum herum, und `live.js` nutzt denselben
-Baustein während der Fahrt.
+**The dongle has its own page.** `/obd` only works in a browser
+with Web Bluetooth, and a control that stays mute in Safari does not belong in
+the main UI. `obd-core.js` is the building block — the list of
+measured values, the handshake, the assembly of multi-part responses;
+`obd.js` is the diagnostics page around it, and `live.js` uses the same
+building block while driving.
 
-**Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
-gerechnetes Streckenprofil und eine Liste von Ladeoptionen — mehr braucht er
-nicht. Das ist der Grund, warum `check_optimizer.py` ohne beides auskommt und
-ein hypothetischer Standort („was wäre, wenn hier ein 300-kW-Lader stünde?")
-eine Zeile Code ist statt eines Datenbankeintrags.
+**The optimizer knows neither database nor network.** It receives a fully
+calculated route profile and a list of charging options — it needs nothing
+more. That is the reason `check_optimizer.py` manages without either and
+a hypothetical location ("what if a 300 kW charger stood here?")
+is one line of code instead of a database entry.
 
-Möglich wird das durch eine Eigenschaft des Verbrauchsmodells: Der
-Energiebedarf einer Etappe hängt **nicht** vom Ladestand ab — ein E-Auto wird
-beim Laden nicht schwerer. Ein einziger Durchlauf des Modells genügt also für
-alle Varianten; der Optimierer liest den Bedarf jeder Etappe als Differenz
-zweier kumulierter Werte ab. Deshalb kostet ein zweiter Ladeplan mit anderem
-Radius weder eine Routing- noch eine Wetterabfrage.
+This is made possible by a property of the consumption model: the
+energy demand of a leg does **not** depend on the state of charge — an EV does not
+get heavier when charging. A single pass of the model is therefore enough for
+all variants; the optimizer reads the demand of each leg as the difference
+of two cumulative values. That is why a second charging plan with a different
+radius costs neither a routing nor a weather request.
 
-**Kein PostGIS.** Der einzige Geo-Query ist „alle Ladepunkte im Korridor um eine
-Polyline". Das löst ein Index auf `(lat, lon)` mit Bounding-Box-Vorfilter und
-Haversine bei rund 150.000 deutschen Ladepunkten in Millisekunden — und erhält
-den SQLite-Fallback für die lokale Entwicklung.
+**No PostGIS.** The only geo query is "all charge points in the corridor around a
+polyline". An index on `(lat, lon)` with bounding-box prefilter and
+haversine solves this in milliseconds with around 150,000 German charge points —
+and preserves the SQLite fallback for local development.
 
-**Keine Kartenbibliothek.** `frontend/map.js` sind zweihundert Zeilen für
-Kacheln, eine Linie, Marker und Zoomen mit Ziehen. Eine Bibliothek einzubinden
-hiesse, sie mit ins Repo zu legen (die Content-Security-Policy verbietet CDNs)
-und dauerhaft zu pflegen — für einen Bruchteil ihres Funktionsumfangs.
+**No map library.** `frontend/map.js` is two hundred lines for
+tiles, a line, markers and zooming by dragging. Including a library
+would mean putting it into the repo (the content security policy forbids CDNs)
+and maintaining it permanently — for a fraction of its functionality.
 
-Kartenkacheln kommen von OpenStreetMap; die Namensnennung steht unter der Karte,
-weil sie verlangt ist.
+Map tiles come from OpenStreetMap; the attribution is shown below the map
+because it is required.
 
 ---
 
-## Was das Auto hergibt — die MEB-Datenkennungen
+## What the car provides — the MEB data identifiers
 
-Ein ELM327-Dongle liest an einem MEB-Fahrzeug (ID.3, ID.4, ID.Buzz, Enyaq,
-Q4 e-tron, Cupra Born) **nichts** über die genormten OBD2-PIDs — die sind auf
-Verbrennungsmotoren gemünzt. Alles läuft über herstellerspezifische
-UDS-Abfragen, und die Kenntnis darüber steht in drei Quellen, die einander
-teils widersprechen:
+An ELM327 dongle on a MEB vehicle (ID.3, ID.4, ID.Buzz, Enyaq,
+Q4 e-tron, Cupra Born) reads **nothing** via the standardised OBD2 PIDs — they are
+meant for combustion engines. Everything goes through manufacturer-specific
+UDS queries, and the knowledge about them is in three sources that
+partly contradict one another:
 
 * [spot2000/Volkswagen-MEB-EV-CAN-parameters](https://github.com/spot2000/Volkswagen-MEB-EV-CAN-parameters)
-  — 193 Parameter mit Adressen; bei vielen fehlt die Umrechnung
+  — 193 parameters with addresses; for many the conversion is missing
 * [meatpiHQ/wican-fw](https://github.com/meatpiHQ/wican-fw/blob/main/vehicle_profiles/vw/ev_meb.json)
-  — Fahrzeugprofil mit Formeln, nennt den ID.Buzz ausdrücklich
+  — vehicle profile with formulas, names the ID.Buzz explicitly
 * [codingABI/id3esp32obd2](https://github.com/codingABI/id3esp32obd2)
-  — ESP32-Logger, liest die CAN-Rahmen direkt
+  — ESP32 logger, reads the CAN frames directly
 
-Wo sie sich widersprechen, steht unten, welcher Fassung jolt folgt und warum.
-Die Liste selbst steht in `frontend/obd-core.js`; **das ist die
-Referenz**, diese Tabelle ist ihre Erläuterung.
+Where they contradict one another, the section below states which version jolt follows and why.
+The list itself is in `frontend/obd-core.js`; **that is the
+reference**, this table is its explanation.
 
-### Zieladressen
+### Target addresses
 
-Ein Fahrzeug spricht auf **zwei Rahmenbreiten**. Das ist der Grund, warum
-Klima- und Akkuwerte anfangs gar nicht ankamen: Der Handshake stellt `ATSP7`
-ein — 29 Bit —, und auf einer 11-Bit-Kennung hört dann niemand.
+A vehicle speaks on **two frame widths**. That is the reason why
+climate and battery values did not arrive at all at first: the handshake sets `ATSP7`
+— 29 bit —, and nobody listens on an 11-bit identifier then.
 
-| Gerät | Protokoll | ATCP | ATSH | ATCRA | ATFCSH |
+| Device | Protocol | ATCP | ATSH | ATCRA | ATFCSH |
 |---|---|---|---|---|---|
-| Batterie (BMS) | 7 (29 Bit) | `17` | `FC007B` | `17FE007B` | `17FC007B` |
-| Fahrzeug | 7 (29 Bit) | `17` | `FC0076` | `17FE0076` | `17FC0076` |
-| DC/DC-Wandler | 7 (29 Bit) | `17` | `FC00B9` | `17FE00B9` | `17FC00B9` |
-| Klima | **6 (11 Bit)** | `00` | `746` | `7B0` | `746` |
-| Akku (Kapazität) | **6 (11 Bit)** | `00` | `710` | `77A` | `710` |
+| Battery (BMS) | 7 (29 bit) | `17` | `FC007B` | `17FE007B` | `17FC007B` |
+| Vehicle | 7 (29 bit) | `17` | `FC0076` | `17FE0076` | `17FC0076` |
+| DC/DC converter | 7 (29 bit) | `17` | `FC00B9` | `17FE00B9` | `17FC00B9` |
+| Climate | **6 (11 bit)** | `00` | `746` | `7B0` | `746` |
+| Battery (capacity) | **6 (11 bit)** | `00` | `710` | `77A` | `710` |
 
-`0x746` und `0x710` passen in elf Bit, `0x17FC007B` nur in 29. Für die beiden
-unteren Zeilen schaltet jolt kurz auf `ATSP6` um und im `finally` zurück.
+`0x746` and `0x710` fit in eleven bits, `0x17FC007B` only in 29. For the two
+lower rows jolt briefly switches to `ATSP6` and back in the `finally`.
 
-### Flusskontrolle — der Handgriff, ohne den die Hälfte fehlt
+### Flow control — the trick without which half is missing
 
 ```
-ATFCSH<kopf>   ATFCSD300000   ATFCSM1
+ATFCSH<header>   ATFCSD300000   ATFCSM1
 ```
 
-Passt eine Antwort nicht in einen CAN-Rahmen, muss der Fragende ein
-Flow-Control-Paket zurücksenden. Der ELM327 macht das selbst — aber nur, wenn
-er den Kopf kennt, und bei den MEB-Adressen rät er falsch. **Ohne diese drei
-Befehle scheitert jede mehrteilige Antwort stumm.** Betroffen waren
-Batteriestrom, Energiezähler, Reichweite und Kompressor — vier der
-interessantesten Werte.
+If a response does not fit into one CAN frame, the asker must send back a
+flow-control packet. The ELM327 does this itself — but only if
+it knows the header, and with the MEB addresses it guesses wrong. **Without these three
+commands every multi-part response fails silently.** Affected were
+battery current, energy counters, range and compressor — four of the
+most interesting values.
 
-### Die Messwerte
+### The measured values
 
-`b[0]` ist das erste Byte **nach** der Quittung (`62` + Datenkennung), also
-`g_dataBuffer[0]` bei codingABI und `B4` bei spot2000/WiCAN.
+`b[0]` is the first byte **after** the acknowledgement (`62` + data identifier), i.e.
+`g_dataBuffer[0]` at codingABI and `B4` at spot2000/WiCAN.
 
-| Wert | DID | Gerät | Takt | Umrechnung | Anmerkung |
+| Value | DID | Device | Rate | Conversion | Remark |
 |---|---|---|---|---|---|
-| Ladestand (roh) | `22028C` | BMS | jede | `b0/2,5` | Pflicht — ohne ihn wird die Runde verworfen |
-| Spannung | `221E3B` | BMS | jede | `[b0:b1]/4` | ~377 V bei 79 % |
-| **Strom** | `221E3D` | BMS | jede | `([b0:b3]−150000)/100` | **mehrteilig**; negativ = Entladung |
-| **Entladen gesamt** | `221E32` | BMS | jede | `\|[b12:b15]\|/8583,07` | **mehrteilig, vorzeichenbehaftet** |
-| Geladen gesamt | ↑ | BMS | jede | `[b8:b11]/8583,07` | aus derselben Antwort |
-| Ladegrenze | `221E1B` | BMS | jede | `[b0:b1]/5` | |
-| Betriebsart | `227448` | BMS | jede | `b0` | Bit 2 = lädt |
-| Heizstrom (PTC) | `221620` | BMS | jede | `b0/4` | Zuheizer der Batterie |
-| Tempo | `22F40D` | BMS | jede | `b0` | |
-| Batterietemperatur | `222A0B` | BMS | 10 | `b0/2−40` | genauer als die Aussentemperatur für die Ladekurve |
-| Nebenverbraucher | `220364` | Fahrzeug | jede | `[b0:b1]/10` | alles ausser dem Antrieb |
-| **Kilometerstand** | `22295A` | Fahrzeug | jede | `[b0:b2]` | ganze km; korrigiert die GPS-Strecke |
-| DC/DC-Strom | `22465B` | DC/DC | 10 | `[b0:b1]/16` | |
-| Akkukapazität | `222AB2` | Akku | 40 | `[b0:b3]/1310,77/1000` | gemessen, nicht Prospekt |
-| Reichweite | `222AB6` | Akku | 10 | `[b0:b1]` | **mehrteilig** |
-| Aussentemperatur | `222609` | Klima | 20 | `b0/2−50` | |
-| Innentemperatur | `222613` | Klima | 20 | `[b0:b1]/5−40` | |
-| **Klimakompressor** | `220800` | Klima | 20 | `[b5:b6]` W | **mehrteilig**; `b0` Bit 0 = an, `[b3:b4]` = Drehzahl |
+| State of charge (raw) | `22028C` | BMS | every | `b0/2.5` | Required — without it the round is discarded |
+| Voltage | `221E3B` | BMS | every | `[b0:b1]/4` | ~377 V at 79 % |
+| **Current** | `221E3D` | BMS | every | `([b0:b3]−150000)/100` | **multi-part**; negative = discharge |
+| **Total discharged** | `221E32` | BMS | every | `\|[b12:b15]\|/8583.07` | **multi-part, signed** |
+| Total charged | ↑ | BMS | every | `[b8:b11]/8583.07` | from the same response |
+| Charge limit | `221E1B` | BMS | every | `[b0:b1]/5` | |
+| Operating mode | `227448` | BMS | every | `b0` | Bit 2 = charging |
+| Heating current (PTC) | `221620` | BMS | every | `b0/4` | battery heater |
+| Speed | `22F40D` | BMS | every | `b0` | |
+| Battery temperature | `222A0B` | BMS | 10 | `b0/2−40` | more accurate than the outside temperature for the charging curve |
+| Auxiliary loads | `220364` | Vehicle | every | `[b0:b1]/10` | everything except the drive |
+| **Odometer** | `22295A` | Vehicle | every | `[b0:b2]` | whole km; corrects the GPS distance |
+| DC/DC current | `22465B` | DC/DC | 10 | `[b0:b1]/16` | |
+| Battery capacity | `222AB2` | Battery | 40 | `[b0:b3]/1310.77/1000` | measured, not brochure |
+| Range | `222AB6` | Battery | 10 | `[b0:b1]` | **multi-part** |
+| Outside temperature | `222609` | Climate | 20 | `b0/2−50` | |
+| Inside temperature | `222613` | Climate | 20 | `[b0:b1]/5−40` | |
+| **Climate compressor** | `220800` | Climate | 20 | `[b5:b6]` W | **multi-part**; `b0` bit 0 = on, `[b3:b4]` = speed |
 
-„Takt" ist die Rundenzahl: `jede` heisst jede Messung, `20` jede zwanzigste.
-Selten gelesen wird, was sich langsam ändert oder einen Protokollwechsel
-kostet.
+"Rate" is the round count: `every` means every measurement, `20` every twentieth.
+Values that change slowly or cost a protocol switch are read rarely.
 
-### Wo die Quellen sich widersprechen
+### Where the sources contradict each other
 
-| Wert | jolt folgt | verworfen |
+| Value | jolt follows | discarded |
 |---|---|---|
-| **Strom** `221E3D` | spot2000 + codingABI: `([b0:b3]−150000)/100` | WiCAN: `(150000−[b1:b5])/100` — ergibt am Fahrzeug −383 731 A |
-| **Reichweite** `222AB6` | codingABI: `[b0:b1]` → 297 km | WiCAN: `[b1:b2]` → 10 497 km |
-| **Kapazität** `222AB2` | codingABI: vier Bytes | WiCAN: zwei Bytes × 50 — dieselbe Formel, gröber |
+| **Current** `221E3D` | spot2000 + codingABI: `([b0:b3]−150000)/100` | WiCAN: `(150000−[b1:b5])/100` — yields −383,731 A on the vehicle |
+| **Range** `222AB6` | codingABI: `[b0:b1]` → 297 km | WiCAN: `[b1:b2]` → 10,497 km |
+| **Capacity** `222AB2` | codingABI: four bytes | WiCAN: two bytes × 50 — the same formula, coarser |
 
-### Was keine Quelle wusste
+### What no source knew
 
-Die **Kompressorleistung** steht in keiner der drei Listen; spot2000 führt
-`220800` mit „equation missing". Eine Differenzmessung am Fahrzeug hat sie
-entschieden — einmal mit und einmal ohne laufenden Kompressor:
+The **compressor power** is in none of the three lists; spot2000 lists
+`220800` with "equation missing". A differential measurement on the vehicle
+settled it — once with and once without the compressor running:
 
 ```
           b0    b1b2   b3b4   b5b6   b7
-aus     0x10       0      0      0    0
-an      0x51    9408   9408   2618   14
-Teillast        3648   3712    935    5
+off     0x10       0      0      0    0
+on      0x51    9408   9408   2618   14
+partial         3648   3712    935    5
 ```
 
-`b5b6` ist die Leistung in Watt (0 / 935 / 2618), `b1b2` und `b3b4` laufen
-gleich und viel höher — Soll- und Ist-Drehzahl. Als Watt wären 9,4 kW für
-einen Klimakompressor zu viel. Der Werkzeugkasten dafür steht unter
-`/obd` → „Klimakompressor eingrenzen".
+`b5b6` is the power in watts (0 / 935 / 2618), `b1b2` and `b3b4` run
+alike and much higher — setpoint and actual speed. As watts, 9.4 kW would be too much for
+a climate compressor. The toolbox for this is under
+`/obd` → „Klimakompressor eingrenzen" ("Narrow down climate compressor").
 
-### Nicht implementiert
+### Not implemented
 
-* `222AB8` **Energieinhalt** — mehrteilig, keine Quelle nennt eine Umrechnung.
-  Für den Verbrauch braucht es ihn nicht: Die Differenz des Entladezählers ist
-  genauer.
-* Zellspannungen und -temperaturen (spot2000 führt über hundert davon) — für
-  die Routenplanung ohne Belang.
+* `222AB8` **energy content** — multi-part, no source gives a conversion.
+  Consumption does not need it: the difference of the discharge counter is
+  more accurate.
+* Cell voltages and temperatures (spot2000 lists over a hundred of them) — irrelevant for
+  route planning.
 
-### Zwei Ladestände
+### Two states of charge
 
-MEB-Fahrzeuge liefern **zwei**: den des Batteriemanagements und den der
-Anzeige. `reserve_soc` und `ziel_soc` meinen den der Anzeige.
+MEB vehicles deliver **two**: that of the battery management and that of the
+display. `reserve_soc` and `target_soc` refer to the display one.
 
 ```
-brutto = b0 / 2,5
-Anzeige = brutto · 51/46 − 6,4        (auf 0…100 begrenzt)
+gross = b0 / 2.5
+display = gross · 51/46 − 6.4        (clamped to 0…100)
 ```
 
-Wer den falschen nimmt, rechnet dauerhaft um den verborgenen Puffer daneben —
-bei 79 % Anzeige sind das gut zwei Prozentpunkte.
+Anyone who takes the wrong one is permanently off by the hidden buffer —
+at 79 % display that is a good two percentage points.
 
 ---
 
-## Nächste Schritte
+## Next steps
 
-**Belegung der Ladepunkte.** Der Kommentar in `laden/availability.py` sagt,
-echte Belegungsdaten seien für ein Privatprojekt nicht zu haben. Das stimmt
-nicht mehr — jedenfalls nicht für Deutschland. Die
-[OCPDB von MobiData BW](https://mobidata-bw.de/dataset/e-ladesaulen) liefert
-OCPI 3.0 **ohne Schlüssel und ohne Registrierung**, deutschlandweit, mit
-Live-Status für über zehntausend Standorte. Nachgemessen bewegen sich rund
-13 % der Ladepunkte pro Stunde — es sind echte Daten, keine Momentaufnahme.
+**Occupancy of the charge points.** The comment in `charging/availability.py` says
+real occupancy data is not available to a private project. That is no
+longer true — at least not for Germany. The
+[OCPDB of MobiData BW](https://mobidata-bw.de/dataset/e-ladesaulen) delivers
+OCPI 3.0 **without a key and without registration**, nationwide, with
+live status for over ten thousand sites. Measured afterwards, around
+13 % of the charge points change per hour — it is real data, not a snapshot.
 
-Zwei Haken: Es gibt keine räumliche Filterung (`bbox` wird stillschweigend
-ignoriert), man muss den Bestand also periodisch synchronisieren statt pro
-Anfrage abzufragen. Und für **Frankreich** gibt es nichts — der nationale
-Zugangspunkt führt unter „temps réel" null IRVE-Datensätze.
+Two catches: there is no spatial filtering (`bbox` is silently
+ignored), so the inventory has to be synchronised periodically instead of queried per
+request. And for **France** there is nothing — the national
+access point lists zero IRVE datasets under "temps réel".
 
-Die vorbereitete `VerfuegbarkeitsQuelle`-Schnittstelle passt: ein Adapter, der
-`Zustand(frei=…, quelle="ocpi")` liefert statt `Unbekannt`. Der Aufwand liegt
-weniger im OCPI-Teil als im Abgleich mit dem eigenen Ladepunkt-Bestand — die
-Live-Einträge tragen eine `evse_id`, jolts OCM-Import speichert die nicht.
+The prepared `AvailabilitySource` interface fits: an adapter that
+returns `State(free=…, source="ocpi")` instead of `Unknown`. The effort lies
+less in the OCPI part than in matching against jolt's own charge-point inventory — the
+live entries carry an `evse_id`, jolt's OCM import does not store it.
 
-**Wichtig dabei:** `redundanz_bonus` bleibt. Live-Daten gibt es für etwa ein
-Zehntel der Standorte und für Frankreich gar nicht; ein Optimierer, der
-Standorte ohne Live-Daten benachteiligt, wählt auf einer Frankreichfahrt
-systematisch die falschen.
+**Important here:** the redundancy bonus (`redundancy_bonus`) stays. Live data exists for about a
+tenth of the sites and for France not at all; an optimizer that
+penalises sites without live data systematically chooses the wrong ones on a trip through France.
 
-**Was der Kompressor sonst noch hergibt.** `220800` liefert neben der Leistung
-Soll- und Ist-Drehzahl; ein Wert steht noch ohne Deutung (`b7`, dieselbe Grösse
-wie die Leistung im Verhältnis 1:187). Und `222AB8` (Energieinhalt) wartet
-weiter auf eine Umrechnung — gebraucht wird er nicht, die Differenz des
-Entladezählers ist genauer.
+**What else the compressor offers.** `220800` delivers, besides the power,
+setpoint and actual speed; one value is still uninterpreted (`b7`, the same quantity
+as the power in the ratio 1:187). And `222AB8` (energy content) keeps
+waiting for a conversion — it is not needed, the difference of the
+discharge counter is more accurate.

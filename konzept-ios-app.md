@@ -1,486 +1,477 @@
-# jolt als native iOS-App
+# jolt as a native iOS app
 
-Der Umbau des Frontends von einer PWA auf einen nativen SwiftUI-Client.
-Dieses Dokument hält fest, **warum** das nötig ist, **was** dabei entsteht und
-in welcher Reihenfolge — es ist die Vorlage für die Umsetzung, nicht ihr
-Ergebnis.
+Converting the frontend from a PWA to a native SwiftUI client. This document
+records **why** that is necessary, **what** comes out of it and in which
+order — it is the template for the implementation, not its result.
 
-Der Stand vor dem Umbau trägt den Tag `pwa-stand-2026-09-05`.
+The state before the conversion carries the tag `pwa-stand-2026-09-05`.
 
 ---
 
-## Warum überhaupt nativ
+## Why native at all
 
-Drei Dinge kann eine Web-Oberfläche auf iOS grundsätzlich nicht, und alle drei
-sind für jolt keine Nebensache:
+There are three things a web interface fundamentally cannot do on iOS, and all
+three are no side issue for jolt:
 
-**Bluetooth.** Safari implementiert `navigator.bluetooth` auf iOS nicht — aus
-Datenschutzgründen, systemweit, seit Jahren und ohne Aussicht auf Änderung.
-Deshalb braucht die PWA heute [Bluefy](https://bluefy.app): eine fremde App,
-die per CoreBluetooth eine Brücke baut und die Web-API im Seiteninhalt
-nachbildet. Das funktioniert, aber es bedeutet, dass die zentrale Funktion von
-jolt — den Ladestand aus dem Auto lesen — von einer App abhängt, die uns nicht
-gehört und deren Fortbestand niemand zusichert.
+**Bluetooth.** Safari does not implement `navigator.bluetooth` on iOS — for
+privacy reasons, system-wide, for years and with no prospect of change. That is
+why the PWA currently needs [Bluefy](https://bluefy.app): a third-party app that
+builds a bridge via CoreBluetooth and emulates the web API in the page content.
+This works, but it means that jolt's central function — reading the charge
+level from the car — depends on an app that does not belong to us and whose
+continued existence nobody guarantees.
 
-**Standort im Hintergrund.** Sobald der Safari-Tab nicht sichtbar ist, pausiert
-iOS die Positionsermittlung. Genau deshalb gibt es in `frontend/live.js` den
-Bildschirm-Wachhalter mit dem stummen Video — ein Notbehelf gegen ein Problem,
-das nativ nicht existiert. Eine Fahrt aufzuzeichnen, während das Telefon in
-der Tasche liegt, geht nur mit `CLLocationManager` und
-`allowsBackgroundLocationUpdates`.
+**Location in the background.** As soon as the Safari tab is not visible, iOS
+pauses position tracking. That is exactly why `frontend/live.js` contains the
+screen wake lock with the silent video — a workaround for a problem that does
+not exist natively. Recording a trip while the phone is in your pocket only
+works with `CLLocationManager` and `allowsBackgroundLocationUpdates`.
 
-**CarPlay.** Gibt es für Web-Inhalte nicht, in keiner Form. Apple erlaubt dort
-ausschliesslich eigene Vorlagen über eine `CPTemplateApplicationSceneDelegate`.
+**CarPlay.** Does not exist for web content, in no form. Apple only allows its
+own templates there, via a `CPTemplateApplicationSceneDelegate`.
 
-## Der Weg dorthin führt über Capacitor
+## The way there leads through Capacitor
 
-Hier stand zuerst, ein WebView-Wrapper löse davon nichts: Er benutze dasselbe
-WebKit und habe dieselbe fehlende Bluetooth-API. Der erste Halbsatz stimmt,
-der Schluss daraus nicht. Der Zugriff läuft bei Capacitor nicht über die
-Web-API, sondern über Plugins, die nativen Code ausführen — es ist ein echtes
-Xcode-Projekt, in dem beliebiges Swift liegen darf.
+It used to say here that a WebView wrapper solves none of this: it uses the same
+WebKit and has the same missing Bluetooth API. The first half-sentence is true,
+the conclusion drawn from it is not. With Capacitor, access does not go through
+the web API but through plugins that execute native code — it is a real Xcode
+project in which arbitrary Swift may live.
 
-| Grenze | Weg über Capacitor |
+| Limit | Way via Capacitor |
 |---|---|
-| Bluetooth | `@capacitor-community/bluetooth-le` über CoreBluetooth |
-| Bildschirm wachhalten | `@capacitor-community/keep-awake`, setzt `isIdleTimerDisabled` |
-| Standort im Hintergrund | Plugin über `CLLocationManager` |
-| CarPlay | eigener `CPTemplateApplicationSceneDelegate`, echte Swift-Arbeit |
+| Bluetooth | `@capacitor-community/bluetooth-le` via CoreBluetooth |
+| Keep screen awake | `@capacitor-community/keep-awake`, sets `isIdleTimerDisabled` |
+| Location in the background | plugin via `CLLocationManager` |
+| CarPlay | own `CPTemplateApplicationSceneDelegate`, real Swift work |
 
-**Den Ausschlag gibt `obd-core.js`.** Dieses Dokument nennt die Datei weiter
-unten das wertvollste Stück des Frontends und Schritt 3 den Prüfstein des
-ganzen Umbaus — zu Recht: Bei einer Übersetzung gehen Vorzeichen, Skalierung
-und Bytereihenfolge still daneben, und ein falscher Wert sieht plausibel aus.
-Genau dieses Risiko entfällt, wenn die Datei weiterläuft statt übersetzt zu
-werden. Sie ist 1055 Zeilen lang, und davon fassen **vierzehn** die
-Web-Bluetooth-API an, gebündelt in `verbinden`, `verbindungAufbauen`,
-`trennen`, `befehl` und `verbindenOhneDialog`. Der Rest ist Rechnerei ohne
-Browser-Bezug.
+**What tips the balance is `obd-core.js`.** Further below, this document calls
+the file the most valuable piece of the frontend and step 3 the touchstone of
+the whole conversion — rightly so: in a translation, signs, scaling and byte
+order silently go wrong, and a wrong value looks plausible. Exactly this risk
+disappears if the file keeps running instead of being translated. It is 1055
+lines long (at the time of writing), and of those **fourteen** touch the Web
+Bluetooth API, bundled in `link`, `connectionBuildUp`, `detach`, `command` and
+`connectWithoutDialog`. The rest is arithmetic with no browser connection.
 
-Getauscht wird deshalb nur der Transport: `frontend/obd-ble-native.js` bildet
-die benutzte Teilmenge von Web Bluetooth nach und beantwortet sie über das
-Plugin. Im Kern steht dafür eine einzige neue Funktion, `bt()`, die zur
-Laufzeit entscheidet, woher das Bluetooth kommt. Die Zahlen bleiben damit
-gleich, weil es dieselbe Rechnung ist.
+So only the transport is swapped: `frontend/obd-ble-native.js` emulates the
+subset of Web Bluetooth that is used and answers it via the plugin. For this,
+the core gets a single new function, `bt()`, which decides at runtime where the
+Bluetooth comes from. The numbers therefore stay the same, because it is the
+same calculation.
 
-**Was Capacitor nicht kann.** Sobald iOS die App suspendiert, steht das
-JavaScript. Die BLE-Verbindung überlebt und ein Standort-Plugin sammelt
-nativ weiter, aber die Ableseschleife für die CAN-Werte läuft nicht mehr.
-„Fahrt mit dem Telefon in der Tasche" gibt es damit für GPS, nicht für die
-Fahrzeugdaten. Mit Telefon in der Halterung und wachgehaltenem Bildschirm
-ist der Fall gegenstandslos — und das ist der Alltag.
+**What Capacitor cannot do.** As soon as iOS suspends the app, the JavaScript
+stops. The BLE connection survives and a location plugin keeps collecting
+natively, but the reading loop for the CAN values no longer runs. "Trip with
+the phone in your pocket" therefore exists for GPS, not for the vehicle data.
+With the phone in its mount and the screen kept awake the case is moot — and
+that is everyday use.
 
-**SwiftUI bleibt die Option dahinter, nicht davor.** Wenn die App im Alltag
-trägt und CarPlay dazukommen soll, ist der Weg dorthin offen, und er ist
-dann besser begehbar als heute: Die übersetzten Byte-Formeln liessen sich
-gegen eine laufende native App auf echten Fahrten prüfen statt gegen Bluefy.
-Der ehrliche Vorbehalt dazu ist, dass Zwischenlösungen oft dauerhaft werden.
+**SwiftUI remains the option behind it, not in front of it.** If the app holds
+up in daily use and CarPlay is to be added, the path there is open, and it is
+then easier to walk than today: the translated byte formulas could be checked
+against a running native app on real trips instead of against Bluefy. The
+honest reservation is that interim solutions often become permanent.
 
-## Was ausdrücklich bleibt
+## What explicitly stays
 
-**Das Backend ändert sich nicht.** Die App spricht dieselbe FastAPI, die die
-Web-Oberfläche heute schon bedient. Kein neuer Endpunkt ist für den ersten
-Schritt nötig.
+**The backend does not change.** The app talks to the same FastAPI that already
+serves the web interface today. No new endpoint is needed for the first step.
 
-**Das Web-Frontend bleibt bestehen.** Es ist der Zugang vom Rechner aus, es
-funktioniert, und es ist die Rückfallebene, solange die App noch nicht trägt.
-Erst wenn sie es tut, ist über einen Rückbau zu reden — vorher nicht.
+**The web frontend stays.** It is the access from the computer, it works, and it
+is the fallback while the app does not yet hold up. Only once it does is a
+rollback worth discussing — not before.
 
-**`obd-core.js` wird übersetzt, nicht ersetzt.** Darin stecken siebzehn
-Messwerte mit ihren Datenkennungen, die 11-/29-Bit-Adressumschaltung und die
-Byte-Formeln, und ein Teil davon ist am Fahrzeug erarbeitet und nicht aus einer
-Referenz abgeschrieben. Diese Datei ist das wertvollste Stück des Frontends.
+**`obd-core.js` is translated, not replaced.** It contains seventeen readings
+with their data identifiers, the 11-/29-bit address switching and the byte
+formulas, and part of it was worked out on the vehicle and not copied from a
+reference. This file is the most valuable piece of the frontend.
 
 ---
 
-## Aufbau
+## Structure
 
 ```
 ios/
   Jolt.xcodeproj
   Jolt/
-    App/            Einstieg, Szenen, Einstellungen
-    Netz/           HTTP-Anbindung an jolts API
-    OBD/            CoreBluetooth + Protokoll (Übersetzung aus obd-core.js)
-    Fahrt/          Live-Aufzeichnung, Hintergrund-Standort
-    Ansichten/      SwiftUI: Planung, Live, Fahrten, Fahrzeuge
-    CarPlay/        CPTemplateApplicationSceneDelegate + Statusvorlage
-  JoltTests/        Protokolltests gegen bekannte Antworten
+    App/            entry point, scenes, settings
+    Network/        HTTP connection to jolt's API
+    OBD/            CoreBluetooth + protocol (translation of obd-core.js)
+    Trip/           live recording, background location
+    Views/          SwiftUI: planning, live, trips, vehicles
+    CarPlay/        CPTemplateApplicationSceneDelegate + status template
+  JoltTests/        protocol tests against known responses
 ```
 
-Deutsche Bezeichner wie im Backend. Das ist keine Marotte, sondern hält die
-Begriffe zwischen den Schichten gleich: Was im Backend `verbrauchsfaktor`
-heisst, soll in der App nicht `consumptionFactor` heissen.
+English identifiers as in the backend. That is not a quirk but keeps the terms
+the same between the layers: what is called `consumption_factor` in the backend
+should not be called something else in the app.
 
-### Warum ein Verzeichnis im bestehenden Repository
+### Why a directory in the existing repository
 
-Und nicht ein zweites daneben: Der OBD2-Code existiert dann zweimal — einmal
-in JavaScript, einmal in Swift — und muss zusammenbleiben. Wer eine Byte-Formel
-korrigiert, muss beide sehen. In getrennten Repositories laufen sie
-auseinander, und zwar unbemerkt, weil ein Fehler dort erst am Auto auffällt.
+And not a second one next to it: the OBD2 code then exists twice — once in
+JavaScript, once in Swift — and has to stay together. Whoever corrects a byte
+formula has to see both. In separate repositories they drift apart, and
+unnoticed at that, because an error there only shows up at the car.
 
 ---
 
-## Die vier Bausteine
+## The four building blocks
 
-### 1. Netz — die Anbindung an jolts API
+### 1. Network — the connection to jolt's API
 
-Dünn. Ein `URLSession`-Client, `Codable`-Strukturen für die Antworten, sonst
-nichts. Die fachliche Rechnung bleibt im Backend, wo sie steht.
+Thin. A `URLSession` client, `Codable` structures for the responses, nothing
+else. The domain calculation stays in the backend, where it is.
 
-Zugang: `x-token`-Header, wie ihn `deps.aktuelle_sitzung` erwartet. Das Token
-kommt aus `POST /api/auth/login` und gehört in die Keychain, nicht in
-`UserDefaults`.
+Access: `x-token` header, as expected by `deps.current_session`. The token comes
+from `POST /api/auth/login` and belongs in the Keychain, not in `UserDefaults`.
 
-Gebraucht werden für den Anfang:
+What is needed to begin with:
 
-| Zweck | Endpunkt |
+| Purpose | Endpoint |
 |---|---|
-| Anmelden | `POST /api/auth/login`, `GET /api/auth/status` |
-| Fahrzeuge | `GET /api/fahrzeuge`, `PUT /api/fahrzeuge/{id}` |
-| Route rechnen | `POST /api/route` |
-| Ladeplan | `POST /api/fahrten/{id}/ladeplan` |
-| Fahrtenliste | `GET /api/fahrten`, `GET /api/fahrten/{id}` |
-| Fahrt starten | `POST /api/live/start/{fahrt_id}` |
-| Aufzeichnung starten | `POST /api/live/aufzeichnung` |
-| Messpunkt melden | `POST /api/live/{sitzung_id}/punkt` |
-| Zustand lesen | `GET /api/live/{sitzung_id}` |
-| Verlauf nachladen | `GET /api/live/{sitzung_id}/punkte` |
-| Laufend zusehen | `WebSocket /api/live/{sitzung_id}/ws` |
+| Log in | `POST /api/auth/login`, `GET /api/auth/status` |
+| Vehicles | `GET /api/fahrzeuge`, `PUT /api/fahrzeuge/{id}` |
+| Calculate route | `POST /api/route` |
+| Charging plan | `POST /api/fahrten/{id}/ladeplan` |
+| Trip list | `GET /api/fahrten`, `GET /api/fahrten/{id}` |
+| Start trip | `POST /api/live/start/{trip_id}` |
+| Start recording | `POST /api/live/aufzeichnung` |
+| Report measurement point | `POST /api/live/{session_id}/punkt` |
+| Read state | `GET /api/live/{session_id}` |
+| Reload history | `GET /api/live/{session_id}/punkte` |
+| Follow continuously | `WebSocket /api/live/{session_id}/ws` |
 
-### 2. OBD — Bluetooth und Protokoll
+### 2. OBD — Bluetooth and protocol
 
-Der aufwendigste Teil und der, bei dem am meisten schiefgehen kann.
+The most laborious part and the one where the most can go wrong.
 
-**CoreBluetooth** ersetzt die Bluefy-Brücke: ELM327-Adapter suchen, verbinden,
-die serielle Kennung finden, Kommandos schreiben, Antworten in Rahmen
-zusammensetzen. Das ist Fleissarbeit mit bekannten Fallstricken
-(Mehrrahmen-Antworten, Flusskontrolle).
+**CoreBluetooth** replaces the Bluefy bridge: find ELM327 adapters, connect,
+find the serial characteristic, write commands, assemble responses into frames.
+This is diligent work with known pitfalls (multi-frame responses, flow
+control).
 
-**Das Protokoll** kommt aus `frontend/obd-core.js`. Zu übertragen sind:
+**The protocol** comes from `frontend/obd-core.js`. To be carried over are:
 
-- die Adressblöcke `BMS`, `KLIMA`, `AKKU11`, `FAHRZEUG`, `DCDC` mit ihren
-  `cp`/`sh`/`cra`/`fcsh`-Werten,
-- die Liste `MESSWERTE` mit siebzehn Einträgen: Datenkennung, Zieladresse,
-  Byte-Formel, `pflicht`-Kennzeichen,
-- die Protokollumschaltung: Klima- und 11-Bit-Batteriegerät antworten nur
-  unter `ATSP6`, alles andere unter `ATSP7`. Genau daran scheiterten in einer
-  Testfahrt **alle** Temperaturwerte, und die Ursache war die Rahmenbreite,
-  nicht die Adresse.
+- the address blocks `BMS`, `CLIMATE`, `AKKU11`, `VEHICLE`, `DCDC` with their
+  `cp`/`sh`/`cra`/`fcsh` values (they live in `frontend/readings.js`),
+- the `READINGS` list with seventeen entries (`vals` in `frontend/readings.js`):
+  data identifier, target address, byte formula, `required` flag,
+- the protocol switching: the climate and 11-bit battery devices only answer
+  under `ATSP6`, everything else under `ATSP7`. This is exactly what made
+  **all** temperature values fail in a test drive, and the cause was the frame
+  width, not the address.
 
-**Diese Übersetzung wird geprüft, bevor sie ans Auto kommt.** Vorzeichen,
-Skalierung und Bytereihenfolge sind genau die Stellen, an denen eine
-Portierung still danebengeht — `soc_roh` ist ein Byte geteilt durch 2,5, der
-Batteriestrom `(Rohwert − 150000)/100` über vier Bytes, und beide sähen auch
-falsch noch plausibel aus. `JoltTests` bekommt deshalb die aufgezeichneten
-Rohantworten aus echten Fahrten als Prüffälle: dieselbe Hex-Antwort hinein,
-derselbe Zahlenwert heraus wie in JavaScript.
+**This translation is checked before it gets to the car.** Signs, scaling and
+byte order are exactly the places where a port silently goes wrong — `soc_raw`
+is one byte divided by 2.5, the battery current `(raw − 150000)/100` over four
+bytes, and both would still look plausible even if wrong. `JoltTests` therefore
+gets the recorded raw responses from real trips as test cases: the same hex
+response in, the same numeric value out as in JavaScript.
 
-### 3. Fahrt — Aufzeichnung im Hintergrund
+### 3. Trip — recording in the background
 
-Der Grund, warum das Ganze nativ sein muss.
+The reason the whole thing has to be native.
 
-`CLLocationManager` mit `allowsBackgroundLocationUpdates = true` und der
-Berechtigung „Immer erlauben". Dazu `UIBackgroundModes: location` und
-`bluetooth-central` in der `Info.plist`.
+`CLLocationManager` with `allowsBackgroundLocationUpdates = true` and the
+"Always Allow" permission. Plus `UIBackgroundModes: location` and
+`bluetooth-central` in the `Info.plist`.
 
-Zwei Dinge, die die PWA nicht konnte und die hier ohne Umstände gehen:
+Two things the PWA could not do and which work here without any fuss:
 
-- **Bildschirm wachhalten** ist `UIApplication.shared.isIdleTimerDisabled =
-  true`. Der Video-Hack in `live.js` entfällt ersatzlos.
-- **Kein Datenverlust bei Verbindungsabriss.** Messpunkte kommen zuerst in
-  eine lokale Warteschlange und gehen von dort ans Backend. Die Fahrt vom 4.9.
-  hat 46 % ihrer Dauer in Lücken verbracht, und der grösste Teil davon war
-  Funkloch, nicht Sensorausfall — die Punkte gab es, sie kamen nur nie an.
+- **Keeping the screen awake** is `UIApplication.shared.isIdleTimerDisabled =
+  true`. The video hack in `live.js` is dropped without replacement.
+- **No data loss when the connection drops.** Measurement points go into a local
+  queue first and from there to the backend. The trip of 4 Sep spent 46 % of its
+  duration in gaps, and the largest part of that was dead spots, not sensor
+  failure — the points existed, they just never arrived.
 
-**Zum Melden gibt es zwei Wege, und der zweite ist der bessere:**
+**There are two ways to report, and the second is the better one:**
 
-`POST /api/live/{sitzung_id}/punkt` braucht die Sitzungs-ID und ein Token.
+`POST /api/live/{session_id}/punkt` needs the session ID and a token.
 
-`POST /api/live/melden` braucht nur den **Logger-Token des Fahrzeugs** (aus
-`POST /api/fahrzeuge/{id}/logger-token`). Das Backend sucht die laufende
-Sitzung selbst, und wenn keine läuft, antwortet es mit `200` und
-`aufgenommen: false` statt mit einem Fehler — ausdrücklich gedacht für ein
-Gerät, das unbeaufsichtigt sendet. Genau die Lage, in der ein
-Hintergrundprozess ist. Der Token bleibt gültig, während Sitzungs-IDs mit
-jeder Fahrt wechseln; ein Hintergrunddienst müsste sonst Zustand pflegen, den
-er beim Aufwachen längst verloren hat.
+`POST /api/live/melden` needs only the **vehicle's logger token** (from
+`POST /api/fahrzeuge/{id}/logger-token`). The backend finds the running session
+itself, and if none is running, it answers with `200` and `recorded: false`
+instead of an error — explicitly meant for a device that sends unattended.
+Exactly the situation a background process is in. The token stays valid, while
+session IDs change with every trip; a background service would otherwise have to
+maintain state that it has long lost by the time it wakes up.
 
-### 4. CarPlay — was geht, und auf welchem Weg
+### 4. CarPlay — what is possible, and by which route
 
-*Quelle: Apples CarPlay Developer Guide, Stand 8.6.2026
+*Source: Apple's CarPlay Developer Guide, as of 8 Jun 2026
 (<https://developer.apple.com/download/files/CarPlay-Developer-Guide.pdf>).
-Was dort nicht steht, ist unten als Annahme oder offen gekennzeichnet.*
+What is not stated there is marked below as an assumption or as open.*
 
-**Das Dashboard selbst lässt sich nicht zeigen.** CarPlay-Apps bestehen aus
-einem festen Satz Vorlagen, die iOS zeichnet; Web-Inhalte, eigene Karten und
-Diagramme gibt es nicht. Möglich ist eine **native Kurzfassung** — ein Blick auf
-das, was man unterwegs wissen muss —, und dafür gibt es zwei Wege, die sich
-nicht ausschliessen.
+**The dashboard itself cannot be shown.** CarPlay apps consist of a fixed set of
+templates that iOS draws; web content, custom maps and charts do not exist.
+What is possible is a **native short version** — a glance at what you need to
+know on the road —, and there are two routes for that, which do not exclude each
+other.
 
-| | Weg A: Widget und Live Activity | Weg B: CarPlay-App mit Vorlagen |
+| | Route A: Widget and Live Activity | Route B: CarPlay app with templates |
 |---|---|---|
-| Freigabe von Apple | **keine** („Your app does not need to be a CarPlay app") | Antrag mit Begründung, Prüfung durch Apple |
-| Mindestens | iOS 26 | iOS 14 (Driving task) bzw. 16 (EV charging) |
-| Wo es erscheint | links vom CarPlay-Dashboard (Widget), im Dashboard oder als Mitteilung (Live Activity) | eigenes Symbol auf dem CarPlay-Startbildschirm |
-| Was es kann | ein Blick: wenige Zahlen, aktualisiert von der App | Listen, Informationsseiten, Raster; Auswahl und Schaltflächen |
-| Grössen | Widget `systemSmall`, Live Activity `small` (dieselbe wie Apple Watch) | feste Vorlagen, höchstens 2 bis 3 Ebenen tief (Driving task) |
-| Swift-Ziel | Widget-Erweiterung (eigenes Ziel im Xcode-Projekt) | Szenen-Delegate in der App selbst |
-| Aufwand | mittel | höher, und er beginnt mit dem Warten auf Apple |
+| Approval from Apple | **none** ("Your app does not need to be a CarPlay app") | application with justification, review by Apple |
+| Minimum | iOS 26 | iOS 14 (Driving task) or 16 (EV charging) |
+| Where it appears | left of the CarPlay dashboard (widget), in the dashboard or as a notification (Live Activity) | own icon on the CarPlay home screen |
+| What it can do | a glance: a few numbers, updated by the app | lists, information pages, grids; selection and buttons |
+| Sizes | widget `systemSmall`, Live Activity `small` (the same as Apple Watch) | fixed templates, at most 2 to 3 levels deep (Driving task) |
+| Swift target | widget extension (own target in the Xcode project) | scene delegate in the app itself |
+| Effort | medium | higher, and it begins with waiting for Apple |
 
-**Weg A im Einzelnen.**
+**Route A in detail.**
 
-- Ein Widget in CarPlay braucht die Familie `.systemSmall`, eine Live Activity
-  `.supplementalActivityFamilies([.small])`. Fehlt die kleine Aktivität, zeigt
-  CarPlay die kompakten Ansichten der Dynamic Island.
-- Ein Widget öffnet die App in CarPlay **nicht**, solange die App keine
-  CarPlay-App ist. Es zeigt, es bedient nicht.
-- Ein Widget, dessen Daten hinter Datenschutzklasse A oder B liegen, ist in
-  CarPlay nutzlos: Das iPhone ist dort meist gesperrt. Die Daten gehören in
-  eine ungeschützte Ablage (Klasse C oder keine) — ein Detail, an dem das
-  leicht scheitert.
-- Die Live Activity ist der bessere Träger für jolt: Sie hat einen Beginn und
-  ein Ende — die Fahrt — und wird von der App aktualisiert, die ohnehin läuft
-  (Hintergrund-Standort, Dongle).
+- A widget in CarPlay needs the family `.systemSmall`, a Live Activity
+  `.supplementalActivityFamilies([.small])`. If the small activity is missing,
+  CarPlay shows the compact views of the Dynamic Island.
+- A widget does **not** open the app in CarPlay as long as the app is not a
+  CarPlay app. It shows, it does not operate.
+- A widget whose data sits behind data protection class A or B is useless in
+  CarPlay: the iPhone is usually locked there. The data belongs in an
+  unprotected store (class C or none) — a detail on which this easily fails.
+- The Live Activity is the better carrier for jolt: it has a beginning and an
+  end — the trip — and is updated by the app, which is running anyway
+  (background location, dongle).
 
-**Weg B im Einzelnen.**
+**Route B in detail.**
 
-- Kategorie **Driving task** (`com.apple.developer.carplay-driving-task`) oder
-  **EV charging** (`com.apple.developer.carplay-charging`, iOS 16). Eine App
-  bekommt eine Kategorie; gewählt wird im Antrag. **Navigation** scheidet aus —
-  sie verlangt Abbiegehinweise (`com.apple.developer.carplay-maps`).
-- Driving task: Aufgaben, die „wirklich bei der Fahrt helfen"; nur Vorlagen
-  (keine eigene Karte); Daten höchstens **alle 10 Sekunden** aktualisieren;
-  keine Ortssuche; keine Nutzung ausserhalb des Fahrzeugs.
-- EV charging: muss mehr leisten als eine Liste von Ladesäulen; auf einer Karte
-  dürfen nur Ladesäulen erscheinen; bis zu fünf Ebenen tief.
-- Für alle: Nichts darf zum Griff zum iPhone auffordern, jeder Ablauf muss ohne
-  iPhone möglich sein, nichts Unzusammenhängendes (Einstellungen, Konto).
-- **Welche Vorlagen es gibt** (Tabelle des Leitfadens, Seite 14, als Bild
-  gelesen — im Text sind die Häkchen nicht zu erkennen):
+- Category **Driving task** (`com.apple.developer.carplay-driving-task`) or
+  **EV charging** (`com.apple.developer.carplay-charging`, iOS 16). An app gets
+  one category; it is chosen in the application. **Navigation** is ruled out —
+  it requires turn-by-turn directions (`com.apple.developer.carplay-maps`).
+- Driving task: tasks that "really help while driving"; templates only (no
+  custom map); update data at most **every 10 seconds**; no location search; no
+  use outside the vehicle.
+- EV charging: must do more than a list of charging stations; on a map only
+  charging stations may appear; up to five levels deep.
+- For all: nothing may ask the user to pick up the iPhone, every flow must be
+  possible without the iPhone, nothing unrelated (settings, account).
+- **Which templates exist** (table in the guide, page 14, read as an image — in
+  the text the check marks cannot be made out):
 
-  | Vorlage | Driving task | EV charging |
+  | Template | Driving task | EV charging |
   |---|---|---|
-  | Information (wenige Zeilen, Schaltflächen) | ja | ja |
-  | Liste, Raster (bis acht Einträge), Tab-Leiste | ja | ja |
-  | Point of interest (Orte) | ja | ja |
-  | Alarm, Aktionsblatt | ja | ja |
-  | Suche | nein | iOS 27 |
-  | Karte | nein | nein (nur Navigation) |
-  | Tiefe der Vorlagen | 2, ab iOS 26.4: 3 | 5 |
-  | Aktualisierung der Daten | höchstens alle 10 s | keine Grenze genannt |
+  | Information (a few lines, buttons) | yes | yes |
+  | List, grid (up to eight entries), tab bar | yes | yes |
+  | Point of interest (places) | yes | yes |
+  | Alert, action sheet | yes | yes |
+  | Search | no | iOS 27 |
+  | Map | no | no (navigation only) |
+  | Template depth | 2, from iOS 26.4: 3 | 5 |
+  | Data update | at most every 10 s | no limit stated |
 
-  Für jolt reicht **in beiden** Kategorien das, was gebraucht wird: eine
-  Informationsvorlage („nächster Stopp") und eine Liste der Stopps.
-- **Empfehlung: EV charging.** Der Kern von jolt ist die Planung von Ladestopps;
-  das ist die Aufgabe der Kategorie. Dazu kommen fünf statt zwei bis drei
-  Ebenen (Stoppliste → Stopp → Ausweichstandort), keine genannte
-  Aktualisierungsgrenze und die Vorlage für Orte für „nächste Ladesäule". Die
-  Bedingung ist, dass die App „mehr leistet als eine Liste von Ladesäulen" und
-  auf Karten nur Ladesäulen zeigt — beides trifft zu. **Das Risiko:** Apple
-  entscheidet nach dem Antrag, und ein späterer Wechsel der Kategorie hiesse
-  vermutlich einen neuen Antrag (Annahme, nicht im Leitfaden belegt). Driving
-  task wäre der Rückfall, mit engeren Grenzen.
-- Ablauf: Antrag unter developer.apple.com/carplay, Zusatzvereinbarung
-  zustimmen, Apple prüft und ordnet dem Entwicklerkonto das Entitlement zu,
-  danach neues Provisionierungsprofil mit der CarPlay-Fähigkeit.
+  For jolt, what is needed is enough **in both** categories: an information
+  template ("next stop") and a list of the stops.
+- **Recommendation: EV charging.** The core of jolt is planning charging stops;
+  that is the category's purpose. In addition there are five instead of two to
+  three levels (stop list → stop → fallback site), no stated update limit and
+  the template for places for "nearest charging station". The condition is that
+  the app does "more than a list of charging stations" and shows only charging
+  stations on maps — both apply. **The risk:** Apple decides after the
+  application, and a later change of category would presumably mean a new
+  application (assumption, not backed by the guide). Driving task would be the
+  fallback, with tighter limits.
+- Process: application at developer.apple.com/carplay, accept the additional
+  agreement, Apple reviews and assigns the entitlement to the developer account,
+  then a new provisioning profile with the CarPlay capability.
 
-*Gestrichen:* Hier stand, die Statusanzeige werde „weniger streng geprüft als
-eine Navigationsanzeige". Das steht nirgends im Leitfaden und war eine Annahme.
+*Struck:* It used to say here that the status display would be "reviewed less
+strictly than a navigation display". That is stated nowhere in the guide and was
+an assumption.
 
-#### Was angezeigt wird
+#### What is displayed
 
-Dieselben Angaben für beide Wege — alle stehen schon im Zustand, den
-`GET /api/live/{sitzung_id}` und der WebSocket liefern:
+The same information for both routes — all of it is already in the state
+delivered by `GET /api/live/{session_id}` and the WebSocket:
 
-| Anzeige | Feld im Zustand | Anmerkung |
+| Display | Field in the state | Note |
 |---|---|---|
-| Ladestand | `ist_soc`, `soc_quelle` | „zuletzt gemessen" kennzeichnen, wenn nicht frisch |
-| Reichweite bis Reserve | `reserve_bei_km` | leer, wenn das Ziel ohne Nachladen erreicht wird |
-| Nächster Ladestopp | `naechster_stopp` (Name, km, Ankunfts-Ladestand) | nur bei geplanter Fahrt |
-| Ankunft | `ankunft_verschiebung_min` | „nach Plan", „+12 min" |
-| Rest | `rest_km` | |
+| Charge level | `actual_soc`, `soc_source` | mark as "last measured" if not fresh |
+| Range to reserve | `reserve_at_km` | empty if the destination is reached without recharging |
+| Next charging stop | `next_stop` (name, km, arrival charge level) | only on a planned trip |
+| Arrival | `arrival_shift_min` | "on plan", "+12 min" |
+| Remaining | `remaining_km` | |
 
-Der Verkehr gehört **nicht** dazu: Er steht nur in der Antwort der Planung und
-wird nicht gespeichert (TomTom-Bedingungen), also nicht im laufenden Zustand.
+Traffic is **not** part of it: it appears only in the planning response and is
+not stored (TomTom terms), so not in the running state either.
 
-Bei einer **Aufzeichnung** ohne Plan bleiben Ladestand und, wenn das Auto
-antwortet, Fahrzeugwerte — kein Ladestopp, keine Ankunft. Die Anzeige muss mit
-fehlenden Feldern umgehen können; sie zeigt, was da ist, und erfindet nichts.
+For a **recording** without a plan, the charge level and, if the car answers,
+vehicle values remain — no charging stop, no arrival. The display has to cope
+with missing fields; it shows what is there and invents nothing.
 
-#### Wie der Zustand zum Swift-Code kommt
+#### How the state gets to the Swift code
 
-Der Zustand liegt im JavaScript der Oberfläche (`live.js: zustandAnzeigen`),
-und das läuft, solange die App am Leben gehalten wird — auch bei gesperrtem
-Telefon (Hintergrund-Standort, an einer echten Fahrt bestätigt). Ein kleines
-Capacitor-Plugin nimmt von dort **ein Anzeigemodell** entgegen und gibt es an
-ActivityKit (Weg A) oder an die Vorlage (Weg B). Kein zweiter Weg zum Server,
-kein zweiter Token, keine zweite Rechnung.
+The state lives in the interface's JavaScript (`live.js: showState`), and that
+runs as long as the app is kept alive — also with the phone locked (background
+location, confirmed on a real trip). A small Capacitor plugin takes **a display
+model** from there and passes it on to ActivityKit (route A) or to the template
+(route B). No second route to the server, no second token, no second
+calculation.
 
-Das Anzeigemodell ist eine reine Funktion `Zustand → {wenige Zahlen und Texte}`
-und lässt sich **ohne Swift und ohne Mac** bauen und prüfen: Rundung, Platzhalter
-für fehlende Werte, „veraltet" nach einer Frist, höchstens eine Aktualisierung
-alle 10 Sekunden (die Regel von Weg B; Weg A hat eigene Grenzen, siehe unten).
+The display model is a pure function `state → {a few numbers and texts}` and can
+be built and tested **without Swift and without a Mac**: rounding, placeholders
+for missing values, "stale" after a deadline, at most one update every 10
+seconds (the rule of route B; route A has its own limits, see below).
 
-#### Wie Swift-Code in ein erzeugtes Projekt kommt
+#### How Swift code gets into a generated project
 
-Das iOS-Projekt wird in der CI **erzeugt** und ist nicht eingecheckt (siehe
-„Bauen und Ausliefern") — das soll so bleiben. Der Swift-Code liegt deshalb
-eingecheckt neben der Konfiguration und wird nach `cap add ios` ergänzt:
+The iOS project is **generated** in CI and not checked in (see "Building and
+delivery") — that is meant to stay that way. The Swift code is therefore
+checked in next to the configuration and added after `cap add ios`:
 
-- **Plugin und CarPlay-Szene (Weg B):** als lokales Swift-Paket (wie die
-  Community-Plugins), das `cap sync` einbindet. Der Szenen-Delegate steht in
-  der `Info.plist` über den Klassennamen mit Modulnamen; `tools/ios_info_plist.sh`
-  ergänzt das Szenen-Manifest, das Entitlement geht als Build-Einstellung
-  (`CODE_SIGN_ENTITLEMENTS`) hinein. Das berührt das Xcode-Projekt kaum.
-  **Annahmen, ungeprüft:** dass sich ein Szenen-Delegate aus einem Swift-Paket
-  über seinen Modulnamen in der `Info.plist` einbinden lässt, und dass ein
-  CarPlay-Szenen-Manifest auch verlangt, das iPhone-Fenster als Szene zu führen.
-  Ob die Capacitor-Vorlage das bereits tut oder umgestellt werden müsste, ist
-  offen — und wäre der eigentliche Eingriff in die App.
-- **Widget-Erweiterung (Weg A):** ein Widget ist ein **eigenes Ziel** mit eigener
-  Bundle-Kennung — als Paket nicht abbildbar. Das Xcode-Projekt muss
-  programmatisch ergänzt werden (das Ruby-Werkzeug `xcodeproj` oder XcodeGen auf
-  dem macOS-Läufer; `tools/ios_signatur.sh` patcht das Projekt schon heute).
-  **Offen:** Die Erweiterung braucht eine eigene App-ID und ein eigenes Profil.
-  Ob die automatische Signatur über den API-Schlüssel (`-allowProvisioningUpdates`)
-  das für ein zweites Ziel ohne Handarbeit anlegt, ist **nicht geprüft** und
-  entscheidet, wie viel von Weg A in der CI läuft. Das zeigt nur ein Versuch.
+- **Plugin and CarPlay scene (route B):** as a local Swift package (like the
+  community plugins), which `cap sync` pulls in. The scene delegate is listed in
+  the `Info.plist` by class name with module name; `tools/ios_info_plist.sh`
+  adds the scene manifest, the entitlement goes in as a build setting
+  (`CODE_SIGN_ENTITLEMENTS`). That hardly touches the Xcode project.
+  **Assumptions, unchecked:** that a scene delegate from a Swift package can be
+  wired into the `Info.plist` by its module name, and that a CarPlay scene
+  manifest also requires the iPhone window to be run as a scene. Whether the
+  Capacitor template already does this or would have to be changed is open — and
+  would be the actual intervention in the app.
+- **Widget extension (route A):** a widget is a **target of its own** with its
+  own bundle identifier — not representable as a package. The Xcode project has
+  to be extended programmatically (the Ruby tool `xcodeproj` or XcodeGen on the
+  macOS runner; `tools/ios_signatur.sh` already patches the project today).
+  **Open:** the extension needs its own app ID and its own profile. Whether
+  automatic signing via the API key (`-allowProvisioningUpdates`) creates that
+  for a second target without manual work is **not checked** and decides how
+  much of route A runs in CI. Only an attempt will show.
 
-`tools/check_ios.py` bekommt die Prüfungen, die sich ohne Mac stellen lassen:
-Szenen-Manifest vorhanden, Entitlement gesetzt, das Widget-Ziel im Projekt.
+`tools/check_ios.py` gets the checks that can be made without a Mac: scene
+manifest present, entitlement set, the widget target in the project.
 
-#### Was sich ohne Gerät nicht prüfen lässt
+#### What cannot be checked without a device
 
-Wie in der ganzen App: Die CI beantwortet, ob es **baut**. Ob es im Auto
-**erscheint**, zeigt nur CarPlay — auf dem Mac im *CarPlay Simulator* (Teil der
-Xcode-Zusatzwerkzeuge) oder im Fahrzeug über TestFlight. Ein Mac fehlt; also
-bleibt das Auto der Test, und der erste Versuch dort ist ein Versuch.
+As in the whole app: CI answers whether it **builds**. Whether it **appears** in
+the car is shown only by CarPlay — on the Mac in the *CarPlay Simulator* (part
+of the additional Xcode tools) or in the vehicle via TestFlight. A Mac is
+missing; so the car remains the test, and the first attempt there is an attempt.
 
-Nicht nachgelesen, aber vor dem Bau zu klären: wie lange eine Live Activity
-laufen darf und wie oft sie sich aktualisieren lässt (Apple begrenzt beides) —
-bei einer Fahrt von acht Stunden ist das keine Nebensache.
+Not looked up, but to be clarified before building: how long a Live Activity may
+run and how often it can be updated (Apple limits both) — on an eight-hour trip
+that is no side issue.
 
 ---
 
-## Reihenfolge
+## Order
 
-Jeder Schritt endet mit etwas, das läuft.
+Every step ends with something that runs.
 
-Die Schritte 1 bis 6 oben beschreiben den SwiftUI-Weg. Gebaut wird zuerst
-die Capacitor-Stufe, weil sie dieselben drei Grenzen nimmt, ohne die
-Byte-Formeln anzufassen.
+Steps 1 to 6 above describe the SwiftUI route. The Capacitor stage is built
+first, because it takes the same three limits without touching the byte
+formulas.
 
-| # | Schritt | Ergebnis | Stand |
+| # | Step | Result | Status |
 |---|---|---|---|
-| 1 | Capacitor-Gerüst, Plugin-Hülle, `bt()` im Kern | Bluetooth läuft nativ statt über Bluefy | erledigt |
-| 2 | `keep-awake` statt Video-Behelf | Bildschirm bleibt an | erledigt |
-| 3 | CI erzeugt und baut das iOS-Projekt | „compiliert es" ohne Mac beantwortbar | gebaut; der erste Lauf scheiterte an der App-ID (Bindestrich), behoben |
-| 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
-| 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | eingebaut (`@capacitor-community/background-geolocation`), **ungeprüft auf dem Gerät** |
-| 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | erledigt (`live.js`, Stapel-Endpunkt `/punkte`) |
-| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | **erledigt:** `frontend/display.js` (reine Funktion, gedrosselter Sender) und `tools/check_display.js`; `live.js` meldet Zustand und Fahrtende, ein Plugin setzt später nur noch das Ziel |
-| 8 | CarPlay-Antrag bei Apple (Kategorie wählen, Vorlagen im Leitfaden prüfen) | Entitlement für Weg B | **Entwurf fertig:** [`carplay-antrag.md`](carplay-antrag.md) (Kategorie EV charging, englischer Text zum Einfügen); abgeschickt wird er von dir |
-| 9 | Weg A: Plugin, Live Activity, Widget-Ziel in der CI, Signatur | Ladestand und nächster Stopp im CarPlay-Dashboard | **gebaut, ungeprüft auf dem Gerät:** Plugin `plugins/jolt-anzeige` (ActivityKit), Widget-Erweiterung `ios-native/JoltWidget` (Familie `.small`), `tools/ios_widget.sh/.rb` hängt das Ziel nach `cap add ios` ein, `check_ios.py` prüft Modell gegen Swift-Felder. **Offen:** ob die automatische Signatur Kennung und Profil der Erweiterung (`<App-ID>.widget`) beim Export selbst anlegt; ob CarPlay die Activity zeigt. Apple beendet eine Live Activity nach 8 Stunden. Kein `systemSmall`-Widget (nur die Live Activity). Die Erweiterung gilt ab iOS 18 (kleine CarPlay-Familie; `if #available` im `WidgetBundle` baut nicht), die App behält ihre Mindestfassung (sie anzuheben liess `cap sync` ein ungültiges `Package.swift` schreiben). **Ungeprüft:** ob App Store Connect eine Erweiterung mit höherer Mindestfassung als die App annimmt. |
-| 10 | Weg B: CarPlay-Szene mit Vorlagen | Liste der Ladestopps im Auto | **gebaut, ungeprüft im Auto:** Entitlement `carplay-charging` ist zugeteilt (Oktober 2026). `JoltCarPlaySceneDelegate` (Liste „Jetzt“ und „Ladestopps“, Stopp-Seite), `JoltAnzeigeStore` als Brücke vom Plugin, `tools/ios_carplay.sh/.rb` (zweite Szene in der Info.plist, AppDelegate, Entitlement). **Offen:** Entitlement im Portal für die App-ID einschalten und `CARPLAY_ENTITLEMENT` setzen ([`ios-einrichten.md`](ios-einrichten.md)); ob die Szene beim Kaltstart ohne Oberfläche etwas zeigt (dann nur der abgelegte letzte Stand); **Aufzeichnung starten und beenden** geht aus der Liste (Start mit dem zuletzt benutzten Fahrzeug, Beenden mit Rückfrage) — aber nur, wenn die Oberfläche läuft; beim Kaltstart ohne sie sagt CarPlay, dass jolt auf dem iPhone geöffnet werden muss. Ein Start mit gesperrtem iPhone scheitert womöglich am Standort (die Oberfläche fragt ihn beim Start ab); der Grund erscheint dann in CarPlay. Eine Fahrzeugwahl in CarPlay fehlt noch. |
+| 1 | Capacitor scaffolding, plugin shell, `bt()` in the core | Bluetooth runs natively instead of via Bluefy | done |
+| 2 | `keep-awake` instead of the video workaround | screen stays on | done |
+| 3 | CI generates and builds the iOS project | "does it compile" answerable without a Mac | built; the first run failed on the app ID (hyphen), fixed |
+| 4 | Apple Developer Program, signing, TestFlight | app gets onto the iPhone | workflow done (`ios-testflight.yml`), waiting for account and secrets — instructions: [`ios-einrichten.md`](ios-einrichten.md) |
+| 5 | Background location via plugin | recording with the screen locked | built in (`@capacitor-community/background-geolocation`), **unchecked on the device** |
+| 6 | Queue against dead spots | no more gaps | done (`live.js`, batch endpoint `/punkte`) |
+| 7 | Display model: state → a few numbers (`live.js`), with test | the basis for both routes, without Swift and without Apple | **done:** `frontend/display.js` (pure function, throttled sender) and `tools/check_display.js`; `live.js` reports state and end of trip, a plugin later only sets the target |
+| 8 | CarPlay application to Apple (choose category, check templates in the guide) | entitlement for route B | **draft done:** [`carplay-antrag.md`](carplay-antrag.md) (category EV charging, English text to paste in); you submit it yourself |
+| 9 | Route A: plugin, Live Activity, widget target in CI, signing | charge level and next stop in the CarPlay dashboard | **built, unchecked on the device:** plugin `plugins/jolt-anzeige` (ActivityKit), widget extension `ios-native/JoltWidget` (family `.small`), `tools/ios_widget.sh/.rb` attaches the target after `cap add ios`, `check_ios.py` checks the model against Swift fields. **Open:** whether automatic signing creates the extension's identifier and profile (`<App-ID>.widget`) itself on export; whether CarPlay shows the activity. Apple ends a Live Activity after 8 hours. No `systemSmall` widget (only the Live Activity). The extension applies from iOS 18 (small CarPlay family; `if #available` in the `WidgetBundle` does not build), the app keeps its minimum version (raising it made `cap sync` write an invalid `Package.swift`). **Unchecked:** whether App Store Connect accepts an extension with a higher minimum version than the app. |
+| 10 | Route B: CarPlay scene with templates | list of charging stops in the car | **built, unchecked in the car:** entitlement `carplay-charging` has been granted (October 2026). `JoltCarPlaySceneDelegate` (lists "Jetzt" and "Ladestopps", stop page), `JoltAnzeigeStore` as bridge from the plugin, `tools/ios_carplay.sh/.rb` (second scene in the Info.plist, AppDelegate, entitlement). **Open:** enable the entitlement in the portal for the app ID and set `CARPLAY_ENTITLEMENT` ([`ios-einrichten.md`](ios-einrichten.md)); whether the scene shows anything on a cold start without the interface (then only the stored last state); **starting and ending a recording** works from the list (start with the most recently used vehicle, end with a confirmation prompt) — but only if the interface is running; on a cold start without it, CarPlay says that jolt has to be opened on the iPhone. A start with a locked iPhone may fail because of location (the interface asks for it at the start); the reason then appears in CarPlay. A vehicle choice in CarPlay is still missing. |
 
-**Schritt 4 ist der Engpass, nicht der Code.** Alles bis einschliesslich 3
-läuft ohne Apple-Konto und ohne Mac. Ab 4 geht nichts mehr ohne das
-Developer-Programm: Ohne Signatur gibt es keinen Weg auf ein Gerät, und ohne
-Mac oder hinterlegte Zertifikate keinen signierten Bau.
+**Step 4 is the bottleneck, not the code.** Everything up to and including 3
+runs without an Apple account and without a Mac. From 4 on, nothing works
+without the Developer Program: without signing there is no way onto a device,
+and without a Mac or stored certificates no signed build.
 
-CarPlay steht am Ende, aber **nicht mehr hinter SwiftUI**: Beide Wege laufen
-über Capacitor mit einem kleinen Plugin, die App bleibt, wie sie ist. Der
-Antrag (8) und das Anzeigemodell (7) hängen an nichts und können sofort
-beginnen; 9 und 10 brauchen ein Gerät mit iOS 26 bzw. ein Fahrzeug.
+CarPlay comes last, but **no longer behind SwiftUI**: both routes go through
+Capacitor with a small plugin, the app stays as it is. The application (8) and
+the display model (7) depend on nothing and can begin immediately; 9 and 10
+need a device with iOS 26 or a vehicle, respectively.
 
-**Empfohlene Reihenfolge:** 7 und 8 gleichzeitig, danach 9. Weg A bringt ohne
-Antrag und ohne Warten etwas ins Auto; Weg B ist der Mehrwert für die Liste der
-Stopps und lohnt, wenn sie unterwegs gebraucht wird.
+**Recommended order:** 7 and 8 at the same time, then 9. Route A brings
+something into the car without an application and without waiting; route B is
+the added value for the list of stops and is worthwhile if it is needed on the
+road.
 
 ---
 
-## Bauen und Ausliefern
+## Building and delivery
 
-**Es gibt kein Xcode und keinen Mac.** Das ist die Bedingung, unter der
-alles hier steht, und der Capacitor-Weg kommt damit zurecht: Das
-iOS-Projekt wird nicht von Hand gepflegt, sondern bei jedem Lauf aus
-`package.json` und `capacitor.config.json` erzeugt. Deshalb ist `ios/` auch
-nicht eingecheckt — es wäre eine zweite Wahrheit neben der Konfiguration,
-und die beiden liefen unbemerkt auseinander.
+**There is no Xcode and no Mac.** That is the condition under which everything
+here stands, and the Capacitor route copes with it: the iOS project is not
+maintained by hand but generated on every run from `package.json` and
+`capacitor.config.json`. That is why `ios/` is not checked in either — it would
+be a second source of truth next to the configuration, and the two would drift
+apart unnoticed.
 
-**Automatisch bauen** über GitHub Actions: `.github/workflows/ios.yml` legt
-das Projekt mit `cap add ios` an, ergänzt die `Info.plist` über
-`tools/ios_info_plist.sh` und baut gegen den Simulator, ohne Signatur.
+**Building automatically** via GitHub Actions: `.github/workflows/ios.yml`
+creates the project with `cap add ios`, adds to the `Info.plist` via
+`tools/ios_info_plist.sh` and builds against the simulator, without signing.
 
-Der Pfadfilter ist eng: `frontend/**` steht **nicht** darin. Die App lädt
-ihre Oberfläche zur Laufzeit vom Server (`server.url` in
-`capacitor.config.json`), eine geänderte Zeile in `live.js` braucht also
-keinen neuen App-Bau, sondern geht den gewohnten Weg über den Container.
-Genau dafür ist der Aufbau so gewählt — der schnelle Deploy-Weg bleibt.
+The path filter is narrow: `frontend/**` is **not** in it. The app loads its
+interface at runtime from the server (`server.url` in `capacitor.config.json`),
+so a changed line in `live.js` needs no new app build but goes the usual way via
+the container. This is exactly what the setup was chosen for — the fast deploy
+route stays.
 
-Die JavaScript-seitigen Prüfungen laufen dagegen bei jedem Commit in
-`ci.yml`, auf einem Linux-Läufer und damit ohne Minutenfaktor:
-`tools/check_ble_bridge.js` spielt den Weg einer Runde am Auto gegen einen
-nachgebildeten Dongle durch, und ein Vergleich stellt sicher, dass
-`frontend/ble-plugin.js` noch zu seinem Eintrag passt.
+The JavaScript-side checks, on the other hand, run on every commit in `ci.yml`,
+on a Linux runner and thus without a minute multiplier:
+`tools/check_ble_bridge.js` plays through the path of a round at the car against
+a simulated dongle, and a comparison makes sure that `frontend/ble-plugin.js`
+still matches its entry.
 
-Läuft auf `macos-latest`, und dafür gilt bei privaten Repositories ein
-**Minutenfaktor von 10** — eine Minute auf einem Mac-Läufer zählt wie zehn
-gegen das Kontingent. Deshalb baut der Ablauf nur gegen den Simulator und
-signiert nicht: Ein Simulatorbau braucht weder Zertifikat noch
-Bereitstellungsprofil und ist der billigste Weg, „compiliert überhaupt noch"
-zu beantworten.
+Runs on `macos-latest`, and for private repositories a **minute multiplier of
+10** applies there — one minute on a Mac runner counts as ten against the quota.
+That is why the workflow only builds against the simulator and does not sign: a
+simulator build needs neither certificate nor provisioning profile and is the
+cheapest way to answer "does it still compile at all".
 
-**Auf Geräte kommt die App über TestFlight**, und ohne Mac führt daran kein
-Weg vorbei: Der übliche Ersatz — Gerät ans Kabel, Xcode vertraut ihm, App
-läuft sieben Tage — setzt genau das Xcode voraus, das hier fehlt.
+**The app gets onto devices via TestFlight**, and without a Mac there is no way
+around it: the usual substitute — device on the cable, Xcode trusts it, app runs
+for seven days — presupposes exactly the Xcode that is missing here.
 
-**Ein Apple-Developer-Programm für 99 $/Jahr ist damit Pflicht**, und zwar
-früher als auf dem SwiftUI-Weg. Was danach zu tun ist, lässt sich
-vollständig ohne Mac erledigen; die Schritte stehen mit Befehlen in
+**An Apple Developer Program at $99/year is therefore mandatory**, and earlier
+than on the SwiftUI route. What is to be done after that can be done entirely
+without a Mac; the steps, with commands, are in
 [`ios-einrichten.md`](ios-einrichten.md):
 
-1. Distributionszertifikat — die Signieranfrage (CSR) erzeugt `openssl`.
-2. App-ID `de.thesmarthome.jolt` (ohne Bindestrich: Capacitor lehnt ihn ab),
-   die App in App Store Connect und ein API-Schlüssel für den Upload.
-3. API-Schlüssel (Rolle Admin) und Team-ID als vier Repository-Geheimnisse;
-   Zertifikat und Profil legt Apple selbst an. Wer manuell signieren will,
-   ergänzt drei weitere.
+1. Distribution certificate — the signing request (CSR) is generated by
+   `openssl`.
+2. App ID `de.thesmarthome.jolt` (without a hyphen: Capacitor rejects it), the
+   app in App Store Connect and an API key for the upload.
+3. API key (role Admin) and team ID as four repository secrets; Apple creates
+   certificate and profile itself. Anyone who wants to sign manually adds three
+   more.
 
-Der Ablauf dahinter ist fertig: `.github/workflows/ios-testflight.yml`
-archiviert (automatisch signiert, manuell als Rückfall) und lädt direkt nach TestFlight hoch,
-ausgelöst von Hand oder per Tag `ios-*`. `tools/ios_signatur.sh` stellt dafür
-nur das App-Ziel um (eine Kommandozeilen-Einstellung träfe auch die
-Swift-Pakete, die keine Profile kennen), `tools/ios_symbol.sh` setzt das
-jolt-Symbol statt des Capacitor-Logos, `tools/check_ios.py` prüft in der
-normalen CI alles, was sich ohne Mac prüfen lässt.
+The workflow behind it is done: `.github/workflows/ios-testflight.yml` archives
+(automatically signed, manually as a fallback) and uploads directly to
+TestFlight, triggered by hand or by the tag `ios-*`. `tools/ios_signatur.sh`
+only switches the app target for this (a command-line setting would also hit the
+Swift packages, which do not know profiles), `tools/ios_symbol.sh` sets the jolt
+icon instead of the Capacitor logo, `tools/check_ios.py` checks in the normal CI
+everything that can be checked without a Mac.
 
-Erst danach ist die App auf dem Telefon. Bis dahin beantwortet die CI nur,
-ob sie sich bauen lässt — was nicht wenig ist, aber eben noch nichts fährt.
+Only after that is the app on the phone. Until then, CI only answers whether it
+can be built — which is not little, but nothing drives yet.
 
 ---
 
-## Was dieses Dokument nicht klärt
+## What this document does not settle
 
-- **Wie viel der Web-Oberfläche später verschwindet.** Sinnvoll erst zu
-  entscheiden, wenn die App im Alltag trägt.
-- **Ob das iPad als Testgerät taugt.** Nur die Mobilfunk-Ausführungen haben
-  einen echten GPS-Empfänger; reine WLAN-Modelle schätzen die Position und sind
-  für eine Fahrtaufzeichnung unbrauchbar.
-- **Ob Apple das CarPlay-Entitlement erteilt**, und für welche Kategorie
-  (Driving task oder EV charging; eine App bekommt eine). Davon hängt nur Weg B
-  ab, Weg A nicht.
-- ~~Ob das Fahrzeug CarPlay hat und welche iOS-Version das iPhone hat.~~
-  **Beantwortet (5.10.2026): kabelloses CarPlay, neueste iOS-Version.** Weg A ist
-  damit möglich. Kabellos heisst, dass das iPhone in der Tasche bleibt und
-  gesperrt ist — genau der Fall, in dem Widget-Daten hinter Datenschutzklasse A
-  oder B nichts zeigen. Daten und Anzeige gehören deshalb in eine ungeschützte
-  Ablage.
-- **Ob die Capacitor-Vorlage das iPhone-Fenster schon als Szene führt**, wie es
-  ein CarPlay-Szenen-Manifest voraussetzt (Weg B).
-- **Ob die automatische Signatur über den API-Schlüssel eine zweite App-ID für
-  die Widget-Erweiterung selbst anlegt.** Nicht geprüft; ein Versuch in der CI
-  klärt es.
-- **Wie lange eine Live Activity bei einer langen Fahrt läuft.** Nicht
-  nachgelesen.
+- **How much of the web interface disappears later.** Sensible to decide only
+  once the app holds up in daily use.
+- **Whether the iPad is suitable as a test device.** Only the cellular models
+  have a real GPS receiver; Wi-Fi-only models estimate the position and are
+  useless for recording a trip.
+- **Whether Apple grants the CarPlay entitlement**, and for which category
+  (Driving task or EV charging; an app gets one). Only route B depends on it,
+  route A does not.
+- ~~Whether the vehicle has CarPlay and which iOS version the iPhone has.~~
+  **Answered (5 Oct 2026): wireless CarPlay, latest iOS version.** Route A is
+  therefore possible. Wireless means that the iPhone stays in the pocket and
+  locked — exactly the case in which widget data behind data protection class A
+  or B shows nothing. Data and display therefore belong in an unprotected store.
+- **Whether the Capacitor template already runs the iPhone window as a scene**,
+  as a CarPlay scene manifest presupposes (route B).
+- **Whether automatic signing via the API key creates a second app ID for the
+  widget extension itself.** Not checked; an attempt in CI will settle it.
+- **How long a Live Activity runs on a long trip.** Not looked up.
