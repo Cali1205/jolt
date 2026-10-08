@@ -98,8 +98,8 @@ class ORS:
             raise RoutingError(f"Routing meldet HTTP {response.status_code}: "
                                 f"{response.text[:200]}")
 
-        records = response.json()
-        features = records.get("features") or []
+        data = response.json()
+        features = data.get("features") or []
         if not features:
             raise RoutingError("Keine Route gefunden - Start oder Ziel prüfen.")
 

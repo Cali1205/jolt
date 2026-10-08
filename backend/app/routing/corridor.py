@@ -121,16 +121,16 @@ def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
         # then drop out of every plan although it lies directly on the way.
         # So the anchor only says *which stretch* of the route to check;
         # measuring happens in the window up to the neighboring anchors.
-        upcoming = min(range(len(anchor)),
+        nearest = min(range(len(anchor)),
                         key=lambda i: haversine_m(lp.lat, lp.lon,
                                                   anchor[i][0], anchor[i][1]))
-        begin = anchor[upcoming - 1][3] if upcoming > 0 else 0
-        upto = (anchor[upcoming + 1][3] if upcoming + 1 < len(anchor)
+        begin = anchor[nearest - 1][3] if nearest > 0 else 0
+        end = (anchor[nearest + 1][3] if nearest + 1 < len(anchor)
                else len(points) - 1)
 
         spacing = float("inf")
-        km_on_route = anchor[upcoming][2]
-        for i in range(begin, upto + 1):
+        km_on_route = anchor[nearest][2]
+        for i in range(begin, end + 1):
             d = haversine_m(lp.lat, lp.lon, points[i][1], points[i][0])
             if d < spacing:
                 spacing, km_on_route = d, km_list[i]

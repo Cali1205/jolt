@@ -23,13 +23,13 @@ wording of the record.
 DEFAULT_PRICE_EUR_KWH = 0.59
 
 
-def price_per_kwh(operator: str, lst: list | None,
-                 std_default: float = DEFAULT_PRICE_EUR_KWH) -> float:
+def price_per_kwh(operator: str, entries: list | None,
+                 default_price: float = DEFAULT_PRICE_EUR_KWH) -> float:
     """The price for an operator, otherwise the default price."""
-    if not lst or not operator:
-        return std_default
+    if not entries or not operator:
+        return default_price
     name = operator.strip().lower()
-    for entry in lst:
+    for entry in entries:
         if not isinstance(entry, dict):
             continue
         pattern = str(entry.get("pattern") or "").strip().lower()
@@ -37,8 +37,8 @@ def price_per_kwh(operator: str, lst: list | None,
             try:
                 return float(entry.get("eur_kwh"))
             except (TypeError, ValueError):
-                return std_default
-    return std_default
+                return default_price
+    return default_price
 
 
 def price_function(vehicle):
@@ -48,8 +48,8 @@ def price_function(vehicle):
     a function, just as it gets the route profile as a list. That keeps it
     testable without a database.
     """
-    lst = getattr(vehicle, "electricity_prices", None) or []
-    std_default = getattr(vehicle, "electricity_price_eur_kwh", None)
-    std_default = DEFAULT_PRICE_EUR_KWH if std_default is None else float(std_default)
+    entries = getattr(vehicle, "electricity_prices", None) or []
+    default_price = getattr(vehicle, "electricity_price_eur_kwh", None)
+    default_price = DEFAULT_PRICE_EUR_KWH if default_price is None else float(default_price)
     return lambda option: price_per_kwh(getattr(option, "operator", ""),
-                                       lst, std_default)
+                                       entries, default_price)

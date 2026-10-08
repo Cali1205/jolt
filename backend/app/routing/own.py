@@ -68,10 +68,10 @@ def radius_km(straight_line_km: float) -> float:
     return min(RADIUS_MAX_KM, max(RADIUS_MIN_KM, straight_line_km * RADIUS_SHARE))
 
 
-def _next(fs_path: list, lat: float, lon: float) -> tuple[int, float]:
+def _next(path: list, lat: float, lon: float) -> tuple[int, float]:
     """Index of the nearest point and its distance in m."""
     best, spacing = 0, float("inf")
-    for i, p in enumerate(fs_path):
+    for i, p in enumerate(path):
         d = haversine_m(lat, lon, p[0], p[1])
         if d < spacing:
             best, spacing = i, d
@@ -83,7 +83,7 @@ def _length_m(points: list) -> float:
                for a, b in zip(points, points[1:]))
 
 
-def fitting_section(fs_path: list, start: tuple[float, float],
+def fitting_section(path: list, start: tuple[float, float],
                         destination: tuple[float, float]) -> Section | None:
     """The part of the path between start and destination - or None.
 
@@ -95,20 +95,20 @@ def fitting_section(fs_path: list, start: tuple[float, float],
     and the section is flipped. Both count: whoever has driven
     Gueugnon - Reutlingen also knows Reutlingen - Gueugnon.
     """
-    if len(fs_path) < 2:
+    if len(path) < 2:
         return None
     straight_line_km = haversine_m(start[0], start[1], destination[0], destination[1]) / 1000.0
     if straight_line_km <= 0:
         return None
     limit_m = radius_km(straight_line_km) * 1000.0
 
-    i, d_start = _next(fs_path, start[0], start[1])
-    j, d_target = _next(fs_path, destination[0], destination[1])
+    i, d_start = _next(path, start[0], start[1])
+    j, d_target = _next(path, destination[0], destination[1])
     if d_start > limit_m or d_target > limit_m or i == j:
         return None
 
     against = j < i
-    section = fs_path[j:i + 1][::-1] if against else fs_path[i:j + 1]
+    section = path[j:i + 1][::-1] if against else path[i:j + 1]
     length_km = _length_m(section) / 1000.0
     # The path is at least as long as the straight line; significantly less
     # means measurement points are missing - a gap about which nothing can
@@ -147,7 +147,7 @@ def waypoints(section: Section, spacing_km: float = SPACING_KM,
     def driven(p) -> bool:
         return p[2] is None or p[2] >= MIN_SPEED_KMH
 
-    origin_of: list[tuple[float, float]] = []
+    waypoints: list[tuple[float, float]] = []
     target_m = step_m
     # Not all the way to the end: a point shortly before the destination
     # achieves nothing and forces the route to knock where it is heading
@@ -158,10 +158,10 @@ def waypoints(section: Section, spacing_km: float = SPACING_KM,
             key=lambda i: abs(cumulative[i] - target_m), default=None)
         if candidate is not None:
             p = (points[candidate][0], points[candidate][1])
-            if not origin_of or haversine_m(origin_of[-1][0], origin_of[-1][1], p[0], p[1]) > 1000.0:
-                origin_of.append(p)
+            if not waypoints or haversine_m(waypoints[-1][0], waypoints[-1][1], p[0], p[1]) > 1000.0:
+                waypoints.append(p)
         target_m += step_m
-    return origin_of[:maximal]
+    return waypoints[:maximal]
 
 
 def path_from_samples(rows: list) -> list[tuple[float, float, float | None]]:

@@ -43,17 +43,17 @@ def _type_unify(text: str) -> list[str]:
     return sorted(set(hit))
 
 
-def _number(val) -> float:
+def _number(value) -> float:
     """Number from a field that may contain a decimal comma.
 
     The official CSV uses the German comma throughout; a naive float()
     returns 0 there and would swallow every power figure.
     """
-    if val is None:
+    if value is None:
         return 0.0
-    if isinstance(val, (int, float)):
-        return float(val)
-    text = str(val).strip().replace(".", "").replace(",", ".")
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(".", "").replace(",", ".")
     try:
         return float(text)
     except ValueError:
@@ -89,13 +89,13 @@ def _lengths_shorten(fields: dict) -> dict:
     model so that the list cannot go stale next to the columns.
     """
     shortened = {}
-    for name, val in fields.items():
+    for name, value in fields.items():
         column = models.ChargePoint.__table__.columns.get(name)
         len_total = getattr(getattr(column, "type", None), "length", None)
-        if isinstance(val, str) and len_total and len(val) > len_total:
-            log.info("Field %s truncated to %d characters: %r", name, len_total, val)
-            val = val[:len_total]
-        shortened[name] = val
+        if isinstance(value, str) and len_total and len(value) > len_total:
+            log.info("Field %s truncated to %d characters: %r", name, len_total, value)
+            value = value[:len_total]
+        shortened[name] = value
     return shortened
 
 
@@ -104,8 +104,8 @@ def _save(db, source: str, foreign_id: str, fields: dict) -> str:
     present = (db.query(models.ChargePoint)
                  .filter_by(source=source, foreign_id=foreign_id).one_or_none())
     if present:
-        for keyname, val in fields.items():
-            setattr(present, keyname, val)
+        for key, value in fields.items():
+            setattr(present, key, value)
         return "aktualisiert"
     db.add(models.ChargePoint(source=source, foreign_id=foreign_id, **fields))
     # Without this flush the lookup above does not see a record that was just

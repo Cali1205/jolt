@@ -46,12 +46,12 @@ def _forecast_for(departure: datetime | None) -> bool:
     """
     if departure is None:
         return False
-    now_ts = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
     if departure.tzinfo is None:
         departure = departure.replace(tzinfo=timezone.utc)
-    if departure <= now_ts + NOW_TOLERANCE:
+    if departure <= now + NOW_TOLERANCE:
         return False
-    if departure > now_ts + timedelta(days=FORECAST_DAYS):
+    if departure > now + timedelta(days=FORECAST_DAYS):
         log.warning("Departure in more than %d days - there is no weather "
                     "forecast for that, the current weather applies.", FORECAST_DAYS)
         return False

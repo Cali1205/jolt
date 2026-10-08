@@ -69,14 +69,14 @@ def examine_session(x_token: str, db: Session) -> models.AuthSession:
     if not session:
         raise HTTPException(401, "Sitzung unbekannt - bitte neu anmelden.")
 
-    now_ts = datetime.utcnow()
-    if now_ts - session.last_seen > SESSION_MAX_AGE:
+    now = datetime.utcnow()
+    if now - session.last_seen > SESSION_MAX_AGE:
         db.delete(session)
         db.commit()
         raise HTTPException(401, "Sitzung abgelaufen - bitte neu anmelden.")
 
-    if now_ts - session.last_seen > SESSION_TOUCH:
-        session.last_seen = now_ts
+    if now - session.last_seen > SESSION_TOUCH:
+        session.last_seen = now
         db.commit()
     return session
 

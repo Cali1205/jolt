@@ -46,9 +46,9 @@ def _unpack(records: dict) -> dict:
     and nobody should fail on that.
     """
     for shell in ("result", "tlm"):
-        inneres = records.get(shell)
-        if isinstance(inneres, dict):
-            return inneres
+        inner = records.get(shell)
+        if isinstance(inner, dict):
+            return inner
     return records
 
 

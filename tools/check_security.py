@@ -176,7 +176,7 @@ def part_live() -> None:
     live = open(os.path.join(frontend, "live.js"), encoding="utf-8").read()
     obd = open(os.path.join(frontend, "obd.js"), encoding="utf-8").read()
     verify("socket.send(JSON.stringify({ token: K.token() }))" in live
-           and 'records.kind === "bereit"' in live,
+           and 'message.kind === "bereit"' in live,
            "die Live-Ansicht schickt den Token als erste WebSocket-Nachricht "
            "und gilt erst nach 'bereit' als verbunden")
     verify('"X-Token": joltToken() },\n      body: JSON.stringify(payload)' in obd,

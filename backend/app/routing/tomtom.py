@@ -140,16 +140,16 @@ def _query(places: str, timeout: int, **parameter) -> dict:
 
 
 def _number(summary: dict, name: str) -> float:
-    val = summary.get(name)
-    return float(val) if isinstance(val, (int, float)) else 0.0
+    value = summary.get(name)
+    return float(value) if isinstance(value, (int, float)) else 0.0
 
 
-def read_suggestions(records: dict) -> list[Suggestion]:
+def read_suggestions(data: dict) -> list[Suggestion]:
     """The routes from a calculateRoute response. Faulty entries are dropped
     instead of discarding everything: a route without points or without
     length is not a route for jolt."""
-    origin_of = []
-    for route in records.get("routes") or []:
+    suggestions = []
+    for route in data.get("routes") or []:
         z = route.get("summary") or {}
         points = [(p["latitude"], p["longitude"])
                   for leg in route.get("legs") or []
@@ -160,9 +160,9 @@ def read_suggestions(records: dict) -> list[Suggestion]:
             continue
         timestamp = _number(z, "travelTimeInSeconds")
         without = _number(z, "noTrafficTravelTimeInSeconds") or timestamp
-        origin_of.append(Suggestion(points=points, distance_m=distance, time_s=timestamp,
+        suggestions.append(Suggestion(points=points, distance_m=distance, time_s=timestamp,
                              without_traffic_s=without, traffic_s=max(0.0, timestamp - without)))
-    return origin_of
+    return suggestions
 
 
 def alternativen(start: tuple[float, float], destination: tuple[float, float],
@@ -174,10 +174,10 @@ def alternativen(start: tuple[float, float], destination: tuple[float, float],
     at four a different road is the fastest than on Sunday at three
     (measured: 723 km instead of 712 km on Reutlingen - Hamburg).
     """
-    records = _query(_places(start, destination), TIMEOUT_GEOMETRY_S,
+    data = _query(_places(start, destination), TIMEOUT_GEOMETRY_S,
                       maxAlternatives=max(0, min(maximal, MAX_ALTERNATIVEN)),
                       **_departure_parameter(departure))
-    return read_suggestions(records)
+    return read_suggestions(data)
 
 
 def traffic(start: tuple[float, float], destination: tuple[float, float],
@@ -190,9 +190,9 @@ def traffic(start: tuple[float, float], destination: tuple[float, float],
     TomTom would calculate for *its own* route, and the number would have
     nothing to do with the route.
     """
-    records = _query(_places(start, destination, between), TIMEOUT_SUMMARY_S,
+    data = _query(_places(start, destination, between), TIMEOUT_SUMMARY_S,
                       routeRepresentation="summaryOnly", **_departure_parameter(departure))
-    routes = records.get("routes") or []
+    routes = data.get("routes") or []
     if not routes:
         return None
     z = routes[0].get("summary") or {}

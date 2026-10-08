@@ -151,7 +151,7 @@ def templates():
 
 
 @router.get("")
-def lst(db: Session = Depends(get_db)):
+def list_vehicles(db: Session = Depends(get_db)):
     return [_as_dict(f) for f in db.query(models.Vehicle)
             .order_by(models.Vehicle.id).all()]
 
@@ -181,8 +181,8 @@ def change(vehicle_id: int, user_input: VehicleInput,
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
     if user_input.charge_curve:
         _examine_curve(user_input.charge_curve)
-    for keyname, val in user_input.model_dump(exclude={"charge_curve"}).items():
-        setattr(vehicle, keyname, val)
+    for field, value in user_input.model_dump(exclude={"charge_curve"}).items():
+        setattr(vehicle, field, value)
     if user_input.charge_curve:
         _set_curve(db, vehicle, user_input.charge_curve)
     db.commit()

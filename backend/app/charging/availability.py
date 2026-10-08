@@ -54,9 +54,9 @@ class Reports:
     belong in permanent storage.
     """
 
-    def __init__(self, onward: AvailabilitySource | None = None):
+    def __init__(self, next_source: AvailabilitySource | None = None):
         self._occupied: dict[int, float] = {}
-        self._next = onward or Unknown()
+        self._next = next_source or Unknown()
 
     def report(self, charge_point_id: int) -> None:
         self._occupied[charge_point_id] = time.time()
@@ -65,10 +65,10 @@ class Reports:
         self._occupied.pop(charge_point_id, None)
 
     def actual_reported(self, charge_point_id: int) -> bool:
-        since = self._occupied.get(charge_point_id)
-        if since is None:
+        reported_at = self._occupied.get(charge_point_id)
+        if reported_at is None:
             return False
-        if time.time() - since > REPORT_VALID_S:
+        if time.time() - reported_at > REPORT_VALID_S:
             del self._occupied[charge_point_id]
             return False
         return True

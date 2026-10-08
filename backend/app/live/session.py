@@ -103,16 +103,16 @@ class State:
 # The two running factors
 # ---------------------------------------------------------------------------
 
-def _timeframe(points: list) -> list:
+def _recent_points(points: list) -> list:
     """The samples of the last `TIMEFRAME_KM`, but at least two."""
     usable = [p for p in points
                  if p.km_on_route is not None and p.plan_soc is not None]
     if len(usable) < 2:
         return []
     last = usable[-1]
-    timeframe = [p for p in usable
+    recent = [p for p in usable
                if (last.km_on_route - p.km_on_route) <= TIMEFRAME_KM]
-    return timeframe if len(timeframe) >= 2 else usable[-2:]
+    return recent if len(recent) >= 2 else usable[-2:]
 
 
 def _charge_pauses_minutes(points: list, energy_profile: list) -> float:
@@ -140,8 +140,8 @@ def _charge_pauses_minutes(points: list, energy_profile: list) -> float:
     """
     def driven(from_km: float, until_km: float) -> float:
         begin = plan_minutes_at(energy_profile, from_km)
-        upto = plan_minutes_at(energy_profile, until_km)
-        return 0.0 if begin is None or upto is None else max(0.0, upto - begin)
+        end = plan_minutes_at(energy_profile, until_km)
+        return 0.0 if begin is None or end is None else max(0.0, end - begin)
 
     return charge_phases.charge_pauses_minutes(points, driven)
 
@@ -165,11 +165,11 @@ def _consumption_factor(points: list) -> float | None:
     # reported states of charge, the fallback rule in `_timeframe` takes over
     # instead and takes the last two - a long measurement basis is even the
     # better one here.
-    timeframe = _timeframe([p for p in points if p.soc is not None])
-    if not timeframe:
+    recent = _recent_points([p for p in points if p.soc is not None])
+    if not recent:
         return None
 
-    first, last = timeframe[0], timeframe[-1]
+    first, last = recent[0], recent[-1]
     if last.km_on_route - first.km_on_route < MIN_DISTANCE_KM:
         return None
 
@@ -181,7 +181,7 @@ def _consumption_factor(points: list) -> float | None:
     # window, although fresh measurements had been taken.
     actual_consumption = 0.0
     plan_consumption = 0.0
-    for section in charge_phases.sections(timeframe):
+    for section in charge_phases.sections(recent):
         if section.charges:
             continue
         actual_consumption += section.soc_pp
@@ -243,11 +243,11 @@ def _time_factor(points: list, energy_profile: list) -> float | None:
     "arrival time shifts" would not be available - and every arrival time in
     the replanned charging plan would be the one from the old plan.
     """
-    timeframe = _timeframe(points)
-    if not timeframe:
+    recent = _recent_points(points)
+    if not recent:
         return None
 
-    first, last = timeframe[0], timeframe[-1]
+    first, last = recent[0], recent[-1]
     if last.km_on_route - first.km_on_route < MIN_DISTANCE_KM:
         return None
     if not first.timestamp or not last.timestamp:
@@ -259,7 +259,7 @@ def _time_factor(points: list, energy_profile: list) -> float | None:
     # discards it - and it would be frozen for the next TIMEFRAME_KM, i.e.
     # blind precisely on the stretch where it is needed again.
     actual_minutes = ((last.timestamp - first.timestamp).total_seconds() / 60.0
-                   - _charge_pauses_minutes(timeframe, energy_profile))
+                   - _charge_pauses_minutes(recent, energy_profile))
     plan_end = plan_minutes_at(energy_profile, last.km_on_route)
     plan_start = plan_minutes_at(energy_profile, first.km_on_route)
     if plan_end is None or plan_start is None:
@@ -375,21 +375,21 @@ def capacity_remember(vehicle, raw_values: dict | None, timestamp) -> None:
     """
     if not vehicle or not raw_values:
         return
-    val = raw_values.get("battery_kwh")
-    if not isinstance(val, (int, float)):
+    capacity = raw_values.get("battery_kwh")
+    if not isinstance(capacity, (int, float)):
         return
-    if not (0.5 * vehicle.battery_net_kwh <= val
+    if not (0.5 * vehicle.battery_net_kwh <= capacity
             <= vehicle.battery_net_kwh * 1.05):
         log.info("Capacity %s kWh discarded - does not match %s kWh in the "
-                 "profile.", val, vehicle.battery_net_kwh)
+                 "profile.", capacity, vehicle.battery_net_kwh)
         return
     so_far = vehicle.measured_capacity_kwh
-    if so_far is not None and abs(so_far - val) < CAPACITY_STEP_KWH:
+    if so_far is not None and abs(so_far - capacity) < CAPACITY_STEP_KWH:
         return
     if so_far is None:
         log.info("Capacity of %s measured for the first time: %.1f kWh (profile %.1f).",
-                 vehicle.name, val, vehicle.battery_net_kwh)
-    vehicle.measured_capacity_kwh = round(val, 2)
+                 vehicle.name, capacity, vehicle.battery_net_kwh)
+    vehicle.measured_capacity_kwh = round(capacity, 2)
     vehicle.capacity_measured_at = timestamp or datetime.utcnow()
 
 
@@ -424,7 +424,7 @@ def _replan(db, session: models.LiveSession, state: State, km: float,
     velocity = None if anchor >= 2 else speed_factor_measured(session.points, profile)
 
     try:
-        fresh = replanning.schedule(
+        updated_plan = replanning.schedule(
             db, session.trip, km, soc,
             replanning.read_parameter(session.plan),
             session.consumption_factor, session.time_factor, speed_factor=velocity)
@@ -434,11 +434,11 @@ def _replan(db, session: models.LiveSession, state: State, km: float,
         log.warning("Replanning failed: %s", failure)
         return
 
-    if not replanning.stops_same(session.plan, fresh):
+    if not replanning.stops_same(session.plan, updated_plan):
         state.plan_changed = True
-        state.change = replanning.describe_change(session.plan, fresh)
-    session.plan = fresh
-    state.plan = fresh
+        state.change = replanning.describe_change(session.plan, updated_plan)
+    session.plan = updated_plan
+    state.plan = updated_plan
 
 
 def _may_new_plan(session: models.LiveSession, km: float,
@@ -500,13 +500,13 @@ def _build_state(session: models.LiveSession, point: models.LivePoint,
     reserve_at = _reserve_at(profile, point, actual_soc,
                                session.consumption_factor, vehicle.reserve_soc)
     shift = _arrival_shift(session, profile, point, total_km)
-    upcoming, arrival_soc = _next_stop(session, profile, point, actual_soc)
+    next_stop, arrival_soc = _next_stop(session, profile, point, actual_soc)
 
     required, reason, urgent = _examine_replanning(
         vehicle=vehicle, deviation=deviation, spacing_m=spacing_m,
         detour_since=session.detour_since, now_ts=point.timestamp, forecast=forecast,
         reserve_at=reserve_at, total_km=total_km,
-        shift=shift, upcoming=upcoming,
+        shift=shift, upcoming=next_stop,
         arrival_soc=arrival_soc)
 
     return State(
@@ -519,7 +519,7 @@ def _build_state(session: models.LiveSession, point: models.LivePoint,
         time_factor=round(session.time_factor, 3),
         remaining_km=round(remaining_km, 1), forecast_soc_at_target=forecast,
         reserve_at_km=reserve_at, arrival_shift_min=shift,
-        next_stop=upcoming, replanning_required=required, reason=reason,
+        next_stop=next_stop, replanning_required=required, reason=reason,
         urgent=urgent)
 
 
@@ -610,21 +610,21 @@ def _next_stop(session, profile: list, point, actual_soc):
     """
     stops = ((session.plan or {}).get("stops") or [])
     km = point.km_on_route or 0.0
-    upcoming = next((s for s in stops
+    stop = next((s for s in stops
                       if (s.get("km_on_route") or 0.0) > km + 0.5), None)
-    if upcoming is None:
+    if stop is None:
         return None, None
 
-    target_km = upcoming.get("km_on_route") or 0.0
+    target_km = stop.get("km_on_route") or 0.0
     plan_there = plan_soc_at(profile, target_km)
     if plan_there is None or point.plan_soc is None or actual_soc is None:
-        return dict(upcoming), None
+        return dict(stop), None
 
     consumed = point.plan_soc - plan_there
     extrapolated = round(actual_soc - consumed * session.consumption_factor, 2)
-    description = {"id": upcoming.get("id"), "name": upcoming.get("name"),
+    description = {"id": stop.get("id"), "name": stop.get("name"),
                     "km_on_route": target_km,
-                    "planned_soc": upcoming.get("arrival_soc"),
+                    "planned_soc": stop.get("arrival_soc"),
                     "expected_soc": extrapolated}
     return description, extrapolated
 
@@ -687,6 +687,6 @@ def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
 
 
 def state_as_dict(state: State) -> dict:
-    records = asdict(state)
-    records.pop("urgent", None)      # only for the internal lock
-    return records
+    fields = asdict(state)
+    fields.pop("urgent", None)      # only for the internal lock
+    return fields

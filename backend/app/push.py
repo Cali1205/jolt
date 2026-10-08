@@ -85,8 +85,8 @@ def sender() -> str:
     The push service wants to know whom it can reach if a server becomes
     conspicuous. A mailto: or https: address, otherwise some services refuse.
     """
-    val = os.environ.get("VAPID_SUBJECT", "").strip()
-    return val or "mailto:jolt@localhost"
+    value = os.environ.get("VAPID_SUBJECT", "").strip()
+    return value or "mailto:jolt@localhost"
 
 
 def actual_configured() -> bool:
@@ -166,7 +166,7 @@ def endpoint_allowed(endpoint: str) -> bool:
     return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
 
 
-def _send_real(subscription: models.PushSubscription, msg: bytes) -> int:
+def _send_real(subscription: models.PushSubscription, message: bytes) -> int:
     """The actual sending to the push service. Returns the HTTP status."""
     from pywebpush import WebPushException, webpush
 
@@ -176,7 +176,7 @@ def _send_real(subscription: models.PushSubscription, msg: bytes) -> int:
         return 0
     try:
         response = webpush(
-            subscription_info=_as_subscription(subscription), data=msg,
+            subscription_info=_as_subscription(subscription), data=message,
             vapid_private_key=private_key(),
             vapid_claims={"sub": sender()},
             content_encoding="aes128gcm", timeout=TIME_LIMIT_S)
@@ -199,14 +199,14 @@ def send(db, title: str, text: str, url: str = "/", dispatcher=None) -> dict:
             return {"sent": 0, "removed": 0, "failure": 0, "origin_of": True}
         dispatcher = _send_real
 
-    msg = json.dumps({"title": title, "text": text, "url": url},
+    message = json.dumps({"title": title, "text": text, "url": url},
                            ensure_ascii=False).encode("utf-8")
 
     sent = failure = 0
     tot: list[models.PushSubscription] = []
     for subscription in db.query(models.PushSubscription).all():
         try:
-            status = dispatcher(subscription, msg)
+            status = dispatcher(subscription, message)
         except Exception as exception:      # noqa: BLE001
             log.warning("Push to %s failed: %s", subscription.endpoint[:60],
                         exception)

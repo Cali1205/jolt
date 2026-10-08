@@ -207,7 +207,7 @@ def end_orphaned(db) -> list[dict]:
     Returns what was ended - for the log, and so that a check run can look
     something up.
     """
-    now_ts = datetime.utcnow()
+    now = datetime.utcnow()
     ended_at = []
     for session in db.query(models.LiveSession).filter_by(running=True).all():
         points = session.points
@@ -219,14 +219,14 @@ def end_orphaned(db) -> list[dict]:
             mins = CHARGE_PAUSE_MINUTES
         else:
             mins = QUIET_MINUTES
-        if tail is None or now_ts - tail < timedelta(minutes=mins):
+        if tail is None or now - tail < timedelta(minutes=mins):
             continue
 
         session.running = False
-        session.ended_at = now_ts
+        session.ended_at = now
         result = {"session_id": session.id, "points": len(points),
                     "deadline_minutes": mins,
-                    "quiet_minutes": round((now_ts - tail).total_seconds() / 60)}
+                    "quiet_minutes": round((now - tail).total_seconds() / 60)}
 
         # Learning happens here, too - a forgotten trip is no worse a
         # measurement than a properly ended one.

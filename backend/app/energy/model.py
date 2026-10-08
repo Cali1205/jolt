@@ -278,8 +278,8 @@ def compute_profile(fz: VehicleValues, points: list, speed_ms: list,
                     otherwise the measured consumption would no longer match
                     the measured distance.
     """
-    std_default = Environment()
-    fetch_environment = environment_for or (lambda lat, lon: std_default)
+    default_environment = Environment()
+    fetch_environment = environment_for or (lambda lat, lon: default_environment)
 
     capacity_wh = fz.battery_net_kwh * 1000.0
     soc = start_soc

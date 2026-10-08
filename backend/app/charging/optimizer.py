@@ -402,10 +402,10 @@ def _thin_out_candidates(options: list[ChargeOption], total_km: float,
     # Choose the section width so that the upper limit is kept - on a trip of
     # 900 km, 15 km sections would otherwise not suffice.
     sections_max = max(1.0, AT_MOST_CANDIDATES / CANDIDATES_PER_SECTION)
-    extent = max(SECTION_KM, total_km / sections_max)
+    section_width_km = max(SECTION_KM, total_km / sections_max)
 
     keep: list[ChargeOption] = []
-    for _, group in _group(usable, extent):
+    for _, group in _group(usable, section_width_km):
         # Sort key in the order in which it counts on the road: power first
         # (it determines the standing time), then redundancy (the risk of
         # facing an occupied charger), then the detour.
@@ -433,18 +433,18 @@ def _thin_out_candidates(options: list[ChargeOption], total_km: float,
 
 
 def _group(options: list[ChargeOption], width_km: float):
-    latest: list[ChargeOption] = []
-    keyname = None
+    current: list[ChargeOption] = []
+    key = None
     for o in options:
         k = int(o.km_on_route // width_km)
-        if keyname is None or k == keyname:
-            keyname = k
-            latest.append(o)
+        if key is None or k == key:
+            key = k
+            current.append(o)
         else:
-            yield keyname, latest
-            keyname, latest = k, [o]
-    if latest:
-        yield keyname, latest
+            yield key, current
+            key, current = k, [o]
+    if current:
+        yield key, current
 
 
 class _Graph:
@@ -587,8 +587,8 @@ class _Graph:
                 # destination is the cheapest.
                 return self._path_trace_back(labels, lid)
 
-            for fresh in self._successor(node, soc, cost, target_soc, done):
-                target_node, new_soc, new_cost, departure = fresh
+            for successor in self._successor(node, soc, cost, target_soc, done):
+                target_node, new_soc, new_cost, departure = successor
                 if new_soc <= done[target_node]:
                     continue
                 if new_cost >= top[target_node].get(new_soc, math.inf) - _EPS:
@@ -703,12 +703,12 @@ class _Graph:
         """
         node: list[int] = []
         departures: list[float] = []
-        latest = lid
-        while latest >= 0:
-            k, _soc, _cost, predecessor, departure = labels[latest]
+        label_id = lid
+        while label_id >= 0:
+            k, _soc, _cost, predecessor, departure = labels[label_id]
             node.append(k)
             departures.append(departure)
-            latest = predecessor
+            label_id = predecessor
         node.reverse()
         departures.reverse()
         # node = [start, stop .., destination]; departures[i] belongs to
@@ -767,8 +767,8 @@ class _Graph:
         # The condition "at least the target SoC at the destination" is
         # already contained in `min_charge` for the last leg - only the
         # minimum remains here.
-        tail = levels[-1]
-        d = min(tail, key=lambda val: tail[val][0])
+        last_level = levels[-1]
+        d = min(last_level, key=lambda dep_soc: last_level[dep_soc][0])
 
         departures = [0.0] * len(stops)
         for t in range(len(stops) - 1, -1, -1):
@@ -776,7 +776,7 @@ class _Graph:
             d = levels[t][d][1]
         return departures
 
-    def _fill_level(self, node: int, upcoming: int, target_soc: float,
+    def _fill_level(self, node: int, next_node: int, target_soc: float,
                        cells: list[float],
                        inputs: list[tuple[float, float, float | None]]):
         """One DP level: all sensible departure SoCs at this stop.
@@ -785,7 +785,7 @@ class _Graph:
         SoC at the previous stop).
         """
         tab = self.table(node)
-        min_target = self.min_charge(node, upcoming, target_soc)
+        min_target = self.min_charge(node, next_node, target_soc)
         level: dict[float, tuple[float, float | None]] = {}
         for arrival, time_prior, origin in inputs:
             if arrival + _EPS < self.reserve:
@@ -991,10 +991,10 @@ def _grid(lower_limit: float, step: float):
     """
     lower_limit = max(0.0, min(100.0, lower_limit))
     yield lower_limit
-    val = math.ceil((lower_limit + _EPS) / step) * step
-    while val <= 100.0 + _EPS:
-        yield min(100.0, val)
-        val += step
+    soc = math.ceil((lower_limit + _EPS) / step) * step
+    while soc <= 100.0 + _EPS:
+        yield min(100.0, soc)
+        soc += step
 
 
 def _fine_grid() -> list[float]:

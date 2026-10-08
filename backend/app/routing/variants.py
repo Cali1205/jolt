@@ -92,7 +92,7 @@ def alternative_points(start: tuple[float, float], destination: tuple[float, flo
     bearing = bearing_degree(start[0], start[1], destination[0], destination[1])
     offset_m = straight_line * offset_share
 
-    origin_of = []
+    candidates = []
     for share in shares:
         # Point on the straight line: onward toward the destination by the fraction.
         middle = offset_point(start[0], start[1], bearing, straight_line * share)
@@ -104,13 +104,13 @@ def alternative_points(start: tuple[float, float], destination: tuple[float, flo
             # of an eastbound route lies south. Tying the label to the sign
             # mislabels half the map.
             direction = "nördlich" if point[0] > middle[0] else "südlich"
-            origin_of.append({
+            candidates.append({
                 "point": point,
                 # The label describes the *origin*, not the quality - that is
                 # only known after evaluation.
                 "label": f"{direction} bei {round(share * 100)} %",
             })
-    return origin_of
+    return candidates
 
 
 def actual_dominated(candidate_m: float, candidate_s: float,

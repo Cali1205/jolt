@@ -106,35 +106,35 @@ def num(records: dict, *names: str) -> float | None:
     for name in names:
         if name not in records:
             continue
-        val = records[name]
-        if val is None or val == "":
+        value = records[name]
+        if value is None or value == "":
             continue
         try:
-            read = float(val)
+            read = float(value)
         except (TypeError, ValueError):
-            raise SourcesError(f"Feld {name!r} ist keine Zahl: {val!r}")
+            raise SourcesError(f"Feld {name!r} ist keine Zahl: {value!r}")
         # NaN does not come out of JSON, but it does come out of
         # float("nan") - and it silently poisons every calculation behind it,
         # because every comparison with it yields False and no limit kicks in.
         if read != read:
-            raise SourcesError(f"Feld {name!r} ist keine Zahl: {val!r}")
+            raise SourcesError(f"Feld {name!r} ist keine Zahl: {value!r}")
         return read
     return None
 
 
 def required(records: dict, *names: str) -> float:
-    val = num(records, *names)
-    if val is None:
+    value = num(records, *names)
+    if value is None:
         raise SourcesError(f"Pflichtfeld fehlt: {' oder '.join(names)}")
-    return val
+    return value
 
 
-def limits(val: float, bottom: float, upper: float, name: str) -> float:
-    if not bottom <= val <= upper:
+def limits(value: float, bottom: float, upper: float, name: str) -> float:
+    if not bottom <= value <= upper:
         raise SourcesError(
-            f"{name} liegt ausserhalb des Möglichen: {val:g} "
+            f"{name} liegt ausserhalb des Möglichen: {value:g} "
             f"(erwartet {bottom:g} bis {upper:g})")
-    return val
+    return value
 
 
 def formate() -> dict:
@@ -176,12 +176,12 @@ def truth(records: dict, *names: str) -> bool | None:
     for name in names:
         if name not in records or records[name] is None:
             continue
-        val = records[name]
-        if isinstance(val, bool):
-            return val
-        if isinstance(val, (int, float)):
-            return bool(val)
-        text = str(val).strip().lower()
+        value = records[name]
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
         if text in ("1", "true", "yes", "ja"):
             return True
         if text in ("0", "false", "no", "nein"):

@@ -48,11 +48,11 @@ def read_parameter(plan: dict | None) -> dict:
     power as at the start - a plan that also changes its selection criteria
     in the middle of the trip would no longer be traceable.
     """
-    vals = dict(DEFAULTS)
-    for keyname in vals:
-        if plan and plan.get(keyname) is not None:
-            vals[keyname] = plan[keyname]
-    return vals
+    params = dict(DEFAULTS)
+    for key in params:
+        if plan and plan.get(key) is not None:
+            params[key] = plan[key]
+    return params
 
 
 def rest_from(geometry: list, from_km: float) -> tuple[list, float]:
@@ -160,18 +160,18 @@ def remaining_profile_physics(trip: models.Trip, rest: list, speed_factor: float
                 return None
             speed_ms.append(velocity / 3.6)
 
-    fresh = model.compute_profile(
+    flat_profile = model.compute_profile(
         VehicleValues.from_trip(trip), points, speed_ms,
         # The state of charge is irrelevant for the route profile: only the
         # cumulative kWh and minutes are needed, and the energy demand of a
         # leg does not depend on how full the battery is.
         start_soc=100.0, environment_for=environment_for, speed_factor=speed_factor)
-    if len(fresh.points) < 2:
+    if len(flat_profile.points) < 2:
         return None
     return optimizer.RouteProfile(
-        km=[p.km for p in fresh.points],
-        kwh=[p.kwh_cumulative for p in fresh.points],
-        mins=[p.minutes_cumulative for p in fresh.points])
+        km=[p.km for p in flat_profile.points],
+        kwh=[p.kwh_cumulative for p in flat_profile.points],
+        mins=[p.minutes_cumulative for p in flat_profile.points])
 
 
 def search_options(db, geometry: list, vehicle, parameter: dict
@@ -276,7 +276,7 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
             "speed_factor": speed_factor}
 
 
-def stops_same(old: dict | None, fresh: dict | None) -> bool:
+def stops_same(old: dict | None, new_plan: dict | None) -> bool:
     """Do two plans describe the same stops?
 
     What is compared is location and departure state of charge, not the
@@ -284,13 +284,13 @@ def stops_same(old: dict | None, fresh: dict | None) -> bool:
     seconds is not a change anyone at the wheel wants to be informed about. A
     different location or a noticeably different charge swing is.
     """
-    if old is None or fresh is None:
-        return old is fresh
-    if bool(old.get("feasible")) != bool(fresh.get("feasible")):
+    if old is None or new_plan is None:
+        return old is new_plan
+    if bool(old.get("feasible")) != bool(new_plan.get("feasible")):
         return False
 
     a = old.get("stops") or []
-    b = fresh.get("stops") or []
+    b = new_plan.get("stops") or []
     if len(a) != len(b):
         return False
     for one, two in zip(a, b):
@@ -301,16 +301,16 @@ def stops_same(old: dict | None, fresh: dict | None) -> bool:
     return True
 
 
-def describe_change(old: dict | None, fresh: dict) -> str:
+def describe_change(old: dict | None, new_plan: dict) -> str:
     """What has changed - in a sentence that works at the wheel.
 
     No diff and no list: whoever is driving can hear a sentence or read it in
     passing. Everything else is in the view.
     """
-    if not fresh.get("feasible"):
-        return fresh.get("reason") or "Kein Ladeplan mehr möglich."
+    if not new_plan.get("feasible"):
+        return new_plan.get("reason") or "Kein Ladeplan mehr möglich."
 
-    new_stops = fresh.get("stops") or []
+    new_stops = new_plan.get("stops") or []
     old_stops = (old or {}).get("stops") or []
     if old is not None and not old.get("feasible"):
         return f"Wieder ein Plan möglich: {len(new_stops)} Ladestopp(s)."

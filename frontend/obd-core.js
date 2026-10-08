@@ -33,12 +33,12 @@ window.joltObd = (function () {
   const LOG_MAX = 600;
   const logRing = [];
 
-  function report(text, variety) {
-    logRing.push({ timestamp: Date.now(), variety: variety || "", text: String(text) });
+  function report(text, level) {
+    logRing.push({ timestamp: Date.now(), variety: level || "", text: String(text) });
     if (logRing.length > LOG_MAX) {
       logRing.splice(0, logRing.length - LOG_MAX);
     }
-    try { reporterOutside(text, variety); } catch (failure) { /* the caller is at fault, not us */ }
+    try { reporterOutside(text, level); } catch (failure) { /* the caller is at fault, not us */ }
   }
 
   let lastRecord = null;   // the most recent record read completely
@@ -58,13 +58,13 @@ window.joltObd = (function () {
   }
 
 
-  const short = (id) => `0000${id}-0000-1000-8000-00805f9b34fb`;
+  const fullUuid = (id) => `0000${id}-0000-1000-8000-00805f9b34fb`;
   const SERVICES = [
-    short("fff0"),   // Vgate, Veepeak, many clones
-    short("ffe0"),   // HM-10 based
-    short("ffe5"),
-    short("fee7"),
-    short("18f0"),
+    fullUuid("fff0"),   // Vgate, Veepeak, many clones
+    fullUuid("ffe0"),   // HM-10 based
+    fullUuid("ffe5"),
+    fullUuid("fee7"),
+    fullUuid("18f0"),
     "6e400001-b5a3-f393-e0a9-e50e24dcca9e",   // Nordic UART
   ];
 
@@ -128,14 +128,14 @@ window.joltObd = (function () {
    *
    * Confirmed response to 22028C:  17FE007B 04 62028C B4 */
   const SEND_BMS = "FC007B";        // lower 24 bits; upper 5 via ATCP17
-  const BMS_EMPFANGEN = "17FE007B";   // receive filter: full identifier
+  const BMS_RECEIVE = "17FE007B";   // receive filter: full identifier
   const HANDSHAKE = [
     "ATZ", "ATE0", "ATL0", "ATS0", "ATH1",
     "ATSP7", "ATCP17", "ATCAF1", "ATST FF",
-    `ATSH${SEND_BMS}`, `ATCRA${BMS_EMPFANGEN}`,
+    `ATSH${SEND_BMS}`, `ATCRA${BMS_RECEIVE}`,
   ];
 
-  let write_out = null;      // characteristic for sending
+  let writeChar = null;      // characteristic for sending
   let deviceRemembered = null;  // for reconnecting after a dropout
   let buffer = "";
   let waitOn = null;       // {fulfil, reject, clock}
@@ -208,12 +208,12 @@ window.joltObd = (function () {
         report("Verbindung getrennt.");
         counter.connection.dropouts += 1;
         counter.connection.since = null;
-        // Without this, `connected_()` would take a dropout for an existing
-        // connection - `write_out` used to be cleared only on the intentional
-        // `detach()`. `attach()` now relies on `connected_()` to avoid an
+        // Without this, `isConnected()` would take a dropout for an existing
+        // connection - `writeChar` used to be cleared only on the intentional
+        // `detach()`. `attach()` now relies on `isConnected()` to avoid an
         // unnecessary second setup - exactly that would have skipped every
         // further connection attempt after a real dropout.
-        write_out = null;
+        writeChar = null;
         // In a tunnel, or when the dongle falls asleep, the connection drops.
         // During a running recording that is no reason to stop - someone who
         // needs a touch first loses half the trip, because nobody at the wheel
@@ -246,9 +246,9 @@ window.joltObd = (function () {
                                  || c.properties.writeWithoutResponse);
         const n = chars.find((c) => c.properties.notify);
         report(`Dienst ${service.uuid}: ${chars.length} Charakteristiken`);
-        if (w && n) { write_out = w; notify = n; break; }
+        if (w && n) { writeChar = w; notify = n; break; }
       }
-      if (!write_out || !notify) {
+      if (!writeChar || !notify) {
         throw new Error("Kein Dienst mit Schreiben und Benachrichtigen "
                         + "gefunden. Die UUID des Dongles steht oben im "
                         + "Protokoll - sie gehört in die Liste DIENSTE.");
@@ -266,7 +266,7 @@ window.joltObd = (function () {
       await notify.startNotifications();
       notify.addEventListener("characteristicvaluechanged", atData);
       notifyCurrent = notify;
-      report(`Bereit. Schreiben auf ${write_out.uuid}, Lesen auf ${notify.uuid}`);
+      report(`Bereit. Schreiben auf ${writeChar.uuid}, Lesen auf ${notify.uuid}`);
       counter.connection.since = Date.now();
   }
 
@@ -359,7 +359,7 @@ window.joltObd = (function () {
     } catch (failure) {
       report("Trennen: " + failure.message);
     }
-    write_out = null;
+    writeChar = null;
     latestAddress = null;
     waitOn = null;
     buffer = "";
@@ -418,13 +418,13 @@ window.joltObd = (function () {
  * answer that takes up to ten seconds. The answer came one second after
  * the abort - the log then showed a timeout where in reality there was
  * a finding. */
-function command(text, limit_ms = 15000, intern = false) {
+function command(text, limit_ms = 15000, internal = false) {
     return new Promise((fulfil, reject) => {
-      if (!write_out) { reject(new Error("nicht verbunden")); return; }
+      if (!writeChar) { reject(new Error("nicht verbunden")); return; }
       // Any character ends the ELM327's listening mode. A command from outside
       // (voltage check, console, read round) would interrupt it in the middle
       // of the stream and mix its response with frames.
-      if (listenActive && !intern) {
+      if (listenActive && !internal) {
         reject(new Error("der Dongle lauscht gerade")); return;
       }
       if (waitOn) { reject(new Error("es läuft noch ein Befehl")); return; }
@@ -446,15 +446,15 @@ function command(text, limit_ms = 15000, intern = false) {
           reject(new Error("Zeitüberschreitung bei " + text));
         }, limit_ms),
       };
-      const records = new TextEncoder().encode(text + "\r");
+      const bytes = new TextEncoder().encode(text + "\r");
       // writeValueWithoutResponse is newer than writeValue and missing in some
       // implementations - so check for the method and not only for the
       // property of the characteristic.
-      const without_response = write_out.properties.writeWithoutResponse
-        && typeof write_out.writeValueWithoutResponse === "function";
-      const send = without_response
-        ? write_out.writeValueWithoutResponse(records)
-        : write_out.writeValue(records);
+      const noResponse = writeChar.properties.writeWithoutResponse
+        && typeof writeChar.writeValueWithoutResponse === "function";
+      const send = noResponse
+        ? writeChar.writeValueWithoutResponse(bytes)
+        : writeChar.writeValue(bytes);
       send.catch((f) => {
         if (waitOn) { clearTimeout(waitOn.clock); waitOn = null; }
         reject(f);
@@ -472,24 +472,24 @@ function command(text, limit_ms = 15000, intern = false) {
   let seriesError = [];
 
   async function series(commands) {
-    let everything_good = true;
+    let allOk = true;
     seriesError = [];
     for (const b of commands) {
-      const clean = b.trim();
-      if (!clean) continue;
+      const trimmed = b.trim();
+      if (!trimmed) continue;
       try {
-        await command(clean);
+        await command(trimmed);
       } catch (failure) {
         report("FEHLER " + failure.message + " - weiter mit dem nächsten Befehl");
-        everything_good = false;
-        seriesError.push(`${clean}: ${failure.message}`);
+        allOk = false;
+        seriesError.push(`${trimmed}: ${failure.message}`);
         // A late response to the expired command must not be attributed to the
         // next one.
         buffer = "";
         await new Promise((w) => setTimeout(w, 300));
       }
     }
-    return everything_good;
+    return allOk;
   }
 
   /* ---------- Charge level ---------- */
@@ -532,9 +532,9 @@ function command(text, limit_ms = 15000, intern = false) {
 
   function socFromResponse(raw) {
     const hex = raw.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
-    const brand = hex.indexOf("62028C");
-    if (brand < 0) return null;
-    const payload = hex.slice(brand + 6);
+    const index = hex.indexOf("62028C");
+    if (index < 0) return null;
+    const payload = hex.slice(index + 6);
     if (payload.length < 2) return null;
     return socFromRaw(parseInt(payload.slice(0, 2), 16));
   }
@@ -589,8 +589,8 @@ function command(text, limit_ms = 15000, intern = false) {
         // Two's complement. Without it the discharge counter read as 4.15
         // billion instead of -17 438 - and both look equally unsuspicious as a
         // number at first.
-        const bound = Math.pow(2, len_total * 8 - 1);
-        if (raw >= bound) raw -= bound * 2;
+        const signLimit = Math.pow(2, len_total * 8 - 1);
+        if (raw >= signLimit) raw -= signLimit * 2;
       }
       if (typeof row.mask === "number") raw &= row.mask;
       let val = (raw + pre_offset) / divider * factor + offset;
@@ -606,18 +606,18 @@ function command(text, limit_ms = 15000, intern = false) {
 
   /* What a row needs at minimum for it to become a query. */
   function examineRow(row, addresses, actualExtra) {
-    const wo = row.name || "(ohne Namen)";
+    const rowName = row.name || "(ohne Namen)";
     if (!row.name) TABLE_ERROR.push("Eintrag ohne `name`.");
     if (typeof row.len_total !== "number" || row.len_total < 1) {
-      TABLE_ERROR.push(`${wo}: 'laenge' fehlt oder ist kleiner als 1.`);
+      TABLE_ERROR.push(`${rowName}: 'laenge' fehlt oder ist kleiner als 1.`);
     }
     if (typeof row.downhill !== "number" || row.downhill < 0) {
-      TABLE_ERROR.push(`${wo}: 'ab' fehlt oder ist negativ.`);
+      TABLE_ERROR.push(`${rowName}: 'ab' fehlt oder ist negativ.`);
     }
     if (actualExtra) return;
-    if (!row.did) TABLE_ERROR.push(`${wo}: 'did' fehlt.`);
+    if (!row.did) TABLE_ERROR.push(`${rowName}: 'did' fehlt.`);
     if (!addresses[row.address]) {
-      TABLE_ERROR.push(`${wo}: Adresse "${row.address}" steht nicht `
+      TABLE_ERROR.push(`${rowName}: Adresse "${row.address}" steht nicht `
                           + `in 'adressen'.`);
     }
   }
@@ -704,12 +704,12 @@ function command(text, limit_ms = 15000, intern = false) {
   }
 
   function payload_bytes(raw, did) {
-    const together = multiframe(raw);
-    const hex = (together || raw.replace(/[^0-9A-Fa-f]/g, "")).toUpperCase();
-    const receipt = "62" + did.slice(2).toUpperCase();
-    const brand = hex.indexOf(receipt);
-    if (brand < 0) return null;
-    const rest = hex.slice(brand + receipt.length);
+    const joined = multiframe(raw);
+    const hex = (joined || raw.replace(/[^0-9A-Fa-f]/g, "")).toUpperCase();
+    const ack = "62" + did.slice(2).toUpperCase();
+    const index = hex.indexOf(ack);
+    if (index < 0) return null;
+    const rest = hex.slice(index + ack.length);
     const bytes = [];
     for (let i = 0; i + 1 < rest.length; i += 2) {
       bytes.push(parseInt(rest.slice(i, i + 2), 16));
@@ -739,7 +739,7 @@ function command(text, limit_ms = 15000, intern = false) {
    *   ATFCSD  its content: 30 = continue, 00 = no pause, 00 = no spacing
    *   ATFCSM1 use these defaults instead of guessing on its own
    */
-  async function flusskontrolle(destination) {
+  async function flowControl(destination) {
     if (!destination.fcsh) return;
     await command(`ATFCSH${destination.fcsh}`);
     await command("ATFCSD300000");
@@ -759,7 +759,7 @@ function command(text, limit_ms = 15000, intern = false) {
       try {
         await command(`ATSP${destination.trace_log}`);
         await command(`ATSH${destination.sh}`);
-        await flusskontrolle(destination);
+        await flowControl(destination);
         await command(`ATCRA${destination.cra}`);
         return evaluate(await command(entry.did, 8000), entry);
       } catch (failure) {
@@ -783,7 +783,7 @@ function command(text, limit_ms = 15000, intern = false) {
         await command(`ATCP${destination.cp}`);
       }
       await command(`ATSH${destination.sh}`);
-      await flusskontrolle(destination);
+      await flowControl(destination);
       await command(`ATCRA${destination.cra}`);
       latestAddress = destination;
     }
@@ -793,14 +793,14 @@ function command(text, limit_ms = 15000, intern = false) {
   function evaluate(response, entry) {
     const bytes = payload_bytes(response, entry.did);
     if (!bytes || !bytes.length) return null;
-    const clean = (val) => (val === null || val === undefined
+    const orNull = (val) => (val === null || val === undefined
                               || Number.isNaN(val)) ? null : val;
-    const val = clean(entry.load(bytes));
+    const val = orNull(entry.load(bytes));
     if (!entry.further) return val;
     // Several quantities from the same response - see `discharge_kwh`.
     const further = {};
-    for (const [name, lies] of Object.entries(entry.further)) {
-      const w = clean(lies(bytes));
+    for (const [name, readFn] of Object.entries(entry.further)) {
+      const w = orNull(readFn(bytes));
       if (w !== null) further[name] = Math.round(w * 1000) / 1000;
     }
     return { val, further };
@@ -809,22 +809,22 @@ function command(text, limit_ms = 15000, intern = false) {
   /* Read a complete record. Errors of single quantities are noted and
    * skipped - a recording that aborts because of the odometer would have
    * lost the charge level along with it. */
-  async function readRecord(lap) {
+  async function readRecord(round) {
     if (listenActive) throw new Error("der Dongle lauscht gerade");
     roundRunning = true;
-    const onset = Date.now();
+    const startedAt = Date.now();
     let succeeded = false;
     try {
-      const record = await recordReadRaw(lap);
+      const record = await recordReadRaw(round);
       succeeded = true;
-      lastRecord = { timestamp: Date.now(), lap, vals: record };
+      lastRecord = { timestamp: Date.now(), lap: round, vals: record };
       return record;
     } finally {
       roundRunning = false;
       const r = counter.rounds;
       r.n += 1;
       if (!succeeded) r.failure += 1;
-      r.latestMs = Date.now() - onset;
+      r.latestMs = Date.now() - startedAt;
       r.sumMs += r.latestMs;
       r.timestamp = Date.now();
     }
@@ -848,7 +848,7 @@ function command(text, limit_ms = 15000, intern = false) {
    * instead of waiting: the voltage is an extra, and `command()` allows
    * only one waiting command anyway. */
   async function voltage() {
-    if (!write_out || waitOn || roundRunning) return null;
+    if (!writeChar || waitOn || roundRunning) return null;
     try {
       const response = await command("ATRV", 3000);
       const hit = /(\d{1,2}\.\d+)\s*V?/i.exec(response || "");
@@ -858,17 +858,17 @@ function command(text, limit_ms = 15000, intern = false) {
     }
   }
 
-  async function recordReadRaw(lap) {
+  async function recordReadRaw(round) {
     const raw = {};
     for (const entry of READINGS) {
-      if (entry.rarely && lap % entry.rarely !== 0) continue;
+      if (entry.rarely && round % entry.rarely !== 0) continue;
       const z = readingCounter(entry.name);
-      const onset = Date.now();
+      const startedAt = Date.now();
       let counted = false;
-      const complete = (variety) => {
+      const complete = (outcome) => {
         counted = true;
-        z[variety] += 1;
-        z.latestMs = Date.now() - onset;
+        z[outcome] += 1;
+        z.latestMs = Date.now() - startedAt;
         z.sumMs += z.latestMs;
         z.timestamp = Date.now();
       };
@@ -957,7 +957,7 @@ function command(text, limit_ms = 15000, intern = false) {
       deviceRemembered = device;
       device.addEventListener("gattserverdisconnected", () => {
         report("Verbindung getrennt.");
-        write_out = null;   // see the reasoning at the other listener above
+        writeChar = null;   // see the reasoning at the other listener above
         if (atDropout) atDropout();
       });
       await locked(() => connectionBuildUp(device));
@@ -976,13 +976,13 @@ function command(text, limit_ms = 15000, intern = false) {
     // Already connected - e.g. because the automatic reconnect has just come
     // through: do nothing instead of setting up a second connection that
     // would only get in the way of the first.
-    if (connected_()) return true;
+    if (isConnected()) return true;
     if (await connectWithoutDialog()) return true;
     await link();
-    return connected_();
+    return isConnected();
   }
 
-  function connected_() { return !!write_out; }
+  function isConnected() { return !!writeChar; }
 
   /* ---------- Listening in (passive) ----------
    *
@@ -1004,18 +1004,18 @@ function command(text, limit_ms = 15000, intern = false) {
    * filter and format are otherwise those of listening in, and the next
    * read round would get nonsense. */
   function writeRaw(text) {
-    const records = new TextEncoder().encode(text);
-    const without_response = write_out.properties.writeWithoutResponse
-      && typeof write_out.writeValueWithoutResponse === "function";
-    return without_response ? write_out.writeValueWithoutResponse(records)
-                        : write_out.writeValue(records);
+    const bytes = new TextEncoder().encode(text);
+    const noResponse = writeChar.properties.writeWithoutResponse
+      && typeof writeChar.writeValueWithoutResponse === "function";
+    return noResponse ? writeChar.writeValueWithoutResponse(bytes)
+                        : writeChar.writeValue(bytes);
   }
 
   async function listen(options) {
     const o = options || {};
     const trace_log = o.trace_log === "7" ? "7" : "6";
     const duration = Math.max(500, Math.min(120000, Number(o.duration_ms) || 10000));
-    if (!write_out) throw new Error("nicht verbunden");
+    if (!writeChar) throw new Error("nicht verbunden");
     if (listenActive) throw new Error("es wird schon gelauscht");
     if (waitOn || roundRunning) throw new Error("es läuft noch ein Befehl");
 
@@ -1025,7 +1025,7 @@ function command(text, limit_ms = 15000, intern = false) {
     const ids = new Map();
     let rest = "";
     let stopped = false;
-    const onset = Date.now();
+    const startedAt = Date.now();
 
     const hint = (t) => {
       if (result.hints.length < 8 && !result.hints.includes(t)) {
@@ -1038,7 +1038,7 @@ function command(text, limit_ms = 15000, intern = false) {
         && t.length > 1 && t.slice(1).every((b) => /^[0-9A-F]{2}$/.test(b));
       if (!actualFrame) { hint(z.slice(0, 60)); return; }
       result.total += 1;
-      const records = t.slice(1).join(" ");
+      const tail = t.slice(1).join(" ");
       let e = ids.get(t[0]);
       if (!e) {
         if (ids.size >= 2000) return;
@@ -1046,8 +1046,8 @@ function command(text, limit_ms = 15000, intern = false) {
         ids.set(t[0], e);
       }
       e.n += 1;
-      e.tail = records;
-      if (e.variants.size < 200) e.variants.add(records);
+      e.tail = tail;
+      if (e.variants.size < 200) e.variants.add(tail);
       if (result.probes.length < 30) result.probes.push(z);
     };
     const collect = (text) => {
@@ -1077,8 +1077,8 @@ function command(text, limit_ms = 15000, intern = false) {
       // Any character ends listening in; the prompt after it reports that the
       // dongle is ready again.
       await writeRaw("\r");
-      const upto = Date.now() + 2500;
-      while (!stopped && Date.now() < upto) {
+      const until = Date.now() + 2500;
+      while (!stopped && Date.now() < until) {
         await new Promise((w) => setTimeout(w, 25));
       }
       if (rest.trim()) row(rest.trim());
@@ -1096,7 +1096,7 @@ function command(text, limit_ms = 15000, intern = false) {
       listenActive = false;
     }
 
-    const seconds = Math.max(1, (Date.now() - onset) / 1000);
+    const seconds = Math.max(1, (Date.now() - startedAt) / 1000);
     result.ids = Array.from(ids.values())
       .sort((a, b) => b.n - a.n)
       .map((e) => ({ id: e.id, n: e.n,
@@ -1111,7 +1111,7 @@ function command(text, limit_ms = 15000, intern = false) {
 
   return {
     obtainable: () => !!bt(),
-    linked: () => !!write_out,
+    linked: () => !!writeChar,
 
     /* ---------- Observing (for the settings) ---------- */
 
@@ -1127,7 +1127,7 @@ function command(text, limit_ms = 15000, intern = false) {
      * and it can be output as JSON (diagnostic report). */
     diagnose() {
       return JSON.parse(JSON.stringify({
-        linked: !!write_out,
+        linked: !!writeChar,
         transport: this.transport(),
         commandRunning: !!waitOn,
         roundRunning,
