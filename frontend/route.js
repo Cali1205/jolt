@@ -653,7 +653,7 @@ window.joltRoute = (function () {
 
   function set_up() {
     placeSearchSetUp("start", "start-hits", "start");
-    placeSearchSetUp("destination", "destination-hits", "ziel");
+    placeSearchSetUp("destination", "destination-hits", "destination");
     K.sliderCouple("start-soc", "start-soc-output");
     K.sliderCouple("speed", "speed-output");
     payloadCouple();
