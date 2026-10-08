@@ -78,7 +78,7 @@ public struct JoltDisplay: Codable, Hashable {
         public var departureSocText: String?
         public var chargeTimeMin: Int?
         public var chargeTimeText: String?
-        public var operator: String?
+        public var `operator`: String?
         public var powerKw: Int?
     }
 

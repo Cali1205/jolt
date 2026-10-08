@@ -583,8 +583,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         if let soc = stop.departureSocText {
             points.append(CPInformationItem(title: "Ladestand bei Abfahrt", detail: soc))
         }
-        if let operator = stop.operator {
-            points.append(CPInformationItem(title: "Betreiber", detail: operator))
+        if let operatorName = stop.operator {
+            points.append(CPInformationItem(title: "Betreiber", detail: operatorName))
         }
         if let kw = stop.powerKw {
             points.append(CPInformationItem(title: "Leistung", detail: "bis \(kw) kW"))
