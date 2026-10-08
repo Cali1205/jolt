@@ -146,15 +146,18 @@ class ORS:
         # jenseits der Grenze. Nur wenn `land` explizit gesetzt ist (z.B. um
         # eine Eingabe wie "Hamburg" von gleichnamigen Orten anderswo zu
         # unterscheiden), wird eingeschränkt.
-        params = {"api_key": self.api_key, "text": text, "size": 6}
+        params = {"text": text, "size": 6}
         if land:
             params["boundary.country"] = land
         try:
+            # Schlüssel im Header, nie in der URL: Sonst steht er in jeder
+            # Fehlermeldung, die an den Client geht.
             antwort = requests.get(f"{BASIS}/geocode/search", timeout=TIMEOUT,
-                                   params=params)
+                                   params=params, headers=self._kopf())
             antwort.raise_for_status()
         except requests.RequestException as fehler:
-            raise RoutingFehler(f"Ortssuche nicht erreichbar: {fehler}") from fehler
+            raise RoutingFehler(
+                f"Ortssuche nicht erreichbar ({type(fehler).__name__})") from fehler
 
         treffer = []
         for merkmal in antwort.json().get("features", []):

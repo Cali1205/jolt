@@ -346,7 +346,7 @@ def main() -> int:
         def raise_for_status(self): pass
         def json(self): return {"features": []}
 
-    def _gefaelschtes_get(url, timeout=None, params=None):
+    def _gefaelschtes_get(url, timeout=None, params=None, headers=None):
         angefragt.clear()
         angefragt.update(params or {})
         return _GefaelschteAntwort()

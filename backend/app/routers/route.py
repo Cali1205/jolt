@@ -718,7 +718,7 @@ def ladeplan_rechnen(fahrt_id: int, radius_km: float = Query(8.0, gt=0, le=50),
 
 
 @router.get("/fahrten")
-def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, le=200)):
+def fahrten_liste(db: Session = Depends(get_db), grenze: int = Query(30, ge=1, le=200)):
     """Die zuletzt geplanten Fahrten.
 
     Bewusst mehr als Start und Ziel: Ohne Verbrauch, Aussentemperatur und
