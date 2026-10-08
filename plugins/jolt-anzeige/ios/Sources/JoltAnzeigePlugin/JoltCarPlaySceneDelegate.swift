@@ -9,7 +9,8 @@ import UIKit
 /// wird, was das Anzeigemodell der Oberfläche liefert - dasselbe, das auch die
 /// Live Activity speist:
 ///
-///   Kacheln "jolt" (CPGridTemplate, höchstens acht)
+///   Reiter "Kacheln" (CPGridTemplate), "Bilder" (CPListImageRowItem) und
+///   "Tabelle" (CPInformationTemplate), alle mit denselben höchstens acht Plätzen:
 ///     Fahrt beenden, Ladestand, Verbrauch (mit Balken), Rekuperation,
 ///     Ankunft, Reserve, Nebenverbraucher, Ladestopps
 ///     Ladestopps und Verbrauch öffnen eine Seite; ein Stopp ihre Informationsseite
@@ -24,6 +25,8 @@ import UIKit
 public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var schnittstelle: CPInterfaceController?
     private var gitter: CPGridTemplate?
+    private var bilderListe: CPListTemplate?
+    private var tabelle: CPInformationTemplate?
     private var beobachterKennung: UUID?
     private var ergebnisKennung: UUID?
     /// "wird gestartet …" bis das Ergebnis da ist.
@@ -41,12 +44,32 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     ) {
         schnittstelle = interfaceController
         aufnehmen(JoltAnzeigeStore.shared.aktuell)
-        let vorlage = CPGridTemplate(
-            title: "jolt",
-            gridButtons: kacheln(JoltAnzeigeStore.shared.aktuell))
-        gitter = vorlage
-        vorlage.trailingNavigationBarButtons = leiste(JoltAnzeigeStore.shared.aktuell)
-        interfaceController.setRootTemplate(vorlage, animated: false, completion: nil)
+        // Dieselben Werte in drei Anordnungen, zum Vergleichen im Auto: Kacheln
+        // (Raster von iOS), Bildzeilen (dichter) und Tabelle (nur Text).
+        let modell = JoltAnzeigeStore.shared.aktuell
+        let eintraege = self.eintraege(modell)
+
+        let raster = CPGridTemplate(title: "jolt", gridButtons: gitterKnoepfe(eintraege))
+        raster.tabTitle = "Kacheln"
+        raster.tabImage = UIImage(systemName: "square.grid.2x2")
+        raster.trailingNavigationBarButtons = leiste(modell)
+        gitter = raster
+
+        let zeilen = CPListTemplate(title: "jolt", sections: bildZeilen(eintraege))
+        zeilen.tabTitle = "Bilder"
+        zeilen.tabImage = UIImage(systemName: "photo.on.rectangle")
+        zeilen.trailingNavigationBarButtons = leiste(modell)
+        bilderListe = zeilen
+
+        let tafel = CPInformationTemplate(
+            title: "jolt", layout: .leading, items: tabellenZeilen(eintraege), actions: [])
+        tafel.tabTitle = "Tabelle"
+        tafel.tabImage = UIImage(systemName: "list.bullet")
+        tafel.trailingNavigationBarButtons = leiste(modell)
+        tabelle = tafel
+
+        let reiter = CPTabBarTemplate(templates: [raster, zeilen, tafel])
+        interfaceController.setRootTemplate(reiter, animated: false, completion: nil)
 
         beobachterKennung = JoltAnzeigeStore.shared.beobachten { [weak self] modell in
             guard let self = self else { return }
@@ -75,6 +98,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         ergebnisKennung = nil
         laeuft = nil
         gitter = nil
+        bilderListe = nil
+        tabelle = nil
         schnittstelle = nil
     }
 
@@ -95,11 +120,11 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     ///           | Rekuperation (Verlauf) | Ladestopps
     ///
     /// Mehr als acht Kacheln nimmt CarPlay nicht.
-    private func kacheln(_ rohmodell: JoltAnzeige?) -> [CPGridButton] {
+    private func eintraege(_ rohmodell: JoltAnzeige?) -> [Eintrag] {
         guard let modell = frisch(rohmodell) else {
             return [leereKachel("Keine laufende Fahrt")]
         }
-        var ergebnis: [CPGridButton] = []
+        var ergebnis: [Eintrag] = []
         /// Das Bild, das die Oberfläche für diesen Platz gezeichnet hat (Stil
         /// "a" oder "b"); nil heisst: Swift zeichnet wie bisher.
         func bild(_ platz: String) -> UIImage? { fertigesBild(platz, modell) }
@@ -183,7 +208,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         return Array(ergebnis.prefix(8))
     }
 
-    private func leereKachel(_ titel: String, bild: UIImage? = nil) -> CPGridButton {
+    private func leereKachel(_ titel: String, bild: UIImage? = nil) -> Eintrag {
         kachel(titel: titel, wert: "–", klein: nil, bild: bild)
     }
 
@@ -295,11 +320,58 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                         balken: [Double?]? = nil,
                         linie: [Double]? = nil,
                         bild: UIImage? = nil,
-                        handler: (() -> Void)? = nil) -> CPGridButton {
-        CPGridButton(
-            titleVariants: [titel],
-            image: bild ?? kachelBild(wert: wert, klein: klein, balken: balken, linie: linie),
-            handler: handler.map { aufruf -> ((CPGridButton) -> Void) in { _ in aufruf() } })
+                        handler: (() -> Void)? = nil) -> Eintrag {
+        Eintrag(
+            titel: titel, wert: wert,
+            bild: bild ?? kachelBild(wert: wert, klein: klein, balken: balken, linie: linie),
+            handler: handler)
+    }
+
+    /// Ein Platz der Anzeige, unabhängig von der Vorlage, die ihn zeigt.
+    private struct Eintrag {
+        let titel: String
+        let wert: String
+        let bild: UIImage
+        let handler: (() -> Void)?
+    }
+
+    private func gitterKnoepfe(_ eintraege: [Eintrag]) -> [CPGridButton] {
+        eintraege.prefix(8).map { e in
+            CPGridButton(
+                titleVariants: [e.titel], image: e.bild,
+                handler: e.handler.map { aufruf -> ((CPGridButton) -> Void) in { _ in aufruf() } })
+        }
+    }
+
+    /// Bildzeilen zu je vier Bildern; die Beschriftung unter dem Bild gibt es
+    /// erst ab iOS 17.4, davor steht nur das Bild.
+    private func bildZeilen(_ eintraege: [Eintrag]) -> [CPListSection] {
+        let proZeile = 4
+        var zeilen: [CPListItem] = []
+        var start = 0
+        while start < eintraege.count {
+            let teil = Array(eintraege[start..<min(start + proZeile, eintraege.count)])
+            let bilder = teil.map { $0.bild }
+            let zeile: CPListImageRowItem
+            if #available(iOS 17.4, *) {
+                zeile = CPListImageRowItem(
+                    text: nil, images: bilder, imageTitles: teil.map { $0.titel })
+            } else {
+                zeile = CPListImageRowItem(text: teil.map { $0.titel }.joined(separator: " · "),
+                                           images: bilder)
+            }
+            zeile.listImageRowHandler = { _, index, abschluss in
+                if index >= 0 && index < teil.count { teil[index].handler?() }
+                abschluss()
+            }
+            zeilen.append(zeile)
+            start += proZeile
+        }
+        return [CPListSection(items: zeilen)]
+    }
+
+    private func tabellenZeilen(_ eintraege: [Eintrag]) -> [CPInformationItem] {
+        eintraege.map { CPInformationItem(title: $0.titel, detail: $0.wert) }
     }
 
     /// Eine Kachel als Bild: grosser Wert, darunter eine kleine Zeile oder
@@ -407,8 +479,13 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     }
 
     private func anzeigen(_ modell: JoltAnzeige?) {
-        gitter?.updateGridButtons(kacheln(modell))
+        let eintraege = self.eintraege(modell)
+        gitter?.updateGridButtons(gitterKnoepfe(eintraege))
         gitter?.trailingNavigationBarButtons = leiste(modell)
+        bilderListe?.updateSections(bildZeilen(eintraege))
+        bilderListe?.trailingNavigationBarButtons = leiste(modell)
+        tabelle?.items = tabellenZeilen(eintraege)
+        tabelle?.trailingNavigationBarButtons = leiste(modell)
     }
 
 
