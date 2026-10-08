@@ -161,6 +161,6 @@ def charges_at_end(points, timeframe_minutes: float,
     if len(with_soc) < 2:
         return False
     end = with_soc[-1].timestamp
-    timeframe = [p for p in with_soc
+    recent = [p for p in with_soc
                if end - p.timestamp <= timedelta(minutes=timeframe_minutes)]
-    return charged_pp(timeframe) >= min_swing_pp
+    return charged_pp(recent) >= min_swing_pp

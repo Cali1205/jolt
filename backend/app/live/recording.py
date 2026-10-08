@@ -124,15 +124,15 @@ def gps_elevations_smooth(geometry: list, elevations: list) -> list:
 
     half = SMOOTHING_M / 2.0
     smoothed = []
-    left_side = right = 0
+    left = right = 0
     for i, middle in enumerate(odometer_km):
-        while odometer_km[left_side] < middle - half:
-            left_side += 1
+        while odometer_km[left] < middle - half:
+            left += 1
         while right + 1 < len(odometer_km) and odometer_km[right + 1] <= middle + half:
             right += 1
-        timeframe = [elevations[j] for j in range(left_side, right + 1)
+        window = [elevations[j] for j in range(left, right + 1)
                    if elevations[j] is not None]
-        smoothed.append(sum(timeframe) / len(timeframe) if timeframe
+        smoothed.append(sum(window) / len(window) if window
                           else (elevations[i] or 0.0))
     return smoothed
 

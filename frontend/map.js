@@ -60,17 +60,17 @@ window.joltMap = (function () {
   }
 
   function pastScreen(lat, lon) {
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
     const m = pastWorld(middle.lat, middle.lon, zoom);
     const p = pastWorld(lat, lon, zoom);
-    return { x: p.x - m.x + extent / 2, y: p.y - m.y + elevation / 2 };
+    return { x: p.x - m.x + width / 2, y: p.y - m.y + height / 2 };
   }
 
   /* ---------- Tiles ---------- */
 
   function fetchTile(z, x, y) {
-    const keyname = `${z}/${x}/${y}`;
-    if (tiles.has(keyname)) return tiles.get(keyname);
+    const key = `${z}/${x}/${y}`;
+    if (tiles.has(key)) return tiles.get(key);
 
     const picture = new Image();
     picture.decoding = "async";
@@ -78,7 +78,7 @@ window.joltMap = (function () {
     // A failure must not lead to endless reloading.
     picture.onerror = () => { picture.failed = true; };
     picture.src = TILE_URL(z, x, y);
-    tiles.set(keyname, picture);
+    tiles.set(key, picture);
 
     // Otherwise the cache grows without limit over a long session.
     if (tiles.size > 400) {
@@ -108,17 +108,17 @@ window.joltMap = (function () {
   }
 
   function drawTiles() {
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
     const z = Math.round(zoom);
     const zoom_scale = Math.pow(2, zoom - z);
     const dimension = TILE * zoom_scale;
 
     const m = pastWorld(middle.lat, middle.lon, z);
-    const leftTop = { x: m.x - extent / 2 / zoom_scale, y: m.y - elevation / 2 / zoom_scale };
+    const leftTop = { x: m.x - width / 2 / zoom_scale, y: m.y - height / 2 / zoom_scale };
     const fromX = Math.floor(leftTop.x / TILE);
     const fromY = Math.floor(leftTop.y / TILE);
-    const untilX = Math.floor((leftTop.x + extent / zoom_scale) / TILE);
-    const untilY = Math.floor((leftTop.y + elevation / zoom_scale) / TILE);
+    const untilX = Math.floor((leftTop.x + width / zoom_scale) / TILE);
+    const untilY = Math.floor((leftTop.y + height / zoom_scale) / TILE);
     const count = Math.pow(2, z);
 
     for (let x = fromX; x <= untilX; x++) {
@@ -146,7 +146,7 @@ window.joltMap = (function () {
     pen.lineJoin = "round";
     pen.lineCap = "round";
 
-    for (const [colour, extent] of [[COLORS.routeEdge, 7], [COLORS.route, 4]]) {
+    for (const [colour, lineWidth] of [[COLORS.routeEdge, 7], [COLORS.route, 4]]) {
       pen.beginPath();
       let scheduled = false;
       for (let i = 0; i < route.length; i++) {
@@ -155,7 +155,7 @@ window.joltMap = (function () {
         else pen.lineTo(p.x, p.y);
       }
       pen.strokeStyle = colour;
-      pen.lineWidth = extent;
+      pen.lineWidth = lineWidth;
       pen.stroke();
     }
   }
@@ -176,9 +176,9 @@ window.joltMap = (function () {
 
       if (m.text && large) {
         pen.font = "600 12px system-ui, sans-serif";
-        const extent = pen.measureText(m.text).width;
+        const textWidth = pen.measureText(m.text).width;
         pen.fillStyle = "#101418dd";
-        pen.fillRect(p.x + 11, p.y - 9, extent + 10, 18);
+        pen.fillRect(p.x + 11, p.y - 9, textWidth + 10, 18);
         pen.fillStyle = "#e6ebf0";
         pen.fillText(m.text, p.x + 16, p.y + 4);
       }
@@ -189,11 +189,11 @@ window.joltMap = (function () {
 
   function adjustSize() {
     const ratio = window.devicePixelRatio || 1;
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    if (canvas.width !== extent * ratio
-        || canvas.height !== elevation * ratio) {
-      canvas.width = extent * ratio;
-      canvas.height = elevation * ratio;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (canvas.width !== width * ratio
+        || canvas.height !== height * ratio) {
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
     }
     pen.setTransform(ratio, 0, 0, ratio, 0, 0);
   }
@@ -260,13 +260,13 @@ window.joltMap = (function () {
     canvas.addEventListener("pointermove", (e) => {
       if (!pointer.has(e.pointerId)) return;
       pointer.set(e.pointerId, local(e));
-      const now_ts = placement();
-      if (!reference) { reference = now_ts; return; }
-      if (now_ts.spacing > 0 && reference.spacing > 0) {
-        zoomAround(Math.log2(now_ts.spacing / reference.spacing), reference.x, reference.y);
+      const current = placement();
+      if (!reference) { reference = current; return; }
+      if (current.spacing > 0 && reference.spacing > 0) {
+        zoomAround(Math.log2(current.spacing / reference.spacing), reference.x, reference.y);
       }
-      shift(reference.x - now_ts.x, reference.y - now_ts.y);
-      reference = now_ts;
+      shift(reference.x - current.x, reference.y - current.y);
+      reference = current;
     });
 
     // A pointer that is lost without `pointerup` arriving (a system gesture of
@@ -307,13 +307,13 @@ window.joltMap = (function () {
   /* Zoom around a point on the canvas (pixels): the place under this
    * point lies under it again afterwards. */
   function zoomAround(delta, sx, sy) {
-    const fresh = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
-    if (fresh === zoom) return;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
+    if (newZoom === zoom) return;
     const dx = sx - canvas.clientWidth / 2;
     const dy = sy - canvas.clientHeight / 2;
     const m = pastWorld(middle.lat, middle.lon, zoom);
     const under = pastGeo(m.x + dx, m.y + dy, zoom);
-    zoom = fresh;
+    zoom = newZoom;
     const u = pastWorld(under.lat, under.lon, zoom);
     const n = TILE * Math.pow(2, zoom);
     middle = pastGeo(u.x - dx, Math.max(0, Math.min(n, u.y - dy)), zoom);
@@ -346,8 +346,8 @@ window.joltMap = (function () {
    * the map should not zoom and drift a little with every update. */
   function contentFit(force) {
     if (!canvas || !follow) return;
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    if (extent < 50 || elevation < 50) return;      // hidden: try again later
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (width < 50 || height < 50) return;      // hidden: try again later
     const points = contentPoints();
     if (!points.length) return;
 
@@ -362,29 +362,29 @@ window.joltMap = (function () {
 
     if (!force) {
       const f = Math.pow(2, zoom);
-      const visibleB = extent - 2 * EDGE_PX, visibleH = elevation - 2 * EDGE_PX;
+      const visibleB = width - 2 * EDGE_PX, visibleH = height - 2 * EDGE_PX;
       const m = pastWorld(middle.lat, middle.lon, 0);
-      const left_side = (minX - m.x) * f + extent / 2, right = (maxX - m.x) * f + extent / 2;
-      const upper = (minY - m.y) * f + elevation / 2, bottom = (maxY - m.y) * f + elevation / 2;
-      const inside = left_side >= EDGE_PX / 2 && right <= extent - EDGE_PX / 2
-        && upper >= EDGE_PX / 2 && bottom <= elevation - EDGE_PX / 2;
+      const left = (minX - m.x) * f + width / 2, right = (maxX - m.x) * f + width / 2;
+      const upper = (minY - m.y) * f + height / 2, bottom = (maxY - m.y) * f + height / 2;
+      const inside = left >= EDGE_PX / 2 && right <= width - EDGE_PX / 2
+        && upper >= EDGE_PX / 2 && bottom <= height - EDGE_PX / 2;
       const share = Math.max(w0 * f / visibleB, h0 * f / visibleH);
-      // A single point (start of a recording) has no extent:
+      // A single point (start of a recording) has no width:
       // it suffices for it to be in the picture.
       if (inside && (share >= MIN_SHARE || (w0 === 0 && h0 === 0))) return;
     }
 
-    let fresh;
+    let targetZoom;
     if (w0 < 1e-9 && h0 < 1e-9) {
-      fresh = 15;                                  // one point: street level
+      targetZoom = 15;                                  // one point: street level
     } else {
-      const factor = Math.min((extent - 2 * EDGE_PX) / Math.max(w0, 1e-9),
-                              (elevation - 2 * EDGE_PX) / Math.max(h0, 1e-9));
+      const factor = Math.min((width - 2 * EDGE_PX) / Math.max(w0, 1e-9),
+                              (height - 2 * EDGE_PX) / Math.max(h0, 1e-9));
       // Round down to quarter levels: stable against the back and forth on every
       // little thing, and the route surely fits in.
-      fresh = Math.floor(Math.log2(factor) * 4) / 4;
+      targetZoom = Math.floor(Math.log2(factor) * 4) / 4;
     }
-    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fresh));
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom));
     middle = pastGeo((minX + maxX) / 2 * Math.pow(2, zoom),
                     (minY + maxY) / 2 * Math.pow(2, zoom), zoom);
     drawLater();
@@ -441,13 +441,13 @@ window.joltMap = (function () {
   }
 
   function setRoute(geometry) {
-    const fresh = geometry || [];
+    const newRoute = geometry || [];
     // A shorter route than before is a new one (different trip, different
     // planning): following begins afresh there, even if the previous view
     // was panned by hand. A growing trace stays as it is.
-    const newTrip = fresh.length < route.length || route.length === 0;
+    const newTrip = newRoute.length < route.length || route.length === 0;
     if (newTrip) setFollow(true);
-    route = fresh;
+    route = newRoute;
     // A new route is always fitted anew; otherwise its first point would
     // stay put in the wide view of the previous one.
     contentFit(newTrip);

@@ -22,8 +22,8 @@ window.joltTrips = (function () {
                                        minute: "2-digit" });
   }
 
-  const num = (val, put) =>
-    (val === null || val === undefined) ? "" : K.num(val, put);
+  const num = (value, digits) =>
+    (value === null || value === undefined) ? "" : K.num(value, digits);
 
   /* What makes one trip incomparable with another.
    *
@@ -248,9 +248,9 @@ window.joltTrips = (function () {
       let soc = null;
       if (withDongle) {
         try {
-          const val = window.joltObd.socFromResponse(
+          const reading = window.joltObd.socFromResponse(
             await window.joltObd.command("22028C"));
-          if (val) soc = Math.round(val.hmi * 10) / 10;
+          if (reading) soc = Math.round(reading.hmi * 10) / 10;
         } catch (failure) {
           /* No answer to the first query does **not** mean "no
            * dongle". A car that is still asleep does not answer - the

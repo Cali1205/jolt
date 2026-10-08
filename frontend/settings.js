@@ -46,8 +46,8 @@ window.joltSettings = (function () {
       : (ms >= 1000 ? K.num(ms / 1000, 1) + " s" : Math.round(ms) + " ms");
   }
 
-  function row(name, val, variety) {
-    return `<dt>${esc(name)}</dt><dd${variety ? ` class="${variety}"` : ""}>${val}</dd>`;
+  function row(name, value, kind) {
+    return `<dt>${esc(name)}</dt><dd${kind ? ` class="${kind}"` : ""}>${value}</dd>`;
   }
 
   function time_of_day(ms) {
@@ -274,12 +274,12 @@ window.joltSettings = (function () {
     const rows = [];
     for (const field of O.FIELDS) {
       const count = d.readings[field.name];
-      const val = record && record.vals[field.name] !== undefined
+      const value = record && record.vals[field.name] !== undefined
         ? record.vals[field.name] : (count ? count.val : null);
       const unit = field.unit ? " " + field.unit : "";
-      const text = val === null || val === undefined ? "–"
-        : K.num(val, field.put) + unit;
-      const as_of = count ? count.timestamp : (record && val !== null && val !== undefined ? record.timestamp : null);
+      const text = value === null || value === undefined ? "–"
+        : K.num(value, field.put) + unit;
+      const as_of = count ? count.timestamp : (record && value !== null && value !== undefined ? record.timestamp : null);
       const required = field.required ? " <small>(Pflicht)</small>" : "";
       if (!count) {
         // Companion or never read.
@@ -290,12 +290,12 @@ window.joltSettings = (function () {
         continue;
       }
       const total = count.ok + count.empty + count.failure;
-      const origin_of = count.failure;
+      const failures = count.failure;
       rows.push(`<tr><td>${esc(field.title)}${required}</td><td>${text}</td>`
         + `<td>${age(as_of)}</td>`
         + `<td>${count.ok}</td>`
         + `<td class="${count.empty ? "warnung" : "still"}">${count.empty}</td>`
-        + `<td class="${origin_of && origin_of * 4 > total ? "schlecht" : (origin_of ? "warnung" : "still")}">${origin_of}</td>`
+        + `<td class="${failures && failures * 4 > total ? "schlecht" : (failures ? "warnung" : "still")}">${failures}</td>`
         + `<td>${duration(total ? count.sumMs / total : null)}</td></tr>`);
     }
     el("diag-messwerte").innerHTML = header + rows.join("");

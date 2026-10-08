@@ -18,7 +18,7 @@ generate candidates ourselves and evaluate them with jolt's own consumption
 model.
 
 Evaluation is based on the **finished charging plan** and not on the travel
-time - see `_variants_rate` (rate variants). A route that is longer
+time - see `_rate_variants` (rate variants). A route that is longer
 *and* slower than the fastest is discarded beforehand: it cannot have a
 charging plan that saves it, and computing costs more than weeding out.
 
@@ -166,13 +166,13 @@ def _examine_departure(request: Routenanfrage) -> datetime | None:
         return None
     if departure.tzinfo is None:
         departure = departure.replace(tzinfo=timezone.utc)
-    now_ts = datetime.now(timezone.utc)
-    if departure < now_ts - DEPARTURE_TOLERANCE:
+    now = datetime.now(timezone.utc)
+    if departure < now - DEPARTURE_TOLERANCE:
         raise HTTPException(422, "Die Abfahrt liegt in der Vergangenheit.")
-    if departure > now_ts + DEPARTURE_MAX:
+    if departure > now + DEPARTURE_MAX:
         raise HTTPException(422, "Die Abfahrt liegt mehr als 60 Tage in der "
                                  "Zukunft - so weit reicht keine Prognose.")
-    if departure <= now_ts + DEPARTURE_TOLERANCE:
+    if departure <= now + DEPARTURE_TOLERANCE:
         return None
     return departure
 
@@ -188,7 +188,7 @@ def compute_route(request: Routenanfrage, db: Session = Depends(get_db)):
     # `from_trip` (from_trip) expects a trip-like object; the trip only comes
     # into being in `_save_trips` (save trips), hence a lightweight
     # placeholder.
-    vals = model.VehicleValues.from_trip(SimpleNamespace(
+    values = model.VehicleValues.from_trip(SimpleNamespace(
         vehicle=vehicle, payload_kg=request.payload_kg,
         air_drag_factor=request.air_drag_factor,
         trailer_kg=request.trailer_kg,
@@ -196,13 +196,13 @@ def compute_route(request: Routenanfrage, db: Session = Depends(get_db)):
         speed_max_kmh=request.speed_max_kmh))
 
     departure = _examine_departure(request)
-    groups = _distances_collect(request, db, departure)
-    candidates = _compute_candidates(request, vals, groups, departure)
+    groups = _collect_distances(request, db, departure)
+    candidates = _compute_candidates(request, values, groups, departure)
     results = _save_trips(db, request, vehicle, candidates)
 
     # Before the rating: traffic belongs in the ranking.
     _fetch_traffic(db, request, results, departure)
-    _variants_rate(db, results, vehicle)
+    _rate_variants(db, results, vehicle)
     return {"variants": results,
             "departure": departure.isoformat() if departure else None}
 
@@ -320,7 +320,7 @@ def _fetch_traffic(db: Session, request: Routenanfrage, results: list,
     TomTom is asked about the route jolt drives, not about its own:
     waypoints are chosen from the stored geometry that force TomTom onto the
     same road. The delay is then attached to the variant and flows into
-    `_variants_rate` (rate variants); it does not go into the database.
+    `_rate_variants` (rate variants); it does not go into the database.
     """
     if not (request.tomtom and tomtom.obtainable()):
         return
@@ -348,7 +348,7 @@ def _fetch_traffic(db: Session, request: Routenanfrage, results: list,
             variant["traffic_basis"] = "prognose" if departure else "live"
 
 
-def _routes_plan(request: Routenanfrage, start: tuple, destination: tuple,
+def _plan_routes(request: Routenanfrage, start: tuple, destination: tuple,
                  db: Session | None = None,
                  departure: datetime | None = None) -> list[dict]:
     """Which routing requests are made - each costs from the daily quota.
@@ -375,7 +375,7 @@ def _routes_plan(request: Routenanfrage, start: tuple, destination: tuple,
     return routes
 
 
-def _distances_collect(request: Routenanfrage, db: Session | None = None,
+def _collect_distances(request: Routenanfrage, db: Session | None = None,
                       departure: datetime | None = None) -> list[dict]:
     """Step 1: query the routes and merge what is the same road.
 
@@ -394,7 +394,7 @@ def _distances_collect(request: Routenanfrage, db: Session | None = None,
     groups: list[dict] = []
     last_error: RoutingError | None = None
     basis = None
-    for path in _routes_plan(request, start, destination, db, departure):
+    for path in _plan_routes(request, start, destination, db, departure):
         try:
             distance = vendor.route(start, destination,
                                      intermediate_stops=path["between"] or None,
@@ -458,7 +458,7 @@ def _cap_factor(profile) -> float:
     return 1.0
 
 
-def _compute_candidates(request: Routenanfrage, vals, groups: list[dict],
+def _compute_candidates(request: Routenanfrage, values, groups: list[dict],
                         departure: datetime | None = None) -> list[dict]:
     """Step 2: for each genuinely different route - and only for those -
     compute weather and consumption model."""
@@ -482,7 +482,7 @@ def _compute_candidates(request: Routenanfrage, vals, groups: list[dict],
             environment_for = None
             avg = model.Environment()
 
-        profile = model.compute_profile(vals, points, velocity, request.start_soc,
+        profile = model.compute_profile(values, points, velocity, request.start_soc,
                                        environment_for, request.speed_factor)
         candidates.append({
             "labels": group["labels"],
@@ -541,7 +541,7 @@ def _save_trips(db: Session, request: Routenanfrage, vehicle,
     return results
 
 
-def _variants_rate(db, results: list, vehicle) -> None:
+def _rate_variants(db, results: list, vehicle) -> None:
     """Measure the variants against the **finished charging plan**, not the
     travel time.
 

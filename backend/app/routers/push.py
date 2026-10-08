@@ -30,7 +30,7 @@ class SignOut(BaseModel):
 
 
 @router.get("/schluessel")
-def keyname():
+def public_key():
     """What the browser needs to create a subscription.
 
     Reachable without login: the public key is no secret, and before login

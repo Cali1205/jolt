@@ -1395,7 +1395,7 @@ def main() -> int:
     # exactly why the battery current never arrived in a single round.
     for command in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
         verify(command in core, f"die Flusskontrolle setzt {command}")
-    verify(core.count("await flusskontrolle(destination)") >= 2,
+    verify(core.count("await flowControl(destination)") >= 2,
            "und zwar auf beiden Wegen - mit und ohne Protokollwechsel")
     verify(all(f'fcsh: "{h}"' in table
                for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
@@ -1468,9 +1468,9 @@ def main() -> int:
            and "SECTION_FROM_SOC_S = 300" in live,
            "die Balkenbreite folgt der Quelle: eine Minute mit Zähler, "
            "fünf ohne - nicht dem Wunsch")
-    verify("final.net - at_first.net" in live,
+    verify("final.net - first.net" in live,
            "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
-    verify("final.gps - at_first.gps" in live,
+    verify("final.gps - first.gps" in live,
            "die Strecke je Balken kommt dagegen aus dem GPS - der "
            "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
            "sind rund 1,2 km")
@@ -1505,7 +1505,7 @@ def main() -> int:
            "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "
            "vorher fiel er stumm durch, und vier von dreizehn Werten fehlten "
            "eine ganze Fahrt lang ohne Spur")
-    verify("valuesAsOf" in live and "neverCome" in live,
+    verify("valuesAsOf" in live and "unanswered" in live,
            "das Dashboard hält den letzten bekannten Wert je Messgrösse fest, "
            "statt die Zeile leer zu lassen")
     verify("ageText" in live and 'class="wann"' in live,

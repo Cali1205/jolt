@@ -31,17 +31,17 @@
 
   /* ---------- Log ---------- */
 
-  function log(text, variety) {
+  function log(text, direction) {
     const timestamp = new Date().toLocaleTimeString("de-DE");
-    const character = variety === "raus" ? "→" : (variety === "rein" ? "←" : " ");
-    el("log").textContent += `${timestamp} ${character} ${text}\n`;
+    const arrow = direction === "raus" ? "→" : (direction === "rein" ? "←" : " ");
+    el("log").textContent += `${timestamp} ${arrow} ${text}\n`;
     el("log").scrollTop = el("log").scrollHeight;
   }
 
-  function as_of(text, variety) {
+  function as_of(text, level) {
     const k = el("verbindung");
     k.textContent = text;
-    k.className = "stand " + (variety || "");
+    k.className = "stand " + (level || "");
   }
 
   function buttons(at) {
@@ -57,23 +57,23 @@
       // them again here would not repeat ATCP17 and ATCAF1 and would thereby
       // destroy exactly what matters.
       const response = await O.command("22028C");
-      const val = O.socFromResponse(response);
-      if (val === null) {
+      const reading = O.socFromResponse(response);
+      if (reading === null) {
         el("soc-wert").textContent = "?";
         log("Antwort enthält kein 62028C - siehe oben. Entweder ist die "
             + "Datenkennung eine andere, oder das Steuergerät antwortet "
             + "nicht auf dieser Kennung.");
         return;
       }
-      lastSoc = Math.round(val.hmi * 10) / 10;
+      lastSoc = Math.round(reading.hmi * 10) / 10;
       // Show both numbers: the big one is what is in the car and what jolt
       // gets; the small one next to it makes it traceable what it came from.
       el("soc-wert").textContent = lastSoc + " %";
       el("soc-herkunft").textContent =
-        `Rohwert 0x${val.raw.toString(16).toUpperCase()} = ${val.raw}`
-        + ` → brutto ${val.bms.toFixed(1)} % → Anzeige ${val.hmi.toFixed(1)} %`;
-      log(`Ladestand: brutto ${val.bms.toFixed(1)} %, `
-          + `Anzeige ${val.hmi.toFixed(1)} % (Rohwert ${val.raw})`);
+        `Rohwert 0x${reading.raw.toString(16).toUpperCase()} = ${reading.raw}`
+        + ` → brutto ${reading.bms.toFixed(1)} % → Anzeige ${reading.hmi.toFixed(1)} %`;
+      log(`Ladestand: brutto ${reading.bms.toFixed(1)} %, `
+          + `Anzeige ${reading.hmi.toFixed(1)} % (Rohwert ${reading.raw})`);
     } catch (failure) {
       el("soc-wert").textContent = "–";
       log("FEHLER " + failure.message);
@@ -92,10 +92,10 @@
    * The trip is created here right away: without a running session, jolt
    * does accept the measurement points but stores them nowhere - and one
    * only notices afterwards. */
-  function goAsOf(text, variety) {
+  function goAsOf(text, level) {
     const k = el("los-stand");
     k.textContent = text;
-    k.className = "stand " + (variety || "");
+    k.className = "stand " + (level || "");
   }
 
   function joltToken() {
@@ -165,10 +165,10 @@
         goAsOf("Bereit – wartet, bis das Auto fährt.", "gut");
         running = true;
         moved = 0;
-        // `lap` controls which rarely read values are due (`readRecord`).
+        // `round` controls which rarely read values are due (`readRecord`).
         // Without resetting, the second trip of a session continues counting
         // where the first one stopped.
-        lap = 0;
+        round = 0;
         el("fahrt-start").hidden = true;
         el("fahrt-stop").hidden = false;
         await screenAwakeHold();
@@ -192,13 +192,13 @@
    * drives off. */
   async function createTrip(soc) {
     goAsOf("Fahrt anlegen …");
-    const wo = await city();
+    const place = await getPosition();
     const response = await fetch("/api/live/aufzeichnung", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify({
         vehicle_id: vehicleId(),
-        lat: wo.lat, lon: wo.lon,
+        lat: place.lat, lon: place.lon,
         soc: soc ? Math.round(soc.hmi * 10) / 10 : null,
         name: tripName() }),
     });
@@ -260,7 +260,7 @@
   /* ---------- Recording ---------- */
 
   let running = false;
-  let lap = 0;
+  let round = 0;
   let wake_lock = null;   // WakeLockSentinel
   let sessionId = null;    // set when this page created the trip
 
@@ -299,17 +299,17 @@
   }
 
   async function aRound() {
-    const raw = await O.readRecord(lap);
-    lap += 1;
+    const raw = await O.readRecord(round);
+    round += 1;
 
     const soc = O.socFromRaw(raw.soc_raw);
-    const wo = await city().catch((f) => {
+    const place = await getPosition().catch((f) => {
       log("Standort: " + f.message);
       return null;
     });
-    if (!wo) return null;
+    if (!place) return null;
 
-    if (typeof wo.elevation_m === "number") raw.elevation_m = Math.round(wo.elevation_m);
+    if (typeof place.elevation_m === "number") raw.elevation_m = Math.round(place.elevation_m);
 
     /* Automatic: wait until the car is really driving.
      *
@@ -322,21 +322,21 @@
      * Two rounds in a row, so that a single outlier does not create a trip -
      * and no trip comes into being while the car shunts in the yard. */
     if (!sessionId && el("automatik").checked && !el("token").value.trim()) {
-      const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh
-        : (typeof wo.speed_kmh === "number" && !Number.isNaN(wo.speed_kmh)
-           ? wo.speed_kmh : null);
-      if (velocity !== null && velocity < DRIVES_FROM_KMH) {
+      const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh
+        : (typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
+           ? place.speed_kmh : null);
+      if (speed !== null && speed < DRIVES_FROM_KMH) {
         moved = 0;
         return { soc, raw, waits: true,
-                 records: { reason: `steht (${Math.round(velocity)} km/h)` } };
+                 records: { reason: `steht (${Math.round(speed)} km/h)` } };
       }
       moved += 1;
-      if (velocity !== null && moved < DRIVES_ROUNDS) {
+      if (speed !== null && moved < DRIVES_ROUNDS) {
         return { soc, raw, waits: true,
-                 records: { reason: `fährt an (${Math.round(velocity)} km/h)` } };
+                 records: { reason: `fährt an (${Math.round(speed)} km/h)` } };
       }
-      log(`Bewegung erkannt${velocity === null ? " (kein Tempo messbar)"
-                                            : ` (${Math.round(velocity)} km/h)`}`
+      log(`Bewegung erkannt${speed === null ? " (kein Tempo messbar)"
+                                            : ` (${Math.round(speed)} km/h)`}`
           + " - Fahrt wird angelegt.");
       try {
         await createTrip(soc);
@@ -351,7 +351,7 @@
     }
 
     const payload = {
-      lat: wo.lat, lon: wo.lon,
+      lat: place.lat, lon: place.lon,
       soc: Math.round(soc.hmi * 10) / 10,
       raw_values: raw,
     };
@@ -367,7 +367,7 @@
      * trip runs in the jolt app on another device, this page does not know
      * the session - then it identifies itself with the vehicle's logger
      * token, and jolt looks for the running session itself. */
-    const destination = sessionId
+    const url = sessionId
       ? `/api/live/${sessionId}/punkt`
       : "/api/live/melden";
     if (!sessionId) payload.token = el("token").value.trim();
@@ -375,7 +375,7 @@
     // `/punkt` requires login; `/melden` identifies itself with the logger
     // token in the body and does not need the header, but it does no harm
     // either.
-    const response = await fetch(destination, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify(payload),
@@ -389,7 +389,7 @@
 
   async function tripLoop() {
     while (running) {
-      const onset = Date.now();
+      const startedAt = Date.now();
       try {
         const result = await aRound();
         if (result && result.waits) {
@@ -414,13 +414,13 @@
             ["Leistung", power],
             ["Spannung", (raw.voltage_v ?? "–") + " V"],
             ["aufgenommen", records.recorded ? "ja" : "nein"],
-            ["Runde", String(lap)],
+            ["Runde", String(round)],
           ]);
           stand2(records.recorded
             ? `läuft – zuletzt ${new Date().toLocaleTimeString("de-DE")}`
             : `läuft – jolt: ${records.reason || "nicht aufgenommen"}`,
             records.recorded ? "gut" : "");
-          log(`Runde ${lap}: ${lastSoc} % (roh ${raw.soc_raw})`
+          log(`Runde ${round}: ${lastSoc} % (roh ${raw.soc_raw})`
               + `${raw._missing ? ", ohne " + raw._missing.join("/") : ""}`
               + ` → jolt ${records.recorded ? "ok" : (records.reason || "?")}`);
         }
@@ -431,15 +431,15 @@
         stand2("Aussetzer: " + failure.message, "schlecht");
         log("Runde übersprungen: " + failure.message);
       }
-      const rest = Number(el("takt").value) * 1000 - (Date.now() - onset);
+      const rest = Number(el("takt").value) * 1000 - (Date.now() - startedAt);
       await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
     }
   }
 
-  function stand2(text, variety) {
+  function stand2(text, level) {
     const k = el("fahrt-stand");
     k.textContent = text;
-    k.className = "stand " + (variety || "");
+    k.className = "stand " + (level || "");
   }
 
   async function startTrip() {
@@ -449,7 +449,7 @@
       return;
     }
     running = true;
-    lap = 0;
+    round = 0;
     el("fahrt-start").hidden = true;
     el("fahrt-stop").hidden = false;
     await screenAwakeHold();
@@ -466,8 +466,8 @@
       try {
         const response = await fetch(`/api/live/${sessionId}/ende`, {
           method: "POST", headers: { "X-Token": joltToken() } });
-        const records = await response.json().catch(() => ({}));
-        const built = records.recording || {};
+        const data = await response.json().catch(() => ({}));
+        const built = data.recording || {};
         if (built.ok) {
           log(`Fahrt abgeschlossen: ${built.distance_km} km, `
               + `${built.consumption_kwh} kWh gerechnet, Höhen aus `
@@ -475,11 +475,11 @@
         } else if (built.reason) {
           log("Fahrt nicht auswertbar: " + built.reason);
         }
-        if (records.learned) {
-          log(`Gelernt: Faktor ${records.learned.earlier} → `
-              + `${records.learned.after} (Fahrt ×${records.learned.raw_factor})`);
-        } else if (records.not_learned) {
-          log("Nichts gelernt: " + records.not_learned);
+        if (data.learned) {
+          log(`Gelernt: Faktor ${data.learned.earlier} → `
+              + `${data.learned.after} (Fahrt ×${data.learned.raw_factor})`);
+        } else if (data.not_learned) {
+          log("Nichts gelernt: " + data.not_learned);
         }
       } catch (failure) {
         log("Fahrt beenden: " + failure.message);
@@ -533,18 +533,18 @@
     charged_kwh: [100, 100000, "Lebensdauerzähler"],
   };
 
-  function check_row(title, val, verdict, note) {
+  function check_row(title, value, verdict, note) {
     const colour = verdict === "ok" ? "gut"
       : (verdict === "fehlt" ? "" : "schlecht");
-    return `<tr class="${colour}"><th>${title}</th><td>${val}</td>`
+    return `<tr class="${colour}"><th>${title}</th><td>${value}</td>`
       + `<td>${note || ""}</td></tr>`;
   }
 
   async function valuesCall() {
     const btn = el("pruefen");
     btn.disabled = true;
-    const destination = el("pruef-ergebnis");
-    destination.innerHTML = "<p>lese …</p>";
+    const resultEl = el("pruef-ergebnis");
+    resultEl.innerHTML = "<p>lese …</p>";
     try {
       if (!O.linked()) {
         await O.attach();
@@ -603,13 +603,13 @@
           "entladen minus geladen, über die Lebensdauer"));
       }
 
-      destination.innerHTML =
+      resultEl.innerHTML =
         `<p><b>${good}</b> plausibel, <b>${bad}</b> auffällig, `
         + `<b>${without}</b> ohne Wert</p>`
         + `<table class="pruef"><tbody>${rows.join("")}</tbody></table>`;
       log(`Prüfung: ${good} plausibel, ${bad} auffällig, ${without} ohne Wert`);
     } catch (failure) {
-      destination.innerHTML = `<p class="stand schlecht">${failure.message}</p>`;
+      resultEl.innerHTML = `<p class="stand schlecht">${failure.message}</p>`;
       log("Prüfung: " + failure.message);
     } finally {
       btn.disabled = false;
@@ -656,8 +656,8 @@
    * pairs from byte 1 - the way the control unit means them. What differs
    * clearly in both columns is the candidate. */
   function showClimate() {
-    const destination = el("klima-ergebnis");
-    if (!climateA || !climateA.b) { destination.innerHTML = ""; return; }
+    const resultEl = el("klima-ergebnis");
+    if (!climateA || !climateA.b) { resultEl.innerHTML = ""; return; }
     const a = climateA.a, b = climateA.b;
     const n = Math.min(a.length, b.length);
 
@@ -681,7 +681,7 @@
         + `<td>${d > 0 ? "+" : ""}${d || "–"}</td></tr>`);
     }
 
-    destination.innerHTML =
+    resultEl.innerHTML =
       `<p>Bit 0 von Byte 0: <b>${a[0] & 1}</b> → <b>${b[0] & 1}</b>`
       + `${(a[0] & 1) !== (b[0] & 1) ? " – das ist das An/Aus-Bit." : ""}</p>`
       + `<table class="pruef"><tbody>`
@@ -700,7 +700,7 @@
 
   /* ---------- Report to jolt ---------- */
 
-  function city() {
+  function getPosition() {
     return new Promise((fulfil, reject) => {
       if (!navigator.geolocation) { reject(new Error("kein GPS")); return; }
       navigator.geolocation.getCurrentPosition(
@@ -709,7 +709,7 @@
         // and is the fallback if no map data can be obtained on finishing.
         // `speed` comes in m/s and is often null (cold fix, standstill).
         // Without this conversion the GPS fallback of the movement detection
-        // further below was dead code: `wo.speed_kmh` simply did not exist, and
+        // further below was dead code: `place.speed_kmh` simply did not exist, and
         // without speed from the car the automatic created the trip immediately -
         // parking lot included.
         (p) => fulfil({ lat: p.coords.latitude, lon: p.coords.longitude,
@@ -726,15 +726,15 @@
     if (!token) { log("Kein Logger-Token eingetragen."); return; }
     if (lastSoc === null) { log("Erst den Ladestand abfragen."); return; }
     try {
-      const wo = await city();
+      const place = await getPosition();
       const response = await fetch("/api/live/melden", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, soc: lastSoc,
-                               lat: wo.lat, lon: wo.lon }),
+                               lat: place.lat, lon: place.lon }),
       });
-      const records = await response.json();
-      log(`jolt: HTTP ${response.status} ${JSON.stringify(records).slice(0, 200)}`);
+      const data = await response.json();
+      log(`jolt: HTTP ${response.status} ${JSON.stringify(data).slice(0, 200)}`);
     } catch (failure) {
       log("FEHLER " + failure.message);
     }

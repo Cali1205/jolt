@@ -73,8 +73,8 @@ def client_ip(request: Request) -> str:
     return peer
 
 
-def _expired(queue: deque, now_ts: float, timeframe: int) -> None:
-    while queue and now_ts - queue[0] > timeframe:
+def _expired(queue: deque, now: float, window_s: int) -> None:
+    while queue and now - queue[0] > window_s:
         queue.popleft()
 
 
@@ -86,34 +86,34 @@ CLEANUP_ALL_S = 60
 _last_cleaned_up: dict[int, float] = {}
 
 
-def _count(eimer: dict, keyname: str, timeframe: int, bound: int,
+def _count(buckets: dict, key: str, window_s: int, bound: int,
              cleanup_from: float | None = None) -> bool:
     """True if the request is allowed.
 
     `cleanup_from` exists only for testing: time of the last cleanup round, so
     that the round can be triggered without waiting.
     """
-    now_ts = time.time()
+    now = time.time()
     with _lock:
-        _remove_expired(eimer, now_ts, timeframe, cleanup_from)
-        queue = eimer[keyname]
-        _expired(queue, now_ts, timeframe)
+        _remove_expired(buckets, now, window_s, cleanup_from)
+        queue = buckets[key]
+        _expired(queue, now, window_s)
         if len(queue) >= bound:
             return False
-        queue.append(now_ts)
+        queue.append(now)
         return True
 
 
-def _remove_expired(eimer: dict, now_ts: float, timeframe: int,
+def _remove_expired(buckets: dict, now: float, window_s: int,
                            most_recent: float | None) -> None:
     """Delete senders without a hit in the window - at most once per minute."""
-    most_recent = _last_cleaned_up.get(id(eimer), 0.0) if most_recent is None else most_recent
-    if now_ts - most_recent < CLEANUP_ALL_S:
+    most_recent = _last_cleaned_up.get(id(buckets), 0.0) if most_recent is None else most_recent
+    if now - most_recent < CLEANUP_ALL_S:
         return
-    _last_cleaned_up[id(eimer)] = now_ts
-    for keyname in [k for k, q in eimer.items()
-                       if not q or now_ts - q[-1] > timeframe]:
-        del eimer[keyname]
+    _last_cleaned_up[id(buckets)] = now
+    for key in [k for k, q in buckets.items()
+                       if not q or now - q[-1] > window_s]:
+        del buckets[key]
 
 
 def login_limit(request: Request) -> None:
@@ -124,13 +124,13 @@ def login_limit(request: Request) -> None:
 
 def report_locked(request: Request) -> bool:
     """True if this address has sent a wrong logger token too often."""
-    now_ts = time.time()
+    now = time.time()
     with _lock:
-        _remove_expired(_report_error, now_ts, LOGIN_WINDOW, None)
+        _remove_expired(_report_error, now, LOGIN_WINDOW, None)
         queue = _report_error.get(client_ip(request))
         if not queue:
             return False
-        _expired(queue, now_ts, LOGIN_WINDOW)
+        _expired(queue, now, LOGIN_WINDOW)
         return len(queue) >= REPORT_ERROR_MAX
 
 
@@ -142,8 +142,8 @@ def count_report_error(request: Request) -> None:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        fs_path = request.url.path
-        if fs_path.startswith("/api/") and not fs_path.startswith(EXEMPT):
+        path = request.url.path
+        if path.startswith("/api/") and not path.startswith(EXEMPT):
             if not _count(_hit, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
                 # Return a response instead of raising `HTTPException`:
                 # FastAPI's exception handling does not apply in a middleware,

@@ -149,7 +149,7 @@ def air_density(temp_c: float, elevation_m: float) -> float:
 
 
 def elevation_smooth(points: list[Sample],
-                   timeframe_m: float = SMOOTHING_M) -> list[float]:
+                   window_m: float = SMOOTHING_M) -> list[float]:
     """Moving average over the *distance*, not over the index.
 
     Averaged over the index, a traffic jam in which a hundred points lie at the
@@ -161,16 +161,16 @@ def elevation_smooth(points: list[Sample],
     cum = [0.0]
     for a, b in zip(points, points[1:]):
         cum.append(cum[-1] + haversine_m(a.lat, a.lon, b.lat, b.lon))
-    origin_of, left_side = [], 0
+    result, left = [], 0
     for i in range(len(points)):
-        while cum[i] - cum[left_side] > timeframe_m / 2:
-            left_side += 1
+        while cum[i] - cum[left] > window_m / 2:
+            left += 1
         right = i
-        while right + 1 < len(points) and cum[right + 1] - cum[i] < timeframe_m / 2:
+        while right + 1 < len(points) and cum[right + 1] - cum[i] < window_m / 2:
             right += 1
-        origin_of.append(sum(points[j].elevation_m for j in range(left_side, right + 1))
-                   / (right - left_side + 1))
-    return origin_of
+        result.append(sum(points[j].elevation_m for j in range(left, right + 1))
+                   / (right - left + 1))
+    return result
 
 
 def build_timeframe(points: list[Sample], mass_kg: float,
@@ -204,7 +204,7 @@ def build_timeframe(points: list[Sample], mass_kg: float,
                           "h1": elevations[i], "h2": elevations[i + 1],
                           "a": a, "b": b})
 
-    origin_of: list[Timeframe] = []
+    result: list[Timeframe] = []
     buffer: list[dict] = []
 
     def complete():
@@ -232,7 +232,7 @@ def build_timeframe(points: list[Sample], mass_kg: float,
             v1, v2 = x["s"] / x["dt"], nx["s"] / nx["dt"]
             kin += max(0.0, 0.5 * mass_kg * (v2 * v2 - v1 * v1))
         net = buffer[-1]["h2"] - buffer[0]["h1"]
-        origin_of.append(Timeframe(
+        result.append(Timeframe(
             from_s=buffer[0]["a"].time_s, until_s=buffer[-1]["b"].time_s,
             duration_s=t, distance_m=s, speed_kmh=s / t * 3.6,
             on_m=uphill, from_m=downhill, net_elevation_m=net,
@@ -250,7 +250,7 @@ def build_timeframe(points: list[Sample], mass_kg: float,
             complete()
             buffer = []
     complete()
-    return origin_of
+    return result
 
 
 # ---------- Least-squares fit ----------
@@ -297,10 +297,10 @@ def _eigenvalues(a: list[list[float]]) -> list[float]:
     return sorted(abs(m[i][i]) for i in range(n))
 
 
-def _rows(timeframe: list[Timeframe], mass_kg: float) -> tuple[list, list, list]:
+def _rows(windows: list[Timeframe], mass_kg: float) -> tuple[list, list, list]:
     """Force balance per metre. Every summand has the unit newton."""
     X, y, gew = [], [], []
-    for f in timeframe:
+    for f in windows:
         s = f.distance_m
         X.append([
             1.0,                                # F_roll
@@ -318,7 +318,7 @@ def _rows(timeframe: list[Timeframe], mass_kg: float) -> tuple[list, list, list]
     return X, y, gew
 
 
-def identifizieren(timeframe: list[Timeframe], mass_kg: float,
+def identifizieren(windows: list[Timeframe], mass_kg: float,
                    lam: float = 0.02) -> Result:
     """Estimate the parameters from the windows.
 
@@ -328,15 +328,15 @@ def identifizieren(timeframe: list[Timeframe], mass_kg: float,
     wild parameters.
     """
     k = len(COLUMNS)
-    res = Result(mass_kg=mass_kg, n_timeframe=len(timeframe))
-    if len(timeframe) < 3 * k:
+    res = Result(mass_kg=mass_kg, n_timeframe=len(windows))
+    if len(windows) < 3 * k:
         res.warnings.append(
-            f"Zu wenige Fenster ({len(timeframe)}) für {k} Parameter - "
+            f"Zu wenige Fenster ({len(windows)}) für {k} Parameter - "
             "mindestens das Dreifache wäre nötig.")
-        if len(timeframe) <= k:
+        if len(windows) <= k:
             return res
 
-    X, y, gew = _rows(timeframe, mass_kg)
+    X, y, gew = _rows(windows, mass_kg)
     n = len(X)
     res.distance_km = sum(gew) / 1000.0
     sg = sum(gew)
@@ -407,14 +407,14 @@ def _examine(res: Result) -> None:
             "Streuung in Tempo oder Steigung, um die Parameter einzeln zu "
             "trennen. Die Summe stimmt, die Aufteilung nicht.")
     for name in COLUMNS:
-        val = getattr(res, {"f_roll": "f_roll_n", "cw_a": "cw_a_m2",
+        value = getattr(res, {"f_roll": "f_roll_n", "cw_a": "cw_a_m2",
                              "uphill": "uphill_factor", "downhill": "eta_regen",
                              "p_neben": "p_aux_w",
                              "beschl": "accel_share"}[name])
         s = res.failure.get(name, 0.0)
-        if s > 0 and abs(val) < 2 * s:
+        if s > 0 and abs(value) < 2 * s:
             res.warnings.append(
-                f"{name}: {val:.3f} ± {s:.3f} - nicht von null zu "
+                f"{name}: {value:.3f} ± {s:.3f} - nicht von null zu "
                 "unterscheiden, aus dieser Fahrt nicht bestimmbar.")
 
 

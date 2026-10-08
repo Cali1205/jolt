@@ -18,7 +18,7 @@ window.joltLive = (function () {
   let locationErrorReported = false;
   let latestReport = 0;      // time of the last position report
   let dongle = false;         // is the OBD2 dongle reading along?
-  let lap = 0;
+  let readRound = 0;
   // The driven track of a recording, [[lon, lat], ...].
   let track = [];
   // The distance covered along this track. It is carried **continuously**
@@ -58,7 +58,7 @@ window.joltLive = (function () {
    * Collected raw and only combined into sections at draw time - this way
    * the section width can be changed without losing the measurement. */
   let consumption_track = [];
-  let neverCome = new Set();  // ids this car does not answer
+  let unanswered = new Set();  // ids this car does not answer
   /* The power of the auxiliary consumers, when the control unit does not
    * report it.
    *
@@ -186,8 +186,8 @@ window.joltLive = (function () {
       // triggers a reconnect itself.
       try { socket.onclose = null; socket.close(); } catch (e) {}
     }
-    const schema = location.protocol === "https:" ? "wss" : "ws";
-    socket = new WebSocket(`${schema}://${location.host}/api/live/${sessionId}/ws`);
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(`${scheme}://${location.host}/api/live/${sessionId}/ws`);
 
     // A browser cannot set headers on a WebSocket; the token therefore goes
     // as the first message. Only the reply "bereit" ("ready") means the
@@ -203,18 +203,18 @@ window.joltLive = (function () {
     };
     socket.onerror = () => showConnection("gestört", "#e2596a");
     socket.onmessage = (msg) => {
-      let records;
-      try { records = JSON.parse(msg.data); } catch (e) { return; }
-      if (records.kind === "bereit") {
+      let message;
+      try { message = JSON.parse(msg.data); } catch (e) { return; }
+      if (message.kind === "bereit") {
         showConnection("verbunden", "#57c98a");
         attempt = 0;   // an established connection resets the wait time
         return;
       }
-      if (records.kind === "ende") {
+      if (message.kind === "ende") {
         showConnection("Fahrt beendet", "#8a97a5");
         return;
       }
-      showState(records);
+      showState(message);
     };
   }
 
@@ -295,12 +295,12 @@ window.joltLive = (function () {
      * over a long distance that would be a thousand entries too many. */
     // Position and distance **before** the history: the history point should
     // know how far had been driven when it came into being.
-    const city = measurement_site(z);
-    if (city) {
+    const place = measurement_site(z);
+    if (place) {
       const most_recent = track[track.length - 1];
-      if (!most_recent || most_recent[0] !== city[0] || most_recent[1] !== city[1]) {
-        if (most_recent) drivenKm += spacingKm(most_recent, city);
-        track.push(city);
+      if (!most_recent || most_recent[0] !== place[0] || most_recent[1] !== place[1]) {
+        if (most_recent) drivenKm += spacingKm(most_recent, place);
+        track.push(place);
       }
     }
 
@@ -351,7 +351,7 @@ window.joltLive = (function () {
      * has nothing to do with whether a route exists.
      */
     if (window.joltMap) {
-      const here = city || [z_lon(z), z_lat(z)];
+      const here = place || [z_lon(z), z_lat(z)];
       const marker = [{ lat: here[1], lon: here[0], kind: "auto", text: "hier" }];
       // In a recording the driven track is what there is to see:
       // it grows along and shows that data is really being written.
@@ -383,37 +383,37 @@ window.joltLive = (function () {
 
   function showResponse(z, reserve) {
     const box = document.getElementById("live-antwort");
-    const num = document.getElementById("live-antwort-zahl");
+    const numberEl = document.getElementById("live-antwort-zahl");
     const text = document.getElementById("live-antwort-text");
     if (!box) return;
 
     const stop = z.next_stop;
-    let val = null, wo = "", variety = "";
+    let expectedSoc = null, whereText = "", level = "";
     if (stop && stop.expected_soc !== null && stop.expected_soc !== undefined) {
-      val = stop.expected_soc;
-      wo = `an ${stop.name || "nächster Stopp"} · km ${K.num(stop.km_on_route)}`;
+      expectedSoc = stop.expected_soc;
+      whereText = `an ${stop.name || "nächster Stopp"} · km ${K.num(stop.km_on_route)}`;
     } else if (z.forecast_soc_at_target !== null) {
-      val = z.forecast_soc_at_target;
-      wo = "am Ziel, ohne Nachladen";
+      expectedSoc = z.forecast_soc_at_target;
+      whereText = "am Ziel, ohne Nachladen";
     }
 
-    if (val === null) {
-      num.textContent = K.num(z.actual_soc) + " %";
+    if (expectedSoc === null) {
+      numberEl.textContent = K.num(z.actual_soc) + " %";
       text.textContent = "Ladestand – noch keine Prognose";
       box.className = "";
       return;
     }
     // A negative value is not a statement about the battery but about the
     // fact that it will not be enough. That is exactly what belongs there.
-    if (val < 0) {
-      num.textContent = "reicht nicht";
-      variety = "schlecht";
+    if (expectedSoc < 0) {
+      numberEl.textContent = "reicht nicht";
+      level = "schlecht";
     } else {
-      num.textContent = K.num(val) + " %";
-      variety = val < reserve ? "schlecht" : (val < reserve + 8 ? "warnung" : "gut");
+      numberEl.textContent = K.num(expectedSoc) + " %";
+      level = expectedSoc < reserve ? "schlecht" : (expectedSoc < reserve + 8 ? "warnung" : "gut");
     }
-    text.textContent = wo;
-    box.className = variety;
+    text.textContent = whereText;
+    box.className = level;
   }
 
   /* Straight-line distance between two [lon, lat] in kilometres. For a driven
@@ -448,13 +448,13 @@ window.joltLive = (function () {
     const canvas = document.getElementById("live-verlauf");
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    if (!extent || !elevation) return;
-    canvas.width = extent * dpr;
-    canvas.height = elevation * dpr;
-    const pen = canvas.getContext("2d");
-    pen.setTransform(dpr, 0, 0, dpr, 0, 0);
-    pen.clearRect(0, 0, extent, elevation);
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (!width || !height) return;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
 
     const trip = K.state.trip;
     const profile = (trip && trip.profile) || [];
@@ -484,8 +484,8 @@ window.joltLive = (function () {
     const maxKm = profile.length
       ? (profile[profile.length - 1].km || 1)
       : Math.max(1, ...history.map(distanceFrom));
-    const left_side = 4, right = extent - 4, upper = 8, bottom = elevation - 16;
-    const x = (km) => left_side + (km / maxKm) * (right - left_side);
+    const left = 4, right = width - 4, upper = 8, bottom = height - 16;
+    const x = (km) => left + (km / maxKm) * (right - left);
     const y = (soc) => bottom - (Math.max(0, Math.min(100, soc)) / 100)
       * (bottom - upper);
 
@@ -494,94 +494,94 @@ window.joltLive = (function () {
     if (profile.length > 1) {
       let maxElevation = 1;
       for (const p of profile) maxElevation = Math.max(maxElevation, p.elevation || 0);
-      pen.beginPath();
-      pen.moveTo(x(0), bottom);
+      ctx.beginPath();
+      ctx.moveTo(x(0), bottom);
       for (const p of profile) {
-        pen.lineTo(x(p.km), bottom - ((p.elevation || 0) / maxElevation) * (bottom - upper) * 0.3);
+        ctx.lineTo(x(p.km), bottom - ((p.elevation || 0) / maxElevation) * (bottom - upper) * 0.3);
       }
-      pen.lineTo(x(maxKm), bottom);
-      pen.closePath();
-      pen.fillStyle = "rgba(138,151,165,.12)";
-      pen.fill();
+      ctx.lineTo(x(maxKm), bottom);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(138,151,165,.12)";
+      ctx.fill();
     }
 
     // The reserve as a line, not a number: you see at once where the
     // measured curve is heading towards it.
-    pen.beginPath();
-    pen.setLineDash([4, 4]);
-    pen.moveTo(left_side, y(reserve));
-    pen.lineTo(right, y(reserve));
-    pen.strokeStyle = "rgba(226,89,106,.6)";
-    pen.lineWidth = 1;
-    pen.stroke();
-    pen.setLineDash([]);
-    pen.fillStyle = "rgba(226,89,106,.75)";
-    pen.font = "10px system-ui, sans-serif";
-    pen.fillText("Reserve", left_side + 2, y(reserve) - 3);
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(left, y(reserve));
+    ctx.lineTo(right, y(reserve));
+    ctx.strokeStyle = "rgba(226,89,106,.6)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(226,89,106,.75)";
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.fillText("Reserve", left + 2, y(reserve) - 3);
 
     // Planned curve: muted, it is the reference and not the message.
     if (profile.length > 1) {
-      pen.beginPath();
+      ctx.beginPath();
       profile.forEach((p, i) => {
         const px = x(p.km), py = y(p.soc);
-        if (i === 0) pen.moveTo(px, py); else pen.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       });
-      pen.strokeStyle = "rgba(138,151,165,.55)";
-      pen.lineWidth = 1.5;
-      pen.stroke();
+      ctx.strokeStyle = "rgba(138,151,165,.55)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
 
     // The charging stops as markers - they explain the jumps that are
     // about to come, and show how far away the next one still is.
     for (const stop of (plan && plan.stops) || []) {
       const px = x(stop.km_on_route);
-      pen.beginPath();
-      pen.moveTo(px, upper);
-      pen.lineTo(px, bottom);
-      pen.strokeStyle = "rgba(255,201,60,.35)";
-      pen.lineWidth = 1;
-      pen.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px, upper);
+      ctx.lineTo(px, bottom);
+      ctx.strokeStyle = "rgba(255,201,60,.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
 
     // The measured curve. It is the message, so make it strong.
     if (history.length > 1) {
-      pen.beginPath();
+      ctx.beginPath();
       history.forEach((v, i) => {
         const px = x(distanceFrom(v)), py = y(v.soc);
-        if (i === 0) pen.moveTo(px, py); else pen.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       });
-      pen.strokeStyle = "#ffc93c";
-      pen.lineWidth = 2.5;
-      pen.lineJoin = "round";
-      pen.stroke();
+      ctx.strokeStyle = "#ffc93c";
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = "round";
+      ctx.stroke();
     }
 
     // Where the car is right now. A computed state of charge gets a
     // hollow dot - you should be able to see that it is not measured.
-    const now_ts = history[history.length - 1];
-    if (now_ts) {
-      pen.beginPath();
-      pen.arc(x(distanceFrom(now_ts)), y(now_ts.soc), 4.5, 0, Math.PI * 2);
-      if (now_ts.reported) { pen.fillStyle = "#ffc93c"; pen.fill(); }
-      else { pen.strokeStyle = "#ffc93c"; pen.lineWidth = 2; pen.stroke(); }
+    const latest = history[history.length - 1];
+    if (latest) {
+      ctx.beginPath();
+      ctx.arc(x(distanceFrom(latest)), y(latest.soc), 4.5, 0, Math.PI * 2);
+      if (latest.reported) { ctx.fillStyle = "#ffc93c"; ctx.fill(); }
+      else { ctx.strokeStyle = "#ffc93c"; ctx.lineWidth = 2; ctx.stroke(); }
     }
 
-    pen.fillStyle = "rgba(138,151,165,.8)";
-    pen.fillText("0", left_side, elevation - 4);
+    ctx.fillStyle = "rgba(138,151,165,.8)";
+    ctx.fillText("0", left, height - 4);
     const label = K.num(maxKm) + " km";
-    pen.fillText(label, right - pen.measureText(label).width,
-                   elevation - 4);
+    ctx.fillText(label, right - ctx.measureText(label).width,
+                   height - 4);
   }
 
   /* ---------- The charging plan on the road ---------- */
 
   function drawPlan() {
-    const lst = document.getElementById("live-plan");
+    const listEl = document.getElementById("live-plan");
     const as_of = document.getElementById("live-plan-stand");
-    if (!lst || !as_of) return;
+    if (!listEl || !as_of) return;
 
     if (!plan) {
-      lst.innerHTML = '<li class="leer">Noch kein Ladeplan.</li>';
+      listEl.innerHTML = '<li class="leer">Noch kein Ladeplan.</li>';
       as_of.textContent = "";
       return;
     }
@@ -589,16 +589,16 @@ window.joltLive = (function () {
                                       : "beim Losfahren gerechnet";
 
     if (!plan.feasible) {
-      lst.innerHTML = `<li class="leer" style="color:#e2596a">${
+      listEl.innerHTML = `<li class="leer" style="color:#e2596a">${
         sanitize(plan.reason || "Kein Ladeplan möglich.")}</li>`;
       return;
     }
     if (!plan.stops || !plan.stops.length) {
-      lst.innerHTML = '<li class="leer">Kein Ladestopp mehr nötig.</li>';
+      listEl.innerHTML = '<li class="leer">Kein Ladestopp mehr nötig.</li>';
       return;
     }
 
-    lst.innerHTML = "";
+    listEl.innerHTML = "";
     plan.stops.forEach((s, i) => {
       const entry = document.createElement("li");
       entry.innerHTML = `
@@ -610,7 +610,7 @@ window.joltLive = (function () {
             ${K.num(s.max_kw)} kW · ${s.point_count} Ladepunkte</div>
         </div>
         <div class="kw">${K.duration(s.charge_time_minutes)}</div>`;
-      lst.appendChild(entry);
+      listEl.appendChild(entry);
     });
   }
 
@@ -651,33 +651,33 @@ window.joltLive = (function () {
     try {
       if (!("Notification" in window) || !("PushManager" in window)) return;
 
-      const keyname = await K.api("/api/push/schluessel");
-      if (!keyname.configured) return;   // no VAPID key on the server
+      const key = await K.api("/api/push/schluessel");
+      if (!key.configured) return;   // no VAPID key on the server
 
       if (Notification.permission === "default") {
         await Notification.requestPermission();
       }
       if (Notification.permission !== "granted") return;
 
-      const registrierung = K.state.serviceWorker
+      const registration = K.state.serviceWorker
         || (navigator.serviceWorker && await navigator.serviceWorker.ready);
-      if (!registrierung || !registrierung.pushManager) return;
+      if (!registration || !registration.pushManager) return;
 
       // Reuse an existing subscription. Creating a new one would return
       // the same endpoint, but costs a detour.
-      let subscription = await registrierung.pushManager.getSubscription();
+      let subscription = await registration.pushManager.getSubscription();
       if (!subscription) {
-        subscription = await registrierung.pushManager.subscribe({
+        subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: keyAsBytes(keyname.keyname),
+          applicationServerKey: keyAsBytes(key.keyname),
         });
       }
 
-      const records = subscription.toJSON();
+      const subscriptionJson = subscription.toJSON();
       await K.api("/api/push/abo", { method: "POST", body: {
-        endpoint: records.endpoint,
-        p256dh: records.keys.p256dh,
-        auth: records.keys.auth,
+        endpoint: subscriptionJson.endpoint,
+        p256dh: subscriptionJson.keys.p256dh,
+        auth: subscriptionJson.keys.auth,
         device: navigator.userAgent.slice(0, 120),
       }});
     } catch (failure) {
@@ -768,12 +768,12 @@ window.joltLive = (function () {
     // Before the throttling: the state machine wants to see every fix, not every
     // twelfth.
     examineDrivingState(coords, timeMs);
-    const now_ts = Date.now();
+    const now = Date.now();
     // Do not report every GPS update: the device delivers every
     // second, and the tracking averages over kilometres anyway.
     // Sending more often costs battery and mobile data without saying anything.
-    if (now_ts - latestReport < REPORT_INTERVAL_MS) return;
-    latestReport = now_ts;
+    if (now - latestReport < REPORT_INTERVAL_MS) return;
+    latestReport = now;
     reportPosition(coords, timeMs);
   }
 
@@ -838,15 +838,15 @@ window.joltLive = (function () {
         backgroundMessage: "Position und Ladestand werden weiter erfasst.",
         requestPermissions: true,
         distanceFilter: 0,
-      }, (city, failure) => {
+      }, (place, failure) => {
         if (failure) { locationError(failure); return; }
-        if (!city || typeof city.latitude !== "number") return;
+        if (!place || typeof place.latitude !== "number") return;
         locationInput({
-          latitude: city.latitude, longitude: city.longitude,
+          latitude: place.latitude, longitude: place.longitude,
           // The plugin delivers null instead of -1 when the speed is missing.
-          speed: typeof city.speed === "number" ? city.speed : null,
-          altitude: typeof city.altitude === "number" ? city.altitude : null,
-        }, city.time);
+          speed: typeof place.speed === "number" ? place.speed : null,
+          altitude: typeof place.altitude === "number" ? place.altitude : null,
+        }, place.time);
       });
     } catch (failure) {
       // The plugin did not work - then at least the location in the foreground,
@@ -1166,23 +1166,23 @@ window.joltLive = (function () {
 
   /* The speed from the fix - or from two fixes if the device
    * provides none (regularly the case in the browser on iOS). */
-  function speedKmh(coords, city, timeMs) {
+  function speedKmh(coords, place, timeMs) {
     const prior = latestPosition;
-    latestPosition = { lat: city.lat, lon: city.lon, timestamp: timeMs };
+    latestPosition = { lat: place.lat, lon: place.lon, timestamp: timeMs };
     if (typeof coords.speed === "number" && coords.speed >= 0) {
       return coords.speed * 3.6;
     }
     if (!prior) return null;
     const dt = (timeMs - prior.timestamp) / 1000;
     if (dt < 1 || dt > 30) return null;
-    return distanceM(prior, city) / dt * 3.6;
+    return distanceM(prior, place) / dt * 3.6;
   }
 
   function examineDrivingState(coords, timeMs) {
     if (!autoMode || !K.state.sessionId) return;
-    const now_ts = Date.now();
-    const city = { lat: coords.latitude, lon: coords.longitude };
-    const v = speedKmh(coords, city, timeMs || now_ts);
+    const now = Date.now();
+    const place = { lat: coords.latitude, lon: coords.longitude };
+    const v = speedKmh(coords, place, timeMs || now);
     if (v === null) return;
     latestSpeed = v;
 
@@ -1194,14 +1194,14 @@ window.joltLive = (function () {
     }
     fastSequence = 0;
     if (v < STAND_KMH) asOfSeen = true;
-    if (now_ts < manualUntil || driveState === "geparkt") return;
+    if (now < manualUntil || driveState === "geparkt") return;
 
     if (v < STAND_KMH) {
-      if (standSince === null) { standSince = now_ts; standCity = city; }
-      const as_of = now_ts - standSince;
+      if (standSince === null) { standSince = now; standCity = place; }
+      const as_of = now - standSince;
       if (as_of >= PARK_TIME_MS) statePark("Das Auto steht seit drei Minuten");
       else if (as_of >= STANDING_TIME_MS && driveState === "faehrt") driveState = "steht";
-    } else if (standCity && distanceM(standCity, city) > PATH_M) {
+    } else if (standCity && distanceM(standCity, place) > PATH_M) {
       // Slow and far from the stopping place: you got out and are walking.
       statePark("Du bist vom Auto weggegangen");
     }
@@ -1235,10 +1235,10 @@ window.joltLive = (function () {
   let latestVoltage = null;
   let latestVoltageTime = 0;
 
-  function avg(lst) {
-    const sortiert = [...lst].sort((a, b) => a - b);
-    const m = Math.floor(sortiert.length / 2);
-    return sortiert.length % 2 ? sortiert[m] : (sortiert[m - 1] + sortiert[m]) / 2;
+  function avg(values) {
+    const sorted = [...values].sort((a, b) => a - b);
+    const m = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2;
   }
 
   async function examineVoltage() {
@@ -1330,12 +1330,12 @@ window.joltLive = (function () {
   }
 
   function showDongle() {
-    const at = document.getElementById("dongle-an");
+    const connectBtn = document.getElementById("dongle-an");
     const pause = document.getElementById("dongle-pause");
-    if (!at || !pause) return;
+    if (!connectBtn || !pause) return;
     const linked = dongle && window.joltObd && window.joltObd.linked();
-    at.hidden = linked && !donglePause;
-    at.textContent = donglePause ? "Dongle wieder verbinden"
+    connectBtn.hidden = linked && !donglePause;
+    connectBtn.textContent = donglePause ? "Dongle wieder verbinden"
                                  : "Dongle verbinden";
     pause.hidden = !linked || donglePause;
   }
@@ -1493,10 +1493,10 @@ window.joltLive = (function () {
     if (typeof raw.aux_load_kw === "number") return;
     const kw = powerKw(raw);
     if (kw === null) return;
-    const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
+    const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
     // Only while standing, and only when energy is drawn - while charging
     // you measure the charger, not the heater.
-    if (velocity !== null && velocity < 5 && kw > 0) {
+    if (speed !== null && speed < 5 && kw > 0) {
       aux_load = { kw, timestamp: Date.now() };
     }
   }
@@ -1521,9 +1521,9 @@ window.joltLive = (function () {
     block.hidden = false;
 
     const kw = powerKw(raw);
-    const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
-    const current = (kw !== null && velocity !== null && velocity >= 5)
-      ? Math.abs(kw) / velocity * 100 : null;
+    const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
+    const current = (kw !== null && speed !== null && speed >= 5)
+      ? Math.abs(kw) / speed * 100 : null;
 
     const parts = [];
     /* The consumption of the trip first: that is the number you
@@ -1616,7 +1616,7 @@ window.joltLive = (function () {
    * The list comes from `joltObd.FELDER`, so that a new data identifier shows up
    * here by itself and does not have to be maintained in two places. */
   function valuesRemember(raw) {
-    const now_ts = Date.now();
+    const now = Date.now();
     // For the consumption plot: odometer and state of charge with a timestamp.
     // The power is deliberately not included - see verbrauchsabschnitte().
     if (typeof raw.odometer_km === "number") {
@@ -1629,7 +1629,7 @@ window.joltLive = (function () {
                               ? raw.charged_kwh : 0)
         : null;
       consumption_track.push({
-        timestamp: now_ts, km: raw.odometer_km, net,
+        timestamp: now, km: raw.odometer_km, net,
         // The two counters individually, for the display of recuperation.
         disch: typeof raw.discharge_kwh === "number" ? raw.discharge_kwh : null,
         chg: typeof raw.charged_kwh === "number" ? raw.charged_kwh : null,
@@ -1644,15 +1644,15 @@ window.joltLive = (function () {
     }
     for (const [name, val] of Object.entries(raw)) {
       if (typeof val === "number") {
-        valuesAsOf[name] = { val, timestamp: now_ts };
-        neverCome.delete(name);
+        valuesAsOf[name] = { val, timestamp: now };
+        unanswered.delete(name);
       }
     }
     // "Answered, but without a usable value" means: the data identifier
     // does not fit this vehicle. That stays so until a value does come
     // after all - hence remembered and not decided anew each round.
     for (const name of raw._empty || []) {
-      if (!valuesAsOf[name]) neverCome.add(name);
+      if (!valuesAsOf[name]) unanswered.add(name);
     }
   }
 
@@ -1682,9 +1682,9 @@ window.joltLive = (function () {
   const CHARGING_AS_OF_KWH = 0.05;
 
   function runningConsumption(raw, soc) {
-    const fz = K.state.recVehicle
+    const car = K.state.recVehicle
       || (K.state.trip && K.state.trip.vehicle);
-    const battery = fz && (fz.capacity_kwh || fz.battery_net_kwh);
+    const battery = car && (car.capacity_kwh || car.battery_net_kwh);
     if (consumption_track.length < 2) return null;
 
     /* **Summed up instead of start against end.**
@@ -1785,63 +1785,63 @@ window.joltLive = (function () {
     const points = consumption_track.filter((p) => typeof p.gps === "number");
     if (points.length < 2) return null;
     const withCounter = points.every((p) => typeof p.net === "number");
-    const fz = K.state.recVehicle
+    const car = K.state.recVehicle
       || (K.state.trip && K.state.trip.vehicle) || {};
-    const battery = fz.capacity_kwh || fz.battery_net_kwh;
+    const battery = car.capacity_kwh || car.battery_net_kwh;
     if (!withCounter && !battery) return null;
 
     const onset = points[0].timestamp;
-    const extent = widthChoose(
+    const bucketWidth = widthChoose(
       points[points.length - 1].timestamp - onset,
       withCounter ? SECTION_WITH_COUNTER_S : SECTION_FROM_SOC_S);
-    const eimer = new Map();
+    const buckets = new Map();
     for (const p of points) {
-      const n = Math.floor((p.timestamp - onset) / extent);
-      if (!eimer.has(n)) eimer.set(n, []);
-      eimer.get(n).push(p);
+      const n = Math.floor((p.timestamp - onset) / bucketWidth);
+      if (!buckets.has(n)) buckets.set(n, []);
+      buckets.get(n).push(p);
     }
 
     const bar = [];
-    for (const [n, group] of [...eimer.entries()].sort((a, b) => a[0] - b[0])) {
+    for (const [n, group] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
       if (group.length < 2) continue;
-      const at_first = group[0], final = group[group.length - 1];
-      const km = final.gps - at_first.gps;
+      const first = group[0], final = group[group.length - 1];
+      const km = final.gps - first.gps;
       if (km < BAR_MIN_KM) continue;
-      const kwh = withCounter ? (final.net - at_first.net)
-        : ((at_first.soc !== null && final.soc !== null)
-           ? (at_first.soc - final.soc) / 100 * battery : null);
+      const kwh = withCounter ? (final.net - first.net)
+        : ((first.soc !== null && final.soc !== null)
+           ? (first.soc - final.soc) / 100 * battery : null);
       if (kwh === null || !Number.isFinite(kwh)) continue;
       bar.push({ n, kwh100: kwh / km * 100, km });
     }
-    return bar.length ? { bar, extent, withCounter } : null;
+    return bar.length ? { bar, bucketWidth, withCounter } : null;
   }
 
   function drawConsumption() {
     const canvas = document.getElementById("live-verbrauch");
     const foot = document.getElementById("live-verbrauch-fuss");
     if (!canvas || !foot) return;
-    const records = consumption_sections();
-    if (!records) { canvas.hidden = true; foot.hidden = true; return; }
+    const sections = consumption_sections();
+    if (!sections) { canvas.hidden = true; foot.hidden = true; return; }
     canvas.hidden = false; foot.hidden = false;
 
     const dpr = window.devicePixelRatio || 1;
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    if (!extent || !elevation) return;
-    canvas.width = extent * dpr;
-    canvas.height = elevation * dpr;
-    const pen = canvas.getContext("2d");
-    pen.setTransform(dpr, 0, 0, dpr, 0, 0);
-    pen.clearRect(0, 0, extent, elevation);
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (!width || !height) return;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
 
-    const vals = records.bar.map((b) => b.kwh100);
+    const vals = sections.bar.map((b) => b.kwh100);
     // The scale generous upwards, so that an outlier does not flatten the other
     // bars, and with a zero line: recuperation goes
     // below zero, and that is exactly what you should see.
     const upper = Math.max(40, ...vals) * 1.1;
     const bottom = Math.min(0, ...vals) * 1.1;
     const span = upper - bottom || 1;
-    const edge = 6, footElevation = 16;
-    const area = elevation - footElevation - edge;
+    const edge = 6, footHeight = 16;
+    const area = height - footHeight - edge;
     const y = (v) => edge + (upper - v) / span * area;
 
     /* Labelled axis. Without it a bar chart is a shape without a
@@ -1858,40 +1858,40 @@ window.joltLive = (function () {
     for (let w = step; w < upper; w += step) split.push(w);
     for (let w = -step; w > bottom; w -= step) split.push(w);
 
-    pen.font = "10px system-ui, sans-serif";
-    pen.textBaseline = "middle";
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
     for (const w of split) {
       const yy = y(w);
-      pen.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
-      pen.lineWidth = 1;
-      pen.beginPath();
-      pen.moveTo(axis, yy); pen.lineTo(extent - edge, yy);
-      pen.stroke();
-      pen.fillStyle = "#8a97a5";
-      pen.textAlign = "right";
-      pen.fillText(String(w), axis - 4, yy);
+      ctx.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(axis, yy); ctx.lineTo(width - edge, yy);
+      ctx.stroke();
+      ctx.fillStyle = "#8a97a5";
+      ctx.textAlign = "right";
+      ctx.fillText(String(w), axis - 4, yy);
     }
     // The unit once at the top left, not on every tick.
-    pen.fillStyle = "#8a97a5";
-    pen.textAlign = "left";
-    pen.fillText("kWh/100", axis + 3, edge + 4);
+    ctx.fillStyle = "#8a97a5";
+    ctx.textAlign = "left";
+    ctx.fillText("kWh/100", axis + 3, edge + 4);
 
-    const field = extent - edge - axis;
-    const b = Math.max(2, field / records.bar.length - 2);
-    records.bar.forEach((bar, i) => {
-      const x = axis + i * (field / records.bar.length);
+    const field = width - edge - axis;
+    const b = Math.max(2, field / sections.bar.length - 2);
+    sections.bar.forEach((bar, i) => {
+      const x = axis + i * (field / sections.bar.length);
       const high = y(bar.kwh100) - y(0);
       // Colour by height: what lies clearly above the average stands out.
-      pen.fillStyle = bar.kwh100 < 0 ? "#57c98a"
+      ctx.fillStyle = bar.kwh100 < 0 ? "#57c98a"
         : (bar.kwh100 > 35 ? "#e8804f" : "#ffc93c");
-      pen.fillRect(x, high < 0 ? y(bar.kwh100) : y(0),
+      ctx.fillRect(x, high < 0 ? y(bar.kwh100) : y(0),
                      b, Math.max(1, Math.abs(high)));
     });
 
     const average = vals.reduce((a, v) => a + v, 0) / vals.length;
     foot.children[0].textContent =
-      `Verbrauch je ${records.extent / 60000} min`
-      + (records.withCounter ? "" : " (aus dem Ladestand)");
+      `Verbrauch je ${sections.bucketWidth / 60000} min`
+      + (sections.withCounter ? "" : " (aus dem Ladestand)");
     foot.children[1].textContent = `Ø ${K.num(average, 1)} kWh/100`;
   }
 
@@ -1904,29 +1904,29 @@ window.joltLive = (function () {
     const fields = (window.joltObd && window.joltObd.FIELDS) || [];
     if (!fields.length) return "";
     const missing = new Set(raw._missing || []);
-    const now_ts = Date.now();
+    const now = Date.now();
 
     const rows = fields.map((f) => {
       const as_of = valuesAsOf[f.name];
       if (!as_of) {
         // Never a value yet. The reason differs, and the
         // difference is the real information when setting up.
-        const reason = neverCome.has(f.name) ? "antwortet nicht"
+        const reason = unanswered.has(f.name) ? "antwortet nicht"
           : (missing.has(f.name) ? "keine Antwort" : "–");
         return `<tr class="leer"><th>${f.title}</th><td>${reason}</td></tr>`;
       }
-      const age = (now_ts - as_of.timestamp) / 1000;
-      const num = K.num(as_of.val, f.put)
+      const age = (now - as_of.timestamp) / 1000;
+      const shown = K.num(as_of.val, f.put)
         + (f.unit ? " " + f.unit : "");
       // Fresh means: arrived in this round. Everything else gets its
       // age written next to it and becomes paler the older it is - this way
       // you can see at a glance which row is still alive.
       if (typeof raw[f.name] === "number") {
-        return `<tr><th>${f.title}</th><td>${num}</td></tr>`;
+        return `<tr><th>${f.title}</th><td>${shown}</td></tr>`;
       }
       const category = age > 120 ? "alt sehr" : "alt";
       return `<tr class="${category}"><th>${f.title}</th>`
-        + `<td>${num}<span class="wann">${ageText(age)}</span></td></tr>`;
+        + `<td>${shown}<span class="wann">${ageText(age)}</span></td></tr>`;
     });
     return `<table class="rohwerte"><tbody>${rows.join("")}</tbody></table>`;
   }
@@ -1968,7 +1968,7 @@ window.joltLive = (function () {
     if (dongle && readAllowed() && window.joltObd
         && window.joltObd.linked()) {
       try {
-        const raw = await window.joltObd.readRecord(lap++);
+        const raw = await window.joltObd.readRecord(readRound++);
         // Record the 12 V voltage along, as long as it is fresh: that way
         // you can later check how far it falls when switching off.
         if (latestVoltage !== null && Date.now() - latestVoltageTime < 15000) {
@@ -2204,10 +2204,10 @@ window.joltLive = (function () {
     // for which the state of charge was just reported.
     field.blur();
     try {
-      const city = await fetchLocation();
+      const place = await fetchLocation();
       const state = await K.api(`/api/live/${K.state.sessionId}/punkt`,
-        { method: "POST", body: { lat: city.lat, lon: city.lon, soc: soc,
-                                  speed_kmh: city.speed_kmh } });
+        { method: "POST", body: { lat: place.lat, lon: place.lon, soc: soc,
+                                  speed_kmh: place.speed_kmh } });
       showState(state);
       // The deviation is the reason typing it in is worthwhile - so
       // it belongs on screen right afterwards as a sentence and not just
@@ -2261,7 +2261,7 @@ window.joltLive = (function () {
     latestRawValuesTime = 0;
     quietReported = false;
     valuesAsOf = {};
-    neverCome = new Set();
+    unanswered = new Set();
     consumptionStart = null;
     consumption_track = [];
     aux_load = null;
@@ -2376,16 +2376,16 @@ window.joltLive = (function () {
    * for each point, write tiles and trigger messages. Here only the
    * state is built up, and drawing happens once at the end. */
   async function rechargeHistory(id) {
-    let records;
+    let stored;
     try {
-      records = await K.api(`/api/live/${id}/punkte`);
+      stored = await K.api(`/api/live/${id}/punkte`);
     } catch (failure) {
       // No reason to let resuming fail - the trip runs on
       // without the history, it just looks poorer.
       console.log("[live] Verlauf nicht nachgeladen:", failure);
       return;
     }
-    const points = (records && records.points) || [];
+    const points = (stored && stored.points) || [];
     if (!points.length) return;
 
     track = [];
@@ -2397,11 +2397,11 @@ window.joltLive = (function () {
       if (typeof p.lat === "number" && typeof p.lon === "number") {
         // `spur` holds [lon, lat] - the same order as `messort()`,
         // and `spacingKm` computes with it.
-        const city = [p.lon, p.lat];
+        const place = [p.lon, p.lat];
         const most_recent = track[track.length - 1];
-        if (!most_recent || most_recent[0] !== city[0] || most_recent[1] !== city[1]) {
-          if (most_recent) drivenKm += spacingKm(most_recent, city);
-          track.push(city);
+        if (!most_recent || most_recent[0] !== place[0] || most_recent[1] !== place[1]) {
+          if (most_recent) drivenKm += spacingKm(most_recent, place);
+          track.push(place);
         }
       }
       if (typeof p.odometer_km === "number") {
@@ -2549,5 +2549,5 @@ window.joltLive = (function () {
            driving_state: () => driveState, drivingStateStart, readAllowed, connectDongle,
            examineVoltage, notificationsSetUp, handshakeSafe,
            reconnectDongle,
-           setAuto: (at) => { autoMode = !!at; } };
+           setAuto: (on) => { autoMode = !!on; } };
 })();

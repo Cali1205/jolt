@@ -52,8 +52,8 @@ window.joltBleNative = (function () {
     catch (failure) { return null; }
   }
 
-  function idRemember(ident) {
-    try { window.localStorage.setItem(KEY, ident); }
+  function idRemember(deviceId) {
+    try { window.localStorage.setItem(KEY, deviceId); }
     catch (failure) { /* private mode - then the dialog every time */ }
   }
 
@@ -78,16 +78,16 @@ window.joltBleNative = (function () {
    * hooks in **afterwards**. That is why this object collects the
    * listeners and distributes to them whatever the plugin delivers -
    * regardless of when they were added. */
-  function charakteristik(ident, serviceUuid, charUuid, attrs) {
-    const listener = [];
-    let signed_in = false;
+  function characteristic(deviceId, serviceUuid, charUuid, attrs) {
+    const listeners = [];
+    let subscribed = false;
 
-    function distribute(val) {
+    function distribute(value) {
       // Web Bluetooth passes in an event with `target.value`, and that is
-      // exactly what `atData` in the core accesses. `val` is already a
+      // exactly what `atData` in the core accesses. `value` is already a
       // DataView, which `TextDecoder` processes directly.
-      const event = { target: { value: val } };
-      for (const call of listener.slice()) {
+      const event = { target: { value: value } };
+      for (const call of listeners.slice()) {
         try { call(event); } catch (failure) { /* a listener may fail */ }
       }
     }
@@ -97,32 +97,32 @@ window.joltBleNative = (function () {
       properties: attrs,
 
       async startNotifications() {
-        if (!signed_in) {
+        if (!subscribed) {
           await shell().BleClient.startNotifications(
-            ident, serviceUuid, charUuid, distribute);
-          signed_in = true;
+            deviceId, serviceUuid, charUuid, distribute);
+          subscribed = true;
         }
         return this;
       },
 
       addEventListener(name, call) {
-        if (name === "characteristicvaluechanged") listener.push(call);
+        if (name === "characteristicvaluechanged") listeners.push(call);
       },
 
       removeEventListener(name, call) {
         if (name !== "characteristicvaluechanged") return;
-        const i = listener.indexOf(call);
-        if (i >= 0) listener.splice(i, 1);
+        const i = listeners.indexOf(call);
+        if (i >= 0) listeners.splice(i, 1);
       },
 
-      writeValue(records) {
+      writeValue(data) {
         return shell().BleClient.write(
-          ident, serviceUuid, charUuid, asDataView(records));
+          deviceId, serviceUuid, charUuid, asDataView(data));
       },
 
-      writeValueWithoutResponse(records) {
+      writeValueWithoutResponse(data) {
         return shell().BleClient.writeWithoutResponse(
-          ident, serviceUuid, charUuid, asDataView(records));
+          deviceId, serviceUuid, charUuid, asDataView(data));
       },
     };
   }
@@ -131,21 +131,21 @@ window.joltBleNative = (function () {
    * DataView. `byteOffset` and `byteLength` have to be passed along: a
    * Uint8Array can be a slice of a larger buffer, and without the two the
    * whole buffer would go out. */
-  function asDataView(records) {
-    if (records instanceof DataView) return records;
-    const field = records instanceof Uint8Array ? records : new Uint8Array(records);
-    return new DataView(field.buffer, field.byteOffset, field.byteLength);
+  function asDataView(data) {
+    if (data instanceof DataView) return data;
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
   /* ---------- Device ---------- */
 
-  function device(ident, name) {
-    const dropout_listener = [];
+  function device(deviceId, name) {
+    const dropoutListeners = [];
     let linked = false;
 
     function reportDropout() {
       linked = false;
-      for (const call of dropout_listener.slice()) {
+      for (const call of dropoutListeners.slice()) {
         try { call(); } catch (failure) { /* see above */ }
       }
     }
@@ -158,14 +158,14 @@ window.joltBleNative = (function () {
         // The dropout callback belongs in here and not in an event of its own:
         // the plugin knows only this one way, and the core hooks in via
         // `gattserverdisconnected` before it connects.
-        await shell().BleClient.connect(ident, reportDropout);
+        await shell().BleClient.connect(deviceId, reportDropout);
         linked = true;
         return server;
       },
 
       async disconnect() {
         linked = false;
-        try { await shell().BleClient.disconnect(ident); }
+        try { await shell().BleClient.disconnect(deviceId); }
         catch (failure) { /* already disconnected is not an error */ }
       },
     };
@@ -174,12 +174,12 @@ window.joltBleNative = (function () {
       get connected() { return linked; },
 
       async getPrimaryServices() {
-        const services = await shell().BleClient.getServices(ident);
+        const services = await shell().BleClient.getServices(deviceId);
         return services.map((d) => ({
           uuid: d.uuid,
           getCharacteristics() {
             return Promise.resolve((d.characteristics || []).map(
-              (c) => charakteristik(ident, d.uuid, c.uuid,
+              (c) => characteristic(deviceId, d.uuid, c.uuid,
                                     c.properties || {})));
           },
         }));
@@ -187,16 +187,16 @@ window.joltBleNative = (function () {
     };
 
     return {
-      id: ident,
+      id: deviceId,
       name: name || null,
       gatt,
       addEventListener(event, call) {
-        if (event === "gattserverdisconnected") dropout_listener.push(call);
+        if (event === "gattserverdisconnected") dropoutListeners.push(call);
       },
       removeEventListener(event, call) {
         if (event !== "gattserverdisconnected") return;
-        const i = dropout_listener.indexOf(call);
-        if (i >= 0) dropout_listener.splice(i, 1);
+        const i = dropoutListeners.indexOf(call);
+        if (i >= 0) dropoutListeners.splice(i, 1);
       },
     };
   }
@@ -233,9 +233,9 @@ window.joltBleNative = (function () {
   function asAbort(failure) {
     const text = (failure && failure.message) || String(failure);
     if (/cancel|abbruch|abort|dismiss|denied/i.test(text)) {
-      const fresh = new Error("User cancelled the requestDevice() chooser.");
-      fresh.name = "NotFoundError";
-      return fresh;
+      const error = new Error("User cancelled the requestDevice() chooser.");
+      error.name = "NotFoundError";
+      return error;
     }
     return failure instanceof Error ? failure : new Error(text);
   }
@@ -244,11 +244,11 @@ window.joltBleNative = (function () {
    * list like Web Bluetooth, so that the core need not distinguish - it is
    * just never longer than one entry. */
   async function getDevices() {
-    const ident = rememberedId();
-    if (!ident) return [];
+    const deviceId = rememberedId();
+    if (!deviceId) return [];
     await prepare();
     try {
-      const found = await shell().BleClient.getDevices([ident]);
+      const found = await shell().BleClient.getDevices([deviceId]);
       return (found || []).map((g) => device(g.deviceId, g.name));
     } catch (failure) {
       return [];

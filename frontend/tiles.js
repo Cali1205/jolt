@@ -92,13 +92,13 @@ window.joltTiles = (function () {
     c.fillText(s, x, y);
   }
 
-  /* A number as large as possible without exceeding `extent`. */
-  function numberFitting(c, s, x, y, startSize, extent, colour, orientation) {
+  /* A number as large as possible without exceeding `maxWidth`. */
+  function numberFitting(c, s, x, y, startSize, maxWidth, colour, orientation) {
     let g = startSize;
     do {
       c.font = `700 ${g}px ${NUMBER}`;
       g -= 1;
-    } while (c.measureText(s).width > extent && g > 10);
+    } while (c.measureText(s).width > maxWidth && g > 10);
     write_out(c, s, x, y, g + 1, colour,
               { typeface: NUMBER, weight: 700, orientation });
   }
@@ -109,11 +109,11 @@ window.joltTiles = (function () {
   }
   function withoutGlow(c) { c.shadowBlur = 0; c.shadowColor = "transparent"; }
 
-  /* An arc from `begin` to `upto` (radians, clockwise). */
-  function arc_len(c, mx, my, r, begin, upto, extent, colour, cap) {
+  /* An arc from `begin` to `end` (radians, clockwise). */
+  function arc_len(c, mx, my, r, begin, end, lineWidth, colour, cap) {
     c.beginPath();
-    c.arc(mx, my, r, begin, upto);
-    c.lineWidth = extent;
+    c.arc(mx, my, r, begin, end);
+    c.lineWidth = lineWidth;
     c.lineCap = cap || "round";
     c.strokeStyle = colour;
     c.stroke();
@@ -177,7 +177,7 @@ window.joltTiles = (function () {
   const SPAN = Math.PI * 1.5;          // 270 degrees
 
   /* Pointer arc with scale: charge level and recuperation. */
-  function pointerA(c, val, colour, unit, aux_line) {
+  function pointerA(c, value, colour, unit, aux_line) {
     reason(c);
     const mx = PAGE / 2, my = 61, r = 44;
     // Scale: eleven ticks, every 10 %.
@@ -192,7 +192,7 @@ window.joltTiles = (function () {
       c.stroke();
     }
     arc_len(c, mx, my, r, START, START + SPAN, 9, COLOR.track);
-    const share = Math.max(0, Math.min(1, val / 100));
+    const share = Math.max(0, Math.min(1, value / 100));
     if (share > 0.004) {
       glow(c, colour, 9);
       arc_len(c, mx, my, r, START, START + SPAN * share, 9, colour);
@@ -202,7 +202,7 @@ window.joltTiles = (function () {
       c.beginPath(); c.arc(mx + Math.cos(w) * r, my + Math.sin(w) * r, 2.6, 0, Math.PI * 2);
       c.fillStyle = COLOR.text; c.fill();
     }
-    numberFitting(c, String(Math.round(val)), mx, my + 11, 36, 58, COLOR.text, "center");
+    numberFitting(c, String(Math.round(value)), mx, my + 11, 36, 58, COLOR.text, "center");
     write_out(c, unit, mx, my + 28, 15, COLOR.muted,
               { orientation: "center", weight: 600 });
     if (aux_line) {
@@ -351,25 +351,25 @@ window.joltTiles = (function () {
   }
 
   /* Number on the left, unit small beside it on the same baseline. */
-  function numberLeft(c, num, unit, y, startSize, extent) {
+  function numberLeft(c, digits, unit, y, startSize, maxWidth) {
     c.font = `700 ${startSize}px ${NUMBER}`;
     let g = startSize;
     const unitWidth = unit ? unit.length * 6.2 + 4 : 0;
-    while (c.measureText(num).width + unitWidth > extent && g > 12) {
+    while (c.measureText(digits).width + unitWidth > maxWidth && g > 12) {
       g -= 1; c.font = `700 ${g}px ${NUMBER}`;
     }
-    const w = c.measureText(num).width;
-    write_out(c, num, 17, y, g, COLOR.text, { typeface: NUMBER, weight: 700 });
+    const w = c.measureText(digits).width;
+    write_out(c, digits, 17, y, g, COLOR.text, { typeface: NUMBER, weight: 700 });
     if (unit) {
       write_out(c, unit, 17 + w + 4, y, 12, COLOR.muted, { weight: 600 });
     }
   }
 
-  function toolbarB(c, val, colour, unit, gauge) {
+  function toolbarB(c, value, colour, unit, gauge) {
     reason(c);
     stripe(c, colour);
-    numberLeft(c, String(Math.round(val)), unit, 56, 44, 92);
-    segmente(c, 17, 70, PAGE - 31, 17, 16, val / 100, () => colour);
+    numberLeft(c, String(Math.round(value)), unit, 56, 44, 92);
+    segmente(c, 17, 70, PAGE - 31, 17, 16, value / 100, () => colour);
     // Scale below the bar.
     const brands = gauge || ["0", "50", "100"];
     brands.forEach((m, i) => {
@@ -557,35 +557,35 @@ window.joltTiles = (function () {
    * missing there. Nothing is substituted: a tile without a value stays empty. */
   function records(m, series_list) {
     const r = series_list || {};
-    const origin_of = {};
-    if (!m) return origin_of;
-    origin_of.soc = m.soc && actual(m.soc.percent)
+    const result = {};
+    if (!m) return result;
+    result.soc = m.soc && actual(m.soc.percent)
       ? { val: m.soc.percent, source: m.soc.source, series: r.soc || null } : null;
-    origin_of.arrival = m.arrival && actual(m.arrival.min)
+    result.arrival = m.arrival && actual(m.arrival.min)
       ? { min: m.arrival.min, text: m.arrival.text } : null;
-    origin_of.reserve = m.reserve && actual(m.reserve.km) ? { km: m.reserve.km, text: m.reserve.text } : null;
+    result.reserve = m.reserve && actual(m.reserve.km) ? { km: m.reserve.km, text: m.reserve.text } : null;
 
     const v = m.history;
-    const timeframe = v && Array.isArray(v.timeframe) ? v.timeframe.filter((f) => f && actual(f.kwh100)) : [];
+    const windows = v && Array.isArray(v.timeframe) ? v.timeframe.filter((f) => f && actual(f.kwh100)) : [];
     const hasBar = !!(v && Array.isArray(v.bar) && v.bar.some(actual));
-    origin_of.consumption = timeframe.length || hasBar
-      ? { text: timeframe.length ? timeframe[0].text : "–", bar: hasBar ? v.bar : null } : null;
+    result.consumption = windows.length || hasBar
+      ? { text: windows.length ? windows[0].text : "–", bar: hasBar ? v.bar : null } : null;
 
     const aux = m.aux;
     const auxKw = aux && actual(aux.kw) ? aux.kw : null;
-    origin_of.aux = auxKw !== null
+    result.aux = auxKw !== null
       ? { val: auxKw, text: String(auxKw.toFixed(1)).replace(".", ","), series: r.aux || null } : null;
 
-    origin_of.regen = v && v.regen && actual(v.regen.percent)
+    result.regen = v && v.regen && actual(v.regen.percent)
       ? { val: v.regen.percent, series: r.regen || null } : null;
 
-    const lst = Array.isArray(m.stopList) ? m.stopList : [];
-    origin_of.stops = lst.length ? {
-      count: lst.length,
-      upcoming: lst[0] && lst[0].kmText ? lst[0].kmText : null,
-      kms: lst.map((s) => s.km).filter(actual),
+    const stops = Array.isArray(m.stopList) ? m.stopList : [];
+    result.stops = stops.length ? {
+      count: stops.length,
+      upcoming: stops[0] && stops[0].kmText ? stops[0].kmText : null,
+      kms: stops.map((s) => s.km).filter(actual),
     } : null;
-    return origin_of;
+    return result;
   }
 
   /* Draw a tile onto a prepared 2D context. */
@@ -623,11 +623,11 @@ window.joltTiles = (function () {
   function pictures(look, m, series_list, generator) {
     if (!DRAWER[look]) return null;
     const every = records(m, series_list);
-    const origin_of = {};
+    const images = {};
     for (const slot of SLOTS) {
-      origin_of[slot] = tilePng(look, slot, every[slot] || null, generator || browserCanvas, 2);
+      images[slot] = tilePng(look, slot, every[slot] || null, generator || browserCanvas, 2);
     }
-    return origin_of;
+    return images;
   }
 
   /* Sample values for the preview in the settings and for checks. */

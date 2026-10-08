@@ -17,30 +17,30 @@ window.joltRoute = (function () {
 
   /* ---------- Place search ---------- */
 
-  function placeSearchSetUp(fieldId, hitId, keyname) {
+  function placeSearchSetUp(fieldId, hitId, key) {
     const field = document.getElementById(fieldId);
-    const lst = document.getElementById(hitId);
-    if (!field || !lst) return;
+    const hitList = document.getElementById(hitId);
+    if (!field || !hitList) return;
     let wait = null;
 
     field.addEventListener("input", () => {
-      chosen[keyname] = null;
+      chosen[key] = null;
       clearTimeout(wait);
       const text = field.value.trim();
-      if (text.length < 2) { lst.innerHTML = ""; return; }
+      if (text.length < 2) { hitList.innerHTML = ""; return; }
       // Typing is faster than answering. Without this pause every character
       // sends a request - with the free ORS quota of 2500 requests per day
       // that is the quickest way to use it up.
-      wait = setTimeout(() => seek(text, lst, field, keyname), 400);
+      wait = setTimeout(() => seek(text, hitList, field, key), 400);
     });
   }
 
-  async function seek(text, lst, field, keyname) {
+  async function seek(text, hitList, field, key) {
     try {
       const response = await K.api("/api/orte?text=" + encodeURIComponent(text));
-      lst.innerHTML = "";
+      hitList.innerHTML = "";
       if (!response.hit.length) {
-        lst.innerHTML = '<li class="leer">Nichts gefunden.</li>';
+        hitList.innerHTML = '<li class="leer">Nichts gefunden.</li>';
         return;
       }
       for (const city of response.hit) {
@@ -48,15 +48,15 @@ window.joltRoute = (function () {
         const btn = document.createElement("button");
         btn.textContent = city.name;
         btn.addEventListener("click", () => {
-          chosen[keyname] = city;
+          chosen[key] = city;
           field.value = city.name;
-          lst.innerHTML = "";
+          hitList.innerHTML = "";
         });
         entry.appendChild(btn);
-        lst.appendChild(entry);
+        hitList.appendChild(entry);
       }
     } catch (failure) {
-      lst.innerHTML = "";
+      hitList.innerHTML = "";
       K.report("Ortssuche: " + failure.message, "fehler");
     }
   }
@@ -144,13 +144,13 @@ window.joltRoute = (function () {
 
   function drawVariants() {
     const block = document.getElementById("varianten-block");
-    const lst = document.getElementById("varianten");
-    if (!block || !lst) return;
+    const variantList = document.getElementById("varianten");
+    if (!block || !variantList) return;
     block.hidden = latestVariants.length < 2;
-    if (latestVariants.length < 2) { lst.innerHTML = ""; return; }
+    if (latestVariants.length < 2) { variantList.innerHTML = ""; return; }
 
     const activeId = K.state.trip && K.state.trip.trip_id;
-    lst.innerHTML = "";
+    variantList.innerHTML = "";
     for (const v of latestVariants) {
       const btn = document.createElement("button");
       btn.className = "variante";
@@ -182,7 +182,7 @@ window.joltRoute = (function () {
           variantChoose(v);
         }
       });
-      lst.appendChild(btn);
+      variantList.appendChild(btn);
     }
     /* Name the source: the traffic comes from TomTom, and anyone seeing a number
      * should know where it is from. */
@@ -192,7 +192,7 @@ window.joltRoute = (function () {
       source.textContent = latestDeparture
         ? "Verkehr: TomTom, Prognose für " + departureText(latestDeparture) + " · Wetter: Vorhersage für diese Zeit"
         : "Verkehr: TomTom, Stand jetzt";
-      lst.appendChild(source);
+      variantList.appendChild(source);
     }
   }
 
@@ -273,13 +273,13 @@ window.joltRoute = (function () {
     const trip = K.state.trip;
     const points = (trip && trip.geometry) || [];
     if (points.length < 2) return;
-    const lst = [
+    const markers = [
       { lat: points[0][1], lon: points[0][0], kind: "start", text: "Start" },
       { lat: points[points.length - 1][1], lon: points[points.length - 1][0],
         kind: "ziel", text: "Ziel" },
     ];
     if (trip.reserve_point) {
-      lst.push({ lat: trip.reserve_point.lat, lon: trip.reserve_point.lon,
+      markers.push({ lat: trip.reserve_point.lat, lon: trip.reserve_point.lon,
                    kind: "reserve",
                    text: "Reserve " + K.num(trip.reserve_point.km) + " km" });
     }
@@ -290,14 +290,14 @@ window.joltRoute = (function () {
       .map((s) => s.id));
     for (const s of latestChargers) {
       if (planned.has(s.id)) continue;
-      lst.push({ lat: s.lat, lon: s.lon,
+      markers.push({ lat: s.lat, lon: s.lon,
                    kind: s.occupied_reported ? "saeuleBelegt" : "saeule" });
     }
     (lastPlan && lastPlan.stops || []).forEach((s, i) => {
-      lst.push({ lat: s.lat, lon: s.lon, kind: "stopp",
+      markers.push({ lat: s.lat, lon: s.lon, kind: "stopp",
                    text: `${i + 1}. ${K.duration(s.charge_time_minutes)}` });
     });
-    window.joltMap.setMarker(lst);
+    window.joltMap.setMarker(markers);
   }
 
   /* ---------- State of charge along the route ---------- */
@@ -306,34 +306,34 @@ window.joltRoute = (function () {
     const canvas = document.getElementById("profil");
     if (!canvas) return;
     const ratio = window.devicePixelRatio || 1;
-    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    canvas.width = extent * ratio;
-    canvas.height = elevation * ratio;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
     const pen = canvas.getContext("2d");
     pen.setTransform(ratio, 0, 0, ratio, 0, 0);
-    pen.clearRect(0, 0, extent, elevation);
+    pen.clearRect(0, 0, width, height);
 
     const profile = trip.profile || [];
     if (profile.length < 2) return;
     const maxKm = profile[profile.length - 1].km || 1;
     const reserve = trip.vehicle.reserve_soc;
 
-    const x = (km) => (km / maxKm) * (extent - 8) + 4;
+    const x = (km) => (km / maxKm) * (width - 8) + 4;
     // Nothing is drawn below zero: a negative state of charge is not a
     // statement about the battery but about the missing charging plan.
-    const y = (soc) => elevation - 6 - (Math.max(0, Math.min(100, soc)) / 100)
-      * (elevation - 24);
+    const y = (soc) => height - 6 - (Math.max(0, Math.min(100, soc)) / 100)
+      * (height - 24);
 
     // Elevation profile as a muted background - it explains the kinks in the
     // SoC curve, and without this explanation they look like measurement errors.
     let maxElevation = 1;
     for (const p of profile) maxElevation = Math.max(maxElevation, p.elevation || 0);
     pen.beginPath();
-    pen.moveTo(x(0), elevation);
+    pen.moveTo(x(0), height);
     for (const p of profile) {
-      pen.lineTo(x(p.km), elevation - ((p.elevation || 0) / maxElevation) * (elevation * 0.35));
+      pen.lineTo(x(p.km), height - ((p.elevation || 0) / maxElevation) * (height * 0.35));
     }
-    pen.lineTo(x(maxKm), elevation);
+    pen.lineTo(x(maxKm), height);
     pen.closePath();
     pen.fillStyle = "#2a333d66";
     pen.fill();
@@ -341,7 +341,7 @@ window.joltRoute = (function () {
     // Reserve line
     pen.beginPath();
     pen.moveTo(4, y(reserve));
-    pen.lineTo(extent - 4, y(reserve));
+    pen.lineTo(width - 4, y(reserve));
     pen.strokeStyle = "#e2596a88";
     pen.setLineDash([4, 4]);
     pen.lineWidth = 1;
@@ -369,19 +369,19 @@ window.joltRoute = (function () {
 
   async function chargersCharging() {
     const trip = K.state.trip;
-    const lst = document.getElementById("saeulen");
-    if (!trip || !lst) return;
+    const chargerList = document.getElementById("saeulen");
+    if (!trip || !chargerList) return;
 
-    lst.innerHTML = '<li class="leer">sucht …</li>';
+    chargerList.innerHTML = '<li class="leer">sucht …</li>';
     try {
       const response = await K.api(`/api/saeulen/entlang/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`);
-      drawChargers(response, lst);
+      drawChargers(response, chargerList);
       latestChargers = response.candidates || [];
       setMarker();
     } catch (failure) {
-      lst.innerHTML = "";
+      chargerList.innerHTML = "";
       K.report("Ladepunkte: " + failure.message, "fehler");
     }
   }
@@ -400,11 +400,11 @@ window.joltRoute = (function () {
 
   async function chargePlanCharging() {
     const trip = K.state.trip;
-    const lst = document.getElementById("ladeplan");
+    const planList = document.getElementById("ladeplan");
     const vals = document.getElementById("ladeplan-werte");
-    if (!trip || !lst || !vals) return;
+    if (!trip || !planList || !vals) return;
 
-    lst.innerHTML = '<li class="leer">plant …</li>';
+    planList.innerHTML = '<li class="leer">plant …</li>';
     vals.innerHTML = "";
     try {
       const plan = await K.api(`/api/fahrten/${trip.trip_id}/ladeplan`
@@ -415,18 +415,18 @@ window.joltRoute = (function () {
         + `&time_value_eur_h=${slider("zeitwert", 30)}`,
         { method: "POST" });
       lastPlan = plan;
-      drawPlan(plan, lst, vals);
+      drawPlan(plan, planList, vals);
       setMarker();
     } catch (failure) {
-      lst.innerHTML = "";
+      planList.innerHTML = "";
       lastPlan = null;
       K.report("Ladeplan: " + failure.message, "fehler");
     }
   }
 
-  function drawPlan(plan, lst, vals) {
+  function drawPlan(plan, planList, vals) {
     if (!plan.feasible) {
-      lst.innerHTML = `<li class="leer">${sanitize(plan.reason)}</li>`;
+      planList.innerHTML = `<li class="leer">${sanitize(plan.reason)}</li>`;
       return;
     }
 
@@ -446,12 +446,12 @@ window.joltRoute = (function () {
     ].join("");
 
     if (!plan.stop_count) {
-      lst.innerHTML = '<li class="leer">Kein Ladestopp nötig – die Strecke '
+      planList.innerHTML = '<li class="leer">Kein Ladestopp nötig – die Strecke '
         + 'reicht mit dem Ladestand beim Start.</li>';
       return;
     }
 
-    lst.innerHTML = "";
+    planList.innerHTML = "";
     plan.stops.forEach((s, i) => {
       const entry = document.createElement("li");
       // The fallback location is the reason you do not have to search anew in
@@ -486,19 +486,19 @@ window.joltRoute = (function () {
           ${detour_alt}
         </div>
         <div class="kw">${K.duration(s.charge_time_minutes)}</div>`;
-      lst.appendChild(entry);
+      planList.appendChild(entry);
     });
   }
 
-  function drawChargers(response, lst) {
+  function drawChargers(response, chargerList) {
     if (!response.count) {
-      lst.innerHTML = '<li class="leer">Keine passenden Ladepunkte gefunden. '
+      chargerList.innerHTML = '<li class="leer">Keine passenden Ladepunkte gefunden. '
         + 'Ist das Ladesäulenregister schon importiert? '
         + '(tools/import_bnetza.py)</li>';
       return;
     }
 
-    lst.innerHTML = "";
+    chargerList.innerHTML = "";
     for (const k of response.candidates.slice(0, 60)) {
       const entry = document.createElement("li");
       const occupied = k.occupied_reported
@@ -532,7 +532,7 @@ window.joltRoute = (function () {
         } catch (failure) { K.report(failure.message, "fehler"); }
       });
       entry.appendChild(btn);
-      lst.appendChild(entry);
+      chargerList.appendChild(entry);
     }
   }
 
@@ -551,8 +551,8 @@ window.joltRoute = (function () {
   function payloadValue() {
     const slider = document.getElementById("zuladung");
     if (!slider) return null;
-    const val = Number(slider.value);
-    return val < 0 ? null : val;
+    const value = Number(slider.value);
+    return value < 0 ? null : value;
   }
 
   function payloadCouple() {
@@ -560,8 +560,8 @@ window.joltRoute = (function () {
     const display = document.getElementById("zuladung-wert");
     if (!slider || !display) return;
     const refresh = () => {
-      const val = payloadValue();
-      display.textContent = val === null ? "wie im Profil" : val + " kg";
+      const value = payloadValue();
+      display.textContent = value === null ? "wie im Profil" : value + " kg";
     };
     slider.addEventListener("input", refresh);
     refresh();
@@ -582,9 +582,9 @@ window.joltRoute = (function () {
    * server needs a point in time: `new Date` reads the text as this
    * device's local time, `toISOString` turns it into UTC with Z - and thus
    * the zone can no longer be confused. Empty or unreadable means "now". */
-  function departureIso(val) {
-    if (!val) return null;
-    const timestamp = new Date(val);
+  function departureIso(text) {
+    if (!text) return null;
+    const timestamp = new Date(text);
     return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
   }
 
@@ -600,9 +600,9 @@ window.joltRoute = (function () {
   function departureLimits() {
     const field = document.getElementById("abfahrt");
     if (!field) return;
-    const now_ts = new Date();
-    field.min = localForField(now_ts);
-    field.max = localForField(new Date(now_ts.getTime() + 60 * 24 * 3600 * 1000));
+    const now = new Date();
+    field.min = localForField(now);
+    field.max = localForField(new Date(now.getTime() + 60 * 24 * 3600 * 1000));
   }
 
   /* ---------- Trailer and maximum speed ---------- */
@@ -612,8 +612,8 @@ window.joltRoute = (function () {
   function numberOrNull(id) {
     const el = document.getElementById(id);
     if (!el || el.value === "") return null;
-    const val = Number(el.value);
-    return Number.isFinite(val) ? val : null;
+    const number = Number(el.value);
+    return Number.isFinite(number) ? number : null;
   }
 
   function trailerValues() {

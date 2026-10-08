@@ -66,8 +66,8 @@ window.jolt = (function () {
     catch (e) { return ""; }
   }
 
-  function setToken(val) {
-    try { localStorage.setItem(TOKEN_KEY, val || ""); } catch (e) {}
+  function setToken(value) {
+    try { localStorage.setItem(TOKEN_KEY, value || ""); } catch (e) {}
   }
 
   /* A single place for all calls - so that the token, the error handling
@@ -89,18 +89,18 @@ window.jolt = (function () {
       throw new Error("Server nicht erreichbar.");
     }
 
-    let records = null;
-    try { records = await response.json(); } catch (e) { /* empty response */ }
+    let data = null;
+    try { data = await response.json(); } catch (e) { /* empty response */ }
 
     if (!response.ok) {
-      const reason = (records && (records.detail || records.message))
+      const reason = (data && (data.detail || data.message))
         || `HTTP ${response.status}`;
       const failure = new Error(typeof reason === "string" ? reason
                                                          : JSON.stringify(reason));
       failure.status = response.status;
       throw failure;
     }
-    return records;
+    return data;
   }
 
   /* ---------- Meldungen ---------- */
@@ -126,12 +126,12 @@ window.jolt = (function () {
 
   /* ---------- Formatierung ---------- */
 
-  const num = (val, put) =>
-    (val === null || val === undefined || Number.isNaN(val))
+  const num = (value, digits) =>
+    (value === null || value === undefined || Number.isNaN(value))
       ? "–"
-      : Number(val).toLocaleString("de-DE", {
-          minimumFractionDigits: put || 0,
-          maximumFractionDigits: put || 0 });
+      : Number(value).toLocaleString("de-DE", {
+          minimumFractionDigits: digits || 0,
+          maximumFractionDigits: digits || 0 });
 
   function duration(mins) {
     if (mins === null || mins === undefined) return "–";

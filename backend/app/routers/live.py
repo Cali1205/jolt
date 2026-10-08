@@ -54,19 +54,19 @@ class Sample(BaseModel):
 
     @field_validator("raw_values")
     @classmethod
-    def _limit_raw_values(cls, val):
+    def _limit_raw_values(cls, value):
         """It is stored per point as JSON - so it has to stay small.
 
         A batch has up to 500 points; without a limit a single request could
         fill the database and memory.
         """
-        if val is None:
-            return val
-        if len(val) > RAW_VALUES_MAX_KEY:
+        if value is None:
+            return value
+        if len(value) > RAW_VALUES_MAX_KEY:
             raise ValueError(f"höchstens {RAW_VALUES_MAX_KEY} Rohwerte je Punkt")
-        if len(json.dumps(val, default=str)) > RAW_VALUES_MAX_BYTES:
+        if len(json.dumps(value, default=str)) > RAW_VALUES_MAX_BYTES:
             raise ValueError(f"Rohwerte höchstens {RAW_VALUES_MAX_BYTES} Zeichen")
-        return val
+        return value
 
     # Time of the **measurement**. If missing, the time of receipt applies.
     # It is set by a device that submits a dead-zone buffer later - otherwise
@@ -98,8 +98,8 @@ def _examine_time(timestamp: datetime | None) -> datetime | None:
         return None
     if timestamp.tzinfo is not None:
         timestamp = timestamp.astimezone(timezone.utc).replace(tzinfo=None)
-    now_ts = datetime.utcnow()
-    if timestamp > now_ts + TIME_AHEAD or timestamp < now_ts - TIME_BACK:
+    now = datetime.utcnow()
+    if timestamp > now + TIME_AHEAD or timestamp < now - TIME_BACK:
         raise HTTPException(422, "Der Zeitstempel der Messung liegt zu weit "
                                  "von der Gegenwart entfernt.")
     return timestamp
@@ -168,11 +168,11 @@ async def _process_point(db: Session, session: models.LiveSession,
         point.speed_kmh, point.outside_temp_c, timestamp=point.timestamp,
         raw_values=point.raw_values, new_plan=new_plan)
 
-    msg = {"kind": "zustand", "simulated": False,
+    message = {"kind": "zustand", "simulated": False,
                  **live_session.state_as_dict(state)}
     if not new_plan:
-        return msg
-    await channel.send(session.id, msg)
+        return message
+    await channel.send(session.id, message)
     # A changed plan is the only reason to disturb someone at the wheel -
     # and the only one that also has to reach a dark phone. In the
     # background, because the response to a moving car must not wait for a
@@ -180,7 +180,7 @@ async def _process_point(db: Session, session: models.LiveSession,
     if state.plan_changed:
         push.send_background(SessionLocal, "jolt – Ladeplan geändert",
                                 state.change)
-    return msg
+    return message
 
 
 @router.post("/start/{trip_id}", dependencies=[Depends(deps.current_session)])
@@ -265,17 +265,17 @@ async def report_points(session_id: int, batch: SampleBatch,
     anything has been written.
     """
     session = await run_in_threadpool(_fetch_active_session, db, session_id)
-    now_ts = datetime.utcnow()
-    checked = [(_examine_time(p.timestamp) or now_ts, i, p)
+    now = datetime.utcnow()
+    checked = [(_examine_time(p.timestamp) or now, i, p)
                 for i, p in enumerate(batch.points)]
     checked.sort(key=lambda t: (t[0], t[1]))
-    msg = None
+    message = None
     for nr, (timestamp, _, p) in enumerate(checked):
-        msg = await _process_point(db, session, sources.RawPoint(
+        message = await _process_point(db, session, sources.RawPoint(
             lat=p.lat, lon=p.lon, soc=p.soc, speed_kmh=p.speed_kmh,
             outside_temp_c=p.outside_temp_c, timestamp=timestamp, raw_values=p.raw_values),
             new_plan=nr == len(checked) - 1)
-    return msg
+    return message
 
 
 class RecordingStart(BaseModel):
@@ -415,8 +415,8 @@ async def report_logger(report: LoggerReport, request: Request,
         return {"recorded": False, "vehicle": vehicle.name,
                 "reason": "Zu diesem Fahrzeug läuft gerade keine Fahrt."}
 
-    msg = await _process_point(db, session, point)
-    return {"recorded": True, "session_id": session.id, **msg}
+    message = await _process_point(db, session, point)
+    return {"recorded": True, "session_id": session.id, **message}
 
 
 @router.get("/{session_id}", dependencies=[Depends(deps.current_session)])
@@ -455,10 +455,10 @@ def read_points(session_id: int, db: Session = Depends(get_db)):
     thousand points nobody downloads that over mobile data.
     """
     session = _fetch_session(db, session_id)
-    origin_of = []
+    samples = []
     for point in session.points:
         raw = point.raw_values if isinstance(point.raw_values, dict) else {}
-        origin_of.append({
+        samples.append({
             "timestamp": utc_iso(point.timestamp),
             "lat": point.lat, "lon": point.lon,
             "soc": point.soc, "km_on_route": point.km_on_route,
@@ -467,7 +467,7 @@ def read_points(session_id: int, db: Session = Depends(get_db)):
             "charged_kwh": raw.get("charged_kwh"),
             "soc_raw": raw.get("soc_raw"),
         })
-    return {"session_id": session.id, "points": origin_of}
+    return {"session_id": session.id, "points": samples}
 
 
 @router.post("/{session_id}/ende", dependencies=[Depends(deps.current_session)])
