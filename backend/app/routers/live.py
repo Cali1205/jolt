@@ -233,7 +233,7 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
             "plan": session.plan}
 
 
-@router.post("/{session_id}/punkt", dependencies=[Depends(deps.current_session)])
+@router.post("/{session_id}/point", dependencies=[Depends(deps.current_session)])
 async def report_point(session_id: int, sample: Sample,
                        db: Session = Depends(get_db)):
     """File a measurement point.
@@ -241,7 +241,7 @@ async def report_point(session_id: int, sample: Sample,
     Only with login (`X-Token`). This used to say the session ID was the key
     - a sequential number anyone could guess, which allowed reading position
     and state of charge and injecting false measurement points. A device in
-    the car without login uses `/melden` with its vehicle's logger token.
+    the car without login uses `/report` with its vehicle's logger token.
     """
     session = await run_in_threadpool(_fetch_active_session, db, session_id)
     return await _process_point(db, session, sources.RawPoint(
@@ -250,7 +250,7 @@ async def report_point(session_id: int, sample: Sample,
         timestamp=_examine_time(sample.timestamp), raw_values=sample.raw_values))
 
 
-@router.post("/{session_id}/punkte", dependencies=[Depends(deps.current_session)])
+@router.post("/{session_id}/points", dependencies=[Depends(deps.current_session)])
 async def report_points(session_id: int, batch: SampleBatch,
                         db: Session = Depends(get_db)):
     """Several measurement points at once - the way for a dead-zone buffer.
@@ -259,7 +259,7 @@ async def report_points(session_id: int, batch: SampleBatch,
     order in the request does not matter. Re-planning happens only for the
     **last** one (see `record_sample`), and only it is sent as state
     to the viewers. The response is the state after the last point - the
-    same shape as for `/punkt`, so the UI treats both alike.
+    same shape as for `/point`, so the UI treats both alike.
 
     All or nothing: an invalid timestamp rejects the whole batch before
     anything has been written.
@@ -286,7 +286,7 @@ class RecordingStart(BaseModel):
     name: str = Field(default="", max_length=120)
 
 
-@router.post("/aufzeichnung", dependencies=[Depends(deps.current_session)])
+@router.post("/recording", dependencies=[Depends(deps.current_session)])
 def start_recording(start: RecordingStart,
                          db: Session = Depends(get_db)):
     """Record a trip without planning it beforehand.
@@ -365,7 +365,7 @@ def start_recording(start: RecordingStart,
             "recording": True}
 
 
-@router.post("/melden")
+@router.post("/report")
 async def report_logger(report: LoggerReport, request: Request,
                         db: Session = Depends(get_db)):
     """Report a measurement point without knowing the session ID.
@@ -439,7 +439,7 @@ def read_state(session_id: int, db: Session = Depends(get_db)):
                 "timestamp": utc_iso(last.timestamp)}}
 
 
-@router.get("/{session_id}/punkte", dependencies=[Depends(deps.current_session)])
+@router.get("/{session_id}/points", dependencies=[Depends(deps.current_session)])
 def read_points(session_id: int, db: Session = Depends(get_db)):
     """The measurement points of a session - for a device that newly joins.
 
@@ -470,7 +470,7 @@ def read_points(session_id: int, db: Session = Depends(get_db)):
     return {"session_id": session.id, "points": samples}
 
 
-@router.post("/{session_id}/ende", dependencies=[Depends(deps.current_session)])
+@router.post("/{session_id}/end", dependencies=[Depends(deps.current_session)])
 def finish(session_id: int, db: Session = Depends(get_db)):
     """Finish the trip - and learn from it.
 
@@ -537,7 +537,7 @@ def _task_hold(task):
     return task
 
 
-@router.post("/{session_id}/simulieren",
+@router.post("/{session_id}/simulate",
              dependencies=[Depends(deps.current_session)])
 async def simulate(session_id: int,
                      extra_consumption: float = Query(1.0, ge=0.5, le=2.0),

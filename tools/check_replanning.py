@@ -345,7 +345,7 @@ def part_plan_comparison():
 
 def prepare_trip(client) -> dict:
     """Compute a trip and create charge points along the route."""
-    vehicles = client.get("/api/fahrzeuge").json()
+    vehicles = client.get("/api/vehicles").json()
     route = client.post("/api/route", json={
         "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
@@ -437,7 +437,7 @@ def part_chain():
     verify(bool(empty.get("reason")),
            "der Grund steht dabei", str(empty.get("reason"))[:80])
 
-    client.post(f"/api/live/{session_id}/ende")
+    client.post(f"/api/live/{session_id}/end")
 
     print("\nStau verschiebt die Ankunft, ohne den Verbrauch zu verbiegen")
     start2 = client.post(f"/api/live/start/{trip_id}",
@@ -455,7 +455,7 @@ def part_chain():
            and last["arrival_shift_min"] > 10,
            "und die Ankunft verschiebt sich deutlich",
            f"{last.get('arrival_shift_min')} min")
-    client.post(f"/api/live/{sitzung2}/ende")
+    client.post(f"/api/live/{sitzung2}/end")
 
     print("\nEine Belegt-Meldung wirft den Stopp aus dem Plan")
     start3 = client.post(f"/api/live/start/{trip_id}",
@@ -477,7 +477,7 @@ def part_chain():
     verify(earlier is not None,
            "vor der Meldung steht ein nächster Stopp im laufenden Plan",
            str(ongoing.get("stops")))
-    client.post(f"/api/saeulen/{earlier['id']}/belegt")
+    client.post(f"/api/chargers/{earlier['id']}/occupied")
     after = _measure(client, sitzung3, trip_id, km=25.0, extra_consumption=1.0,
                       time_factor=1.0)
     plan3 = client.get(f"/api/live/{sitzung3}").json().get("plan") or {}
@@ -488,8 +488,8 @@ def part_chain():
     verify(after.get("plan_changed") is True,
            "und die Änderung wird als Änderung gemeldet",
            after.get("change", ""))
-    client.delete(f"/api/saeulen/{earlier['id']}/belegt")
-    client.post(f"/api/live/{sitzung3}/ende")
+    client.delete(f"/api/chargers/{earlier['id']}/occupied")
+    client.post(f"/api/live/{sitzung3}/end")
 
     print("\nDer Plan ändert sich nicht bei jeder Messung")
     start4 = client.post(f"/api/live/start/{trip_id}",
@@ -509,7 +509,7 @@ def part_chain():
     verify(changes >= 1,
            "aber mindestens einmal - sonst wäre die Sperre eine Blockade",
            f"{changes} Änderungen")
-    client.post(f"/api/live/{sitzung4}/ende")
+    client.post(f"/api/live/{sitzung4}/end")
 
 
 def _start_without_point(client, content):
@@ -522,7 +522,7 @@ def _start_without_point(client, content):
     it is the earliest. They also check something else (cleanup, odometer,
     learning); the start point itself is covered in check_backend.py.
     """
-    response = client.post("/api/live/aufzeichnung", json=content)
+    response = client.post("/api/live/recording", json=content)
     if response.status_code == 200:
         db = SessionLocal()
         try:
@@ -537,7 +537,7 @@ def _start_without_point(client, content):
 def _create_trip(client, vehicle, name, minutes_her, charges=False):
     """A recording with measurement points, the last of which is `minutes_her` old.
 
-    Note when reading: `/api/live/aufzeichnung` ends **all** other running
+    Note when reading: `/api/live/recording` ends **all** other running
     sessions on start. Building two sessions side by side is therefore not
     possible - each case is checked individually.
     """
@@ -576,7 +576,7 @@ def part_orphaned_trip():
 
     client = TestClient(app)
     print("\nVergessene Fahrt selbst beenden")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
 
     # 1. Silent for hours, last driving - this one gets ended.
     still_id, ended_at = _create_trip(client, vehicle, "Vergessen", 200)
@@ -636,7 +636,7 @@ def part_measured_capacity():
 
     client = TestClient(app)
     print("\nGemessene Akkukapazität")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
     start = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Kapazität"}).json()
@@ -685,7 +685,7 @@ def part_measured_capacity():
                "und einer weit darunter ebenso")
     finally:
         db.close()
-    client.post(f"/api/live/{start['session_id']}/ende")
+    client.post(f"/api/live/{start['session_id']}/end")
 
 
 def part_odometer_distance():
@@ -707,7 +707,7 @@ def part_odometer_distance():
 
     client = TestClient(app)
     print("\nStrecke aus dem Kilometerstand")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
 
     def trip(name, with_counter):
         start = _start_without_point(client, {
@@ -736,7 +736,7 @@ def part_odometer_distance():
                     raw_values=raw)
         finally:
             db.close()
-        return client.post(f"/api/live/{start['session_id']}/ende").json()
+        return client.post(f"/api/live/{start['session_id']}/end").json()
 
     without = (trip("Nur GPS", False).get("recording") or {})
     using = (trip("Mit Zähler", True).get("recording") or {})
@@ -777,7 +777,7 @@ def part_odometer_distance():
 
 
 def part_charge_plan_one_path():
-    """`/ladeplan` and replanning compute via the same path.
+    """`/charge-plan` and replanning compute via the same path.
 
     Both used to build the charging plan completely on their own: the same
     translation of corridor candidates into charging options (byte for byte
@@ -797,7 +797,7 @@ def part_charge_plan_one_path():
     trip_id = route["trip_id"]
     print("\nLadeplan und Umplanung: ein Weg")
 
-    over_router = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+    over_router = client.post(f"/api/trips/{trip_id}/charge-plan",
                                params={"min_kw": 100, "radius_km": 10}).json()
     db = SessionLocal()
     try:
@@ -864,7 +864,7 @@ def part_charging_distorted_not():
 
     client = TestClient(app)
     print("\nEin Ladestopp verfälscht weder Lernen noch Abweichung")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
     start = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 80.0, "name": "Mit Ladestopp"}).json()
@@ -888,7 +888,7 @@ def part_charging_distorted_not():
     finally:
         db.close()
 
-    end = client.post(f"/api/live/{start['session_id']}/ende").json()
+    end = client.post(f"/api/live/{start['session_id']}/end").json()
     learned = end.get("learned")
 
     # What the naive way would have delivered - computed from the same
@@ -925,7 +925,7 @@ def part_charging_distorted_not():
                f"gelernt={learned['raw_factor']} naiv={naiv}")
 
     # And the deviation during the trip.
-    state = client.post(f"/api/live/{start['session_id']}/punkt",
+    state = client.post(f"/api/live/{start['session_id']}/point",
                           json={"lat": 48.5, "lon": 11.0, "soc": 50.0})
     # The session has ended; a second one for the deviation.
     start2 = _start_without_point(client, {
@@ -934,7 +934,7 @@ def part_charging_distorted_not():
     tail = None
     for i in range(30):
         soc = 80.0 - i * 0.8 if i < 15 else 80.0 - (i - 15) * 0.8
-        tail = client.post(f"/api/live/{start2['session_id']}/punkt", json={
+        tail = client.post(f"/api/live/{start2['session_id']}/point", json={
             "lat": 48.0 + i * 0.012, "lon": 11.0, "soc": round(soc, 1)}).json()
     dev = tail.get("deviation_pp")
     verify(dev is None or abs(dev) < 40.0,
@@ -990,19 +990,19 @@ def part_state_coordinate():
     """
     client = TestClient(app)
     print("\nZustand trägt die Koordinate")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
     start = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Koordinate"}).json()
 
-    state = client.post(f"/api/live/{start['session_id']}/punkt",
+    state = client.post(f"/api/live/{start['session_id']}/point",
                           json={"lat": 48.21, "lon": 11.34, "soc": 88.0}).json()
     verify(abs((state.get("lat") or 0) - 48.21) < 1e-6
            and abs((state.get("lon") or 0) - 11.34) < 1e-6,
            "der gemeldete Punkt kommt mit seiner Koordinate zurück",
            f"lat={state.get('lat')} lon={state.get('lon')}")
 
-    two = client.post(f"/api/live/{start['session_id']}/punkt",
+    two = client.post(f"/api/live/{start['session_id']}/point",
                        json={"lat": 48.30, "lon": 11.40, "soc": 87.0}).json()
     verify(two.get("lat") != state.get("lat"),
            "und sie wandert mit - sonst bestünde die Spur aus einem Punkt",
@@ -1110,7 +1110,7 @@ def part_altitude_source():
 def part_superseded_trip():
     """A new recording supersedes the old one - but does not swallow it.
 
-    `/api/live/aufzeichnung` ends running sessions of the same vehicle. That
+    `/api/live/recording` ends running sessions of the same vehicle. That
     is right; but all it did was set `laeuft = False`. For a recording that
     was a total loss: route and energy profile are only built from the
     measurement points on completion, and with `laeuft = False` even the
@@ -1122,7 +1122,7 @@ def part_superseded_trip():
     """
     client = TestClient(app)
     print("\nAbgelöste Aufzeichnung")
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
 
     first_item = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
@@ -1227,7 +1227,7 @@ def part_recording():
     client = TestClient(app)
     print("\nFahrt aufzeichnen statt planen")
 
-    vehicle = client.get("/api/fahrzeuge").json()[0]
+    vehicle = client.get("/api/vehicles").json()[0]
     response = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 90.0, "name": "Runde um den Block"})
@@ -1257,7 +1257,7 @@ def part_recording():
     finally:
         db.close()
 
-    end = client.post(f"/api/live/{session_id}/ende").json()
+    end = client.post(f"/api/live/{session_id}/end").json()
     built = end.get("recording") or {}
     verify(built.get("ok") is True,
            "beim Beenden entsteht aus den Messpunkten eine Strecke",
@@ -1269,7 +1269,7 @@ def part_recording():
            "die **gemessene** Aussentemperatur gilt, nicht eine Vorhersage",
            str(built.get("outside_temp_c")))
 
-    trip = client.get(f"/api/fahrten/{start['trip_id']}").json()
+    trip = client.get(f"/api/trips/{start['trip_id']}").json()
     verify(len(trip.get("profile") or []) > 5,
            "die Fahrt hat hinterher ein Energieprofil",
            f"{len(trip.get('profile') or [])} Stützstellen")
@@ -1371,7 +1371,7 @@ def part_chain_with_charge_stop():
     finally:
         db.close()
 
-    client.post(f"/api/live/{session_id}/ende")
+    client.post(f"/api/live/{session_id}/end")
 
 
 def part_position_without_charge_level():
@@ -1463,7 +1463,7 @@ def part_position_without_charge_level():
     finally:
         db.close()
 
-    client.post(f"/api/live/{session_id}/ende")
+    client.post(f"/api/live/{session_id}/end")
 
 
 def part_speed_in_the_chain():
@@ -1512,18 +1512,18 @@ def part_speed_in_the_chain():
     verify((plan.get("speed_factor") or 0) > 1.1,
            "und der Faktor entspricht dem, was tatsächlich gefahren wurde",
            f"×{plan.get('speed_factor')}")
-    client.post(f"/api/live/{session_id}/ende")
+    client.post(f"/api/live/{session_id}/end")
 
 
 
 def _measure(client, session_id, trip_id, km, extra_consumption, time_factor):
     """Report a single measurement point at kilometer `km`."""
-    trip = client.get(f"/api/fahrten/{trip_id}").json()
+    trip = client.get(f"/api/trips/{trip_id}").json()
     profile = trip["profile"]
     entry = _profile_at(profile, km)
     consumed = trip["start_soc"] - (entry.get("soc") or trip["start_soc"])
     soc = max(0.0, trip["start_soc"] - consumed * extra_consumption)
-    return client.post(f"/api/live/{session_id}/punkt", json={
+    return client.post(f"/api/live/{session_id}/point", json={
         "lat": entry["lat"], "lon": entry["lon"], "soc": round(soc, 2)}).json()
 
 

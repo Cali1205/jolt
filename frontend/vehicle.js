@@ -171,7 +171,7 @@ window.joltVehicle = (function () {
 
   async function load() {
     try {
-      K.state.vehicles = await K.api("/api/fahrzeuge");
+      K.state.vehicles = await K.api("/api/vehicles");
     } catch (failure) {
       K.report("Fahrzeuge: " + failure.message, "fehler");
       return;
@@ -266,7 +266,7 @@ window.joltVehicle = (function () {
     }
     let response;
     try {
-      response = await K.api(`/api/fahrzeuge/${vehicle.id}/logger-token`,
+      response = await K.api(`/api/vehicles/${vehicle.id}/logger-token`,
                             { method: "POST" });
     } catch (failure) {
       K.report("Logger-Token: " + failure.message, "fehler");
@@ -286,7 +286,7 @@ window.joltVehicle = (function () {
     const vehicle = chosenVehicle();
     if (!vehicle || !vehicle.logger_active) return;
     try {
-      await K.api(`/api/fahrzeuge/${vehicle.id}/logger-token`,
+      await K.api(`/api/vehicles/${vehicle.id}/logger-token`,
                   { method: "DELETE" });
     } catch (failure) {
       K.report("Logger abmelden: " + failure.message, "fehler");
@@ -298,7 +298,7 @@ window.joltVehicle = (function () {
 
   async function templatesCharging() {
     try {
-      templates = await K.api("/api/fahrzeuge/vorlagen");
+      templates = await K.api("/api/vehicles/templates");
     } catch (failure) { return; }
     const selection = document.getElementById("template");
     selection.innerHTML = '<option value="">– auswählen –</option>'
@@ -327,9 +327,9 @@ window.joltVehicle = (function () {
 
     try {
       if (choice === "neu") {
-        await K.api("/api/fahrzeuge", { method: "POST", body: payload });
+        await K.api("/api/vehicles", { method: "POST", body: payload });
       } else {
-        await K.api("/api/fahrzeuge/" + choice, { method: "PUT", body: payload });
+        await K.api("/api/vehicles/" + choice, { method: "PUT", body: payload });
       }
       await load();
       K.report("Fahrzeug gespeichert.", "hinweis");

@@ -100,7 +100,7 @@ function build(o) {
   console.log("\nStarten");
   t = build();
   await t.calls.listener.carplayAktion({ aktion: "starten" });
-  verify(t.calls.api.length === 1 && t.calls.api[0].fs_path === "/api/live/aufzeichnung"
+  verify(t.calls.api.length === 1 && t.calls.api[0].fs_path === "/api/live/recording"
          && t.calls.api[0].body.vehicle_id === 1,
          "legt die Aufzeichnung mit dem gewaehlten (zuletzt benutzten) Fahrzeug an",
          JSON.stringify(t.calls.api));

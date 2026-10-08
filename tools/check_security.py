@@ -109,9 +109,9 @@ def part_live() -> None:
 
     for method, fs_path, body in (
             ("get", "/api/live/1", None),
-            ("get", "/api/live/1/punkte", None),
-            ("post", "/api/live/1/punkt", point),
-            ("post", "/api/live/1/punkte", {"points": [point]})):
+            ("get", "/api/live/1/points", None),
+            ("post", "/api/live/1/point", point),
+            ("post", "/api/live/1/points", {"points": [point]})):
         response = getattr(client, method)(fs_path, **({"json": body} if body else {}))
         verify(response.status_code == 401,
                f"{method.upper()} {fs_path} ohne Anmeldung: 401", f"HTTP {response.status_code}")
@@ -150,19 +150,19 @@ def part_live() -> None:
            and ws_result("[1]") == "WebSocketDisconnect",
            "und mit einem Token, der keine Zeichenkette ist")
 
-    # /melden stays open, but only with a valid logger token - and whoever sends
+    # /report stays open, but only with a valid logger token - and whoever sends
     # a wrong one too often gets throttled.
     security._report_error.clear()
     report = {"token": "gibt-es-nicht", "lat": 50, "lon": 10, "soc": 50}
-    response = client.post("/api/live/melden", json=report)
+    response = client.post("/api/live/report", json=report)
     verify(response.status_code == 401,
-           "/melden mit unbekanntem Logger-Token: 401", f"HTTP {response.status_code}")
-    response = client.post("/api/live/melden",
+           "/report mit unbekanntem Logger-Token: 401", f"HTTP {response.status_code}")
+    response = client.post("/api/live/report",
                           json={"token": "gibt-es-nicht", "format": "gibt-es-nicht"})
     verify(response.status_code == 401,
            "das Token wird vor der Übersetzung geprüft - ein unbekanntes Format "
            "kostet ohne gültiges Token keine Rechenzeit", f"HTTP {response.status_code}")
-    codes = [client.post("/api/live/melden", json=report).status_code
+    codes = [client.post("/api/live/report", json=report).status_code
              for _ in range(security.REPORT_ERROR_MAX + 2)]
     verify(codes[-1] == 429 and codes[0] == 401,
            "nach zu vielen Fehlversuchen kommt 429 - vom allgemeinen Limit ist "
@@ -170,7 +170,7 @@ def part_live() -> None:
     security._report_error.clear()
 
     # The other end: a UI that does not send the token would be mute after the
-    # hardening - the WebSocket would close, `/punkt` would give 401.
+    # hardening - the WebSocket would close, `/point` would give 401.
     frontend = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "frontend")
     live = open(os.path.join(frontend, "live.js"), encoding="utf-8").read()
@@ -226,7 +226,7 @@ def part_inputs() -> None:
            "p_aux_w": 500, "max_charge_power_kw": 200,
            "electricity_prices": [{"pattern": "Ionity", "eur_kwh": 0.39}],
            "charge_curve": [[0, 100], [50, 150], [80, 60]]}
-    response = client.post("/api/fahrzeuge", json=good, headers=header)
+    response = client.post("/api/vehicles", json=good, headers=header)
     verify(response.status_code == 200,
            "ein ordentliches Fahrzeug wird angelegt", f"HTTP {response.status_code} {response.text[:120]}")
     verify(response.json()["electricity_prices"] == [{"pattern": "Ionity", "eur_kwh": 0.39}],
@@ -237,7 +237,7 @@ def part_inputs() -> None:
                        ("p_aux_w", -1), ("max_charge_power_kw", 0),
                        ("battery_gross_kwh", 1e9), ("name", ""),
                        ("connector_type", "x" * 500)):
-        response = client.post("/api/fahrzeuge", json={**good, field: val}, headers=header)
+        response = client.post("/api/vehicles", json={**good, field: val}, headers=header)
         verify(response.status_code == 422,
                f"{field} = {val if not isinstance(val, str) else repr(val[:8])} "
                "wird abgelehnt - Null im Fahrwiderstand ergab Division durch null",
@@ -249,10 +249,10 @@ def part_inputs() -> None:
             ("ein Strompreis ohne Zahl", {"electricity_prices": [{"pattern": "x", "eur_kwh": "viel"}]}),
             ("ein negativer Strompreis", {"electricity_prices": [{"pattern": "x", "eur_kwh": -1}]}),
             ("hundert Strompreise", {"electricity_prices": [{"pattern": "x", "eur_kwh": 1}] * 100})):
-        response = client.post("/api/fahrzeuge", json={**good, **change}, headers=header)
+        response = client.post("/api/vehicles", json={**good, **change}, headers=header)
         verify(response.status_code == 422, f"{text} wird abgelehnt",
                f"HTTP {response.status_code}")
-    response = client.post("/api/fahrzeuge", headers={**header, "Content-Type": "application/json"},
+    response = client.post("/api/vehicles", headers={**header, "Content-Type": "application/json"},
                           content=b'{"name":"x","battery_gross_kwh":NaN,"battery_net_kwh":1}')
     verify(response.status_code == 422, "NaN als Zahl wird abgelehnt - es verseucht jede Rechnung danach",
            f"HTTP {response.status_code}")
@@ -264,10 +264,10 @@ def part_inputs() -> None:
                             ("Aussentemperatur von 400 Grad", {"outside_temp_c": 400}),
                             ("hundert Rohwerte", {"raw_values": {f"k{i}": 1 for i in range(100)}}),
                             ("ein Rohwert von 20 000 Zeichen", {"raw_values": {"a": "x" * 20000}})):
-        response = client.post("/api/live/1/punkt", json={**point, **change}, headers=header)
+        response = client.post("/api/live/1/point", json={**point, **change}, headers=header)
         verify(response.status_code == 422, f"Messpunkt mit {text} wird abgelehnt",
                f"HTTP {response.status_code}")
-    response = client.post("/api/live/1/punkt", headers=header,
+    response = client.post("/api/live/1/point", headers=header,
                           json={**point, "speed_kmh": 130, "outside_temp_c": -5,
                                 "raw_values": {"odometer_km": 1234, "soc_raw": 150}})
     verify(response.status_code == 404,

@@ -193,7 +193,7 @@
   async function createTrip(soc) {
     goAsOf("Fahrt anlegen …");
     const place = await getPosition();
-    const response = await fetch("/api/live/aufzeichnung", {
+    const response = await fetch("/api/live/recording", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify({
@@ -227,7 +227,7 @@
     const selection = el("vehicle-choice-obd");
     if (!selection) return;
     try {
-      const response = await fetch("/api/fahrzeuge",
+      const response = await fetch("/api/vehicles",
                                   { headers: { "X-Token": joltToken() } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const vehicles = await response.json();
@@ -368,11 +368,11 @@
      * the session - then it identifies itself with the vehicle's logger
      * token, and jolt looks for the running session itself. */
     const url = sessionId
-      ? `/api/live/${sessionId}/punkt`
-      : "/api/live/melden";
+      ? `/api/live/${sessionId}/point`
+      : "/api/live/report";
     if (!sessionId) payload.token = el("token").value.trim();
 
-    // `/punkt` requires login; `/melden` identifies itself with the logger
+    // `/point` requires login; `/report` identifies itself with the logger
     // token in the body and does not need the header, but it does no harm
     // either.
     const response = await fetch(url, {
@@ -464,7 +464,7 @@
     // route - the whole purpose would be missed.
     if (sessionId) {
       try {
-        const response = await fetch(`/api/live/${sessionId}/ende`, {
+        const response = await fetch(`/api/live/${sessionId}/end`, {
           method: "POST", headers: { "X-Token": joltToken() } });
         const data = await response.json().catch(() => ({}));
         const built = data.recording || {};
@@ -727,7 +727,7 @@
     if (lastSoc === null) { log("Erst den Ladestand abfragen."); return; }
     try {
       const place = await getPosition();
-      const response = await fetch("/api/live/melden", {
+      const response = await fetch("/api/live/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, soc: lastSoc,

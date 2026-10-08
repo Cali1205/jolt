@@ -109,7 +109,7 @@ window.joltSettings = (function () {
       supported ? "gut" : "warnung"));
     let serverReady = false;
     try {
-      serverReady = (await K.api("/api/push/schluessel")).configured;
+      serverReady = (await K.api("/api/push/key")).configured;
     } catch (failure) { /* shown below as "nicht erreichbar" */ }
     rows.push(row("Server", serverReady ? "bereit"
       : "ohne VAPID-Schlüssel – Benachrichtigungen aus", serverReady ? "gut" : "warnung"));
@@ -142,7 +142,7 @@ window.joltSettings = (function () {
       if (latest) {
         const endpoint = latest.endpoint;
         await latest.unsubscribe();
-        await K.api("/api/push/abo", { method: "DELETE", body: { endpoint } });
+        await K.api("/api/push/subscription", { method: "DELETE", body: { endpoint } });
       }
       K.report("Dieses Gerät erhält keine Benachrichtigungen mehr.", "hinweis");
     } catch (failure) {

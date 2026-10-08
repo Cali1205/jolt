@@ -6,7 +6,7 @@ from .. import deps, models, routing
 from ..database import get_db
 from ..security import login_limit
 
-router = APIRouter(prefix="/api", tags=["zugang"])
+router = APIRouter(prefix="/api", tags=["access"])
 
 
 class SignIn(BaseModel):

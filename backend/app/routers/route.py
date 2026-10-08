@@ -1,7 +1,7 @@
 """Compute a route: distance, elevation profile, weather, energy demand, charging stops.
 
 The endpoint that brings everything together: the route from the routing
-service, the energy demand from the consumption model and - via `/ladeplan`
+service, the energy demand from the consumption model and - via `/charge-plan`
 (charge plan) - the time-optimal sequence of charging stops from the
 optimizer.
 
@@ -134,7 +134,7 @@ class Routenanfrage(BaseModel):
     speed_max_kmh: float | None = Field(default=None, ge=30, le=250)
 
 
-@router.get("/orte")
+@router.get("/places")
 def search_places(text: str = Query(min_length=2), country: str = ""):
     try:
         hit = routing.provider().seek(text, country)
@@ -605,7 +605,7 @@ def _rate_variants(db, results: list, vehicle) -> None:
     results.sort(key=lambda v: "insgesamt schnellste" not in v["labels"])
 
 
-@router.get("/fahrten/{trip_id}")
+@router.get("/trips/{trip_id}")
 def read_trip(trip_id: int, db: Session = Depends(get_db)):
     """A stored trip - in the same shape as a fresh variant.
 
@@ -661,7 +661,7 @@ def read_trip(trip_id: int, db: Session = Depends(get_db)):
             "soc_at_target": profile[-1]["soc"] if profile else None}
 
 
-@router.post("/fahrten/{trip_id}/ladeplan")
+@router.post("/trips/{trip_id}/charge-plan")
 def compute_charge_plan(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                      min_kw: float = Query(50.0, ge=0),
                      connector_type: str = "",
@@ -721,7 +721,7 @@ def compute_charge_plan(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50)
             "connector_type": connector_type or trip.vehicle.connector_type}
 
 
-@router.get("/fahrten")
+@router.get("/trips")
 def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=200)):
     """The most recently planned trips.
 
@@ -767,7 +767,7 @@ def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=20
     return result
 
 
-@router.delete("/fahrten/{trip_id}")
+@router.delete("/trips/{trip_id}")
 def delete_trip(trip_id: int, db: Session = Depends(get_db)):
     """Remove a trip from the history.
 

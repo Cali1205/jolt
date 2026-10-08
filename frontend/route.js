@@ -37,7 +37,7 @@ window.joltRoute = (function () {
 
   async function seek(text, hitList, field, key) {
     try {
-      const response = await K.api("/api/orte?text=" + encodeURIComponent(text));
+      const response = await K.api("/api/places?text=" + encodeURIComponent(text));
       hitList.innerHTML = "";
       if (!response.hit.length) {
         hitList.innerHTML = '<li class="leer">Nichts gefunden.</li>';
@@ -131,7 +131,7 @@ window.joltRoute = (function () {
    * loaded on its own has no siblings any more - the other variants from
    * back then are separate trips with their own ID. */
   async function tripCharging(tripId) {
-    const trip = await K.api("/api/fahrten/" + tripId);
+    const trip = await K.api("/api/trips/" + tripId);
     latestVariants = [];
     drawVariants();
     K.state.trip = trip;
@@ -374,7 +374,7 @@ window.joltRoute = (function () {
 
     chargerList.innerHTML = '<li class="leer">sucht …</li>';
     try {
-      const response = await K.api(`/api/saeulen/entlang/${trip.trip_id}`
+      const response = await K.api(`/api/chargers/along/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`);
       drawChargers(response, chargerList);
@@ -407,7 +407,7 @@ window.joltRoute = (function () {
     planList.innerHTML = '<li class="leer">plant …</li>';
     vals.innerHTML = "";
     try {
-      const plan = await K.api(`/api/fahrten/${trip.trip_id}/ladeplan`
+      const plan = await K.api(`/api/trips/${trip.trip_id}/charge-plan`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
         + `&stop_fixed_cost_min=${holding_cost()}`
@@ -522,7 +522,7 @@ window.joltRoute = (function () {
       btn.textContent = k.occupied_reported ? "frei" : "belegt";
       btn.addEventListener("click", async () => {
         try {
-          await K.api(`/api/saeulen/${k.id}/belegt`,
+          await K.api(`/api/chargers/${k.id}/occupied`,
                       { method: k.occupied_reported ? "DELETE" : "POST" });
           await chargersCharging();
           // "Everything here is full" is the only availability information that

@@ -99,7 +99,7 @@ async function point(pace = null) {
 
   console.log("\nNetz da");
   await point();
-  verify(posts.length === 1 && posts[0].fs_path === "/api/live/7/punkte"
+  verify(posts.length === 1 && posts[0].fs_path === "/api/live/7/points"
          && posts[0].body.points.length === 1, "ein Punkt geht als Stapel von eins hinaus",
          JSON.stringify(posts));
   verify(typeof posts[0].body.points[0].timestamp === "string"

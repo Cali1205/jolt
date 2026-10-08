@@ -11,7 +11,7 @@ from ..timestamp import utc_iso
 from ..database import get_db
 from ..charging import curves
 
-router = APIRouter(prefix="/api/fahrzeuge", tags=["fahrzeuge"],
+router = APIRouter(prefix="/api/vehicles", tags=["vehicles"],
                    dependencies=[Depends(deps.current_session)])
 
 
@@ -138,7 +138,7 @@ def _set_curve(db: Session, vehicle: models.Vehicle,
             soc_percent=float(entry[0]), kw=float(entry[1])))
 
 
-@router.get("/vorlagen")
+@router.get("/templates")
 def templates():
     """Starting values so nobody has to guess the c_w value and charging
     curve by hand.
@@ -194,7 +194,7 @@ def renew_logger_token(vehicle_id: int, db: Session = Depends(get_db)):
     """Create a new logger token - and thereby invalidate the old one.
 
     The token is the key that lets a device in the car report measurement
-    points (`POST /api/live/melden`). It appears **only in this one
+    points (`POST /api/live/report`). It appears **only in this one
     response**; afterwards it cannot be retrieved from the UI. Whoever loses
     it creates a new one - that costs nothing except re-entering it in the
     logger, and it keeps up the habit of not dragging a secret along in

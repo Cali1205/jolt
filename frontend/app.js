@@ -94,7 +94,7 @@ window.joltApp = (function () {
   async function signed_in() {
     if (!K.token()) return false;
     try {
-      await K.api("/api/fahrzeuge/vorlagen");
+      await K.api("/api/vehicles/templates");
       return true;
     } catch (failure) {
       return false;

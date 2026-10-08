@@ -130,7 +130,7 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
   p.callback({ latitude: 52.5, longitude: 13.4, altitude: 40, speed: 27.5,
                time: fixTime, accuracy: 5 });
   await wait(30);
-  const point = posts.filter((x) => /\/punkte$/.test(x.fs_path)).pop();
+  const point = posts.filter((x) => /\/points$/.test(x.fs_path)).pop();
   const mp = point && point.body.points[point.body.points.length - 1];
   verify(!!mp && mp.lat === 52.5 && mp.lon === 13.4,
          "Position geht an den Server", JSON.stringify(point));
@@ -143,7 +143,7 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
   p.callback({ latitude: 52.51, longitude: 13.41, altitude: null, speed: null,
                time: Date.now() });
   await wait(30);
-  const withoutSpeed = posts.filter((x) => /\/punkte$/.test(x.fs_path)).pop().body.points.pop();
+  const withoutSpeed = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
   verify(withoutSpeed.speed_kmh === null,
          "fehlt die Geschwindigkeit, bleibt sie leer statt 0 oder NaN");
 
