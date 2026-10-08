@@ -185,7 +185,7 @@ The detailed concept with the reasoning behind every decision is in
   vehicle cannot know the session ID of a trip; it only comes into being when
   you set off in the app and changes with every trip. It therefore identifies itself with
   a long-lived **logger token of the vehicle** (`POST
-  /api/live/melden`, "melden" = report), and jolt finds the running trip itself. If the car is
+  /api/live/report`, "melden" = report), and jolt finds the running trip itself. If the car is
   parked, that is not an error but a response with `aufgenommen: false` ("recorded: false") — an
   unattended device that meets error responses logs errors
   or switches itself off.
@@ -232,7 +232,7 @@ The detailed concept with the reasoning behind every decision is in
   alive is shown by a drive.
 - **Buffer measurement points** — every point carries its measurement time and first goes into
   a queue (`localStorage`), from there in batches of 100 to
-  `POST /api/live/{id}/punkte` ("punkte" = points). Without a network the points stay put and later go out
+  `POST /api/live/{id}/points` ("punkte" = points). Without a network the points stay put and later go out
   in measurement order; planning happens only at the last point of a
   batch, because a plan from a position ten minutes old would be
   outdated by the time it appears.
@@ -300,7 +300,7 @@ along the actual route geometry:
 OCM_API_KEY=… ./tools/import_ocm_route.py <trip_id> 30 50   # radius 30 km, from 50 kW
 ```
 
-The `trip_id` is in the response of `GET /api/fahrten` ("fahrten" = trips) once the
+The `trip_id` is in the response of `GET /api/trips` ("fahrten" = trips) once the
 route has been calculated in the app.
 
 ### Notifications to the phone
@@ -447,7 +447,7 @@ backend/app/
               channel.py (WebSocket) · simulator.py
               sources/  translate foreign report formats (jolt.py · abrp.py)
   push.py     Web Push: keys, subscriptions, sending
-  routers/    auth · vehicles · route (incl. /ladeplan) · chargers · live · push
+  routers/    auth · vehicles · route (incl. /charge-plan) · chargers · live · push
 frontend/     index.html · core.js · app.js · map.js (own pan-and-zoom map)
               route.js · live.js · trips.js · vehicle.js
               obd.html · obd-core.js · obd.js  (dongle, separate page)

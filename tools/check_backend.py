@@ -81,21 +81,21 @@ def main() -> int:
     verify(status["password_required"] is False, "ohne APP_PASSWORT offener Zugang")
 
     print("\nFahrzeuge")
-    vehicles = client.get("/api/fahrzeuge").json()
+    vehicles = client.get("/api/vehicles").json()
     verify(len(vehicles) == 1, "beim ersten Start wird ein Fahrzeug angelegt",
            f"sind {len(vehicles)}")
     verify(len(vehicles[0]["charge_curve"]) >= 5,
            "und es hat eine Ladekurve mit mehreren Stützstellen")
-    verify(len(client.get("/api/fahrzeuge/vorlagen").json()) >= 4,
+    verify(len(client.get("/api/vehicles/templates").json()) >= 4,
            "es gibt mehrere Vorlagen zur Auswahl")
 
-    fresh = client.post("/api/fahrzeuge", json={
+    fresh = client.post("/api/vehicles", json={
         "name": "Prüfwagen", "battery_gross_kwh": 82.0, "battery_net_kwh": 77.0,
         "max_charge_power_kw": 150.0,
         "charge_curve": [[0, 120], [20, 150], [50, 100], [80, 50], [100, 8]]}).json()
     verify(fresh["id"] != vehicles[0]["id"], "ein zweites Fahrzeug lässt sich anlegen")
     verify(len(fresh["charge_curve"]) == 5, "mit eigener Ladekurve")
-    failure = client.post("/api/fahrzeuge", json={
+    failure = client.post("/api/vehicles", json={
         "name": "Unsinn", "battery_gross_kwh": 50.0, "battery_net_kwh": 60.0})
     verify(failure.status_code == 400, "netto über brutto wird abgelehnt",
            f"HTTP {failure.status_code}")
@@ -103,7 +103,7 @@ def main() -> int:
     # Regression: a duplicate charge level in the curve violates the
     # unique constraint (vehicle_id, soc_percent) - that must arrive as an
     # understandable 400, not as a bare 500 on commit.
-    double = client.post("/api/fahrzeuge", json={
+    double = client.post("/api/vehicles", json={
         "name": "Doppelte Kurve", "battery_gross_kwh": 82.0, "battery_net_kwh": 77.0,
         "charge_curve": [[0, 180], [20, 180], [80, 80], [90, 90], [90, 60],
                      [100, 45]]})
@@ -119,7 +119,7 @@ def main() -> int:
     # not crash. SQLAlchemy would otherwise write the new rows before deleting
     # the old ones in the same flush and violate the unique constraint, even
     # though the new curve on its own has no duplicates.
-    changed = client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+    changed = client.put(f"/api/vehicles/{vehicles[0]['id']}", json={
         "name": vehicles[0]["name"], "battery_gross_kwh": vehicles[0]["battery_gross_kwh"],
         "battery_net_kwh": vehicles[0]["battery_net_kwh"],
         "charge_curve": [[soc, kw + 5] for soc, kw in vehicles[0]["charge_curve"]]})
@@ -329,7 +329,7 @@ def main() -> int:
         db.close()
 
     print("\nOrtssuche ohne Länderfilter")
-    # Regression: `land` used to be hard-coded to "DE", so /api/orte never
+    # Regression: `land` used to be hard-coded to "DE", so /api/places never
     # asked explicitly - every destination across the border vanished through
     # ORS' boundary.country filter. The demo routing makes no real
     # HTTP call, so the ORS adapter is checked directly here: which
@@ -457,7 +457,7 @@ def main() -> int:
     verify(rig["kwh_total"] > limited["kwh_total"] * 1.25,
            "der Anhänger kostet bei gleichem Tempo deutlich mehr",
            f"{limited['kwh_total']} -> {rig['kwh_total']} kWh")
-    saved = client.get(f"/api/fahrten/{rig['trip_id']}").json()
+    saved = client.get(f"/api/trips/{rig['trip_id']}").json()
     verify(saved.get("trailer_kg") == 1300
            and saved.get("speed_max_kmh") == 100.0,
            "beides steht an der Fahrt - eine Umplanung unterwegs rechnet damit",
@@ -468,7 +468,7 @@ def main() -> int:
         "speed_max_kmh": 5}).status_code == 422,
         "eine Grenze von 5 km/h ist ein Tippfehler und wird abgelehnt")
 
-    bound = client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+    bound = client.put(f"/api/vehicles/{vehicles[0]['id']}", json={
         **vehicles[0],
         "max_speed_kmh": 120.0})
     verify(bound.status_code == 200 and bound.json().get("max_speed_kmh") == 120.0,
@@ -478,7 +478,7 @@ def main() -> int:
     verify(at_auto["kwh_total"] < free["kwh_total"],
            "und begrenzt jede Fahrt dieses Fahrzeugs",
            f"{at_auto['kwh_total']} gegen {free['kwh_total']} kWh")
-    client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+    client.put(f"/api/vehicles/{vehicles[0]['id']}", json={
         **vehicles[0],
         "max_speed_kmh": None})
 
@@ -799,39 +799,39 @@ def main() -> int:
     # A recording has no energy profile from which a charge level could be
     # estimated. Without a measurement the live display stayed empty - until the car
     # answered for the first time, and it does not while parked (alarm system).
-    start = client.post("/api/live/aufzeichnung", json={
+    start = client.post("/api/live/recording", json={
         "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
         "soc": 79.6, "name": "Start"}).json()
     sid = start["session_id"]
-    first_item = client.get(f"/api/live/{sid}/punkte").json()["points"]
+    first_item = client.get(f"/api/live/{sid}/points").json()["points"]
     verify(len(first_item) == 1 and first_item[0]["soc"] == 79.6,
            "der Startladestand ist der erste Messpunkt der Aufzeichnung",
            f"{len(first_item)} Punkte, erster: {first_item[:1]}")
-    gps = client.post(f"/api/live/{sid}/punkt", json={
+    gps = client.post(f"/api/live/{sid}/point", json={
         "lat": 48.4771, "lon": 9.1445}).json()
     verify(gps["actual_soc"] == 79.6 and gps["soc_reported"] is False
            and gps["soc_source"] == "zuletzt",
            "ein Punkt nur mit Position zeigt die letzte Messung - und sagt, dass "
            "sie es ist, statt leer zu bleiben",
            f"{gps['actual_soc']} / {gps['soc_reported']} / {gps['soc_source']}")
-    measured = client.post(f"/api/live/{sid}/punkt", json={
+    measured = client.post(f"/api/live/{sid}/point", json={
         "lat": 48.4772, "lon": 9.1446, "soc": 79.2}).json()
     verify(measured["actual_soc"] == 79.2 and measured["soc_reported"] is True
            and measured["soc_source"] == "gemessen",
            "und ein gemessener Wert ersetzt sie", str(measured["soc_source"]))
-    only_gps = client.post(f"/api/live/{sid}/punkt", json={
+    only_gps = client.post(f"/api/live/{sid}/point", json={
         "lat": 48.4773, "lon": 9.1447}).json()
     verify(only_gps["actual_soc"] == 79.2 and only_gps["soc_source"] == "zuletzt",
            "danach gilt die neueste Messung, nicht die vom Start")
-    client.post(f"/api/live/{sid}/ende")
+    client.post(f"/api/live/{sid}/end")
 
-    points_time = client.get(f"/api/live/{sid}/punkte").json()["points"]
+    points_time = client.get(f"/api/live/{sid}/points").json()["points"]
     verify(points_time and all(p["timestamp"].endswith("Z") for p in points_time),
            "die Messzeiten tragen ein Z - sonst läse der Browser UTC als Ortszeit",
            str(points_time[:1]))
     verify(all(_dz.fromisoformat(p["timestamp"]).tzinfo is not None for p in points_time),
            "und sind für Python zonenbewusst lesbar")
-    trips_list = client.get("/api/fahrten").json()
+    trips_list = client.get("/api/trips").json()
     verify(trips_list and all(f["created_at"].endswith("Z") for f in trips_list),
            "auch das Datum in der Fahrtenliste", str(trips_list[:1]))
     now_utc = _dz.now(_tzz.utc)
@@ -841,21 +841,21 @@ def main() -> int:
            "Stunde zurück, nicht zwei Stunden daneben",
            f"{newest} gegen {now_utc}")
 
-    without = client.post("/api/live/aufzeichnung", json={
+    without = client.post("/api/live/recording", json={
         "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
         "name": "Ohne Auto"}).json()
-    verify(client.get(f"/api/live/{without['session_id']}/punkte").json()["points"] == [],
+    verify(client.get(f"/api/live/{without['session_id']}/points").json()["points"] == [],
            "ohne gemeldeten Startladestand gibt es keinen Startpunkt - es wird "
            "nichts erfunden")
-    empty = client.post(f"/api/live/{without['session_id']}/punkt", json={
+    empty = client.post(f"/api/live/{without['session_id']}/point", json={
         "lat": 48.4771, "lon": 9.1445}).json()
     verify(empty["actual_soc"] is None,
            "und der Ladestand bleibt unbekannt, statt mit 100 % zu raten",
            str(empty["actual_soc"]))
-    client.post(f"/api/live/{without['session_id']}/ende")
+    client.post(f"/api/live/{without['session_id']}/end")
 
     print("\nLadepunkte im Korridor")
-    corridor = client.get(f"/api/saeulen/entlang/{trip_id}",
+    corridor = client.get(f"/api/chargers/along/{trip_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()
     places = {k["name"].split()[0] for k in corridor["candidates"]}
     verify(corridor["count"] == 4,
@@ -871,13 +871,13 @@ def main() -> int:
            "jeder Kandidat hat einen bezifferten Umweg")
 
     first = corridor["candidates"][0]
-    client.post(f"/api/saeulen/{first['id']}/belegt")
-    after = client.get(f"/api/saeulen/entlang/{trip_id}",
+    client.post(f"/api/chargers/{first['id']}/occupied")
+    after = client.get(f"/api/chargers/along/{trip_id}",
                          params={"min_kw": 100, "radius_km": 25}).json()
     reported = [k for k in after["candidates"] if k["id"] == first["id"]]
     verify(reported and reported[0]["occupied_reported"] is True,
            "eine Belegt-Meldung schlägt in der Korridor-Antwort durch")
-    client.delete(f"/api/saeulen/{first['id']}/belegt")
+    client.delete(f"/api/chargers/{first['id']}/occupied")
 
     print("\nLadeplan")
     # The demo route is the straight line, the charging points of the sample sit on
@@ -885,7 +885,7 @@ def main() -> int:
     # real road - hence a more generous detour limit here than
     # the ten minutes the optimizer otherwise works with.
     CHARGE_PLAN = {"min_kw": 100, "radius_km": 25, "detour_limit_min": 15}
-    plan = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+    plan = client.post(f"/api/trips/{trip_id}/charge-plan",
                        params=CHARGE_PLAN).json()
     verify(plan["feasible"] is True,
            "für die Strecke, die ohne Nachladen nicht reicht, entsteht ein Plan",
@@ -913,19 +913,19 @@ def main() -> int:
     # it must change the plan, not just colour the list.
     if plan["stops"]:
         planned = plan["stops"][0]["id"]
-        client.post(f"/api/saeulen/{planned}/belegt")
-        afterwards = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+        client.post(f"/api/chargers/{planned}/occupied")
+        afterwards = client.post(f"/api/trips/{trip_id}/charge-plan",
                              params=CHARGE_PLAN).json()
         verify(planned not in [s["id"] for s in afterwards["stops"]],
                "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
-        client.delete(f"/api/saeulen/{planned}/belegt")
+        client.delete(f"/api/chargers/{planned}/occupied")
 
     # The "effort per stop" slider is passed through to the optimizer. At zero
     # stopping is free, and the plan shatters into short stops - exactly the
     # behaviour the default of five minutes prevents.
-    gratis = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+    gratis = client.post(f"/api/trips/{trip_id}/charge-plan",
                          params={**CHARGE_PLAN, "stop_fixed_cost_min": 0}).json()
-    expensive = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+    expensive = client.post(f"/api/trips/{trip_id}/charge-plan",
                         params={**CHARGE_PLAN, "stop_fixed_cost_min": 20}).json()
     verify(gratis["holding_cost_minutes"] == 0,
            "mit Aufwand null kostet ein Halt nichts",
@@ -938,7 +938,7 @@ def main() -> int:
            "die Haltekosten in der Bilanz sind Anzahl mal Aufwand",
            f"{expensive['holding_cost_minutes']} bei {expensive['stop_count']} Stopps")
 
-    eng = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+    eng = client.post(f"/api/trips/{trip_id}/charge-plan",
                       params={**CHARGE_PLAN, "detour_limit_min": 0.5}).json()
     verify(eng["feasible"] is False,
            "mit einer Umweg-Grenze unter jedem Kandidaten bleibt nichts übrig")
@@ -946,7 +946,7 @@ def main() -> int:
            "und die Antwort sagt, warum - nicht nur, dass es nicht geht",
            eng["reason"])
 
-    without_profile = client.post("/api/fahrten/999999/ladeplan")
+    without_profile = client.post("/api/trips/999999/charge-plan")
     verify(without_profile.status_code == 404,
            "eine unbekannte Fahrt wird sauber abgelehnt",
            f"HTTP {without_profile.status_code}")
@@ -975,7 +975,7 @@ def main() -> int:
 
     # Driving according to plan: the tracking must not trigger.
     for sample in points_scheduled[:12]:
-        state = client.post(f"/api/live/{session_id}/punkt", json={
+        state = client.post(f"/api/live/{session_id}/point", json={
             "lat": sample["lat"], "lon": sample["lon"],
             "soc": sample["soc"]}).json()
     verify(abs(state["deviation_pp"]) < 1.0,
@@ -990,7 +990,7 @@ def main() -> int:
     # Excess consumption: now the tracking must trigger.
     sitzung2 = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
     for sample in points_hungry[:12]:
-        zustand2 = client.post(f"/api/live/{sitzung2}/punkt", json={
+        zustand2 = client.post(f"/api/live/{sitzung2}/point", json={
             "lat": sample["lat"], "lon": sample["lon"],
             "soc": sample["soc"]}).json()
     verify(zustand2["consumption_factor"] > 1.15,
@@ -1010,15 +1010,15 @@ def main() -> int:
     # Off the route. Only the measurement is checked here - that a re-plan only
     # follows after a minute depends on timestamps and is therefore in
     # check_replanning.py, where they can be set.
-    off_route = client.post(f"/api/live/{sitzung2}/punkt", json={
+    off_route = client.post(f"/api/live/{sitzung2}/point", json={
         "lat": 54.9, "lon": 8.31, "soc": 40.0}).json()
     verify(off_route["spacing_to_route_m"] > 500,
            "ein Sprung weg von der Route wird als Abstand erkannt",
            f"{off_route['spacing_to_route_m']} m")
 
-    ended_at = client.post(f"/api/live/{sitzung2}/ende").json()
+    ended_at = client.post(f"/api/live/{sitzung2}/end").json()
     verify(ended_at["ok"] is True, "die Sitzung lässt sich beenden")
-    locked = client.post(f"/api/live/{sitzung2}/punkt", json={
+    locked = client.post(f"/api/live/{sitzung2}/point", json={
         "lat": 52.0, "lon": 10.0, "soc": 30.0})
     verify(locked.status_code == 409,
            "danach werden keine Messpunkte mehr angenommen",
@@ -1038,10 +1038,10 @@ def main() -> int:
                                 ).isoformat().replace("+00:00", "Z")})
     # Deliberately in the wrong order: the server sorts by measurement time.
     batch.reverse()
-    response = client.post(f"/api/live/{buffer}/punkte", json={"points": batch})
+    response = client.post(f"/api/live/{buffer}/points", json={"points": batch})
     verify(response.status_code == 200, "ein Stapel wird angenommen",
            f"HTTP {response.status_code} {response.text[:120]}")
-    times = client.get(f"/api/live/{buffer}/punkte").json()["points"]
+    times = client.get(f"/api/live/{buffer}/points").json()["points"]
     verify(len(times) == 6, "alle sechs Punkte sind gespeichert", f"{len(times)}")
     ts = [z["timestamp"] for z in times]
     verify(ts == sorted(ts) and len(set(ts)) == 6,
@@ -1053,40 +1053,40 @@ def main() -> int:
            ts[0])
     verify(response.json().get("kind") == "zustand"
            and "consumption_factor" in response.json(),
-           "die Antwort hat dieselbe Form wie bei /punkt")
+           "die Antwort hat dieselbe Form wie bei /point")
 
-    single = client.post(f"/api/live/{buffer}/punkt", json={
+    single = client.post(f"/api/live/{buffer}/point", json={
         "lat": points_scheduled[6]["lat"], "lon": points_scheduled[6]["lon"],
         "soc": points_scheduled[6]["soc"],
         "timestamp": (now_ts - timedelta(minutes=29)).isoformat()})
-    verify(single.status_code == 200, "auch /punkt kennt die Messzeit",
+    verify(single.status_code == 200, "auch /point kennt die Messzeit",
            f"HTTP {single.status_code}")
 
-    future = client.post(f"/api/live/{buffer}/punkt", json={
+    future = client.post(f"/api/live/{buffer}/point", json={
         "lat": 52.0, "lon": 10.0, "soc": 50.0,
         "timestamp": (now_ts + timedelta(hours=1)).isoformat()})
     verify(future.status_code == 422,
            "ein Zeitstempel aus der Zukunft wird abgelehnt",
            f"HTTP {future.status_code}")
-    old = client.post(f"/api/live/{buffer}/punkt", json={
+    old = client.post(f"/api/live/{buffer}/point", json={
         "lat": 52.0, "lon": 10.0, "soc": 50.0, "timestamp": "1970-01-01T00:00:00Z"})
     verify(old.status_code == 422, "und einer aus dem Jahr 1970",
            f"HTTP {old.status_code}")
-    earlier = len(client.get(f"/api/live/{buffer}/punkte").json()["points"])
-    half = client.post(f"/api/live/{buffer}/punkte", json={"points": [
+    earlier = len(client.get(f"/api/live/{buffer}/points").json()["points"])
+    half = client.post(f"/api/live/{buffer}/points", json={"points": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0},
         {"lat": 52.0, "lon": 10.0, "soc": 50.0, "timestamp": "1970-01-01T00:00:00Z"}]})
-    after = len(client.get(f"/api/live/{buffer}/punkte").json()["points"])
+    after = len(client.get(f"/api/live/{buffer}/points").json()["points"])
     verify(half.status_code == 422 and earlier == after,
            "ein schlechter Punkt im Stapel lehnt den ganzen Stapel ab - "
            "ohne dass der gute vorher geschrieben wurde",
            f"HTTP {half.status_code}, {earlier} -> {after} Punkte")
-    empty = client.post(f"/api/live/{buffer}/punkte", json={"points": []})
+    empty = client.post(f"/api/live/{buffer}/points", json={"points": []})
     verify(empty.status_code == 422, "ein leerer Stapel ist ein Fehler",
            f"HTTP {empty.status_code}")
     # While parked jolt asks the car nothing, but keeps measuring the 12 V voltage
     # and sends it along: a point whose raw values contain only `batt_v`.
-    only_voltage = client.post(f"/api/live/{buffer}/punkt", json={
+    only_voltage = client.post(f"/api/live/{buffer}/point", json={
         "lat": points_scheduled[6]["lat"], "lon": points_scheduled[6]["lon"],
         "raw_values": {"batt_v": 13.9}})
     verify(only_voltage.status_code == 200
@@ -1094,8 +1094,8 @@ def main() -> int:
            "ein Punkt ohne Fahrzeugabfrage, nur mit der 12-V-Spannung, wird "
            "angenommen - ohne Zähler und ohne Ladestand",
            f"HTTP {only_voltage.status_code}: {only_voltage.text[:120]}")
-    client.post(f"/api/live/{buffer}/ende")
-    to = client.post(f"/api/live/{buffer}/punkte", json={"points": [
+    client.post(f"/api/live/{buffer}/end")
+    to = client.post(f"/api/live/{buffer}/points", json={"points": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0}]})
     verify(to.status_code == 409,
            "in eine beendete Sitzung geht auch kein Stapel", f"HTTP {to.status_code}")
@@ -1105,19 +1105,19 @@ def main() -> int:
     # it is created when setting off in the app and changes with every trip.
     # It therefore identifies itself with the vehicle's logger token.
     vehicle_id = vehicles[0]["id"]
-    client.post(f"/api/live/{session_id}/ende")      # first create some quiet
+    client.post(f"/api/live/{session_id}/end")      # first create some quiet
 
-    wrong = client.post("/api/live/melden", json={
+    wrong = client.post("/api/live/report", json={
         "token": "gibtesnicht", "lat": 53.5, "lon": 10.0, "soc": 50.0})
     verify(wrong.status_code == 401,
            "ein unbekanntes Token wird abgewiesen",
            f"HTTP {wrong.status_code}")
 
     token = client.post(
-        f"/api/fahrzeuge/{vehicle_id}/logger-token").json()["logger_token"]
+        f"/api/vehicles/{vehicle_id}/logger-token").json()["logger_token"]
     verify(len(token) >= 32, "ein Logger-Token lässt sich erzeugen",
            f"{len(token)} Zeichen")
-    lst = client.get("/api/fahrzeuge").json()[0]
+    lst = client.get("/api/vehicles").json()[0]
     verify(lst.get("logger_active") is True,
            "das Fahrzeug meldet, dass ein Logger eingerichtet ist")
     verify("logger_token" not in lst,
@@ -1127,7 +1127,7 @@ def main() -> int:
     # The car is parked outside and the logger sends anyway. That is not an
     # error: an unattended device that receives error responses starts
     # logging or switches itself off.
-    idle = client.post("/api/live/melden", json={
+    idle = client.post("/api/live/report", json={
         "token": token, "lat": 53.5, "lon": 10.0, "soc": 50.0})
     verify(idle.status_code == 200
            and idle.json().get("recorded") is False,
@@ -1136,7 +1136,7 @@ def main() -> int:
 
     sitzung3 = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
     sample = points_scheduled[3]
-    reported = client.post("/api/live/melden", json={
+    reported = client.post("/api/live/report", json={
         "token": token, "lat": sample["lat"], "lon": sample["lon"],
         "soc": sample["soc"]})
     verify(reported.status_code == 200
@@ -1152,7 +1152,7 @@ def main() -> int:
     # Foreign format: the same message, in the language of Iternio/ABRP. That
     # is the way the OBD2 data will come in - translation
     # happens in live/quellen/, details are checked by check_sources.py.
-    foreign = client.post("/api/live/melden", json={
+    foreign = client.post("/api/live/report", json={
         "token": token, "format": "abrp",
         "tlm": {"utc": 1787654321, "soc": 44.0, "lat": sample["lat"],
                 "lon": sample["lon"], "speed": 98.0, "ext_temp": 19.0,
@@ -1167,7 +1167,7 @@ def main() -> int:
     verify(client.get(f"/api/live/{sitzung3}").json()["points"] == 2,
            "der übersetzte Punkt liegt in derselben Sitzung")
 
-    broken = client.post("/api/live/melden", json={
+    broken = client.post("/api/live/report", json={
         "token": token, "format": "abrp",
         "tlm": {"utc": 1787654321, "lat": 48.0, "lon": 11.0}})
     verify(broken.status_code == 400,
@@ -1176,7 +1176,7 @@ def main() -> int:
     verify("soc" in broken.text.lower(),
            "und der Grund nennt das fehlende Feld", broken.text[:140])
 
-    unknown = client.post("/api/live/melden", json={
+    unknown = client.post("/api/live/report", json={
         "token": token, "format": "torque", "lat": 48.0, "lon": 11.0,
         "soc": 50.0})
     verify(unknown.status_code == 400,
@@ -1185,24 +1185,24 @@ def main() -> int:
 
     # A new token invalidates the old one - otherwise "renew" would be worthless.
     newOne = client.post(
-        f"/api/fahrzeuge/{vehicle_id}/logger-token").json()["logger_token"]
+        f"/api/vehicles/{vehicle_id}/logger-token").json()["logger_token"]
     verify(newOne != token, "ein erneuertes Token ist ein anderes")
-    old = client.post("/api/live/melden", json={
+    old = client.post("/api/live/report", json={
         "token": token, "lat": sample["lat"], "lon": sample["lon"],
         "soc": sample["soc"]})
     verify(old.status_code == 401, "und das alte gilt nicht mehr",
            f"HTTP {old.status_code}")
 
-    client.delete(f"/api/fahrzeuge/{vehicle_id}/logger-token")
-    verify(client.get("/api/fahrzeuge").json()[0].get("logger_active") is False,
+    client.delete(f"/api/vehicles/{vehicle_id}/logger-token")
+    verify(client.get("/api/vehicles").json()[0].get("logger_active") is False,
            "der Logger lässt sich wieder abmelden")
-    invalidated = client.post("/api/live/melden", json={
+    invalidated = client.post("/api/live/report", json={
         "token": newOne, "lat": sample["lat"], "lon": sample["lon"],
         "soc": sample["soc"]})
     verify(invalidated.status_code == 401,
            "danach wird von ihm nichts mehr angenommen",
            f"HTTP {invalidated.status_code}")
-    client.post(f"/api/live/{sitzung3}/ende")
+    client.post(f"/api/live/{sitzung3}/end")
 
     print("\nOberfläche wird ausgeliefert")
     page = client.get("/")

@@ -102,7 +102,7 @@ window.joltTrips = (function () {
     if (!holder) return;
     holder.innerHTML = '<p class="leer">lädt …</p>';
     try {
-      const trips = await K.api("/api/fahrten");
+      const trips = await K.api("/api/trips");
       if (!trips.length) {
         holder.innerHTML = '<p class="leer">Noch keine Fahrt geplant.</p>';
         return;
@@ -159,7 +159,7 @@ window.joltTrips = (function () {
       return;
     }
     try {
-      await K.api("/api/fahrten/" + id, { method: "DELETE" });
+      await K.api("/api/trips/" + id, { method: "DELETE" });
       await load();
     } catch (failure) {
       K.report("Löschen: " + failure.message, "fehler");
@@ -271,7 +271,7 @@ window.joltTrips = (function () {
       }
 
       as_of("Fahrt anlegen …");
-      const response = await K.api("/api/live/aufzeichnung", {
+      const response = await K.api("/api/live/recording", {
         method: "POST",
         body: { vehicle_id: id, lat: city.latitude, lon: city.longitude,
                 soc: soc,

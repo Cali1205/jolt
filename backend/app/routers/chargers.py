@@ -9,11 +9,11 @@ from ..database import get_db
 from ..charging import chargers_import, availability
 from ..routing import corridor
 
-router = APIRouter(prefix="/api/saeulen", tags=["ladesäulen"],
+router = APIRouter(prefix="/api/chargers", tags=["chargers"],
                    dependencies=[Depends(deps.current_session)])
 
 
-@router.get("/bestand")
+@router.get("/stock")
 def stock(db: Session = Depends(get_db)):
     """What has been imported at all? The first question when a corridor
     stays empty - usually it is not the search but the empty table."""
@@ -23,7 +23,7 @@ def stock(db: Session = Depends(get_db)):
             "per_source": {source: count for source, count in per_source}}
 
 
-@router.get("/entlang/{trip_id}")
+@router.get("/along/{trip_id}")
 def along_trip(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                   min_kw: float = Query(50.0, ge=0),
                   connector_type: str = "", db: Session = Depends(get_db)):
@@ -66,7 +66,7 @@ def along_trip(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             "radius_km": radius_km, "candidates": result}
 
 
-@router.post("/{charge_point_id}/belegt")
+@router.post("/{charge_point_id}/occupied")
 def report_occupied(charge_point_id: int, db: Session = Depends(get_db)):
     """"Everything is full here" - the only availability information that
     is really reliable. Valid for half an hour, then it expires."""
@@ -76,7 +76,7 @@ def report_occupied(charge_point_id: int, db: Session = Depends(get_db)):
     return {"ok": True, "valid_minutes": availability.REPORT_VALID_S // 60}
 
 
-@router.delete("/{charge_point_id}/belegt")
+@router.delete("/{charge_point_id}/occupied")
 def occupied_revert(charge_point_id: int):
     availability.REPORTS.release(charge_point_id)
     return {"ok": True}

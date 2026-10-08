@@ -70,7 +70,7 @@ client = TestClient(app)
 
 def create_buzz():
     """The ID.Buzz with the corrected values."""
-    response = client.post("/api/fahrzeuge", json={
+    response = client.post("/api/vehicles", json={
         "name": "ID.Buzz Pro (Sim)", "curb_mass_kg": 2400.0,
         "payload_kg": 150.0, "c_w": 0.29,
         "frontal_area_m2": 2.90, "c_rr": 0.010, "eta_drive": 0.88,
@@ -144,7 +144,7 @@ count = charge_points_scatter(route["geometry"])
 print(f"  {count} Ladepunkte entlang der Strecke angelegt")
 
 trip_id = route["trip_id"]
-plan_response = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+plan_response = client.post(f"/api/trips/{trip_id}/charge-plan",
                            params={"min_kw": 100, "radius_km": 10})
 if plan_response.status_code >= 400:
     finding(f"Ladeplan scheitert: HTTP {plan_response.status_code} "
@@ -230,7 +230,7 @@ for step in range(1, 41):
         soc = stops[next_stop]["departure_soc"]
         next_stop += 1
     soc = max(3.0, min(100.0, soc))
-    response = client.post(f"/api/live/{session_id}/punkt", json={
+    response = client.post(f"/api/live/{session_id}/point", json={
         "lat": p["lat"], "lon": p["lon"], "soc": round(soc, 1),
         "speed_kmh": 118.0, "outside_temp_c": 3.0,
         "raw_values": {"soc_raw": int(soc * 2.5), "voltage_v": 390.0,
@@ -284,7 +284,7 @@ if states:
 # ---------------------------------------------------------------------------
 
 say("3. Aufzeichnung: wie obd.js sie fährt - mit Ladepause und Funkloch")
-uphill = client.post("/api/live/aufzeichnung", json={
+uphill = client.post("/api/live/recording", json={
     "vehicle_id": vehicle["id"], "lat": 48.10, "lon": 11.50,
     "soc": 82.0, "name": ""}).json()
 on_id = uphill["session_id"]
@@ -349,7 +349,7 @@ for minute in range(0, 200, 2):
     else:
         raw["_fehlend"] = ["aux_load_kw", "odometer_km"]
 
-    response = client.post(f"/api/live/{on_id}/punkt", json={
+    response = client.post(f"/api/live/{on_id}/point", json={
         "lat": round(lat, 6), "lon": round(lon, 6), "soc": round(soc, 1),
         "speed_kmh": velocity, "outside_temp_c": 4.0, "raw_values": raw})
     if response.status_code >= 400:
@@ -391,7 +391,7 @@ try:
 finally:
     db.close()
 
-end = client.post(f"/api/live/{on_id}/ende")
+end = client.post(f"/api/live/{on_id}/end")
 if end.status_code >= 400:
     finding(f"Beenden scheitert: HTTP {end.status_code} {end.text[:300]}",
            "FEHLER")
@@ -460,8 +460,8 @@ try:
 finally:
     db.close()
 
-lst = client.get("/api/fahrten").json()
-print(f"  /api/fahrten liefert {len(lst)} Fahrten")
+lst = client.get("/api/trips").json()
+print(f"  /api/trips liefert {len(lst)} Fahrten")
 for f in lst:
     print(f"    {f.get('start')} → {f.get('destination')}  "
           f"{f.get('distance_km')} km  {f.get('consumption_kwh_100km')} kWh/100  "

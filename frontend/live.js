@@ -90,7 +90,7 @@ window.joltLive = (function () {
    * a report is a small JSON, and the GPS is running anyway.
    *
    * For the length of the route the vehicle's odometer is the better
-   * source (see `live/aufzeichnung.odometer_factor`) - denser points are
+   * source (see `live/recording.odometer_factor`) - denser points are
    * still needed, because they carry the **history**: elevation profile,
    * speed per segment, and the map. */
   const REPORT_INTERVAL_MS = 12000;
@@ -651,7 +651,7 @@ window.joltLive = (function () {
     try {
       if (!("Notification" in window) || !("PushManager" in window)) return;
 
-      const key = await K.api("/api/push/schluessel");
+      const key = await K.api("/api/push/key");
       if (!key.configured) return;   // no VAPID key on the server
 
       if (Notification.permission === "default") {
@@ -674,7 +674,7 @@ window.joltLive = (function () {
       }
 
       const subscriptionJson = subscription.toJSON();
-      await K.api("/api/push/abo", { method: "POST", body: {
+      await K.api("/api/push/subscription", { method: "POST", body: {
         endpoint: subscriptionJson.endpoint,
         p256dh: subscriptionJson.keys.p256dh,
         auth: subscriptionJson.keys.auth,
@@ -740,7 +740,7 @@ window.joltLive = (function () {
     const more = Number(document.getElementById("extra-consumption").value) / 100;
     const jam = Number(document.getElementById("jam").value) / 100;
     try {
-      await K.api(`/api/live/${K.state.sessionId}/simulieren`
+      await K.api(`/api/live/${K.state.sessionId}/simulate`
         + `?extra_consumption=${more}&tick_s=0.3&time_factor=${jam}`,
         { method: "POST" });
       K.report(`Simulation läuft mit ${Math.round(more * 100)} % Verbrauch `
@@ -2090,7 +2090,7 @@ window.joltLive = (function () {
         const batch = buffer.slice(0, batchSize);
         let state;
         try {
-          state = await K.api(`/api/live/${id}/punkte`,
+          state = await K.api(`/api/live/${id}/points`,
             { method: "POST", body: { points: batch } });
         } catch (failure) {
           const status = failure.status;
@@ -2205,7 +2205,7 @@ window.joltLive = (function () {
     field.blur();
     try {
       const place = await fetchLocation();
-      const state = await K.api(`/api/live/${K.state.sessionId}/punkt`,
+      const state = await K.api(`/api/live/${K.state.sessionId}/point`,
         { method: "POST", body: { lat: place.lat, lon: place.lon, soc: soc,
                                   speed_kmh: place.speed_kmh } });
       showState(state);
@@ -2241,7 +2241,7 @@ window.joltLive = (function () {
     }
     let result = null;
     try {
-      result = await K.api(`/api/live/${K.state.sessionId}/ende`,
+      result = await K.api(`/api/live/${K.state.sessionId}/end`,
                              { method: "POST" });
     } catch (failure) { /* an already ended trip is not a problem */ }
     // The trips view has cached the list; a trip that has just
@@ -2378,7 +2378,7 @@ window.joltLive = (function () {
   async function rechargeHistory(id) {
     let stored;
     try {
-      stored = await K.api(`/api/live/${id}/punkte`);
+      stored = await K.api(`/api/live/${id}/points`);
     } catch (failure) {
       // No reason to let resuming fail - the trip runs on
       // without the history, it just looks poorer.

@@ -132,15 +132,15 @@ What is needed to begin with:
 | Purpose | Endpoint |
 |---|---|
 | Log in | `POST /api/auth/login`, `GET /api/auth/status` |
-| Vehicles | `GET /api/fahrzeuge`, `PUT /api/fahrzeuge/{id}` |
+| Vehicles | `GET /api/vehicles`, `PUT /api/vehicles/{id}` |
 | Calculate route | `POST /api/route` |
-| Charging plan | `POST /api/fahrten/{id}/ladeplan` |
-| Trip list | `GET /api/fahrten`, `GET /api/fahrten/{id}` |
+| Charging plan | `POST /api/trips/{id}/charge-plan` |
+| Trip list | `GET /api/trips`, `GET /api/trips/{id}` |
 | Start trip | `POST /api/live/start/{trip_id}` |
-| Start recording | `POST /api/live/aufzeichnung` |
-| Report measurement point | `POST /api/live/{session_id}/punkt` |
+| Start recording | `POST /api/live/recording` |
+| Report measurement point | `POST /api/live/{session_id}/point` |
 | Read state | `GET /api/live/{session_id}` |
-| Reload history | `GET /api/live/{session_id}/punkte` |
+| Reload history | `GET /api/live/{session_id}/points` |
 | Follow continuously | `WebSocket /api/live/{session_id}/ws` |
 
 ### 2. OBD — Bluetooth and protocol
@@ -189,10 +189,10 @@ Two things the PWA could not do and which work here without any fuss:
 
 **There are two ways to report, and the second is the better one:**
 
-`POST /api/live/{session_id}/punkt` needs the session ID and a token.
+`POST /api/live/{session_id}/point` needs the session ID and a token.
 
-`POST /api/live/melden` needs only the **vehicle's logger token** (from
-`POST /api/fahrzeuge/{id}/logger-token`). The backend finds the running session
+`POST /api/live/report` needs only the **vehicle's logger token** (from
+`POST /api/vehicles/{id}/logger-token`). The backend finds the running session
 itself, and if none is running, it answers with `200` and `recorded: false`
 instead of an error — explicitly meant for a device that sends unattended.
 Exactly the situation a background process is in. The token stays valid, while
@@ -371,7 +371,7 @@ formulas.
 | 3 | CI generates and builds the iOS project | "does it compile" answerable without a Mac | built; the first run failed on the app ID (hyphen), fixed |
 | 4 | Apple Developer Program, signing, TestFlight | app gets onto the iPhone | workflow done (`ios-testflight.yml`), waiting for account and secrets — instructions: [`ios-einrichten.md`](ios-einrichten.md) |
 | 5 | Background location via plugin | recording with the screen locked | built in (`@capacitor-community/background-geolocation`), **unchecked on the device** |
-| 6 | Queue against dead spots | no more gaps | done (`live.js`, batch endpoint `/punkte`) |
+| 6 | Queue against dead spots | no more gaps | done (`live.js`, batch endpoint `/points`) |
 | 7 | Display model: state → a few numbers (`live.js`), with test | the basis for both routes, without Swift and without Apple | **done:** `frontend/display.js` (pure function, throttled sender) and `tools/check_display.js`; `live.js` reports state and end of trip, a plugin later only sets the target |
 | 8 | CarPlay application to Apple (choose category, check templates in the guide) | entitlement for route B | **draft done:** [`carplay-antrag.md`](carplay-antrag.md) (category EV charging, English text to paste in); you submit it yourself |
 | 9 | Route A: plugin, Live Activity, widget target in CI, signing | charge level and next stop in the CarPlay dashboard | **built, unchecked on the device:** plugin `plugins/jolt-anzeige` (ActivityKit), widget extension `ios-native/JoltWidget` (family `.small`), `tools/ios_widget.sh/.rb` attaches the target after `cap add ios`, `check_ios.py` checks the model against Swift fields. **Open:** whether automatic signing creates the extension's identifier and profile (`<App-ID>.widget`) itself on export; whether CarPlay shows the activity. Apple ends a Live Activity after 8 hours. No `systemSmall` widget (only the Live Activity). The extension applies from iOS 18 (small CarPlay family; `if #available` in the `WidgetBundle` does not build), the app keeps its minimum version (raising it made `cap sync` write an invalid `Package.swift`). **Unchecked:** whether App Store Connect accepts an extension with a higher minimum version than the app. |

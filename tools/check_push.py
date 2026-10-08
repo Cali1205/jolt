@@ -243,12 +243,12 @@ def part_without_key():
                str(result))
 
         client = TestClient(app)
-        response = client.get("/api/push/schluessel").json()
+        response = client.get("/api/push/key").json()
         verify(response["configured"] is False,
-               "die Oberfläche erfährt das über /api/push/schluessel",
+               "die Oberfläche erfährt das über /api/push/key",
                str(response))
 
-        created_at = client.post("/api/push/abo", json={
+        created_at = client.post("/api/push/subscription", json={
             "endpoint": "https://push.example.org/x", "p256dh": "a" * 20,
             "auth": "b" * 10})
         verify(created_at.status_code == 409,
@@ -271,13 +271,13 @@ def part_with_key():
         # Without network every https name counts as public; the check itself is
         # in check_security.py.
         push.endpoint_allowed = lambda url: url.startswith("https://")
-        response = client.get("/api/push/schluessel").json()
+        response = client.get("/api/push/key").json()
         verify(response["configured"] is True, "eingerichtet")
         verify(response["keyname"] == publicly,
                "und der öffentliche Schlüssel kommt heraus")
 
         browser = Browserabo("https://push.example.org/ueber-api")
-        created_at = client.post("/api/push/abo", json=browser.as_json())
+        created_at = client.post("/api/push/subscription", json=browser.as_json())
         verify(created_at.status_code == 200, "ein Abo lässt sich anlegen",
                f"HTTP {created_at.status_code}: {created_at.text[:100]}")
 
@@ -289,7 +289,7 @@ def part_with_key():
             db.close()
         verify(found is not None, "und steht in der Datenbank")
 
-        downhill = client.request("DELETE", "/api/push/abo",
+        downhill = client.request("DELETE", "/api/push/subscription",
                             json={"endpoint": browser.endpoint})
         verify(downhill.status_code == 200 and downhill.json()["ok"] is True,
                "und wieder abmelden", f"HTTP {downhill.status_code}")

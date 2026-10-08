@@ -9,7 +9,7 @@ actual route geometry - the same kind of request that OCM answers reliably
 in practice.
 
 Prerequisite: the trip must have been computed in the app beforehand (under
-"Planen" on "Route rechnen"). The ID is in the response of GET /api/fahrten
+"Planen" on "Route rechnen"). The ID is in the response of GET /api/trips
 or in the URL when you open the trip in the UI.
 
     ./tools/import_ocm_route.py 42            # trip 42, 30 km radius, all power levels

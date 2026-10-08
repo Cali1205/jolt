@@ -26,7 +26,7 @@ LOGIN_MAX = int(os.environ.get("LOGIN_LIMIT_PER_15MIN", "10"))
 _lock = threading.Lock()
 _hit: dict[str, deque] = defaultdict(deque)
 _login_hit: dict[str, deque] = defaultdict(deque)
-# Failed attempts with a wrong logger token at /api/live/melden. The path is
+# Failed attempts with a wrong logger token at /api/live/report. The path is
 # exempt from the general limit (it receives measurement points every second),
 # so guessing tokens needs a limit of its own.
 _report_error: dict[str, deque] = defaultdict(deque)

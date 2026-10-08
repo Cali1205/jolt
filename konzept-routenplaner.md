@@ -275,7 +275,7 @@ the option as soon as isochrones are added.
 **Stage 2 — the optimizer** *(done)*
 
 Section 4 in code: candidate graph, Pareto Dijkstra, post-optimization,
-fallback sites. As `POST /api/fahrten/{id}/ladeplan` and as a charging plan in
+fallback sites. As `POST /api/trips/{id}/charge-plan` and as a charging plan in
 the PWA.
 
 Two things turned out differently than planned:
@@ -337,12 +337,12 @@ actually changes.
 
 The way there did need an addition, though, one that was overlooked in the
 design: measurement points came in exclusively via
-`/api/live/{session_id}/punkt`. That suits the PWA, which started the trip
+`/api/live/{session_id}/point`. That suits the PWA, which started the trip
 itself and therefore knows the ID — but not a device installed in the car that
 simply starts sending when it is switched on. The session ID only comes into
 being at departure and changes with every trip; a dongle cannot know it. That
 is why the *vehicle* now carries a long-lived logger token, and
-`POST /api/live/melden` (report) finds its running session itself.
+`POST /api/live/report` (report) finds its running session itself.
 
 An ELM327 does not read the charge level of an MEB vehicle via the standardized
 OBD2 PIDs — those are geared to combustion engines — but via
@@ -388,7 +388,7 @@ values were therefore missing for months, without anything saying anywhere that
 they were missing.
 
 `live/sources/` is nevertheless still right: a logger that speaks a foreign
-format continues to report via `POST /api/live/melden` — the Web Bluetooth route
+format continues to report via `POST /api/live/report` — the Web Bluetooth route
 is one source more, not the only one.
 
 **Stage 5 — calibration from real trips** *(done)*

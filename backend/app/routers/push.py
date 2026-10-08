@@ -29,7 +29,7 @@ class SignOut(BaseModel):
     endpoint: str = Field(min_length=8, max_length=500)
 
 
-@router.get("/schluessel")
+@router.get("/key")
 def public_key():
     """What the browser needs to create a subscription.
 
@@ -40,7 +40,7 @@ def public_key():
             "keyname": push.pub_key()}
 
 
-@router.post("/abo", dependencies=[Depends(deps.current_session)])
+@router.post("/subscription", dependencies=[Depends(deps.current_session)])
 def create_subscription(subscription: Subscription, db: Session = Depends(get_db)):
     if not push.actual_configured():
         raise HTTPException(409, "Es ist kein VAPID-Schlüssel gesetzt - "
@@ -52,7 +52,7 @@ def create_subscription(subscription: Subscription, db: Session = Depends(get_db
     return {"ok": True}
 
 
-@router.delete("/abo", dependencies=[Depends(deps.current_session)])
+@router.delete("/subscription", dependencies=[Depends(deps.current_session)])
 def sign_out_subscription(sign_out: SignOut, db: Session = Depends(get_db)):
     return {"ok": push.delete_subscription(db, sign_out.endpoint)}
 

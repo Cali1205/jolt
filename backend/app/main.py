@@ -19,7 +19,8 @@ from . import deps, push, routing
 from .live import cleanup
 from .database import SessionLocal, migrate, seed_templates
 from .routers import ALL_ROUTER
-from .security import SecurityMiddleware
+from .security import SecurityMiddleware
+from .legacy_paths import LegacyPaths
 
 log = logging.getLogger("uvicorn.error")
 
@@ -37,6 +38,7 @@ app = FastAPI(title="jolt",
               openapi_url="/api/openapi.json" if _docs else None)
 
 app.add_middleware(SecurityMiddleware)
+app.add_middleware(LegacyPaths)  # added last = outermost: rewrite before anything else
 
 
 @app.exception_handler(RequestValidationError)
