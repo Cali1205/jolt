@@ -4,7 +4,7 @@
   "private": true,
   "description": "jolt als iOS-App: Capacitor-Huelle um die bestehende Oberflaeche, damit Bluetooth ueber CoreBluetooth statt ueber Bluefy laeuft.",
   "scripts": {
-    "huelle": "esbuild tools/ble-huelle-eintrag.js --bundle --format=iife --minify --target=es2019 --outfile=frontend/ble-plugin.js",
+    "huelle": "esbuild tools/ble-shell-entry.js --bundle --format=iife --minify --target=es2019 --outfile=frontend/ble-plugin.js",
     "ios:anlegen": "cap add ios",
     "ios:abgleichen": "cap sync ios"
   },

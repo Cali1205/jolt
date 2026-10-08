@@ -13,13 +13,13 @@ import os
 
 import requests
 
-from .provider import Ort, Route, RoutingFehler
+from .provider import City, Route, RoutingError
 
 BASIS = "https://api.openrouteservice.org"
 TIMEOUT = 25
 # Fällt ein Teilstück ohne Geschwindigkeitsangabe an (kommt an Kreuzungen und
 # beim Zielpunkt vor), wird mit diesem Wert weitergerechnet statt abgebrochen.
-TEMPO_ERSATZ_MS = 22.0        # ~80 km/h
+SPEED_FALLBACK_MS = 22.0        # ~80 km/h
 
 log = logging.getLogger("uvicorn.error")
 
@@ -30,16 +30,16 @@ class ORS:
 
     # ---------- intern ----------
 
-    def _kopf(self) -> dict:
+    def _header(self) -> dict:
         if not self.api_key:
-            raise RoutingFehler(
+            raise RoutingError(
                 "Kein ORS_API_KEY gesetzt - ohne Schlüssel lässt sich keine "
                 "Route rechnen. Kostenlos unter openrouteservice.org/dev")
         return {"Authorization": self.api_key,
                 "Content-Type": "application/json; charset=utf-8"}
 
     @staticmethod
-    def _tempo_je_teilstueck(eigenschaften: dict, anzahl_punkte: int) -> list:
+    def _speed_per_segment(attrs: dict, point_count: int) -> list:
         """Aus den Routing-Schritten eine Geschwindigkeit je Teilstück machen.
 
         ORS gibt Distanz und Dauer je Schritt sowie die Indizes der zugehörigen
@@ -50,72 +50,72 @@ class ORS:
         Ortsdurchfahrt mit Autobahntempo rechnet, unterschätzt den Verbrauch
         auf der Autobahn - und dort entscheidet er sich.
         """
-        tempo = [0.0] * max(0, anzahl_punkte - 1)
-        for abschnitt in eigenschaften.get("segments", []):
-            for schritt in abschnitt.get("steps", []):
-                dauer = schritt.get("duration") or 0.0
-                strecke = schritt.get("distance") or 0.0
-                wp = schritt.get("way_points") or []
-                if dauer <= 0 or strecke <= 0 or len(wp) != 2:
+        velocity = [0.0] * max(0, point_count - 1)
+        for section in attrs.get("segments", []):
+            for step in section.get("steps", []):
+                duration = step.get("duration") or 0.0
+                distance = step.get("distance") or 0.0
+                wp = step.get("way_points") or []
+                if duration <= 0 or distance <= 0 or len(wp) != 2:
                     continue
-                v = strecke / dauer
-                for i in range(wp[0], min(wp[1], len(tempo))):
-                    tempo[i] = v
-        return [v if v > 0 else TEMPO_ERSATZ_MS for v in tempo]
+                v = distance / duration
+                for i in range(wp[0], min(wp[1], len(velocity))):
+                    velocity[i] = v
+        return [v if v > 0 else SPEED_FALLBACK_MS for v in velocity]
 
     # ---------- öffentlich ----------
 
-    def route(self, start: tuple[float, float], ziel: tuple[float, float],
-              zwischenstopps: list[tuple[float, float]] | None = None,
-              praeferenz: str = "recommended",
-              mautfrei: bool = False) -> Route:
-        koordinaten = [[start[1], start[0]]]
-        for stopp in (zwischenstopps or []):
-            koordinaten.append([stopp[1], stopp[0]])
-        koordinaten.append([ziel[1], ziel[0]])
+    def route(self, start: tuple[float, float], destination: tuple[float, float],
+              intermediate_stops: list[tuple[float, float]] | None = None,
+              preference: str = "recommended",
+              toll_free: bool = False) -> Route:
+        coordinates = [[start[1], start[0]]]
+        for stop in (intermediate_stops or []):
+            coordinates.append([stop[1], stop[0]])
+        coordinates.append([destination[1], destination[0]])
 
         try:
-            antwort = requests.post(
+            response = requests.post(
                 f"{BASIS}/v2/directions/driving-car/geojson",
-                headers=self._kopf(), timeout=TIMEOUT,
-                json={"coordinates": koordinaten, "elevation": True,
+                headers=self._header(), timeout=TIMEOUT,
+                json={"coordinates": coordinates, "elevation": True,
                       "instructions": True, "units": "m",
-                      "preference": praeferenz,
+                      "preference": preference,
                       # Nur setzen, wenn gefragt: Ein leeres `avoid_features`
                       # lehnt ORS mit HTTP 400 ab.
                       **({"options": {"avoid_features": ["tollways"]}}
-                         if mautfrei else {})})
-        except requests.RequestException as fehler:
-            raise RoutingFehler(f"Routing nicht erreichbar: {fehler}") from fehler
+                         if toll_free else {})})
+        except requests.RequestException as failure:
+            raise RoutingError(f"Routing nicht erreichbar: {failure}") from failure
 
-        if antwort.status_code == 401:
-            raise RoutingFehler("ORS_API_KEY wird abgelehnt - Schlüssel prüfen.")
-        if antwort.status_code == 429:
-            raise RoutingFehler(
+        if response.status_code == 401:
+            raise RoutingError("ORS_API_KEY wird abgelehnt - Schlüssel prüfen.")
+        if response.status_code == 429:
+            raise RoutingError(
                 "Tageskontingent von openrouteservice erschöpft (2.500 Anfragen).")
-        if antwort.status_code >= 400:
-            raise RoutingFehler(f"Routing meldet HTTP {antwort.status_code}: "
-                                f"{antwort.text[:200]}")
+        if response.status_code >= 400:
+            raise RoutingError(f"Routing meldet HTTP {response.status_code}: "
+                                f"{response.text[:200]}")
 
-        daten = antwort.json()
-        merkmale = daten.get("features") or []
-        if not merkmale:
-            raise RoutingFehler("Keine Route gefunden - Start oder Ziel prüfen.")
+        records = response.json()
+        features = records.get("features") or []
+        if not features:
+            raise RoutingError("Keine Route gefunden - Start oder Ziel prüfen.")
 
-        geometrie = merkmale[0].get("geometry", {}).get("coordinates") or []
-        eigenschaften = merkmale[0].get("properties", {})
-        zusammenfassung = eigenschaften.get("summary", {})
+        geometry = features[0].get("geometry", {}).get("coordinates") or []
+        attrs = features[0].get("properties", {})
+        summary = attrs.get("summary", {})
 
-        if geometrie and len(geometrie[0]) < 3:
+        if geometry and len(geometry[0]) < 3:
             log.warning("Route ohne Höhenwerte erhalten - Verbrauch wird in "
                         "der Ebene gerechnet und fällt bergig zu niedrig aus.")
 
-        return Route(punkte=geometrie,
-                     tempo_ms=self._tempo_je_teilstueck(eigenschaften, len(geometrie)),
-                     strecke_m=float(zusammenfassung.get("distance") or 0.0),
-                     fahrzeit_s=float(zusammenfassung.get("duration") or 0.0))
+        return Route(points=geometry,
+                     speed_ms=self._speed_per_segment(attrs, len(geometry)),
+                     distance_m=float(summary.get("distance") or 0.0),
+                     drive_time_s=float(summary.get("duration") or 0.0))
 
-    def hoehen(self, punkte: list) -> list | None:
+    def elevations(self, points: list) -> list | None:
         """Höhen über /elevation/line - derselbe Schlüssel wie fürs Routing.
 
         Eine Anfrage je aufgezeichneter Fahrt, also einmal am Ende und nicht
@@ -123,47 +123,47 @@ class ORS:
         Eine Aufzeichnung ohne Höhen ist immer noch eine Aufzeichnung, und
         sie deswegen zu verlieren wäre der schlechtere Tausch.
         """
-        if not punkte or len(punkte) < 2:
+        if not points or len(points) < 2:
             return None
         try:
-            antwort = requests.post(
-                f"{BASIS}/elevation/line", headers=self._kopf(), timeout=TIMEOUT,
+            response = requests.post(
+                f"{BASIS}/elevation/line", headers=self._header(), timeout=TIMEOUT,
                 json={"format_in": "polyline", "format_out": "polyline",
-                      "geometry": [[float(p[0]), float(p[1])] for p in punkte]})
-            antwort.raise_for_status()
-            geometrie = (antwort.json() or {}).get("geometry")
-        except (requests.RequestException, ValueError) as fehler:
-            log.warning("Höhenabfrage bei ORS fehlgeschlagen: %s", fehler)
+                      "geometry": [[float(p[0]), float(p[1])] for p in points]})
+            response.raise_for_status()
+            geometry = (response.json() or {}).get("geometry")
+        except (requests.RequestException, ValueError) as failure:
+            log.warning("Höhenabfrage bei ORS fehlgeschlagen: %s", failure)
             return None
-        if not isinstance(geometrie, list) or len(geometrie) != len(punkte):
+        if not isinstance(geometry, list) or len(geometry) != len(points):
             log.warning("Höhenantwort passt nicht zur Anfrage (%s statt %s "
-                        "Punkte).", len(geometrie or []), len(punkte))
+                        "Punkte).", len(geometry or []), len(points))
             return None
-        return [[p[0], p[1], p[2] if len(p) > 2 else 0.0] for p in geometrie]
+        return [[p[0], p[1], p[2] if len(p) > 2 else 0.0] for p in geometry]
 
-    def suchen(self, text: str, land: str = "") -> list[Ort]:
+    def seek(self, text: str, country: str = "") -> list[City]:
         # Ohne Länderfilter sucht ORS weltweit - genau das will ein Reiseziel
         # jenseits der Grenze. Nur wenn `land` explizit gesetzt ist (z.B. um
         # eine Eingabe wie "Hamburg" von gleichnamigen Orten anderswo zu
         # unterscheiden), wird eingeschränkt.
         params = {"text": text, "size": 6}
-        if land:
-            params["boundary.country"] = land
+        if country:
+            params["boundary.country"] = country
         try:
             # Schlüssel im Header, nie in der URL: Sonst steht er in jeder
             # Fehlermeldung, die an den Client geht.
-            antwort = requests.get(f"{BASIS}/geocode/search", timeout=TIMEOUT,
-                                   params=params, headers=self._kopf())
-            antwort.raise_for_status()
-        except requests.RequestException as fehler:
-            raise RoutingFehler(
-                f"Ortssuche nicht erreichbar ({type(fehler).__name__})") from fehler
+            response = requests.get(f"{BASIS}/geocode/search", timeout=TIMEOUT,
+                                   params=params, headers=self._header())
+            response.raise_for_status()
+        except requests.RequestException as failure:
+            raise RoutingError(
+                f"Ortssuche nicht erreichbar ({type(failure).__name__})") from failure
 
-        treffer = []
-        for merkmal in antwort.json().get("features", []):
-            koord = merkmal.get("geometry", {}).get("coordinates") or []
-            if len(koord) < 2:
+        hit = []
+        for feature in response.json().get("features", []):
+            coord = feature.get("geometry", {}).get("coordinates") or []
+            if len(coord) < 2:
                 continue
-            treffer.append(Ort(name=merkmal.get("properties", {}).get("label", text),
-                               lat=koord[1], lon=koord[0]))
-        return treffer
+            hit.append(City(name=feature.get("properties", {}).get("label", text),
+                               lat=coord[1], lon=coord[0]))
+        return hit

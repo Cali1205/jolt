@@ -10,17 +10,17 @@ window.joltLive = (function () {
   "use strict";
 
   const K = window.jolt;
-  let steckdose = null;       // WebSocket
+  let socket = null;       // WebSocket
   let plan = null;            // der aktuell gültige Ladeplan
-  let wache = null;           // watchPosition-Kennung, oder "nativ"
-  let nativeWacheId = null;   // Kennung des Hintergrund-Standorts der App
-  let nativeLauf = 0;         // zählt Starts, damit ein später Rückruf weiss, ob er noch gilt
-  let standortFehlerGemeldet = false;
-  let letzteMeldung = 0;      // Zeitpunkt der letzten Positionsmeldung
+  let awake = null;           // watchPosition-Kennung, oder "nativ"
+  let nativeAwakeId = null;   // Kennung des Hintergrund-Standorts der App
+  let nativeRun = 0;         // zählt Starts, damit ein später Rückruf weiss, ob er noch gilt
+  let locationErrorReported = false;
+  let latestReport = 0;      // Zeitpunkt der letzten Positionsmeldung
   let dongle = false;         // liest der OBD2-Dongle mit?
-  let runde = 0;
+  let lap = 0;
   // Die gefahrene Spur einer Aufzeichnung, [[lon, lat], ...].
-  let spur = [];
+  let track = [];
   // Die entlang dieser Spur zurückgelegte Strecke. Sie wird **fortlaufend**
   // mitgeführt und an jedem Verlaufspunkt festgehalten, statt sie beim
   // Zeichnen aus der Spur nachzurechnen: Spur und Verlauf wachsen unter
@@ -28,13 +28,13 @@ window.joltLive = (function () {
   // Verlauf bei jedem neuen Ladestand), also gehört `spur[i]` nicht zu
   // `verlauf[i]`. Beim Aufzeichnen mit Dongle ist der Unterschied gewaltig -
   // der Ladestand ändert sich alle paar Minuten, die Position im Sekundentakt.
-  let gefahrenKm = 0;
+  let drivenKm = 0;
   // Der gemessene Verlauf: [{km, soc, gemeldet}, ...] für die Kurve.
-  let verlauf = [];
+  let history = [];
   // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
   // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
-  let letzteRohwerte = null;
-  let letzteRohwerteZeit = 0;   // wann der letzte vollständige Satz ankam
+  let latestRawValues = null;
+  let latestRawValuesTime = 0;   // wann der letzte vollständige Satz ankam
   /* Der letzte bekannte Wert je Messgrösse, mit seinem Zeitpunkt.
    *
    * Die Tabelle zeigte nur, was in **dieser** Runde ankam - und wurde damit
@@ -46,19 +46,19 @@ window.joltLive = (function () {
    * Kilometerstand von vor dreissig Sekunden stimmt noch; die Innentemperatur
    * von vor zwei Minuten auch. Was fehlt, ist nicht der Wert, sondern die
    * Angabe, wie alt er ist - und die steht jetzt daneben. */
-  let werteStand = {};          // name -> {wert, zeit}
+  let valuesAsOf = {};          // name -> {wert, zeit}
   // Anfang der Fahrt für den laufenden Verbrauch: {soc, km} aus der ersten
   // Runde, in der beides zugleich vorlag.
-  let verbrauchAnfang = null;
+  let consumptionStart = null;
   // Ob wegen der Stille schon gewarnt wurde. Einmal genügt: Eine Meldung,
   // die alle zwölf Sekunden kommt, schaltet man ab.
-  let stilleGemeldet = false;
+  let quietReported = false;
   /* Messpunkte für den Verbrauchsplot: [{zeit, kw, km, soc}, ...].
    *
    * Roh gesammelt und erst beim Zeichnen zu Abschnitten verrechnet - so
    * lässt sich die Abschnittsbreite ändern, ohne die Messung zu verlieren. */
-  let verbrauchsspur = [];
-  let nieGekommen = new Set();  // Kennungen, die dieses Auto nicht beantwortet
+  let consumption_track = [];
+  let neverCome = new Set();  // Kennungen, die dieses Auto nicht beantwortet
   /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
    *
    * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
@@ -71,7 +71,7 @@ window.joltLive = (function () {
    * Weil dieser Rückfall nur so lange gilt, wie sich an der Heizung nichts
    * ändert, wird er mit seinem Alter angezeigt - anders als der gemessene
    * Wert, der immer von jetzt ist. */
-  let nebenverbrauch = null;   // {kw, zeit}
+  let aux_load = null;   // {kw, zeit}
 
   /* Wie oft die Position gemeldet wird.
    *
@@ -91,21 +91,21 @@ window.joltLive = (function () {
    * bessere Quelle (siehe `live/aufzeichnung.odometer_faktor`) - dichtere
    * Punkte braucht es trotzdem, denn sie tragen den **Verlauf**: Höhenprofil,
    * Tempo je Teilstück, und die Karte. */
-  const MELDEABSTAND_MS = 12000;
+  const REPORT_INTERVAL_MS = 12000;
 
-  function verbindungAnzeigen(text, farbe) {
+  function showConnection(text, colour) {
     const el = document.getElementById("live-verbindung");
     if (!el) return;
     el.textContent = text;
-    el.style.color = farbe || "";
+    el.style.color = colour || "";
   }
 
-  async function starten() {
-    const fahrt = K.zustand.fahrt;
-    if (!fahrt) { K.melden("Erst eine Route rechnen.", "fehler"); return; }
+  async function launch() {
+    const trip = K.state.trip;
+    if (!trip) { K.report("Erst eine Route rechnen.", "fehler"); return; }
     // Zuerst der Dongle, dann die Sitzung - siehe dongleAnbieten(). Wer
     // keinen auswählt, fährt ohne: Die Fahrt startet in jedem Fall.
-    const mitDongle = await dongleAnbieten();
+    const withDongle = await dongleOffer();
     try {
       // Mit denselben Filtern wie in der Planen-Ansicht: Ein Ladeplan, der
       // unterwegs plötzlich andere Säulen zulässt als beim Planen, wäre
@@ -113,42 +113,42 @@ window.joltLive = (function () {
       // Auch der Aufwand je Halt geht mit: Ein Plan, der unterwegs plötzlich
       // nach einem anderen Massstab umgeplant wird als beim Losfahren, wäre
       // nicht mehr nachvollziehbar.
-      const haltekosten = document.getElementById("haltekosten");
-      const antwort = await K.api(`/api/live/start/${fahrt.fahrt_id}`
+      const holding_cost = document.getElementById("haltekosten");
+      const response = await K.api(`/api/live/start/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
-        + (haltekosten ? `&stopp_fixkosten_min=${haltekosten.value}` : "")
+        + (holding_cost ? `&stop_fixed_cost_min=${holding_cost.value}` : "")
         + (function () {
             const p = document.getElementById("ladepark");
-            return p ? `&ladepark_bonus_min=${p.value}` : "";
+            return p ? `&charge_park_bonus_min=${p.value}` : "";
           })(),
         { method: "POST" });
-      K.zustand.sitzungId = antwort.sitzung_id;
-      K.sitzungMerken(antwort.sitzung_id);
+      K.state.sessionId = response.session_id;
+      K.sessionRemember(response.session_id);
       // Wer die Fahrt startet, sitzt im Auto: Es darf gelesen werden, bis
       // das Telefon sagt, dass das Auto steht.
-      fahrzustandStart("faehrt");
+      drivingStateStart("faehrt");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
-      plan = antwort.plan || null;
-      planZeichnen();
+      plan = response.plan || null;
+      drawPlan();
       // Beim Losfahren ist der Startladestand der beste bekannte Wert - besser
       // jedenfalls als eine feste Zahl, die mit diesem Auto nichts zu tun hat.
-      socFeldVorbelegen(fahrt.start_soc);
-      verbinden(antwort.sitzung_id);
-      positionVerfolgen();
-      window.joltApp.ansichtZeigen("live");
+      socFieldPrefill(trip.start_soc);
+      link(response.session_id);
+      positionTrace();
+      window.joltApp.showView("live");
       // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
       // beim ersten geänderten Plan, wo sie im Weg steht.
-      benachrichtigungenEinrichten();
-      dongleAnzeigen();
-      K.melden(mitDongle
+      notificationsSetUp();
+      showDongle();
+      K.report(withDongle
         ? "Live-Fahrt läuft – Ladestand und Zähler kommen aus dem Auto."
         : "Live-Fahrt läuft ohne Dongle – der Ladestand kommt von Hand. "
           + "Über „Dongle verbinden“ geht es jederzeit nachträglich.",
         "hinweis");
-    } catch (fehler) {
-      K.melden("Live: " + fehler.message, "fehler");
+    } catch (failure) {
+      K.report("Live: " + failure.message, "fehler");
     }
   }
 
@@ -164,92 +164,92 @@ window.joltLive = (function () {
    * Wachsende Abstände wie beim Dongle: Ein Tunnel dauert Sekunden, ein
    * Funkloch auf dem Land Minuten. Beendet die Fahrt, hört es auf -
    * `K.zustand.sitzungId` ist die Bedingung, und `beenden()` löscht sie. */
-  let neuVerbindenUhr = null;
+  let reconnectClock = null;
 
-  function neuVerbinden(sitzungId, versuch) {
-    if (neuVerbindenUhr) clearTimeout(neuVerbindenUhr);
-    if (versuch > 8 || K.zustand.sitzungId !== sitzungId) return;
-    const warten = Math.min(30000, 2000 * Math.pow(2, versuch - 1));
-    verbindungAnzeigen(`getrennt – neuer Versuch in ${warten / 1000} s`,
+  function reconnectAgain(sessionId, attempt) {
+    if (reconnectClock) clearTimeout(reconnectClock);
+    if (attempt > 8 || K.state.sessionId !== sessionId) return;
+    const wait = Math.min(30000, 2000 * Math.pow(2, attempt - 1));
+    showConnection(`getrennt – neuer Versuch in ${wait / 1000} s`,
                        "#e8804f");
-    neuVerbindenUhr = setTimeout(() => {
-      neuVerbindenUhr = null;
-      if (K.zustand.sitzungId === sitzungId) verbinden(sitzungId, versuch);
-    }, warten);
+    reconnectClock = setTimeout(() => {
+      reconnectClock = null;
+      if (K.state.sessionId === sessionId) link(sessionId, attempt);
+    }, wait);
   }
 
-  function verbinden(sitzungId, versuch = 1) {
-    if (steckdose) {
+  function link(sessionId, attempt = 1) {
+    if (socket) {
       // Den alten Zuhörer abhängen, bevor geschlossen wird: Sonst löst
       // dieses Schliessen selbst einen Wiederaufbau aus.
-      try { steckdose.onclose = null; steckdose.close(); } catch (e) {}
+      try { socket.onclose = null; socket.close(); } catch (e) {}
     }
     const schema = location.protocol === "https:" ? "wss" : "ws";
-    steckdose = new WebSocket(`${schema}://${location.host}/api/live/${sitzungId}/ws`);
+    socket = new WebSocket(`${schema}://${location.host}/api/live/${sessionId}/ws`);
 
     // Ein Browser kann beim WebSocket keine Header setzen; der Token geht
     // deshalb als erste Nachricht. Erst die Antwort "bereit" heisst, dass der
     // Server ihn angenommen hat - vorher gilt die Verbindung nicht als
     // stehend, und die Wartezeit bleibt, wie sie ist.
-    steckdose.onopen = () => {
-      try { steckdose.send(JSON.stringify({ token: K.token() })); }
+    socket.onopen = () => {
+      try { socket.send(JSON.stringify({ token: K.token() })); }
       catch (e) { /* onclose baut neu auf */ }
     };
-    steckdose.onclose = () => {
-      if (K.zustand.sitzungId === sitzungId) neuVerbinden(sitzungId, versuch + 1);
-      else verbindungAnzeigen("getrennt", "#8a97a5");
+    socket.onclose = () => {
+      if (K.state.sessionId === sessionId) reconnectAgain(sessionId, attempt + 1);
+      else showConnection("getrennt", "#8a97a5");
     };
-    steckdose.onerror = () => verbindungAnzeigen("gestört", "#e2596a");
-    steckdose.onmessage = (nachricht) => {
-      let daten;
-      try { daten = JSON.parse(nachricht.data); } catch (e) { return; }
-      if (daten.typ === "bereit") {
-        verbindungAnzeigen("verbunden", "#57c98a");
-        versuch = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
+    socket.onerror = () => showConnection("gestört", "#e2596a");
+    socket.onmessage = (msg) => {
+      let records;
+      try { records = JSON.parse(msg.data); } catch (e) { return; }
+      if (records.kind === "bereit") {
+        showConnection("verbunden", "#57c98a");
+        attempt = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
         return;
       }
-      if (daten.typ === "ende") {
-        verbindungAnzeigen("Fahrt beendet", "#8a97a5");
+      if (records.kind === "ende") {
+        showConnection("Fahrt beendet", "#8a97a5");
         return;
       }
-      zustandAnzeigen(daten);
+      showState(records);
     };
   }
 
-  function zustandAnzeigen(z) {
+  function showState(z) {
     // Das Anzeigemodell für alles ausserhalb dieser Oberfläche (CarPlay,
     // Widget): wenige Zahlen, gedrosselt. Ein Fehler dort darf die Anzeige
     // hier nie mitreissen.
     try {
-      if (window.joltAnzeige) {
-        window.joltAnzeige.melden(z, { spur: verbrauchsspur, werte: werteStand,
-                                       neben: nebenverbrauch, plan: z.plan || plan });
+      if (window.joltDisplay) {
+        window.joltDisplay.report(z, { track: consumption_track, vals: valuesAsOf,
+                                       aux: aux_load, plan: z.plan || plan });
       }
     }
     catch (e) { console.log("[anzeige]", e && e.message); }
-    const fahrt = K.zustand.fahrt;
-    const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
+    const trip = K.state.trip;
+    const reserve = trip ? trip.vehicle.reserve_soc : 10;
 
     // Ein neu gerechneter Plan kommt am Zustand mit. Nur wenn er sich
     // wirklich unterscheidet, wird darauf hingewiesen - ein Plan, der sich
     // alle dreissig Sekunden meldet, ist kein Plan.
     if (z.plan) {
       plan = z.plan;
-      planZeichnen();
-      if (z.plan_geaendert) aenderungMelden(z.aenderung);
+      drawPlan();
+      if (z.plan_changed) reportChange(z.change);
     }
 
     // Der zuletzt bekannte Ladestand als Vorschlag fürs nächste Melden: Am
     // Ladepunkt ist der neue Wert höher, unterwegs niedriger - in beiden
     // Fällen ist der letzte Wert der kürzere Weg als eine feste Zahl.
-    socFeldVorbelegen(z.ist_soc);
+    socFieldPrefill(z.actual_soc);
 
-    const abweichungArt = z.abweichung_pp === null ? ""
-      : (z.abweichung_pp <= -5 ? "schlecht"
-        : (z.abweichung_pp <= -2 ? "warnung" : "gut"));
-    const prognoseArt = z.prognose_soc_am_ziel === null ? ""
-      : (z.prognose_soc_am_ziel < reserve ? "schlecht"
-        : (z.prognose_soc_am_ziel < reserve + 10 ? "warnung" : "gut"));
+    const deviationVariety = z.deviation_pp === null ? ""
+      : (z.deviation_pp <= -5 ? "schlecht"
+        : (z.deviation_pp <= -2 ? "warnung" : "gut"));
+    const forecastVariety = z.forecast_soc_at_target === null ? ""
+      : (z.forecast_soc_at_target < reserve ? "schlecht"
+        : (z.forecast_soc_at_target < reserve + 10 ? "warnung" : "gut"));
 
     /* Die Antwort zuerst, und die Antwort ist nicht der Ladestand.
      *
@@ -257,7 +257,7 @@ window.joltLive = (function () {
      * es?", und die beantwortet der Ankunftswert. Solange ein Ladeplan
      * steht, ist der nächste Stopp die nähere und damit dringlichere
      * Antwort; ohne Plan zählt das Ziel. */
-    antwortZeigen(z, reserve);
+    showResponse(z, reserve);
 
     /* Darunter nur das, was eine Entscheidung ändert. Ladestand und
      * Abweichung stehen bewusst hier und nicht oben: Sie sind Beleg, nicht
@@ -267,23 +267,23 @@ window.joltLive = (function () {
       // von 0,4 Prozentpunkten (ein Byte durch 2,5). Auf ganze Prozent
       // gerundet steht die Zahl minutenlang still, obwohl sie sich bewegt -
       // und gerade die Bewegung will man sehen.
-      K.wertKachel(z.soc_quelle === "zuletzt" ? "Ladestand (zuletzt gemessen)"
-                   : (z.soc_gemeldet === false ? "Ladestand (gerechnet)" : "Ladestand"),
-        K.zahl(z.ist_soc, 1) + " %"),
-      K.wertKachel("Abweichung",
-        (z.abweichung_pp === null ? "–"
-          : (z.abweichung_pp > 0 ? "+" : "") + K.zahl(z.abweichung_pp, 1) + " pp"),
-        abweichungArt),
+      K.valueTile(z.soc_source === "zuletzt" ? "Ladestand (zuletzt gemessen)"
+                   : (z.soc_reported === false ? "Ladestand (gerechnet)" : "Ladestand"),
+        K.num(z.actual_soc, 1) + " %"),
+      K.valueTile("Abweichung",
+        (z.deviation_pp === null ? "–"
+          : (z.deviation_pp > 0 ? "+" : "") + K.num(z.deviation_pp, 1) + " pp"),
+        deviationVariety),
       // Die Ankunftszeit ist die zweite Grösse, die sich unterwegs
       // verschiebt - und die einzige, die ein Stau bewegt, ohne den
       // Verbrauch anzufassen.
-      K.wertKachel("Ankunft",
-        (z.ankunft_verschiebung_min === null ? "–"
-          : (Math.abs(z.ankunft_verschiebung_min) < 1 ? "nach Plan"
-            : (z.ankunft_verschiebung_min > 0 ? "+" : "–")
-              + K.dauer(Math.abs(z.ankunft_verschiebung_min)))),
-        (z.ankunft_verschiebung_min || 0) >= 10 ? "warnung" : ""),
-      K.wertKachel("Noch", K.zahl(z.rest_km) + " km"),
+      K.valueTile("Ankunft",
+        (z.arrival_shift_min === null ? "–"
+          : (Math.abs(z.arrival_shift_min) < 1 ? "nach Plan"
+            : (z.arrival_shift_min > 0 ? "+" : "–")
+              + K.duration(Math.abs(z.arrival_shift_min)))),
+        (z.arrival_shift_min || 0) >= 10 ? "warnung" : ""),
+      K.valueTile("Noch", K.num(z.remaining_km) + " km"),
     ].join("");
 
     /* Jeder Messpunkt kommt **zweimal** hier an: einmal als Antwort auf den
@@ -293,48 +293,48 @@ window.joltLive = (function () {
      * eine Langstrecke wären das tausend Einträge zu viel. */
     // Position und Strecke **vor** dem Verlauf: Der Verlaufspunkt soll
     // wissen, wie weit gefahren wurde, als er entstand.
-    const ort = messort(z);
-    if (ort) {
-      const zuletzt = spur[spur.length - 1];
-      if (!zuletzt || zuletzt[0] !== ort[0] || zuletzt[1] !== ort[1]) {
-        if (zuletzt) gefahrenKm += abstandKm(zuletzt, ort);
-        spur.push(ort);
+    const city = measurement_site(z);
+    if (city) {
+      const most_recent = track[track.length - 1];
+      if (!most_recent || most_recent[0] !== city[0] || most_recent[1] !== city[1]) {
+        if (most_recent) drivenKm += spacingKm(most_recent, city);
+        track.push(city);
       }
     }
 
     // Den letzten Verbrauchspunkt mit der jetzt bekannten GPS-Strecke
     // versehen. Er entstand beim Auslesen des Dongles, also bevor die
     // Position durch war.
-    const letzterV = verbrauchsspur[verbrauchsspur.length - 1];
-    if (letzterV && letzterV.gps === null) letzterV.gps = gefahrenKm;
+    const lastV = consumption_track[consumption_track.length - 1];
+    if (lastV && lastV.gps === null) lastV.gps = drivenKm;
 
-    const vorheriger = verlauf[verlauf.length - 1];
+    const previous = history[history.length - 1];
     // Auch die gefahrene Strecke zählt beim Vergleich: Bei einer
     // Aufzeichnung ist `km_auf_route` für jeden Punkt null (es gibt noch
     // keine Route), und ohne diesen Teil galt jeder Punkt mit unverändertem
     // Ladestand als Dublette. Beim Aufzeichnen mit Dongle sind das fast
     // alle - der Ladestand ändert sich alle paar Minuten.
-    const istNeu = z.ist_soc !== null && z.ist_soc !== undefined
-      && !(vorheriger && vorheriger.km === (z.km_auf_route || 0)
-           && vorheriger.gefahren_km === gefahrenKm
-           && vorheriger.soc === z.ist_soc);
-    if (istNeu) {
-      verlauf.push({ km: z.km_auf_route || 0, gefahren_km: gefahrenKm,
-                     soc: z.ist_soc, gemeldet: z.soc_gemeldet !== false });
+    const actualNew = z.actual_soc !== null && z.actual_soc !== undefined
+      && !(previous && previous.km === (z.km_on_route || 0)
+           && previous.driven_km === drivenKm
+           && previous.soc === z.actual_soc);
+    if (actualNew) {
+      history.push({ km: z.km_on_route || 0, driven_km: drivenKm,
+                     soc: z.actual_soc, reported: z.soc_reported !== false });
     }
-    verlaufZeichnen();
-    verbrauchZeichnen();
-    autoZeile(z);
-    dongleAnzeigen();
+    drawHistory();
+    drawConsumption();
+    autoRow(z);
+    showDongle();
 
-    const balken = document.getElementById("live-balken");
-    balken.style.width = Math.max(0, Math.min(100, z.ist_soc)) + "%";
-    balken.style.background = z.ist_soc <= reserve ? "#e2596a"
-      : (z.ist_soc <= reserve + 10 ? "#e8804f" : "#57c98a");
+    const bar = document.getElementById("live-balken");
+    bar.style.width = Math.max(0, Math.min(100, z.actual_soc)) + "%";
+    bar.style.background = z.actual_soc <= reserve ? "#e2596a"
+      : (z.actual_soc <= reserve + 10 ? "#e8804f" : "#57c98a");
 
-    const hinweis = document.getElementById("live-hinweis");
-    hinweis.textContent = z.grund || "im Plan";
-    hinweis.style.color = z.neuplanung_noetig ? "#e8804f" : "";
+    const hint = document.getElementById("live-hinweis");
+    hint.textContent = z.reason || "im Plan";
+    hint.style.color = z.replanning_required ? "#e8804f" : "";
 
     // Die Reserve-Marke wandert mit: Das ist die eigentliche Aussage der
     // Live-Funktion - nicht "du verbrauchst mehr", sondern "es reicht jetzt
@@ -347,77 +347,77 @@ window.joltLive = (function () {
      * leer, obwohl die Position längst hereinkam. Die eigene Position hat
      * mit dem Vorhandensein einer Route nichts zu tun.
      */
-    if (window.joltKarte) {
-      const hier = ort || [z_lon(z), z_lat(z)];
-      const marker = [{ lat: hier[1], lon: hier[0], typ: "auto", text: "hier" }];
+    if (window.joltMap) {
+      const here = city || [z_lon(z), z_lat(z)];
+      const marker = [{ lat: here[1], lon: here[0], kind: "auto", text: "hier" }];
       // Bei einer Aufzeichnung ist die gefahrene Spur das, was es zu sehen
       // gibt: Sie wächst mit und zeigt, dass wirklich mitgeschrieben wird.
       // Gefüllt wird sie weiter oben, zusammen mit der Strecke.
-      if (!fahrt) {
-        window.joltKarte.routeSetzen(spur);
-        // Die Karte folgt der Spur von selbst (karte.js), bis jemand sie
+      if (!trip) {
+        window.joltMap.setRoute(track);
+        // Die Karte folgt der Spur von selbst (map.js), bis jemand sie
         // anfasst - dann bleibt sie, wo sie ist. Frueher wurde nur der erste
         // Punkt zentriert, und die wachsende Strecke musste man von Hand
         // verfolgen.
       }
-      if (fahrt && z.reserve_bei_km !== null && fahrt.profil) {
-        const treffer = fahrt.profil.find((p) => p.km >= z.reserve_bei_km);
-        if (treffer) {
-          marker.push({ lat: treffer.lat, lon: treffer.lon, typ: "reserve",
-                        text: "Reserve " + K.zahl(z.reserve_bei_km) + " km" });
+      if (trip && z.reserve_at_km !== null && trip.profile) {
+        const hit = trip.profile.find((p) => p.km >= z.reserve_at_km);
+        if (hit) {
+          marker.push({ lat: hit.lat, lon: hit.lon, kind: "reserve",
+                        text: "Reserve " + K.num(z.reserve_at_km) + " km" });
         }
       }
-      for (const stopp of (plan && plan.stopps) || []) {
-        marker.push({ lat: stopp.lat, lon: stopp.lon, typ: "stopp",
-                      text: K.dauer(stopp.ladezeit_minuten) });
+      for (const stop of (plan && plan.stops) || []) {
+        marker.push({ lat: stop.lat, lon: stop.lon, kind: "stopp",
+                      text: K.duration(stop.charge_time_minutes) });
       }
-      window.joltKarte.markerSetzen(marker);
+      window.joltMap.setMarker(marker);
     }
   }
 
 
   /* ---------- Die Antwort ---------- */
 
-  function antwortZeigen(z, reserve) {
-    const kasten = document.getElementById("live-antwort");
-    const zahl = document.getElementById("live-antwort-zahl");
+  function showResponse(z, reserve) {
+    const box = document.getElementById("live-antwort");
+    const num = document.getElementById("live-antwort-zahl");
     const text = document.getElementById("live-antwort-text");
-    if (!kasten) return;
+    if (!box) return;
 
-    const stopp = z.naechster_stopp;
-    let wert = null, wo = "", art = "";
-    if (stopp && stopp.erwartet_soc !== null && stopp.erwartet_soc !== undefined) {
-      wert = stopp.erwartet_soc;
-      wo = `an ${stopp.name || "nächster Stopp"} · km ${K.zahl(stopp.km_auf_route)}`;
-    } else if (z.prognose_soc_am_ziel !== null) {
-      wert = z.prognose_soc_am_ziel;
+    const stop = z.next_stop;
+    let val = null, wo = "", variety = "";
+    if (stop && stop.expected_soc !== null && stop.expected_soc !== undefined) {
+      val = stop.expected_soc;
+      wo = `an ${stop.name || "nächster Stopp"} · km ${K.num(stop.km_on_route)}`;
+    } else if (z.forecast_soc_at_target !== null) {
+      val = z.forecast_soc_at_target;
       wo = "am Ziel, ohne Nachladen";
     }
 
-    if (wert === null) {
-      zahl.textContent = K.zahl(z.ist_soc) + " %";
+    if (val === null) {
+      num.textContent = K.num(z.actual_soc) + " %";
       text.textContent = "Ladestand – noch keine Prognose";
-      kasten.className = "";
+      box.className = "";
       return;
     }
     // Ein negativer Wert ist keine Aussage über den Akku, sondern darüber,
     // dass es so nicht reicht. Genau das gehört dann da zu stehen.
-    if (wert < 0) {
-      zahl.textContent = "reicht nicht";
-      art = "schlecht";
+    if (val < 0) {
+      num.textContent = "reicht nicht";
+      variety = "schlecht";
     } else {
-      zahl.textContent = K.zahl(wert) + " %";
-      art = wert < reserve ? "schlecht" : (wert < reserve + 8 ? "warnung" : "gut");
+      num.textContent = K.num(val) + " %";
+      variety = val < reserve ? "schlecht" : (val < reserve + 8 ? "warnung" : "gut");
     }
     text.textContent = wo;
-    kasten.className = art;
+    box.className = variety;
   }
 
   /* Luftlinie zwischen zwei [lon, lat] in Kilometern. Für eine gefahrene
    * Spur mit Punkten alle dreissig Sekunden ist der Unterschied zur
    * Strassenlänge vernachlässigbar - und für die Achse einer Kurve zählt
    * ohnehin nur, dass sie monoton wächst. */
-  function abstandKm(a, b) {
+  function spacingKm(a, b) {
     if (!a || !b) return 0;
     const R = 6371, r = Math.PI / 180;
     const dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
@@ -441,21 +441,21 @@ window.joltLive = (function () {
    * Soll-Kurve, aber die gemessene ist dann erst recht das, was man sehen
    * will.
    */
-  function verlaufZeichnen() {
-    const leinwand = document.getElementById("live-verlauf");
-    if (!leinwand) return;
+  function drawHistory() {
+    const canvas = document.getElementById("live-verlauf");
+    if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
-    const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
-    if (!breite || !hoehe) return;
-    leinwand.width = breite * dpr;
-    leinwand.height = hoehe * dpr;
-    const stift = leinwand.getContext("2d");
-    stift.setTransform(dpr, 0, 0, dpr, 0, 0);
-    stift.clearRect(0, 0, breite, hoehe);
+    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
+    if (!extent || !elevation) return;
+    canvas.width = extent * dpr;
+    canvas.height = elevation * dpr;
+    const pen = canvas.getContext("2d");
+    pen.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pen.clearRect(0, 0, extent, elevation);
 
-    const fahrt = K.zustand.fahrt;
-    const profil = (fahrt && fahrt.profil) || [];
-    const reserve = fahrt ? fahrt.fahrzeug.reserve_soc : 10;
+    const trip = K.state.trip;
+    const profile = (trip && trip.profile) || [];
+    const reserve = trip ? trip.vehicle.reserve_soc : 10;
 
     // Der Massstab richtet sich nach dem, was es gibt: mit Plan nach der
     // ganzen Strecke, ohne Plan nach dem, was schon gefahren wurde.
@@ -476,153 +476,153 @@ window.joltLive = (function () {
      * der Verlauf um ein Vielfaches kürzer, und die Kurve rückte dadurch
      * an den linken Rand - genau der Fehler, den diese Schleife beheben
      * sollte. Jetzt trägt jeder Verlaufspunkt seine Strecke selbst. */
-    const eigeneKm = !profil.length;
-    const streckeVon = (v) => eigeneKm ? (v.gefahren_km || 0) : v.km;
-    const maxKm = profil.length
-      ? (profil[profil.length - 1].km || 1)
-      : Math.max(1, ...verlauf.map(streckeVon));
-    const links = 4, rechts = breite - 4, oben = 8, unten = hoehe - 16;
-    const x = (km) => links + (km / maxKm) * (rechts - links);
-    const y = (soc) => unten - (Math.max(0, Math.min(100, soc)) / 100)
-      * (unten - oben);
+    const ownKm = !profile.length;
+    const distanceFrom = (v) => ownKm ? (v.driven_km || 0) : v.km;
+    const maxKm = profile.length
+      ? (profile[profile.length - 1].km || 1)
+      : Math.max(1, ...history.map(distanceFrom));
+    const left_side = 4, right = extent - 4, upper = 8, bottom = elevation - 16;
+    const x = (km) => left_side + (km / maxKm) * (right - left_side);
+    const y = (soc) => bottom - (Math.max(0, Math.min(100, soc)) / 100)
+      * (bottom - upper);
 
     // Höhenprofil im Hintergrund. Es erklärt die Knicke in beiden Kurven -
     // ohne diese Erklärung wirken sie wie Messfehler.
-    if (profil.length > 1) {
-      let maxHoehe = 1;
-      for (const p of profil) maxHoehe = Math.max(maxHoehe, p.hoehe || 0);
-      stift.beginPath();
-      stift.moveTo(x(0), unten);
-      for (const p of profil) {
-        stift.lineTo(x(p.km), unten - ((p.hoehe || 0) / maxHoehe) * (unten - oben) * 0.3);
+    if (profile.length > 1) {
+      let maxElevation = 1;
+      for (const p of profile) maxElevation = Math.max(maxElevation, p.elevation || 0);
+      pen.beginPath();
+      pen.moveTo(x(0), bottom);
+      for (const p of profile) {
+        pen.lineTo(x(p.km), bottom - ((p.elevation || 0) / maxElevation) * (bottom - upper) * 0.3);
       }
-      stift.lineTo(x(maxKm), unten);
-      stift.closePath();
-      stift.fillStyle = "rgba(138,151,165,.12)";
-      stift.fill();
+      pen.lineTo(x(maxKm), bottom);
+      pen.closePath();
+      pen.fillStyle = "rgba(138,151,165,.12)";
+      pen.fill();
     }
 
     // Die Reserve als Linie, nicht als Zahl: Man sieht sofort, wo die
     // gemessene Kurve auf sie zuläuft.
-    stift.beginPath();
-    stift.setLineDash([4, 4]);
-    stift.moveTo(links, y(reserve));
-    stift.lineTo(rechts, y(reserve));
-    stift.strokeStyle = "rgba(226,89,106,.6)";
-    stift.lineWidth = 1;
-    stift.stroke();
-    stift.setLineDash([]);
-    stift.fillStyle = "rgba(226,89,106,.75)";
-    stift.font = "10px system-ui, sans-serif";
-    stift.fillText("Reserve", links + 2, y(reserve) - 3);
+    pen.beginPath();
+    pen.setLineDash([4, 4]);
+    pen.moveTo(left_side, y(reserve));
+    pen.lineTo(right, y(reserve));
+    pen.strokeStyle = "rgba(226,89,106,.6)";
+    pen.lineWidth = 1;
+    pen.stroke();
+    pen.setLineDash([]);
+    pen.fillStyle = "rgba(226,89,106,.75)";
+    pen.font = "10px system-ui, sans-serif";
+    pen.fillText("Reserve", left_side + 2, y(reserve) - 3);
 
     // Geplante Kurve: gedämpft, sie ist der Bezug und nicht die Nachricht.
-    if (profil.length > 1) {
-      stift.beginPath();
-      profil.forEach((p, i) => {
+    if (profile.length > 1) {
+      pen.beginPath();
+      profile.forEach((p, i) => {
         const px = x(p.km), py = y(p.soc);
-        if (i === 0) stift.moveTo(px, py); else stift.lineTo(px, py);
+        if (i === 0) pen.moveTo(px, py); else pen.lineTo(px, py);
       });
-      stift.strokeStyle = "rgba(138,151,165,.55)";
-      stift.lineWidth = 1.5;
-      stift.stroke();
+      pen.strokeStyle = "rgba(138,151,165,.55)";
+      pen.lineWidth = 1.5;
+      pen.stroke();
     }
 
     // Die Ladestopps als Marken - sie erklären die Sprünge, die gleich
     // kommen, und zeigen, wie weit der nächste noch weg ist.
-    for (const stopp of (plan && plan.stopps) || []) {
-      const px = x(stopp.km_auf_route);
-      stift.beginPath();
-      stift.moveTo(px, oben);
-      stift.lineTo(px, unten);
-      stift.strokeStyle = "rgba(255,201,60,.35)";
-      stift.lineWidth = 1;
-      stift.stroke();
+    for (const stop of (plan && plan.stops) || []) {
+      const px = x(stop.km_on_route);
+      pen.beginPath();
+      pen.moveTo(px, upper);
+      pen.lineTo(px, bottom);
+      pen.strokeStyle = "rgba(255,201,60,.35)";
+      pen.lineWidth = 1;
+      pen.stroke();
     }
 
     // Die gemessene Kurve. Sie ist die Nachricht, also kräftig.
-    if (verlauf.length > 1) {
-      stift.beginPath();
-      verlauf.forEach((v, i) => {
-        const px = x(streckeVon(v)), py = y(v.soc);
-        if (i === 0) stift.moveTo(px, py); else stift.lineTo(px, py);
+    if (history.length > 1) {
+      pen.beginPath();
+      history.forEach((v, i) => {
+        const px = x(distanceFrom(v)), py = y(v.soc);
+        if (i === 0) pen.moveTo(px, py); else pen.lineTo(px, py);
       });
-      stift.strokeStyle = "#ffc93c";
-      stift.lineWidth = 2.5;
-      stift.lineJoin = "round";
-      stift.stroke();
+      pen.strokeStyle = "#ffc93c";
+      pen.lineWidth = 2.5;
+      pen.lineJoin = "round";
+      pen.stroke();
     }
 
     // Wo das Auto gerade ist. Ein gerechneter Ladestand bekommt einen
     // hohlen Punkt - man soll ihm ansehen, dass er nicht gemessen ist.
-    const jetzt = verlauf[verlauf.length - 1];
-    if (jetzt) {
-      stift.beginPath();
-      stift.arc(x(streckeVon(jetzt)), y(jetzt.soc), 4.5, 0, Math.PI * 2);
-      if (jetzt.gemeldet) { stift.fillStyle = "#ffc93c"; stift.fill(); }
-      else { stift.strokeStyle = "#ffc93c"; stift.lineWidth = 2; stift.stroke(); }
+    const now_ts = history[history.length - 1];
+    if (now_ts) {
+      pen.beginPath();
+      pen.arc(x(distanceFrom(now_ts)), y(now_ts.soc), 4.5, 0, Math.PI * 2);
+      if (now_ts.reported) { pen.fillStyle = "#ffc93c"; pen.fill(); }
+      else { pen.strokeStyle = "#ffc93c"; pen.lineWidth = 2; pen.stroke(); }
     }
 
-    stift.fillStyle = "rgba(138,151,165,.8)";
-    stift.fillText("0", links, hoehe - 4);
-    const beschriftung = K.zahl(maxKm) + " km";
-    stift.fillText(beschriftung, rechts - stift.measureText(beschriftung).width,
-                   hoehe - 4);
+    pen.fillStyle = "rgba(138,151,165,.8)";
+    pen.fillText("0", left_side, elevation - 4);
+    const label = K.num(maxKm) + " km";
+    pen.fillText(label, right - pen.measureText(label).width,
+                   elevation - 4);
   }
 
   /* ---------- Der Ladeplan unterwegs ---------- */
 
-  function planZeichnen() {
-    const liste = document.getElementById("live-plan");
-    const stand = document.getElementById("live-plan-stand");
-    if (!liste || !stand) return;
+  function drawPlan() {
+    const lst = document.getElementById("live-plan");
+    const as_of = document.getElementById("live-plan-stand");
+    if (!lst || !as_of) return;
 
     if (!plan) {
-      liste.innerHTML = '<li class="leer">Noch kein Ladeplan.</li>';
-      stand.textContent = "";
+      lst.innerHTML = '<li class="leer">Noch kein Ladeplan.</li>';
+      as_of.textContent = "";
       return;
     }
-    stand.textContent = plan.stand_km ? "gerechnet ab km " + K.zahl(plan.stand_km)
+    as_of.textContent = plan.reading_km ? "gerechnet ab km " + K.num(plan.reading_km)
                                       : "beim Losfahren gerechnet";
 
-    if (!plan.machbar) {
-      liste.innerHTML = `<li class="leer" style="color:#e2596a">${
-        entschaerfen(plan.grund || "Kein Ladeplan möglich.")}</li>`;
+    if (!plan.feasible) {
+      lst.innerHTML = `<li class="leer" style="color:#e2596a">${
+        sanitize(plan.reason || "Kein Ladeplan möglich.")}</li>`;
       return;
     }
-    if (!plan.stopps || !plan.stopps.length) {
-      liste.innerHTML = '<li class="leer">Kein Ladestopp mehr nötig.</li>';
+    if (!plan.stops || !plan.stops.length) {
+      lst.innerHTML = '<li class="leer">Kein Ladestopp mehr nötig.</li>';
       return;
     }
 
-    liste.innerHTML = "";
-    plan.stopps.forEach((s, i) => {
-      const eintrag = document.createElement("li");
-      eintrag.innerHTML = `
+    lst.innerHTML = "";
+    plan.stops.forEach((s, i) => {
+      const entry = document.createElement("li");
+      entry.innerHTML = `
         <div class="haupt">
-          <div class="titel">${i + 1}. ${entschaerfen(s.name || s.betreiber
+          <div class="titel">${i + 1}. ${sanitize(s.name || s.operator
             || "Ladepunkt")}</div>
-          <div class="unter">km ${K.zahl(s.km_auf_route)} ·
-            ${K.zahl(s.ankunft_soc)} % → ${K.zahl(s.abfahrt_soc)} % ·
-            ${K.zahl(s.max_kw)} kW · ${s.anzahl_punkte} Ladepunkte</div>
+          <div class="unter">km ${K.num(s.km_on_route)} ·
+            ${K.num(s.arrival_soc)} % → ${K.num(s.departure_soc)} % ·
+            ${K.num(s.max_kw)} kW · ${s.point_count} Ladepunkte</div>
         </div>
-        <div class="kw">${K.dauer(s.ladezeit_minuten)}</div>`;
-      liste.appendChild(eintrag);
+        <div class="kw">${K.duration(s.charge_time_minutes)}</div>`;
+      lst.appendChild(entry);
     });
   }
 
   /* Eine Änderung am Plan ist der einzige Anlass, jemanden am Steuer zu
    * stören - deshalb hier und sonst nirgends eine Benachrichtigung. */
-  function aenderungMelden(text) {
-    const kasten = document.getElementById("live-aenderung");
-    if (kasten) {
-      kasten.textContent = text || "Der Ladeplan hat sich geändert.";
-      kasten.hidden = false;
+  function reportChange(text) {
+    const box = document.getElementById("live-aenderung");
+    if (box) {
+      box.textContent = text || "Der Ladeplan hat sich geändert.";
+      box.hidden = false;
     }
-    benachrichtigen(text || "Der Ladeplan hat sich geändert.");
+    notify(text || "Der Ladeplan hat sich geändert.");
   }
 
-  function benachrichtigen(text) {
+  function notify(text) {
     // Ohne erteilte Erlaubnis wird nicht gefragt und nicht benachrichtigt:
     // Wer die Ansicht offen hat, sieht die Meldung ohnehin. Gefragt wird
     // einmal beim Start der Fahrt, wo die Frage auch etwas bedeutet.
@@ -630,7 +630,7 @@ window.joltLive = (function () {
       if (!("Notification" in window) || Notification.permission !== "granted") {
         return;
       }
-      new Notification("jolt – Ladeplan geändert", { body: text, tag: "jolt-plan" });
+      new Notification("jolt – Ladeplan geändert", { body: text, day: "jolt-plan" });
     } catch (e) { /* je nach Browser und Kontext nicht erlaubt - dann eben nicht */ }
   }
 
@@ -644,62 +644,62 @@ window.joltLive = (function () {
    *
    * Scheitert irgendein Schritt, läuft die Fahrt trotzdem - dann eben nur mit
    * der Meldung in der offenen Ansicht. */
-  async function benachrichtigungenEinrichten() {
+  async function notificationsSetUp() {
     try {
       if (!("Notification" in window) || !("PushManager" in window)) return;
 
-      const schluessel = await K.api("/api/push/schluessel");
-      if (!schluessel.eingerichtet) return;   // kein VAPID-Schlüssel am Server
+      const keyname = await K.api("/api/push/schluessel");
+      if (!keyname.configured) return;   // kein VAPID-Schlüssel am Server
 
       if (Notification.permission === "default") {
         await Notification.requestPermission();
       }
       if (Notification.permission !== "granted") return;
 
-      const registrierung = K.zustand.serviceWorker
+      const registrierung = K.state.serviceWorker
         || (navigator.serviceWorker && await navigator.serviceWorker.ready);
       if (!registrierung || !registrierung.pushManager) return;
 
       // Ein bestehendes Abo weiterverwenden. Ein neues anzulegen gäbe
       // denselben Endpunkt zurück, kostet aber einen Umweg.
-      let abo = await registrierung.pushManager.getSubscription();
-      if (!abo) {
-        abo = await registrierung.pushManager.subscribe({
+      let subscription = await registrierung.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registrierung.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: schluesselAlsBytes(schluessel.schluessel),
+          applicationServerKey: keyAsBytes(keyname.keyname),
         });
       }
 
-      const daten = abo.toJSON();
+      const records = subscription.toJSON();
       await K.api("/api/push/abo", { method: "POST", body: {
-        endpoint: daten.endpoint,
-        p256dh: daten.keys.p256dh,
-        auth: daten.keys.auth,
-        geraet: navigator.userAgent.slice(0, 120),
+        endpoint: records.endpoint,
+        p256dh: records.keys.p256dh,
+        auth: records.keys.auth,
+        device: navigator.userAgent.slice(0, 120),
       }});
-    } catch (fehler) {
+    } catch (failure) {
       // Bewusst nur ins Log: Wer gerade losfährt, will keine Fehlermeldung
       // über eine Nebenfunktion lesen.
-      if (window.console) console.warn("Benachrichtigungen:", fehler.message);
+      if (window.console) console.warn("Benachrichtigungen:", failure.message);
     }
   }
 
   /* Der öffentliche Schlüssel kommt als base64url und muss als Uint8Array
    * übergeben werden - der Browser nimmt die Zeichenkette nicht an. */
-  function schluesselAlsBytes(text) {
-    const gefuellt = (text + "=".repeat((4 - text.length % 4) % 4))
+  function keyAsBytes(text) {
+    const filled = (text + "=".repeat((4 - text.length % 4) % 4))
       .replace(/-/g, "+").replace(/_/g, "/");
-    const roh = atob(gefuellt);
-    const bytes = new Uint8Array(roh.length);
-    for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+    const raw = atob(filled);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
     return bytes;
   }
 
   /* Die Namen kommen aus fremden Datenquellen und landen in innerHTML. */
-  function entschaerfen(text) {
-    const hilfe = document.createElement("div");
-    hilfe.textContent = text || "";
-    return hilfe.innerHTML;
+  function sanitize(text) {
+    const helper = document.createElement("div");
+    helper.textContent = text || "";
+    return helper.innerHTML;
   }
 
   /* Wo der Messpunkt lag - [lon, lat], oder null.
@@ -712,7 +712,7 @@ window.joltLive = (function () {
    *
    * Der Rückfall bleibt für Sitzungen, die noch von einer älteren Fassung
    * bedient werden - dort ist er richtig, weil es dann eine Route gibt. */
-  function messort(z) {
+  function measurement_site(z) {
     if (typeof z.lat === "number" && typeof z.lon === "number"
         && (z.lat !== 0 || z.lon !== 0)) {
       return [z.lon, z.lat];
@@ -723,27 +723,27 @@ window.joltLive = (function () {
 
   /* Der Rückfall: über das Profil hängt an jedem Kilometerstand eine
    * Position. Gilt nur für geplante Fahrten. */
-  function z_lat(z) { return punktBeiKm(z.km_auf_route).lat; }
-  function z_lon(z) { return punktBeiKm(z.km_auf_route).lon; }
+  function z_lat(z) { return pointAtKm(z.km_on_route).lat; }
+  function z_lon(z) { return pointAtKm(z.km_on_route).lon; }
 
-  function punktBeiKm(km) {
-    const profil = (K.zustand.fahrt || {}).profil || [];
-    return profil.find((p) => p.km >= km) || profil[profil.length - 1]
+  function pointAtKm(km) {
+    const profile = (K.state.trip || {}).profile || [];
+    return profile.find((p) => p.km >= km) || profile[profile.length - 1]
       || { lat: 0, lon: 0 };
   }
 
-  async function simulieren() {
-    if (!K.zustand.sitzungId) { K.melden("Keine Live-Fahrt.", "fehler"); return; }
-    const mehr = Number(document.getElementById("mehrverbrauch").value) / 100;
-    const stau = Number(document.getElementById("stau").value) / 100;
+  async function simulate() {
+    if (!K.state.sessionId) { K.report("Keine Live-Fahrt.", "fehler"); return; }
+    const more = Number(document.getElementById("mehrverbrauch").value) / 100;
+    const jam = Number(document.getElementById("stau").value) / 100;
     try {
-      await K.api(`/api/live/${K.zustand.sitzungId}/simulieren`
-        + `?mehrverbrauch=${mehr}&takt_s=0.3&zeitfaktor=${stau}`,
+      await K.api(`/api/live/${K.state.sessionId}/simulieren`
+        + `?extra_consumption=${more}&tick_s=0.3&time_factor=${jam}`,
         { method: "POST" });
-      K.melden(`Simulation läuft mit ${Math.round(mehr * 100)} % Verbrauch `
-        + `und ${Math.round(stau * 100)} % Fahrzeit.`, "hinweis");
-    } catch (fehler) {
-      K.melden("Simulation: " + fehler.message, "fehler");
+      K.report(`Simulation läuft mit ${Math.round(more * 100)} % Verbrauch `
+        + `und ${Math.round(jam * 100)} % Fahrzeit.`, "hinweis");
+    } catch (failure) {
+      K.report("Simulation: " + failure.message, "fehler");
     }
   }
 
@@ -761,31 +761,31 @@ window.joltLive = (function () {
    * erfinden - der Verbrauchsfaktor läse daraus, das Auto habe seither nichts
    * verbraucht. Was zwischen zwei Meldungen gilt, rechnet der Server aus dem
    * Energieprofil hoch. */
-  function standortEingang(coords, zeitMs) {
+  function locationInput(coords, timeMs) {
     // Vor der Drosselung: Der Zustand will jeden Fix sehen, nicht jeden
     // zwölften.
-    fahrzustandPruefen(coords, zeitMs);
-    const jetzt = Date.now();
+    examineDrivingState(coords, timeMs);
+    const now_ts = Date.now();
     // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
     // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
     // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
-    if (jetzt - letzteMeldung < MELDEABSTAND_MS) return;
-    letzteMeldung = jetzt;
-    positionMelden(coords, zeitMs);
+    if (now_ts - latestReport < REPORT_INTERVAL_MS) return;
+    latestReport = now_ts;
+    reportPosition(coords, timeMs);
   }
 
-  function positionVerfolgen() {
-    if (wache !== null) return;
-    const nativ = nativerStandort();
-    if (nativ) { nativVerfolgen(nativ); return; }
-    webVerfolgen();
+  function positionTrace() {
+    if (awake !== null) return;
+    const native = nativeLocation();
+    if (native) { nativeTrace(native); return; }
+    webTrace();
   }
 
-  function webVerfolgen() {
+  function webTrace() {
     if (!navigator.geolocation) return;
-    bildschirmWachHalten();
-    wache = navigator.geolocation.watchPosition(
-      (pos) => standortEingang(pos.coords, pos.timestamp),
+    screenAwakeHold();
+    awake = navigator.geolocation.watchPosition(
+      (pos) => locationInput(pos.coords, pos.timestamp),
       // Ein GPS-Fehler unterwegs ist kein Grund, den Nutzer zu behelligen -
       // in einem Tunnel ist er der Normalfall, und die nächste Messung kommt.
       () => {},
@@ -813,7 +813,7 @@ window.joltLive = (function () {
    * Stand liefert `registerPlugin` einen Stellvertreter, dessen Aufrufe mit
    * "not implemented" scheitern - und die Fahrt hätte gar keinen Standort
    * mehr. `isPluginAvailable` fragt nach, und sonst gilt der Browser-Weg. */
-  function nativerStandort() {
+  function nativeLocation() {
     const h = window.joltBlePlugin;
     if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()
         || !h.BackgroundGeolocation) return null;
@@ -822,12 +822,12 @@ window.joltLive = (function () {
     return h.BackgroundGeolocation;
   }
 
-  async function nativVerfolgen(plugin) {
+  async function nativeTrace(plugin) {
     // Sofort besetzen: `addWatcher` antwortet erst nach der
     // Berechtigungsfrage, und bis dahin darf kein zweiter Start dazwischen.
-    wache = "nativ";
-    const lauf = ++nativeLauf;
-    bildschirmWachHalten();
+    awake = "nativ";
+    const cycle = ++nativeRun;
+    screenAwakeHold();
     let id;
     try {
       id = await plugin.addWatcher({
@@ -835,69 +835,69 @@ window.joltLive = (function () {
         backgroundMessage: "Position und Ladestand werden weiter erfasst.",
         requestPermissions: true,
         distanceFilter: 0,
-      }, (ort, fehler) => {
-        if (fehler) { standortFehler(fehler); return; }
-        if (!ort || typeof ort.latitude !== "number") return;
-        standortEingang({
-          latitude: ort.latitude, longitude: ort.longitude,
+      }, (city, failure) => {
+        if (failure) { locationError(failure); return; }
+        if (!city || typeof city.latitude !== "number") return;
+        locationInput({
+          latitude: city.latitude, longitude: city.longitude,
           // Das Plugin liefert null statt -1, wenn die Geschwindigkeit fehlt.
-          speed: typeof ort.speed === "number" ? ort.speed : null,
-          altitude: typeof ort.altitude === "number" ? ort.altitude : null,
-        }, ort.time);
+          speed: typeof city.speed === "number" ? city.speed : null,
+          altitude: typeof city.altitude === "number" ? city.altitude : null,
+        }, city.time);
       });
-    } catch (fehler) {
+    } catch (failure) {
       // Das Plugin ging nicht - dann wenigstens der Standort im Vordergrund,
       // statt für den Rest der Fahrt gar keinen.
-      if (lauf === nativeLauf) { wache = null; webVerfolgen(); }
-      standortFehler(fehler);
+      if (cycle === nativeRun) { awake = null; webTrace(); }
+      locationError(failure);
       return;
     }
     // Beendet, während iOS noch fragte: den eben angelegten Watcher gleich
     // wieder entfernen, sonst läuft er ohne Fahrt weiter und kostet Akku.
-    if (lauf !== nativeLauf || wache !== "nativ") {
-      watcherEntfernen(plugin, id);
+    if (cycle !== nativeRun || awake !== "nativ") {
+      dropWatcher(plugin, id);
       return;
     }
-    nativeWacheId = id;
+    nativeAwakeId = id;
   }
 
-  function watcherEntfernen(plugin, id) {
+  function dropWatcher(plugin, id) {
     // Ein Promise: Eine Ablehnung fängt kein try/catch.
     try {
       Promise.resolve(plugin.removeWatcher({ id })).catch(() => {});
     } catch (e) { /* schon weg */ }
   }
 
-  function standortFehler(fehler) {
-    if (fehler && fehler.code === "NOT_AUTHORIZED") {
+  function locationError(failure) {
+    if (failure && failure.code === "NOT_AUTHORIZED") {
       // Einmal sagen, nicht bei jedem Rückruf. Ohne Erlaubnis gibt es bei
       // gesperrtem Telefon keine Messpunkte - das muss man wissen, bevor man
       // losfährt.
-      if (standortFehlerGemeldet) return;
-      standortFehlerGemeldet = true;
-      K.melden("Standort nicht erlaubt. In den iOS-Einstellungen für jolt "
+      if (locationErrorReported) return;
+      locationErrorReported = true;
+      K.report("Standort nicht erlaubt. In den iOS-Einstellungen für jolt "
         + "Standort auf „Beim Verwenden“ oder „Immer“ stellen - sonst "
         + "kommen bei gesperrtem Telefon keine Messpunkte an.", "warnung");
     }
     // Alles andere ist wie beim Browser: ein Tunnel, die nächste Messung kommt.
   }
 
-  function positionAufgeben() {
-    if (wache === null) return;
-    if (wache === "nativ") {
-      const id = nativeWacheId;
-      nativeWacheId = null;
-      nativeLauf++;
-      const plugin = nativerStandort();
+  function positionGiveUp() {
+    if (awake === null) return;
+    if (awake === "nativ") {
+      const id = nativeAwakeId;
+      nativeAwakeId = null;
+      nativeRun++;
+      const plugin = nativeLocation();
       if (id && plugin) {
-        watcherEntfernen(plugin, id);
+        dropWatcher(plugin, id);
       }
     } else {
-      try { navigator.geolocation.clearWatch(wache); } catch (e) {}
+      try { navigator.geolocation.clearWatch(awake); } catch (e) {}
     }
-    wache = null;
-    standortFehlerGemeldet = false;
-    bildschirmFreigeben();
+    awake = null;
+    locationErrorReported = false;
+    screenRelease();
   }
 
   /* ---------- Der Bildschirm muss anbleiben ---------- */
@@ -914,8 +914,8 @@ window.joltLive = (function () {
    * Die Sperre geht verloren, sobald die Seite in den Hintergrund gerät, und
    * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
    * geholt. */
-  let wachhalter = null;
-  let wachhalterVideo = null;
+  let wake_lock = null;
+  let keepAwakeVideo = null;
 
   /* Auf iOS bleibt die Wake-Lock-API in einer als App vom Homescreen
    * gestarteten Seite ("standalone", siehe manifest.json) unzuverlässig -
@@ -931,7 +931,7 @@ window.joltLive = (function () {
    * Video (1 Sekunde, 2x2 Pixel, schwarz, ohne Ton - 1,5 kB) läuft
    * zuverlässiger. Eingebettet statt als eigene Datei, damit nichts vom
    * Netz nachgeladen werden muss, bevor die Sperre greift. */
-  const WACHHALTER_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMXbW9vdgAAAGxtdmhkAAAA"
+  const KEEP_AWAKE_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMXbW9vdgAAAGxtdmhkAAAA"
     + "AAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAB"
     + "AAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkF0"
     + "cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAA"
@@ -968,8 +968,8 @@ window.joltLive = (function () {
    * sichtbaren Bereich liegt, für iOS nicht als echte Wiedergabe. Jetzt
    * steht es tatsächlich in der oberen linken Ecke, nur eben ein einzelnes,
    * fast durchsichtiges Pixel gross - das fällt nicht auf, zählt aber. */
-  function videoWachhalterHolen() {
-    if (wachhalterVideo) return wachhalterVideo;
+  function fetchVideoKeepAwake() {
+    if (keepAwakeVideo) return keepAwakeVideo;
     const video = document.createElement("video");
     video.muted = true;
     video.loop = true;
@@ -978,9 +978,9 @@ window.joltLive = (function () {
     video.setAttribute("webkit-playsinline", "");
     video.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;"
       + "opacity:0.01;pointer-events:none;z-index:-1;";
-    video.src = WACHHALTER_MP4;
+    video.src = KEEP_AWAKE_MP4;
     document.body.appendChild(video);
-    wachhalterVideo = video;
+    keepAwakeVideo = video;
     return video;
   }
 
@@ -994,45 +994,45 @@ window.joltLive = (function () {
    * als Wiedergabe gelten muss. Der Weg darunter bleibt trotzdem stehen:
    * Die Oberfläche läuft weiter auch im Browser, und dort gibt es nichts
    * Besseres als Wake Lock und den Videobehelf. */
-  async function nativWachHalten() {
+  async function nativeAwakeHold() {
     const h = window.joltBlePlugin;
     if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()) return false;
     try {
       await h.KeepAwake.keepAwake();
       return true;
-    } catch (fehler) {
-      console.log("[live] KeepAwake ging nicht:", fehler.message);
+    } catch (failure) {
+      console.log("[live] KeepAwake ging nicht:", failure.message);
       return false;
     }
   }
 
-  async function bildschirmWachHalten() {
-    if (await nativWachHalten()) return;
-    let hinweis = "";
-    if (!wachhalter && "wakeLock" in navigator) {
+  async function screenAwakeHold() {
+    if (await nativeAwakeHold()) return;
+    let hint = "";
+    if (!wake_lock && "wakeLock" in navigator) {
       try {
-        wachhalter = await navigator.wakeLock.request("screen");
-        wachhalter.addEventListener("release", () => { wachhalter = null; });
-      } catch (fehler) {
-        hinweis = "Wake Lock: " + fehler.message;
+        wake_lock = await navigator.wakeLock.request("screen");
+        wake_lock.addEventListener("release", () => { wake_lock = null; });
+      } catch (failure) {
+        hint = "Wake Lock: " + failure.message;
       }
     } else if (!("wakeLock" in navigator)) {
-      hinweis = "Wake Lock: vom Browser nicht unterstützt";
+      hint = "Wake Lock: vom Browser nicht unterstützt";
     }
     try {
-      await videoWachhalterHolen().play();
-    } catch (fehler) {
-      hinweis += (hinweis ? " / " : "") + "Video: " + fehler.message;
+      await fetchVideoKeepAwake().play();
+    } catch (failure) {
+      hint += (hint ? " / " : "") + "Video: " + failure.message;
     }
-    if (hinweis) {
-      console.log("[live] Bildschirm wachhalten:", hinweis);
-      K.melden("Bildschirm bleibt evtl. nicht an (" + hinweis + ") - "
+    if (hint) {
+      console.log("[live] Bildschirm wachhalten:", hint);
+      K.report("Bildschirm bleibt evtl. nicht an (" + hint + ") - "
         + "sicherheitshalber Automatische Sperre in den iOS-Einstellungen "
         + "auf „Nie” stellen.", "warnung");
     }
   }
 
-  function bildschirmFreigeben() {
+  function screenRelease() {
     // Nach der Fahrt soll sich das Telefon wieder normal sperren. Der
     // native Weg wird zuerst zurückgenommen; die beiden darunter schaden
     // nicht, wenn sie gar nicht erst gegriffen haben.
@@ -1040,12 +1040,12 @@ window.joltLive = (function () {
     if (h && h.Capacitor && h.Capacitor.isNativePlatform()) {
       h.KeepAwake.allowSleep().catch(() => {});
     }
-    if (wachhalter) {
-      try { wachhalter.release(); } catch (e) {}
-      wachhalter = null;
+    if (wake_lock) {
+      try { wake_lock.release(); } catch (e) {}
+      wake_lock = null;
     }
-    if (wachhalterVideo) {
-      try { wachhalterVideo.pause(); } catch (e) {}
+    if (keepAwakeVideo) {
+      try { keepAwakeVideo.pause(); } catch (e) {}
     }
   }
 
@@ -1057,18 +1057,18 @@ window.joltLive = (function () {
    * wieder sichtbar ist. Ohne dieses Nachfassen bliebe der Dongle getrennt,
    * bis der nächste Abriss kommt - und der kommt nicht mehr. */
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || !K.zustand.sitzungId) return;
-    bildschirmWachHalten();
+    if (document.visibilityState !== "visible" || !K.state.sessionId) return;
+    screenAwakeHold();
     // `donglePause` gehört mit in beide Bedingungen: An der Ladesäule ist
     // das Auto verriegelt, und eine Verbindung, die jolt hier von selbst
     // zurückholt, löst die Alarmanlage aus. Heute deckt `dongle` den Fall
     // schon ab - aber diese Bedingung darf nicht davon abhängen, dass eine
     // zweite Variable anderswo richtig gesetzt wurde.
-    dongleWiederverbinden();
+    reconnectDongle();
     // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
     // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
     // wichtige - er schliesst die Lücke.
-    letzteMeldung = 0;
+    latestReport = 0;
   });
 
   /* Wenn ein Dongle mitliest, wandert der Ladestand von hier aus mit.
@@ -1113,47 +1113,47 @@ window.joltLive = (function () {
    * Nicht erfassbar: Wer abschliesst, noch bevor zehn Sekunden vergangen
    * sind, kann im ersten Moment noch eine Abfrage auslösen. Sicher wäre nur
    * ein Signal aus dem Auto selbst. */
-  const SCHNELL_KMH = 15;
-  const STEH_KMH = 3;
-  const STEHZEIT_MS = 10000;
-  const PARKZEIT_MS = 180000;
-  const WEG_M = 25;
+  const FAST_KMH = 15;
+  const STAND_KMH = 3;
+  const STANDING_TIME_MS = 10000;
+  const PARK_TIME_MS = 180000;
+  const PATH_M = 25;
   // Hat jemand "Dongle verbinden" von Hand getippt, will er im Stand lesen.
-  const MANUELL_MS = 600000;
+  const MANUAL_MS = 600000;
   // Kein Dongle in Reichweite (Fahrrad, Bus): Nach so vielen Fehlversuchen ist
   // Schluss, bis wieder angehalten wurde.
-  const WIEDER_VERSUCHE_MAX = 8;
-  const WIEDER_VERSUCHE_FAHREND = 40;
+  const AGAIN_ATTEMPTS_MAX = 8;
+  const AGAIN_ATTEMPTS_DRIVING = 40;
 
-  let autoModus = true;
-  try { autoModus = localStorage.getItem("jolt-dongle-auto") !== "0"; }
+  let autoMode = true;
+  try { autoMode = localStorage.getItem("jolt-dongle-auto") !== "0"; }
   catch (e) { /* ohne Speicher gilt die Vorgabe */ }
 
-  let fahrZustand = "steht";     // "faehrt" | "steht" | "geparkt"
-  let stehSeit = null;
-  let stehOrt = null;
-  let schnellFolge = 0;
-  let standGesehen = true;
-  let manuellBis = 0;
-  let letzteLage = null;
-  let letzteGeschwindigkeit = null;
+  let driveState = "steht";     // "faehrt" | "steht" | "geparkt"
+  let standSince = null;
+  let standCity = null;
+  let fastSequence = 0;
+  let asOfSeen = true;
+  let manualUntil = 0;
+  let latestPosition = null;
+  let latestSpeed = null;
 
-  function lesenErlaubt() {
+  function readAllowed() {
     if (donglePause) return false;
     // Beim Mithören (Einstellungen) darf nichts gefragt werden.
-    if (window.joltObd && window.joltObd.lauscht && window.joltObd.lauscht()) return false;
-    if (!autoModus) return true;
-    return fahrZustand === "faehrt" || Date.now() < manuellBis;
+    if (window.joltObd && window.joltObd.listens && window.joltObd.listens()) return false;
+    if (!autoMode) return true;
+    return driveState === "faehrt" || Date.now() < manualUntil;
   }
 
-  function fahrzustandStart(zustand) {
-    fahrZustand = zustand;
-    stehSeit = null; stehOrt = null; schnellFolge = 0;
-    standGesehen = true; manuellBis = 0; letzteLage = null;
-    spannungBasis = []; spannungFolge = 0;
+  function drivingStateStart(state) {
+    driveState = state;
+    standSince = null; standCity = null; fastSequence = 0;
+    asOfSeen = true; manualUntil = 0; latestPosition = null;
+    voltageBasis = []; voltageSequence = 0;
   }
 
-  function entfernungM(a, b) {
+  function distanceM(a, b) {
     const R = 6371000, rad = Math.PI / 180;
     const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
     const h = Math.sin(dLat / 2) ** 2
@@ -1163,51 +1163,51 @@ window.joltLive = (function () {
 
   /* Die Geschwindigkeit aus dem Fix - oder aus zwei Fixes, wenn das Gerät
    * keine liefert (im Browser auf iOS regelmässig). */
-  function geschwindigkeitKmh(coords, ort, zeitMs) {
-    const vor = letzteLage;
-    letzteLage = { lat: ort.lat, lon: ort.lon, zeit: zeitMs };
+  function speedKmh(coords, city, timeMs) {
+    const prior = latestPosition;
+    latestPosition = { lat: city.lat, lon: city.lon, timestamp: timeMs };
     if (typeof coords.speed === "number" && coords.speed >= 0) {
       return coords.speed * 3.6;
     }
-    if (!vor) return null;
-    const dt = (zeitMs - vor.zeit) / 1000;
+    if (!prior) return null;
+    const dt = (timeMs - prior.timestamp) / 1000;
     if (dt < 1 || dt > 30) return null;
-    return entfernungM(vor, ort) / dt * 3.6;
+    return distanceM(prior, city) / dt * 3.6;
   }
 
-  function fahrzustandPruefen(coords, zeitMs) {
-    if (!autoModus || !K.zustand.sitzungId) return;
-    const jetzt = Date.now();
-    const ort = { lat: coords.latitude, lon: coords.longitude };
-    const v = geschwindigkeitKmh(coords, ort, zeitMs || jetzt);
+  function examineDrivingState(coords, timeMs) {
+    if (!autoMode || !K.state.sessionId) return;
+    const now_ts = Date.now();
+    const city = { lat: coords.latitude, lon: coords.longitude };
+    const v = speedKmh(coords, city, timeMs || now_ts);
     if (v === null) return;
-    letzteGeschwindigkeit = v;
+    latestSpeed = v;
 
-    if (v >= SCHNELL_KMH) {
-      stehSeit = null; stehOrt = null;
-      schnellFolge++;
-      if (schnellFolge >= 2 && fahrZustand !== "faehrt") fahrenBeginnt();
+    if (v >= FAST_KMH) {
+      standSince = null; standCity = null;
+      fastSequence++;
+      if (fastSequence >= 2 && driveState !== "faehrt") driveBegins();
       return;
     }
-    schnellFolge = 0;
-    if (v < STEH_KMH) standGesehen = true;
-    if (jetzt < manuellBis || fahrZustand === "geparkt") return;
+    fastSequence = 0;
+    if (v < STAND_KMH) asOfSeen = true;
+    if (now_ts < manualUntil || driveState === "geparkt") return;
 
-    if (v < STEH_KMH) {
-      if (stehSeit === null) { stehSeit = jetzt; stehOrt = ort; }
-      const stand = jetzt - stehSeit;
-      if (stand >= PARKZEIT_MS) zustandParken("Das Auto steht seit drei Minuten");
-      else if (stand >= STEHZEIT_MS && fahrZustand === "faehrt") fahrZustand = "steht";
-    } else if (stehOrt && entfernungM(stehOrt, ort) > WEG_M) {
+    if (v < STAND_KMH) {
+      if (standSince === null) { standSince = now_ts; standCity = city; }
+      const as_of = now_ts - standSince;
+      if (as_of >= PARK_TIME_MS) statePark("Das Auto steht seit drei Minuten");
+      else if (as_of >= STANDING_TIME_MS && driveState === "faehrt") driveState = "steht";
+    } else if (standCity && distanceM(standCity, city) > PATH_M) {
       // Langsam und weit vom Halteort: Man ist ausgestiegen und geht.
-      zustandParken("Du bist vom Auto weggegangen");
+      statePark("Du bist vom Auto weggegangen");
     }
   }
 
   /* Das Auto ist aus - das merkt man an der 12-V-Spannung, ohne zu fragen.
    *
    * `ATRV` misst der ELM-Chip selbst, es geht nichts auf den CAN-Bus (siehe
-   * `obd-kern.js: spannung`). Solange das Auto an ist oder lädt, hält der
+   * `obd-core.js: spannung`). Solange das Auto an ist oder lädt, hält der
    * DC/DC-Wandler die Spannung oben; geht es aus, fällt sie binnen
    * Sekunden. Das passiert **vor** dem Abschliessen - man schaltet aus,
    * steigt aus und schliesst ab - und ist damit das Signal, das die
@@ -1222,127 +1222,127 @@ window.joltLive = (function () {
    * Lädt das Auto verriegelt, bleibt die Spannung oben, und es bleibt bei
    * diesen Regeln. Auch das ist in Ordnung: Dann ist die Abfrage gerade
    * *nicht* das Problem, solange nichts mehr gefragt wird. */
-  const SPANNUNG_TAKT_MS = 2000;
-  const SPANNUNG_FALL_V = 0.7;
-  const SPANNUNG_FOLGE = 2;
-  const SPANNUNG_GRUNDLAGE = 5;
-  let spannungBasis = [];
-  let spannungFolge = 0;
-  let spannungLaeuft = false;
-  let letzteSpannung = null;
-  let letzteSpannungZeit = 0;
+  const VOLTAGE_TICK_MS = 2000;
+  const VOLTAGE_CASE_V = 0.7;
+  const VOLTAGE_SEQUENCE = 2;
+  const VOLTAGE_BASIS = 5;
+  let voltageBasis = [];
+  let voltageSequence = 0;
+  let voltageRunning = false;
+  let latestVoltage = null;
+  let latestVoltageTime = 0;
 
-  function mittel(liste) {
-    const sortiert = [...liste].sort((a, b) => a - b);
+  function avg(lst) {
+    const sortiert = [...lst].sort((a, b) => a - b);
     const m = Math.floor(sortiert.length / 2);
     return sortiert.length % 2 ? sortiert[m] : (sortiert[m - 1] + sortiert[m]) / 2;
   }
 
-  async function spannungPruefen() {
-    if (spannungLaeuft || !K.zustand.sitzungId || !dongle || !autoModus
-        || fahrZustand === "geparkt" || donglePause || !window.joltObd
-        || !window.joltObd.verbunden() || !window.joltObd.spannung) return;
-    spannungLaeuft = true;
+  async function examineVoltage() {
+    if (voltageRunning || !K.state.sessionId || !dongle || !autoMode
+        || driveState === "geparkt" || donglePause || !window.joltObd
+        || !window.joltObd.linked() || !window.joltObd.voltage) return;
+    voltageRunning = true;
     try {
-      const v = await window.joltObd.spannung();
+      const v = await window.joltObd.voltage();
       if (typeof v !== "number" || !(v > 5 && v < 30)) return;
-      letzteSpannung = v;
-      letzteSpannungZeit = Date.now();
-      if (letzteGeschwindigkeit !== null && letzteGeschwindigkeit >= SCHNELL_KMH) {
-        spannungBasis.push(v);
-        if (spannungBasis.length > 40) spannungBasis.shift();
-        spannungFolge = 0;
+      latestVoltage = v;
+      latestVoltageTime = Date.now();
+      if (latestSpeed !== null && latestSpeed >= FAST_KMH) {
+        voltageBasis.push(v);
+        if (voltageBasis.length > 40) voltageBasis.shift();
+        voltageSequence = 0;
         return;
       }
-      if (Date.now() < manuellBis || spannungBasis.length < SPANNUNG_GRUNDLAGE) return;
-      if (v < mittel(spannungBasis) - SPANNUNG_FALL_V) {
-        if (++spannungFolge >= SPANNUNG_FOLGE) {
-          zustandParken("Die 12-V-Spannung ist gefallen, das Auto ist aus");
+      if (Date.now() < manualUntil || voltageBasis.length < VOLTAGE_BASIS) return;
+      if (v < avg(voltageBasis) - VOLTAGE_CASE_V) {
+        if (++voltageSequence >= VOLTAGE_SEQUENCE) {
+          statePark("Die 12-V-Spannung ist gefallen, das Auto ist aus");
         }
       } else {
-        spannungFolge = 0;
+        voltageSequence = 0;
       }
     } finally {
-      spannungLaeuft = false;
+      voltageRunning = false;
     }
   }
 
-  function zustandParken(grund) {
-    if (fahrZustand === "geparkt") return;
+  function statePark(reason) {
+    if (driveState === "geparkt") return;
     // Erst den Zustand setzen, dann trennen: `trennen()` löst den
     // Verbindungsabriss aus, und dessen Behandlung fragt `lesenErlaubt()`.
-    fahrZustand = "geparkt";
-    stehSeit = null; stehOrt = null;
-    standGesehen = false;
-    spannungBasis = []; spannungFolge = 0;
+    driveState = "geparkt";
+    standSince = null; standCity = null;
+    asOfSeen = false;
+    voltageBasis = []; voltageSequence = 0;
     if (dongle && window.joltObd) {
-      try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
-      K.melden(grund + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
+      try { window.joltObd.detach(); } catch (e) { /* schon getrennt */ }
+      K.report(reason + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
         + "So löst ein abgeschlossenes Auto keinen Alarm aus.", "hinweis");
     }
-    dongleAnzeigen();
+    showDongle();
   }
 
-  function fahrenBeginnt() {
+  function driveBegins() {
     // Nach einem Fehlversuch ohne Dongle erst wieder, wenn angehalten wurde -
     // sonst probierte eine Radfahrt den ganzen Weg über zu verbinden.
-    if (fahrZustand === "geparkt" && !standGesehen) return;
-    const warGeparkt = fahrZustand === "geparkt";
-    fahrZustand = "faehrt";
-    stehSeit = null; stehOrt = null;
-    if (warGeparkt && dongle) {
-      K.melden("Fahrt erkannt – jolt verbindet den Dongle wieder.", "hinweis");
+    if (driveState === "geparkt" && !asOfSeen) return;
+    const wasParked = driveState === "geparkt";
+    driveState = "faehrt";
+    standSince = null; standCity = null;
+    if (wasParked && dongle) {
+      K.report("Fahrt erkannt – jolt verbindet den Dongle wieder.", "hinweis");
     }
-    dongleWiederverbinden();
-    dongleAnzeigen();
+    reconnectDongle();
+    showDongle();
   }
 
   /* Den Dongle holen, wenn er fehlt - solange das Auto fährt, aber nicht
    * endlos: Ist keiner in Reichweite, bleibt die Verbindung aus, und jeder
    * weitere Versuch kostet nur Akku. */
-  function dongleWiederverbinden() {
-    if (!dongle || !lesenErlaubt() || !window.joltObd
-        || window.joltObd.verbunden()) return;
-    let versuche = 0;
-    window.joltObd.wiederverbinden(1, () => {
-      if (!K.zustand.sitzungId || !lesenErlaubt()) return false;
+  function reconnectDongle() {
+    if (!dongle || !readAllowed() || !window.joltObd
+        || window.joltObd.linked()) return;
+    let attempts = 0;
+    window.joltObd.reconnect(1, () => {
+      if (!K.state.sessionId || !readAllowed()) return false;
       // Wer gerade fährt (GPS: mindestens 15 km/h), hat das Auto nicht
       // verlassen: Nach zwei Minuten aufzugeben hiesse, bis zum nächsten Halt
       // ohne Fahrzeugwerte zu fahren und von Hand neu zu verbinden. Dann wird
       // gut zwölf Minuten lang weiter angeklopft (alle 20 s, kostet wenig).
       // Im Stand - und im Bus ohne Dongle - bleibt es bei den acht Versuchen.
-      const fahrend = letzteGeschwindigkeit !== null
-                      && letzteGeschwindigkeit >= SCHNELL_KMH;
-      const grenze = fahrend ? WIEDER_VERSUCHE_FAHREND : WIEDER_VERSUCHE_MAX;
-      if (autoModus && ++versuche > grenze) {
-        fahrZustand = "geparkt";
-        standGesehen = false;
-        K.melden("Kein Dongle in Reichweite – jolt versucht es erst nach dem "
+      const driving = latestSpeed !== null
+                      && latestSpeed >= FAST_KMH;
+      const bound = driving ? AGAIN_ATTEMPTS_DRIVING : AGAIN_ATTEMPTS_MAX;
+      if (autoMode && ++attempts > bound) {
+        driveState = "geparkt";
+        asOfSeen = false;
+        K.report("Kein Dongle in Reichweite – jolt versucht es erst nach dem "
           + "nächsten Halt wieder.", "hinweis");
-        dongleAnzeigen();
+        showDongle();
         return false;
       }
       return true;
     });
   }
 
-  function dongleAnzeigen() {
-    const an = document.getElementById("dongle-an");
+  function showDongle() {
+    const at = document.getElementById("dongle-an");
     const pause = document.getElementById("dongle-pause");
-    if (!an || !pause) return;
-    const verbunden = dongle && window.joltObd && window.joltObd.verbunden();
-    an.hidden = verbunden && !donglePause;
-    an.textContent = donglePause ? "Dongle wieder verbinden"
+    if (!at || !pause) return;
+    const linked = dongle && window.joltObd && window.joltObd.linked();
+    at.hidden = linked && !donglePause;
+    at.textContent = donglePause ? "Dongle wieder verbinden"
                                  : "Dongle verbinden";
-    pause.hidden = !verbunden || donglePause;
+    pause.hidden = !linked || donglePause;
   }
 
   async function donglePausieren() {
     donglePause = true;
     dongle = false;
-    try { window.joltObd.trennen(); } catch (e) {}
-    dongleAnzeigen();
-    K.melden("Dongle getrennt. Das Auto kann jetzt abgeschlossen werden – "
+    try { window.joltObd.detach(); } catch (e) {}
+    showDongle();
+    K.report("Dongle getrennt. Das Auto kann jetzt abgeschlossen werden – "
       + "jolt fragt nichts mehr über CAN. Die Fahrt läuft weiter, die "
       + "Position kommt vom Telefon.", "hinweis");
   }
@@ -1369,21 +1369,21 @@ window.joltLive = (function () {
    * An der Ladesäule gilt das alles nicht: Dort ist Schweigen gewollt, und
    * ein verriegeltes Auto, das wieder über CAN gefragt wird, löst die
    * Alarmanlage aus. Daher die Bedingung auf `donglePause`. */
-  const STILLE_NEUSTART_MS = 120000;
+  const QUIET_RESTART_MS = 120000;
 
-  function stilleUeberwachen() {
-    if (!lesenErlaubt() || !window.joltObd || !window.joltObd.verbunden()) return;
+  function quietWatch() {
+    if (!readAllowed() || !window.joltObd || !window.joltObd.linked()) return;
     // Kam noch nie etwas, läuft die Uhr ab jetzt - sonst wartet die
     // Überwachung auf einen Wert, der nie kommt, und greift nie ein.
-    if (!letzteRohwerteZeit) { letzteRohwerteZeit = Date.now(); return; }
-    if (Date.now() - letzteRohwerteZeit < STILLE_NEUSTART_MS) return;
+    if (!latestRawValuesTime) { latestRawValuesTime = Date.now(); return; }
+    if (Date.now() - latestRawValuesTime < QUIET_RESTART_MS) return;
     // Die Uhr sofort weiterstellen, sonst stösst die nächste Runde
     // denselben Neuaufbau noch einmal an, während der erste läuft.
-    letzteRohwerteZeit = Date.now();
-    K.melden("Der Dongle antwortet seit zwei Minuten nicht mehr – jolt baut "
+    latestRawValuesTime = Date.now();
+    K.report("Der Dongle antwortet seit zwei Minuten nicht mehr – jolt baut "
       + "die Verbindung neu auf.", "hinweis");
-    try { window.joltObd.trennen(); } catch (e) { /* schon getrennt */ }
-    setTimeout(dongleWiederverbinden, 3000);
+    try { window.joltObd.detach(); } catch (e) { /* schon getrennt */ }
+    setTimeout(reconnectDongle, 3000);
   }
 
   /* Den Dongle anbieten, bevor sonst irgendetwas läuft.
@@ -1399,16 +1399,16 @@ window.joltLive = (function () {
    * einer, ohne weiterzufahren: Eine Fahrt mit von Hand gemeldetem
    * Ladestand ist besser als keine Fahrt. Entschieden wird hier nichts,
    * die Rückgabe sagt nur, was daraus geworden ist. */
-  async function dongleAnbieten() {
-    if (!window.joltObd || !window.joltObd.verfuegbar()) return false;
+  async function dongleOffer() {
+    if (!window.joltObd || !window.joltObd.obtainable()) return false;
     try {
-      dongleNutzen();
+      dongleUse();
       // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt worden,
       // verbindet er ohne Berührung.
-      await window.joltObd.anschliessen();
-      if (await handshakeSicher()) return true;
-    } catch (fehler) {
-      console.log("[obd] Verbindung nicht zustande gekommen:", fehler);
+      await window.joltObd.attach();
+      if (await handshakeSafe()) return true;
+    } catch (failure) {
+      console.log("[obd] Verbindung nicht zustande gekommen:", failure);
     }
     dongle = false;
     return false;
@@ -1423,54 +1423,54 @@ window.joltLive = (function () {
    * den Dongle auf, obwohl er verbunden war und Werte lieferte. Deshalb: ein
    * zweiter Durchlauf, und wer danach verbunden ist, wird genutzt.
    * Gibt zurück, ob der Dongle benutzbar ist; die Gründe stehen im Protokoll. */
-  async function handshakeSicher() {
+  async function handshakeSafe() {
     const O = window.joltObd;
-    for (let versuch = 1; versuch <= 2; versuch++) {
-      if (!O.verbunden()) return false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (!O.linked()) return false;
       if (await O.handshake()) return true;
-      console.log("[obd] Handshake unvollständig (Versuch " + versuch + "):",
-                  (O.reiheFehler ? O.reiheFehler() : []).join("; "));
+      console.log("[obd] Handshake unvollständig (Versuch " + attempt + "):",
+                  (O.seriesError ? O.seriesError() : []).join("; "));
     }
-    return O.verbunden();
+    return O.linked();
   }
 
-  async function dongleVerbinden() {
-    const knopf = document.getElementById("dongle-an");
-    if (knopf) knopf.disabled = true;
+  async function connectDongle() {
+    const btn = document.getElementById("dongle-an");
+    if (btn) btn.disabled = true;
     try {
-      if (!window.joltObd || !window.joltObd.verfuegbar()) {
-        K.melden("Dieser Browser kann kein Bluetooth. Mit Dongle: dieselbe "
+      if (!window.joltObd || !window.joltObd.obtainable()) {
+        K.report("Dieser Browser kann kein Bluetooth. Mit Dongle: dieselbe "
           + "Adresse in Bluefy öffnen.", "fehler");
         return;
       }
       donglePause = false;
       // Wer von Hand verbindet, will lesen - auch im Stand, zehn Minuten lang.
-      manuellBis = Date.now() + MANUELL_MS;
-      if (fahrZustand === "geparkt") fahrZustand = "steht";
-      dongleNutzen();
-      await window.joltObd.anschliessen();
-      if (!window.joltObd.verbunden()) throw new Error("keine Verbindung");
-      if (!(await handshakeSicher())) throw new Error("keine Verbindung");
-      K.melden("Dongle verbunden – ab jetzt kommen die Werte aus dem Auto.",
+      manualUntil = Date.now() + MANUAL_MS;
+      if (driveState === "geparkt") driveState = "steht";
+      dongleUse();
+      await window.joltObd.attach();
+      if (!window.joltObd.linked()) throw new Error("keine Verbindung");
+      if (!(await handshakeSafe())) throw new Error("keine Verbindung");
+      K.report("Dongle verbunden – ab jetzt kommen die Werte aus dem Auto.",
                "hinweis");
-    } catch (fehler) {
+    } catch (failure) {
       dongle = false;
-      K.melden("Dongle: " + fehler.message, "fehler");
+      K.report("Dongle: " + failure.message, "fehler");
     } finally {
-      if (knopf) knopf.disabled = false;
-      dongleAnzeigen();
+      if (btn) btn.disabled = false;
+      showDongle();
     }
   }
 
-  function dongleNutzen() {
+  function dongleUse() {
     dongle = true;
     donglePause = false;
     if (window.joltObd) {
-      window.joltObd.einrichten(
+      window.joltObd.set_up(
         (t) => console.log("[obd]", t),
         // Ein Abriss im Tunnel ist kein Grund aufzuhören, solange die Fahrt
         // läuft: Der Baustein baut selbst wieder auf.
-        () => { if (K.zustand.sitzungId) dongleWiederverbinden(); });
+        () => { if (K.state.sessionId) reconnectDongle(); });
     }
   }
 
@@ -1479,22 +1479,22 @@ window.joltLive = (function () {
    * entweder Entladen oder Laden - welches davon, zeigt die erste Messung
    * am Fahrzeug. Deshalb wird der Betrag angezeigt und die Richtung
    * benannt, statt eine Annahme zu treffen, die man nicht sieht. */
-  function leistungKw(roh) {
-    if (!roh || typeof roh.spannung_v !== "number"
-        || typeof roh.strom_a !== "number") return null;
-    return roh.spannung_v * roh.strom_a / 1000;
+  function powerKw(raw) {
+    if (!raw || typeof raw.voltage_v !== "number"
+        || typeof raw.current_a !== "number") return null;
+    return raw.voltage_v * raw.current_a / 1000;
   }
 
-  function nebenverbrauchMerken(roh) {
+  function auxLoadRemember(raw) {
     // Liegt der gemessene Wert vor, braucht es die Näherung nicht.
-    if (typeof roh.nebenverbrauch_kw === "number") return;
-    const kw = leistungKw(roh);
+    if (typeof raw.aux_load_kw === "number") return;
+    const kw = powerKw(raw);
     if (kw === null) return;
-    const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
+    const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
     // Nur im Stand, und nur wenn Energie entnommen wird - beim Laden misst
     // man den Lader, nicht die Heizung.
-    if (tempo !== null && tempo < 5 && kw > 0) {
-      nebenverbrauch = { kw, zeit: Date.now() };
+    if (velocity !== null && velocity < 5 && kw > 0) {
+      aux_load = { kw, timestamp: Date.now() };
     }
   }
 
@@ -1505,50 +1505,50 @@ window.joltLive = (function () {
    * braucht man aber nur gelegentlich: Man sieht hin, wenn man wissen will,
    * *warum* der Verbrauch hoch ist - nicht, um zu erfahren, dass er es ist.
    */
-  function autoZeile(z) {
+  function autoRow(z) {
     const block = document.getElementById("live-auto");
-    const roh = letzteRohwerte;
+    const raw = latestRawValues;
     if (!block) return;
-    if (!roh) {
+    if (!raw) {
       block.hidden = true;
-      const zu = document.getElementById("live-roh");
-      if (zu) zu.hidden = true;
+      const to = document.getElementById("live-roh");
+      if (to) to.hidden = true;
       return;
     }
     block.hidden = false;
 
-    const kw = leistungKw(roh);
-    const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh : null;
-    const momentan = (kw !== null && tempo !== null && tempo >= 5)
-      ? Math.abs(kw) / tempo * 100 : null;
+    const kw = powerKw(raw);
+    const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
+    const current = (kw !== null && velocity !== null && velocity >= 5)
+      ? Math.abs(kw) / velocity * 100 : null;
 
-    const teile = [];
+    const parts = [];
     /* Der Verbrauch der Fahrt zuerst: Das ist die Zahl, wegen der man
      * aufzeichnet. Die momentane Leistung darunter ist Beiwerk - und beim
      * ID.Buzz ohnehin nicht zu haben, weil der Batteriestrom nicht
      * antwortet. */
-    const bisher = laufenderVerbrauch(roh, z && z.ist_soc);
-    if (bisher) {
-      teile.push(`<b>${K.zahl(bisher.kwh100, 1)}</b> kWh/100 auf `
-                 + `${K.zahl(bisher.km, 0)} km`);
+    const so_far = runningConsumption(raw, z && z.actual_soc);
+    if (so_far) {
+      parts.push(`<b>${K.num(so_far.kwh100, 1)}</b> kWh/100 auf `
+                 + `${K.num(so_far.km, 0)} km`);
     }
-    if (momentan !== null) {
-      teile.push(`<b>${K.zahl(momentan, 1)}</b> kWh/100 gerade`);
+    if (current !== null) {
+      parts.push(`<b>${K.num(current, 1)}</b> kWh/100 gerade`);
     }
     if (kw !== null) {
-      teile.push(`<b>${K.zahl(Math.abs(kw), 0)}</b> kW${kw < 0 ? " zurück" : ""}`);
+      parts.push(`<b>${K.num(Math.abs(kw), 0)}</b> kW${kw < 0 ? " zurück" : ""}`);
     }
-    if (typeof roh.nebenverbrauch_kw === "number") {
-      let n = `<b>${K.zahl(roh.nebenverbrauch_kw, 1)}</b> kW Nebenverbraucher`;
-      if (typeof roh.ptc_strom_a === "number"
-          && typeof roh.spannung_v === "number") {
-        n += `, davon <b>${K.zahl(roh.ptc_strom_a * roh.spannung_v / 1000, 1)}</b> Heizung`;
+    if (typeof raw.aux_load_kw === "number") {
+      let n = `<b>${K.num(raw.aux_load_kw, 1)}</b> kW Nebenverbraucher`;
+      if (typeof raw.ptc_current_a === "number"
+          && typeof raw.voltage_v === "number") {
+        n += `, davon <b>${K.num(raw.ptc_current_a * raw.voltage_v / 1000, 1)}</b> Heizung`;
       }
-      teile.push(n);
-    } else if (nebenverbrauch) {
-      const alter = Math.round((Date.now() - nebenverbrauch.zeit) / 60000);
-      teile.push(`<b>${K.zahl(nebenverbrauch.kw, 1)}</b> kW Nebenverbraucher`
-                 + ` (im Stand${alter > 0 ? `, vor ${alter} min` : ""})`);
+      parts.push(n);
+    } else if (aux_load) {
+      const age = Math.round((Date.now() - aux_load.timestamp) / 60000);
+      parts.push(`<b>${K.num(aux_load.kw, 1)}</b> kW Nebenverbraucher`
+                 + ` (im Stand${age > 0 ? `, vor ${age} min` : ""})`);
     }
     /* Aussentemperatur und Kilometerstand standen hier auch. Sie sind
      * richtig und interessant, aber nicht **im Fahren** - und eine Zeile
@@ -1557,29 +1557,29 @@ window.joltLive = (function () {
 
     // Zeile und Tabelle stehen jetzt an verschiedenen Stellen: die Zeile
     // oben bei den Kacheln, die Tabelle unten hinter der Klappe.
-    document.getElementById("live-auto-zeile").innerHTML = teile.join(" · ");
-    const klappe = document.getElementById("live-roh");
-    if (klappe) {
-      klappe.hidden = false;
+    document.getElementById("live-auto-zeile").innerHTML = parts.join(" · ");
+    const flap = document.getElementById("live-roh");
+    if (flap) {
+      flap.hidden = false;
       document.getElementById("live-auto-werte").innerHTML =
-        rohwerteTabelle(roh);
+        rawValuesTable(raw);
     }
 
     /* Wie alt der letzte Satz ist - die Frage, die man am Steuer wirklich
      * hat. "3 s" heisst, der Dongle antwortet; "4 min" heisst, er ist weg,
      * und die Zahlen darunter sind Erinnerungen. Ohne diese Angabe sieht
      * eine eingefrorene Anzeige genauso aus wie eine laufende. */
-    const alter = letzteRohwerteZeit
-      ? Math.round((Date.now() - letzteRohwerteZeit) / 1000) : null;
-    const stand = document.getElementById("live-auto-stand");
-    if (alter === null) {
-      stand.textContent = "";
-    } else if (alter < 90) {
-      stand.textContent = `vor ${alter} s`;
-      stand.style.color = "";
+    const age = latestRawValuesTime
+      ? Math.round((Date.now() - latestRawValuesTime) / 1000) : null;
+    const as_of = document.getElementById("live-auto-stand");
+    if (age === null) {
+      as_of.textContent = "";
+    } else if (age < 90) {
+      as_of.textContent = `vor ${age} s`;
+      as_of.style.color = "";
     } else {
-      stand.textContent = `seit ${K.dauer(alter / 60)} keine Antwort`;
-      stand.style.color = "#e8804f";
+      as_of.textContent = `seit ${K.duration(age / 60)} keine Antwort`;
+      as_of.style.color = "#e8804f";
       /* Einmal deutlich sagen, dass nichts mehr aus dem Auto kommt.
        *
        * Die blasse Zeile hinter der Klappe reicht dafür nicht. Auf einer
@@ -1591,9 +1591,9 @@ window.joltLive = (function () {
        *
        * Drei Minuten, nicht neunzig Sekunden: Ein Tunnel oder eine kurze
        * Sperre soll nicht melden, ein abgerissener Dongle schon. */
-      if (!stilleGemeldet && alter > 180) {
-        stilleGemeldet = true;
-        K.melden("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
+      if (!quietReported && age > 180) {
+        quietReported = true;
+        K.report("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
           + "zeichnet die Strecke weiter auf, aber ohne Ladestand – zum "
           + "Lernen taugt sie dann nicht. jolt in den Vordergrund holen, "
           + "dann verbindet sich der Dongle von selbst wieder.", "fehler");
@@ -1612,44 +1612,44 @@ window.joltLive = (function () {
    *
    * Die Liste kommt aus `joltObd.FELDER`, damit eine neue Datenkennung hier
    * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
-  function werteMerken(roh) {
-    const jetzt = Date.now();
+  function valuesRemember(raw) {
+    const now_ts = Date.now();
     // Für den Verbrauchsplot: Kilometerstand und Ladestand mit Zeitstempel.
     // Die Leistung steht bewusst nicht dabei - siehe verbrauchsabschnitte().
-    if (typeof roh.km_stand === "number") {
+    if (typeof raw.odometer_km === "number") {
       /* `netto` ist der Zählerstand: entladen minus geladen. Seine
        * Differenz über ein Stück Fahrt **ist** die verbrauchte Energie -
        * ohne Umweg über Ladestand und Akkugrösse, und mit 0,117 Wh
        * Auflösung statt 339. */
-      const netto = (typeof roh.entladen_kwh === "number")
-        ? roh.entladen_kwh - (typeof roh.geladen_kwh === "number"
-                              ? roh.geladen_kwh : 0)
+      const net = (typeof raw.discharge_kwh === "number")
+        ? raw.discharge_kwh - (typeof raw.charged_kwh === "number"
+                              ? raw.charged_kwh : 0)
         : null;
-      verbrauchsspur.push({
-        zeit: jetzt, km: roh.km_stand, netto,
+      consumption_track.push({
+        timestamp: now_ts, km: raw.odometer_km, net,
         // Die beiden Zähler einzeln, für die Rekuperation der Anzeige.
-        entl: typeof roh.entladen_kwh === "number" ? roh.entladen_kwh : null,
-        gel: typeof roh.geladen_kwh === "number" ? roh.geladen_kwh : null,
+        disch: typeof raw.discharge_kwh === "number" ? raw.discharge_kwh : null,
+        chg: typeof raw.charged_kwh === "number" ? raw.charged_kwh : null,
         // Die GPS-Strecke wird in `zustandAnzeigen` nachgetragen, sobald
         // die Position dieses Punktes bekannt ist.
         gps: null,
-        soc: typeof roh.soc_roh === "number" ? roh.soc_roh / 2.5 : null });
+        soc: typeof raw.soc_raw === "number" ? raw.soc_raw / 2.5 : null });
       // Grosszuegig: 20 000 Punkte sind bei Zwoelf-Sekunden-Takt rund
       // 66 Stunden. Bei 3000 waeren nach zehn Stunden die ersten Punkte
       // herausgefallen - und mit ihnen der Anfang der Fahrt.
-      if (verbrauchsspur.length > 20000) verbrauchsspur.shift();
+      if (consumption_track.length > 20000) consumption_track.shift();
     }
-    for (const [name, wert] of Object.entries(roh)) {
-      if (typeof wert === "number") {
-        werteStand[name] = { wert, zeit: jetzt };
-        nieGekommen.delete(name);
+    for (const [name, val] of Object.entries(raw)) {
+      if (typeof val === "number") {
+        valuesAsOf[name] = { val, timestamp: now_ts };
+        neverCome.delete(name);
       }
     }
     // "Geantwortet, aber ohne brauchbaren Wert" heisst: Die Datenkennung
     // passt für dieses Fahrzeug nicht. Das bleibt so, bis doch einmal ein
     // Wert kommt - deshalb gemerkt und nicht je Runde neu entschieden.
-    for (const name of roh._leer || []) {
-      if (!werteStand[name]) nieGekommen.add(name);
+    for (const name of raw._empty || []) {
+      if (!valuesAsOf[name]) neverCome.add(name);
     }
   }
 
@@ -1672,17 +1672,17 @@ window.joltLive = (function () {
    * Kilometern kommt deshalb nichts: Bei zwei Kilometern wäre die Angabe
    * auf ±50 % genau und damit schlimmer als keine.
    */
-  const VERBRAUCH_AB_KM = 5.0;
+  const CONSUMPTION_FROM_KM = 5.0;
   /* Ab wie viel Energie **hinein** bei stehendem Auto es ein Ladevorgang
    * ist. Rekuperation gibt es nur in Fahrt; wer steht und trotzdem Energie
    * aufnimmt, hängt am Kabel. */
-  const LADEN_STAND_KWH = 0.05;
+  const CHARGING_AS_OF_KWH = 0.05;
 
-  function laufenderVerbrauch(roh, soc) {
-    const fz = K.zustand.aufzFahrzeug
-      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug);
-    const akku = fz && (fz.kapazitaet_kwh || fz.akku_netto_kwh);
-    if (verbrauchsspur.length < 2) return null;
+  function runningConsumption(raw, soc) {
+    const fz = K.state.recVehicle
+      || (K.state.trip && K.state.trip.vehicle);
+    const battery = fz && (fz.capacity_kwh || fz.battery_net_kwh);
+    if (consumption_track.length < 2) return null;
 
     /* **Aufsummiert statt Anfang gegen Ende.**
      *
@@ -1697,20 +1697,20 @@ window.joltLive = (function () {
      * andere zählt mit, auch der Verbrauch im Stand - der ist echt.
      */
     let kwh = 0, km = 0;
-    for (let i = 1; i < verbrauchsspur.length; i++) {
-      const a = verbrauchsspur[i - 1], b = verbrauchsspur[i];
+    for (let i = 1; i < consumption_track.length; i++) {
+      const a = consumption_track[i - 1], b = consumption_track[i];
       const dkm = (b.km ?? 0) - (a.km ?? 0);
       let d = null;
-      if (a.netto !== null && b.netto !== null) d = b.netto - a.netto;
-      else if (akku && a.soc !== null && b.soc !== null) {
-        d = (a.soc - b.soc) / 100 * akku;
+      if (a.net !== null && b.net !== null) d = b.net - a.net;
+      else if (battery && a.soc !== null && b.soc !== null) {
+        d = (a.soc - b.soc) / 100 * battery;
       }
       if (d === null) continue;
-      if (dkm <= 0 && d < -LADEN_STAND_KWH) continue;   // an der Säule
+      if (dkm <= 0 && d < -CHARGING_AS_OF_KWH) continue;   // an der Säule
       kwh += d;
       km += Math.max(0, dkm);
     }
-    if (km < VERBRAUCH_AB_KM) return null;
+    if (km < CONSUMPTION_FROM_KM) return null;
     return { kwh100: kwh / km * 100, kwh, km };
   }
 
@@ -1737,8 +1737,8 @@ window.joltLive = (function () {
    * Die Balkenbreite folgt deshalb der Quelle, und nicht dem Wunsch:
    * eine Minute mit Zaehler, fuenf ohne.
    */
-  const ABSCHNITT_MIT_ZAEHLER_S = 60;
-  const ABSCHNITT_AUS_SOC_S = 300;
+  const SECTION_WITH_COUNTER_S = 60;
+  const SECTION_FROM_SOC_S = 300;
   /* Bei einer langen Fahrt wird die Minute zu fein.
    *
    * Ein Balken je Minute ist auf einer halben Stunde genau richtig - auf
@@ -1749,18 +1749,18 @@ window.joltLive = (function () {
    * Werte: zwei Minuten liest man noch als zwei Minuten, 87 Sekunden nicht.
    * Die Genauigkeit leidet dabei nicht - mit den Zaehlern ist schon die
    * Minute weit ueber der Aufloesungsgrenze, breiter wird nur besser. */
-  const BREITEN_MIN = [1, 2, 5, 10, 15, 30, 60];
-  const BALKEN_HOECHSTENS = 60;
+  const WIDTHS_MIN = [1, 2, 5, 10, 15, 30, 60];
+  const BAR_AT_MOST = 60;
 
-  function breiteWaehlen(dauer_ms, mindest_s) {
-    for (const min of BREITEN_MIN) {
-      if (min * 60 < mindest_s) continue;
-      if (dauer_ms / (min * 60000) <= BALKEN_HOECHSTENS) return min * 60000;
+  function widthChoose(duration_ms, min_s) {
+    for (const min of WIDTHS_MIN) {
+      if (min * 60 < min_s) continue;
+      if (duration_ms / (min * 60000) <= BAR_AT_MOST) return min * 60000;
     }
-    return BREITEN_MIN[BREITEN_MIN.length - 1] * 60000;
+    return WIDTHS_MIN[WIDTHS_MIN.length - 1] * 60000;
   }
   // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
-  const BALKEN_MIND_KM = 0.3;
+  const BAR_MIN_KM = 0.3;
 
   /* **Die Strecke je Balken kommt aus dem GPS, die Energie aus den Zählern.**
    *
@@ -1778,68 +1778,68 @@ window.joltLive = (function () {
    * Die Energie bleibt bei den Zählern - dort ist die Auflösung 0,117 Wh
    * und damit kein Thema. Jede Grösse aus der Quelle, die sie am besten
    * kennt. */
-  function verbrauchsabschnitte() {
-    const punkte = verbrauchsspur.filter((p) => typeof p.gps === "number");
-    if (punkte.length < 2) return null;
-    const mitZaehler = punkte.every((p) => typeof p.netto === "number");
-    const fz = K.zustand.aufzFahrzeug
-      || (K.zustand.fahrt && K.zustand.fahrt.fahrzeug) || {};
-    const akku = fz.kapazitaet_kwh || fz.akku_netto_kwh;
-    if (!mitZaehler && !akku) return null;
+  function consumption_sections() {
+    const points = consumption_track.filter((p) => typeof p.gps === "number");
+    if (points.length < 2) return null;
+    const withCounter = points.every((p) => typeof p.net === "number");
+    const fz = K.state.recVehicle
+      || (K.state.trip && K.state.trip.vehicle) || {};
+    const battery = fz.capacity_kwh || fz.battery_net_kwh;
+    if (!withCounter && !battery) return null;
 
-    const beginn = punkte[0].zeit;
-    const breite = breiteWaehlen(
-      punkte[punkte.length - 1].zeit - beginn,
-      mitZaehler ? ABSCHNITT_MIT_ZAEHLER_S : ABSCHNITT_AUS_SOC_S);
+    const onset = points[0].timestamp;
+    const extent = widthChoose(
+      points[points.length - 1].timestamp - onset,
+      withCounter ? SECTION_WITH_COUNTER_S : SECTION_FROM_SOC_S);
     const eimer = new Map();
-    for (const p of punkte) {
-      const n = Math.floor((p.zeit - beginn) / breite);
+    for (const p of points) {
+      const n = Math.floor((p.timestamp - onset) / extent);
       if (!eimer.has(n)) eimer.set(n, []);
       eimer.get(n).push(p);
     }
 
-    const balken = [];
-    for (const [n, gruppe] of [...eimer.entries()].sort((a, b) => a[0] - b[0])) {
-      if (gruppe.length < 2) continue;
-      const erst = gruppe[0], letzt = gruppe[gruppe.length - 1];
-      const km = letzt.gps - erst.gps;
-      if (km < BALKEN_MIND_KM) continue;
-      const kwh = mitZaehler ? (letzt.netto - erst.netto)
-        : ((erst.soc !== null && letzt.soc !== null)
-           ? (erst.soc - letzt.soc) / 100 * akku : null);
+    const bar = [];
+    for (const [n, group] of [...eimer.entries()].sort((a, b) => a[0] - b[0])) {
+      if (group.length < 2) continue;
+      const at_first = group[0], final = group[group.length - 1];
+      const km = final.gps - at_first.gps;
+      if (km < BAR_MIN_KM) continue;
+      const kwh = withCounter ? (final.net - at_first.net)
+        : ((at_first.soc !== null && final.soc !== null)
+           ? (at_first.soc - final.soc) / 100 * battery : null);
       if (kwh === null || !Number.isFinite(kwh)) continue;
-      balken.push({ n, kwh100: kwh / km * 100, km });
+      bar.push({ n, kwh100: kwh / km * 100, km });
     }
-    return balken.length ? { balken, breite, mitZaehler } : null;
+    return bar.length ? { bar, extent, withCounter } : null;
   }
 
-  function verbrauchZeichnen() {
-    const leinwand = document.getElementById("live-verbrauch");
-    const fuss = document.getElementById("live-verbrauch-fuss");
-    if (!leinwand || !fuss) return;
-    const daten = verbrauchsabschnitte();
-    if (!daten) { leinwand.hidden = true; fuss.hidden = true; return; }
-    leinwand.hidden = false; fuss.hidden = false;
+  function drawConsumption() {
+    const canvas = document.getElementById("live-verbrauch");
+    const foot = document.getElementById("live-verbrauch-fuss");
+    if (!canvas || !foot) return;
+    const records = consumption_sections();
+    if (!records) { canvas.hidden = true; foot.hidden = true; return; }
+    canvas.hidden = false; foot.hidden = false;
 
     const dpr = window.devicePixelRatio || 1;
-    const breite = leinwand.clientWidth, hoehe = leinwand.clientHeight;
-    if (!breite || !hoehe) return;
-    leinwand.width = breite * dpr;
-    leinwand.height = hoehe * dpr;
-    const stift = leinwand.getContext("2d");
-    stift.setTransform(dpr, 0, 0, dpr, 0, 0);
-    stift.clearRect(0, 0, breite, hoehe);
+    const extent = canvas.clientWidth, elevation = canvas.clientHeight;
+    if (!extent || !elevation) return;
+    canvas.width = extent * dpr;
+    canvas.height = elevation * dpr;
+    const pen = canvas.getContext("2d");
+    pen.setTransform(dpr, 0, 0, dpr, 0, 0);
+    pen.clearRect(0, 0, extent, elevation);
 
-    const werte = daten.balken.map((b) => b.kwh100);
+    const vals = records.bar.map((b) => b.kwh100);
     // Die Skala nach oben grosszuegig, damit ein Ausreisser die uebrigen
     // Balken nicht platt drueckt, und mit Nulllinie: Rekuperation geht
     // unter null, und genau das soll man sehen.
-    const oben = Math.max(40, ...werte) * 1.1;
-    const unten = Math.min(0, ...werte) * 1.1;
-    const spanne = oben - unten || 1;
-    const rand = 6, fussHoehe = 16;
-    const flaeche = hoehe - fussHoehe - rand;
-    const y = (v) => rand + (oben - v) / spanne * flaeche;
+    const upper = Math.max(40, ...vals) * 1.1;
+    const bottom = Math.min(0, ...vals) * 1.1;
+    const span = upper - bottom || 1;
+    const edge = 6, footElevation = 16;
+    const area = elevation - footElevation - edge;
+    const y = (v) => edge + (upper - v) / span * area;
 
     /* Beschriftete Achse. Ohne sie ist ein Balkendiagramm eine Form ohne
      * Aussage - man sieht, dass eine Minute teurer war als die andere, aber
@@ -1849,83 +1849,83 @@ window.joltLive = (function () {
      * Beschriftet wird links, in die Fläche hinein: Eine eigene Spalte
      * dafür wäre auf dem Telefon zu teuer. Drei Linien reichen - null, ein
      * runder Wert dazwischen und das Maximum. */
-    const achse = 30;
-    const teilung = [0];
-    const schritt = oben > 60 ? 25 : (oben > 25 ? 10 : 5);
-    for (let w = schritt; w < oben; w += schritt) teilung.push(w);
-    for (let w = -schritt; w > unten; w -= schritt) teilung.push(w);
+    const axis = 30;
+    const split = [0];
+    const step = upper > 60 ? 25 : (upper > 25 ? 10 : 5);
+    for (let w = step; w < upper; w += step) split.push(w);
+    for (let w = -step; w > bottom; w -= step) split.push(w);
 
-    stift.font = "10px system-ui, sans-serif";
-    stift.textBaseline = "middle";
-    for (const w of teilung) {
+    pen.font = "10px system-ui, sans-serif";
+    pen.textBaseline = "middle";
+    for (const w of split) {
       const yy = y(w);
-      stift.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
-      stift.lineWidth = 1;
-      stift.beginPath();
-      stift.moveTo(achse, yy); stift.lineTo(breite - rand, yy);
-      stift.stroke();
-      stift.fillStyle = "#8a97a5";
-      stift.textAlign = "right";
-      stift.fillText(String(w), achse - 4, yy);
+      pen.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
+      pen.lineWidth = 1;
+      pen.beginPath();
+      pen.moveTo(axis, yy); pen.lineTo(extent - edge, yy);
+      pen.stroke();
+      pen.fillStyle = "#8a97a5";
+      pen.textAlign = "right";
+      pen.fillText(String(w), axis - 4, yy);
     }
     // Die Einheit einmal oben links, nicht an jeden Strich.
-    stift.fillStyle = "#8a97a5";
-    stift.textAlign = "left";
-    stift.fillText("kWh/100", achse + 3, rand + 4);
+    pen.fillStyle = "#8a97a5";
+    pen.textAlign = "left";
+    pen.fillText("kWh/100", axis + 3, edge + 4);
 
-    const feld = breite - rand - achse;
-    const b = Math.max(2, feld / daten.balken.length - 2);
-    daten.balken.forEach((balken, i) => {
-      const x = achse + i * (feld / daten.balken.length);
-      const hoch = y(balken.kwh100) - y(0);
+    const field = extent - edge - axis;
+    const b = Math.max(2, field / records.bar.length - 2);
+    records.bar.forEach((bar, i) => {
+      const x = axis + i * (field / records.bar.length);
+      const high = y(bar.kwh100) - y(0);
       // Farbe nach Höhe: was deutlich über dem Schnitt liegt, fällt auf.
-      stift.fillStyle = balken.kwh100 < 0 ? "#57c98a"
-        : (balken.kwh100 > 35 ? "#e8804f" : "#ffc93c");
-      stift.fillRect(x, hoch < 0 ? y(balken.kwh100) : y(0),
-                     b, Math.max(1, Math.abs(hoch)));
+      pen.fillStyle = bar.kwh100 < 0 ? "#57c98a"
+        : (bar.kwh100 > 35 ? "#e8804f" : "#ffc93c");
+      pen.fillRect(x, high < 0 ? y(bar.kwh100) : y(0),
+                     b, Math.max(1, Math.abs(high)));
     });
 
-    const schnitt = werte.reduce((a, v) => a + v, 0) / werte.length;
-    fuss.children[0].textContent =
-      `Verbrauch je ${daten.breite / 60000} min`
-      + (daten.mitZaehler ? "" : " (aus dem Ladestand)");
-    fuss.children[1].textContent = `Ø ${K.zahl(schnitt, 1)} kWh/100`;
+    const average = vals.reduce((a, v) => a + v, 0) / vals.length;
+    foot.children[0].textContent =
+      `Verbrauch je ${records.extent / 60000} min`
+      + (records.withCounter ? "" : " (aus dem Ladestand)");
+    foot.children[1].textContent = `Ø ${K.num(average, 1)} kWh/100`;
   }
 
-  function alterText(sekunden) {
-    if (sekunden < 60) return `vor ${Math.round(sekunden)} s`;
-    return `vor ${Math.round(sekunden / 60)} min`;
+  function ageText(seconds) {
+    if (seconds < 60) return `vor ${Math.round(seconds)} s`;
+    return `vor ${Math.round(seconds / 60)} min`;
   }
 
-  function rohwerteTabelle(roh) {
-    const felder = (window.joltObd && window.joltObd.FELDER) || [];
-    if (!felder.length) return "";
-    const fehlend = new Set(roh._fehlend || []);
-    const jetzt = Date.now();
+  function rawValuesTable(raw) {
+    const fields = (window.joltObd && window.joltObd.FIELDS) || [];
+    if (!fields.length) return "";
+    const missing = new Set(raw._missing || []);
+    const now_ts = Date.now();
 
-    const zeilen = felder.map((f) => {
-      const stand = werteStand[f.name];
-      if (!stand) {
+    const rows = fields.map((f) => {
+      const as_of = valuesAsOf[f.name];
+      if (!as_of) {
         // Noch nie ein Wert. Der Grund unterscheidet sich, und der
         // Unterschied ist beim Einrichten die eigentliche Information.
-        const grund = nieGekommen.has(f.name) ? "antwortet nicht"
-          : (fehlend.has(f.name) ? "keine Antwort" : "–");
-        return `<tr class="leer"><th>${f.titel}</th><td>${grund}</td></tr>`;
+        const reason = neverCome.has(f.name) ? "antwortet nicht"
+          : (missing.has(f.name) ? "keine Antwort" : "–");
+        return `<tr class="leer"><th>${f.title}</th><td>${reason}</td></tr>`;
       }
-      const alter = (jetzt - stand.zeit) / 1000;
-      const zahl = K.zahl(stand.wert, f.stellen)
-        + (f.einheit ? " " + f.einheit : "");
+      const age = (now_ts - as_of.timestamp) / 1000;
+      const num = K.num(as_of.val, f.put)
+        + (f.unit ? " " + f.unit : "");
       // Frisch heisst: in dieser Runde gekommen. Alles andere bekommt sein
       // Alter danebengeschrieben und wird blasser, je älter es ist - so
       // sieht man auf einen Blick, welche Zeile noch lebt.
-      if (typeof roh[f.name] === "number") {
-        return `<tr><th>${f.titel}</th><td>${zahl}</td></tr>`;
+      if (typeof raw[f.name] === "number") {
+        return `<tr><th>${f.title}</th><td>${num}</td></tr>`;
       }
-      const klasse = alter > 120 ? "alt sehr" : "alt";
-      return `<tr class="${klasse}"><th>${f.titel}</th>`
-        + `<td>${zahl}<span class="wann">${alterText(alter)}</span></td></tr>`;
+      const category = age > 120 ? "alt sehr" : "alt";
+      return `<tr class="${category}"><th>${f.title}</th>`
+        + `<td>${num}<span class="wann">${ageText(age)}</span></td></tr>`;
     });
-    return `<table class="rohwerte"><tbody>${zeilen.join("")}</tbody></table>`;
+    return `<table class="rohwerte"><tbody>${rows.join("")}</tbody></table>`;
   }
 
   /* Werte, die der Server annimmt - sonst keine.
@@ -1940,73 +1940,73 @@ window.joltLive = (function () {
    *
    * 250 km/h statt 500: 255 ist der Platzhalter des Autos, und kein
    * Fahrzeug, das jolt kennt, fährt 250. */
-  function tempoOderNull(wert) {
-    return (typeof wert === "number" && Number.isFinite(wert)
-            && wert >= 0 && wert <= 250) ? wert : null;
+  function speedOrNull(val) {
+    return (typeof val === "number" && Number.isFinite(val)
+            && val >= 0 && val <= 250) ? val : null;
   }
 
-  function temperaturOderNull(wert) {
-    return (typeof wert === "number" && Number.isFinite(wert)
-            && wert >= -80 && wert <= 70) ? wert : null;
+  function temperatureOrNull(val) {
+    return (typeof val === "number" && Number.isFinite(val)
+            && val >= -80 && val <= 70) ? val : null;
   }
 
-  async function positionMelden(coords, zeitMs) {
-    if (!K.zustand.sitzungId) return;
-    const nutzlast = {
+  async function reportPosition(coords, timeMs) {
+    if (!K.state.sessionId) return;
+    const payload = {
       lat: coords.latitude, lon: coords.longitude,
       // Aus dem Fix: m/s, und -1 oder null, wenn das Gerät es nicht weiss.
-      tempo_kmh: tempoOderNull(typeof coords.speed === "number"
+      speed_kmh: speedOrNull(typeof coords.speed === "number"
                                ? coords.speed * 3.6 : null),
       // Wann gemessen wurde, nicht wann es ankommt - sonst wären alle
       // nachgereichten Punkte aus einem Funkloch auf dieselbe Sekunde datiert.
-      zeit: new Date(zeitMs || Date.now()).toISOString(),
+      timestamp: new Date(timeMs || Date.now()).toISOString(),
     };
 
-    if (dongle && lesenErlaubt() && window.joltObd
-        && window.joltObd.verbunden()) {
+    if (dongle && readAllowed() && window.joltObd
+        && window.joltObd.linked()) {
       try {
-        const roh = await window.joltObd.satzLesen(runde++);
+        const raw = await window.joltObd.readRecord(lap++);
         // Die 12-V-Spannung mitschreiben, solange sie frisch ist: Daran
         // lässt sich später nachsehen, wie weit sie beim Ausschalten fällt.
-        if (letzteSpannung !== null && Date.now() - letzteSpannungZeit < 15000) {
-          roh.batt_v = letzteSpannung;
+        if (latestVoltage !== null && Date.now() - latestVoltageTime < 15000) {
+          raw.batt_v = latestVoltage;
         }
-        if (typeof roh.hoehe_m !== "number" && typeof coords.altitude === "number") {
-          roh.hoehe_m = Math.round(coords.altitude);
+        if (typeof raw.elevation_m !== "number" && typeof coords.altitude === "number") {
+          raw.elevation_m = Math.round(coords.altitude);
         }
-        letzteRohwerte = roh;
-        letzteRohwerteZeit = Date.now();
-        stilleGemeldet = false;
-        werteMerken(roh);
-        nebenverbrauchMerken(roh);
-        const wert = window.joltObd.socAusRoh(roh.soc_roh);
-        nutzlast.soc = Math.round(wert.hmi * 10) / 10;
-        nutzlast.rohwerte = roh;
+        latestRawValues = raw;
+        latestRawValuesTime = Date.now();
+        quietReported = false;
+        valuesRemember(raw);
+        auxLoadRemember(raw);
+        const val = window.joltObd.socFromRaw(raw.soc_raw);
+        payload.soc = Math.round(val.hmi * 10) / 10;
+        payload.raw_values = raw;
         // Was das Auto selbst misst, schlägt jede Vorhersage - wenn es
         // plausibel ist. Ein "ungültig" (255 km/h, 77,5 °C) lässt das Tempo des
         // GPS stehen und die Temperatur leer.
-        const autoTempo = tempoOderNull(roh.tempo_kmh);
-        if (autoTempo !== null) nutzlast.tempo_kmh = autoTempo;
-        const autoTemp = temperaturOderNull(roh.aussentemp_c);
-        if (autoTemp !== null) nutzlast.aussentemp_c = autoTemp;
-      } catch (fehler) {
+        const autoSpeed = speedOrNull(raw.speed_kmh);
+        if (autoSpeed !== null) payload.speed_kmh = autoSpeed;
+        const autoTemp = temperatureOrNull(raw.outside_temp_c);
+        if (autoTemp !== null) payload.outside_temp_c = autoTemp;
+      } catch (failure) {
         // Eine Runde ohne Ladestand ist immer noch eine Positionsmeldung -
         // und die trägt Zeitfaktor und Ankunftsprognose weiter.
-        console.log("[obd] Runde übersprungen:", fehler);
+        console.log("[obd] Runde übersprungen:", failure);
       }
-      stilleUeberwachen();
+      quietWatch();
     }
 
     // Die Spannung auch ohne Fahrzeugabfrage mitgeben. Im Stand wird nichts
     // gefragt, `ATRV` aber weiter gemessen - und gerade dort fällt sie, wenn
     // das Auto ausgeht. Ohne diese Zeile stünde der Abfall nirgends, und die
     // Schwelle liesse sich nicht an einer echten Fahrt prüfen.
-    if (!nutzlast.rohwerte && letzteSpannung !== null
-        && Date.now() - letzteSpannungZeit < 15000) {
-      nutzlast.rohwerte = { batt_v: letzteSpannung };
+    if (!payload.raw_values && latestVoltage !== null
+        && Date.now() - latestVoltageTime < 15000) {
+      payload.raw_values = { batt_v: latestVoltage };
     }
-    pufferAnhaengen(nutzlast);
-    pufferAbarbeiten();
+    bufferAppend(payload);
+    bufferProcess();
   }
 
   /* ---------- Messpunkte puffern ---------- */
@@ -2027,74 +2027,74 @@ window.joltLive = (function () {
    * Die Warteschlange liegt auch im localStorage: Lädt iOS die Seite im
    * Hintergrund neu, sollen die Punkte nicht mit ihr verschwinden. Das Limit
    * schützt vor einem Speicher, der ewig wächst; dann gehen die ältesten. */
-  const PUFFER_MAX = 2000;
-  const STAPEL_MAX = 100;
+  const BUFFER_MAX = 2000;
+  const BATCH_MAX = 100;
   // Wie viele Punkte der nächste Stapel hat. Gleich STAPEL_MAX, ausser der
   // Server hat gerade einen Stapel abgelehnt: dann wird halbiert, bis der
   // eine schlechte Punkt feststeht.
-  let stapelGroesse = STAPEL_MAX;
-  let puffer = [];
-  let pufferSitzung = null;
-  let pufferLauf = null;
-  let pufferNochmal = false;
-  let ohneNetzGemeldet = false;
-  let nachgereicht = 0;
-  let abgelehnt = 0;              // vom Server abgelehnte Einzelpunkte
+  let batchSize = BATCH_MAX;
+  let buffer = [];
+  let bufferSession = null;
+  let bufferRun = null;
+  let bufferAgain = false;
+  let withoutGridReported = false;
+  let supplied_later = 0;
+  let rejected = 0;              // vom Server abgelehnte Einzelpunkte
 
-  function pufferSpeicher(id) { return "jolt-puffer-" + id; }
+  function bufferStorage(id) { return "jolt-puffer-" + id; }
 
-  function pufferFuer(id) {
-    if (pufferSitzung === id) return;
-    pufferSitzung = id;
-    puffer = [];
+  function bufferFor(id) {
+    if (bufferSession === id) return;
+    bufferSession = id;
+    buffer = [];
     try {
-      const roh = JSON.parse(localStorage.getItem(pufferSpeicher(id)) || "[]");
-      if (Array.isArray(roh)) puffer = roh;
+      const raw = JSON.parse(localStorage.getItem(bufferStorage(id)) || "[]");
+      if (Array.isArray(raw)) buffer = raw;
     } catch (e) { /* kein Speicher oder beschädigt: ohne weiter */ }
   }
 
-  function pufferSichern() {
-    if (pufferSitzung === null) return;
+  function saveBuffer() {
+    if (bufferSession === null) return;
     try {
-      if (puffer.length) {
-        localStorage.setItem(pufferSpeicher(pufferSitzung), JSON.stringify(puffer));
+      if (buffer.length) {
+        localStorage.setItem(bufferStorage(bufferSession), JSON.stringify(buffer));
       } else {
-        localStorage.removeItem(pufferSpeicher(pufferSitzung));
+        localStorage.removeItem(bufferStorage(bufferSession));
       }
     } catch (e) { /* voll oder gesperrt: dann bleibt er eben im Arbeitsspeicher */ }
   }
 
-  function pufferAnhaengen(punkt) {
-    pufferFuer(K.zustand.sitzungId);
-    puffer.push(punkt);
-    if (puffer.length > PUFFER_MAX) puffer.splice(0, puffer.length - PUFFER_MAX);
+  function bufferAppend(point) {
+    bufferFor(K.state.sessionId);
+    buffer.push(point);
+    if (buffer.length > BUFFER_MAX) buffer.splice(0, buffer.length - BUFFER_MAX);
     // Gesichert wird nur, wenn sich etwas staut - im Normalfall steht der
     // Punkt eine Sekunde später auf dem Server.
-    if (puffer.length > 1) pufferSichern();
+    if (buffer.length > 1) saveBuffer();
   }
 
-  function pufferAbarbeiten() {
-    if (pufferLauf) { pufferNochmal = true; return pufferLauf; }
-    pufferLauf = pufferSenden().finally(() => { pufferLauf = null; });
-    return pufferLauf;
+  function bufferProcess() {
+    if (bufferRun) { bufferAgain = true; return bufferRun; }
+    bufferRun = sendBuffer().finally(() => { bufferRun = null; });
+    return bufferRun;
   }
 
-  async function pufferSenden() {
+  async function sendBuffer() {
     do {
-      pufferNochmal = false;
-      const id = K.zustand.sitzungId;
-      while (id && puffer.length && K.zustand.sitzungId === id) {
-        const stapel = puffer.slice(0, stapelGroesse);
-        let zustand;
+      bufferAgain = false;
+      const id = K.state.sessionId;
+      while (id && buffer.length && K.state.sessionId === id) {
+        const batch = buffer.slice(0, batchSize);
+        let state;
         try {
-          zustand = await K.api(`/api/live/${id}/punkte`,
-            { method: "POST", body: { punkte: stapel } });
-        } catch (fehler) {
-          const status = fehler.status;
+          state = await K.api(`/api/live/${id}/punkte`,
+            { method: "POST", body: { points: batch } });
+        } catch (failure) {
+          const status = failure.status;
           if (status === 404 || status === 409) {
             // Die Sitzung gibt es nicht mehr oder ist beendet: Weiter zu
             // senden hiesse, dieselbe Ablehnung bis in alle Ewigkeit zu holen.
-            puffer = [];
+            buffer = [];
           } else if (status === 422) {
             // Der Server hält den Stapel für ungültig - ein Punkt darin, etwa
             // mit einem Zeitstempel von vor mehr als zwei Tagen. Der ganze
@@ -2104,72 +2104,72 @@ window.joltLive = (function () {
             // Punktes bis zu neunundneunzig gute. Jetzt wird halbiert, bis der
             // eine Punkt feststeht; nur der fliegt raus. Das kostet bei hundert
             // Punkten höchstens sieben weitere Anfragen.
-            if (stapel.length > 1) {
-              stapelGroesse = Math.ceil(stapel.length / 2);
+            if (batch.length > 1) {
+              batchSize = Math.ceil(batch.length / 2);
             } else {
-              puffer.splice(0, 1);
-              stapelGroesse = STAPEL_MAX;
-              abgelehnt += 1;
+              buffer.splice(0, 1);
+              batchSize = BATCH_MAX;
+              rejected += 1;
             }
-          } else if (!ohneNetzGemeldet) {
-            ohneNetzGemeldet = true;
-            K.melden("Keine Verbindung zu jolt – die Messpunkte werden "
+          } else if (!withoutGridReported) {
+            withoutGridReported = true;
+            K.report("Keine Verbindung zu jolt – die Messpunkte werden "
               + "gesammelt und nachgereicht.", "hinweis");
           }
-          pufferSichern();
+          saveBuffer();
           // Netz weg, Server überlastet oder abgemeldet: liegen lassen, der
           // nächste Punkt oder das Zurückkehren des Netzes versucht es erneut.
           if (status !== 404 && status !== 409 && status !== 422) return;
           continue;
         }
-        puffer.splice(0, stapel.length);
-        pufferSichern();
-        if (ohneNetzGemeldet) nachgereicht += stapel.length;
+        buffer.splice(0, batch.length);
+        saveBuffer();
+        if (withoutGridReported) supplied_later += batch.length;
         // Den Zustand nur zeigen, wenn der Stapel die Gegenwart erreicht hat.
         // Mitten im Nachreichen wäre es der von vor zehn Minuten.
-        if (!puffer.length) {
-          if (ohneNetzGemeldet) {
-            ohneNetzGemeldet = false;
-            K.melden("Verbindung wieder da – " + nachgereicht
+        if (!buffer.length) {
+          if (withoutGridReported) {
+            withoutGridReported = false;
+            K.report("Verbindung wieder da – " + supplied_later
               + " Messpunkte nachgereicht.", "hinweis");
-            nachgereicht = 0;
+            supplied_later = 0;
           }
-          zustandAnzeigen(zustand);
+          showState(state);
         }
       }
-    } while (pufferNochmal);
+    } while (bufferAgain);
     // Nach einer Ablehnung geht es in kleinen Stapeln weiter, bis der schlechte
     // Punkt gefunden ist (dann ist die Grösse wieder voll) - oder bis nichts
     // mehr wartet. Ein Wachsen nach jedem Erfolg träfe den schlechten Punkt
     // immer wieder: Das kostete bei 13 Punkten sieben abgelehnte Anfragen
     // statt vier.
-    stapelGroesse = STAPEL_MAX;
-    if (abgelehnt > 0) {
-      K.melden(`${abgelehnt} Messpunkt${abgelehnt === 1 ? " wurde" : "e wurden"} `
+    batchSize = BATCH_MAX;
+    if (rejected > 0) {
+      K.report(`${rejected} Messpunkt${rejected === 1 ? " wurde" : "e wurden"} `
         + "vom Server abgelehnt und verworfen - die übrigen sind angekommen.",
         "hinweis");
-      abgelehnt = 0;
+      rejected = 0;
     }
   }
 
   window.addEventListener("online", () => {
-    if (K.zustand.sitzungId) pufferAbarbeiten();
+    if (K.state.sessionId) bufferProcess();
   });
 
-  function standortHolen() {
-    return new Promise((erfuellen, ablehnen) => {
+  function fetchLocation() {
+    return new Promise((fulfil, reject) => {
       if (!navigator.geolocation) {
-        ablehnen(new Error("Dieses Gerät liefert keinen Standort."));
+        reject(new Error("Dieses Gerät liefert keinen Standort."));
         return;
       }
       navigator.geolocation.getCurrentPosition(
-        (pos) => erfuellen({ lat: pos.coords.latitude, lon: pos.coords.longitude,
-                             tempo_kmh: pos.coords.speed === null ? null
+        (pos) => fulfil({ lat: pos.coords.latitude, lon: pos.coords.longitude,
+                             speed_kmh: pos.coords.speed === null ? null
                                : pos.coords.speed * 3.6 }),
         // Ohne Standort ist der Ladestand allein wertlos: Erst die Position
         // sagt, mit welchem Sollwert er zu vergleichen ist.
-        (fehler) => ablehnen(new Error("Standort nicht verfügbar ("
-          + fehler.message + "). Über HTTPS oder localhost erlaubt der "
+        (failure) => reject(new Error("Standort nicht verfügbar ("
+          + failure.message + "). Über HTTPS oder localhost erlaubt der "
           + "Browser den Zugriff.")),
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
     });
@@ -2179,107 +2179,107 @@ window.joltLive = (function () {
    * jemand darin tippt. Am Ladepunkt wird der Wert eingetippt, und ein Feld,
    * das sich beim Eintippen unter den Fingern ändert, weil gerade eine
    * Nachricht über den WebSocket kam, ist schlimmer als ein leeres. */
-  function socFeldVorbelegen(wert) {
-    const feld = document.getElementById("ist-soc");
-    if (!feld || document.activeElement === feld) return;
-    if (wert === null || wert === undefined || Number.isNaN(wert)) return;
-    feld.value = Math.round(wert);
+  function socFieldPrefill(val) {
+    const field = document.getElementById("ist-soc");
+    if (!field || document.activeElement === field) return;
+    if (val === null || val === undefined || Number.isNaN(val)) return;
+    field.value = Math.round(val);
   }
 
-  async function socMelden() {
-    if (!K.zustand.sitzungId) { K.melden("Keine Live-Fahrt.", "fehler"); return; }
-    const knopf = document.getElementById("soc-melden");
-    const feld = document.getElementById("ist-soc");
-    const soc = Number(feld.value);
-    if (!feld.value || !(soc >= 0 && soc <= 100)) {
-      K.melden("Ladestand zwischen 0 und 100 % angeben.", "fehler");
+  async function reportSoc() {
+    if (!K.state.sessionId) { K.report("Keine Live-Fahrt.", "fehler"); return; }
+    const btn = document.getElementById("soc-melden");
+    const field = document.getElementById("ist-soc");
+    const soc = Number(field.value);
+    if (!field.value || !(soc >= 0 && soc <= 100)) {
+      K.report("Ladestand zwischen 0 und 100 % angeben.", "fehler");
       return;
     }
 
-    knopf.disabled = true;
+    btn.disabled = true;
     // Die Tastatur weg, sonst verdeckt sie auf dem Telefon genau die Werte,
     // wegen derer man den Ladestand gerade gemeldet hat.
-    feld.blur();
+    field.blur();
     try {
-      const ort = await standortHolen();
-      const zustand = await K.api(`/api/live/${K.zustand.sitzungId}/punkt`,
-        { method: "POST", body: { lat: ort.lat, lon: ort.lon, soc: soc,
-                                  tempo_kmh: ort.tempo_kmh } });
-      zustandAnzeigen(zustand);
+      const city = await fetchLocation();
+      const state = await K.api(`/api/live/${K.state.sessionId}/punkt`,
+        { method: "POST", body: { lat: city.lat, lon: city.lon, soc: soc,
+                                  speed_kmh: city.speed_kmh } });
+      showState(state);
       // Die Abweichung ist der Grund, warum das Eintippen sich lohnt - also
       // gehört sie unmittelbar danach als Satz auf den Schirm und nicht nur
       // als Kachel unter fünf anderen.
-      const erklaerung = document.getElementById("soc-erklaerung");
-      if (erklaerung) {
-        erklaerung.textContent = zustand.abweichung_pp === null
-          || zustand.abweichung_pp === undefined
+      const explanation = document.getElementById("soc-erklaerung");
+      if (explanation) {
+        explanation.textContent = state.deviation_pp === null
+          || state.deviation_pp === undefined
           ? "Aufgenommen."
-          : (Math.abs(zustand.abweichung_pp) < 0.5
+          : (Math.abs(state.deviation_pp) < 0.5
             ? "Aufgenommen – genau im Plan."
-            : `Aufgenommen – ${K.zahl(Math.abs(zustand.abweichung_pp), 1)} `
-              + `Prozentpunkte ${zustand.abweichung_pp < 0 ? "unter" : "über"} Plan.`);
+            : `Aufgenommen – ${K.num(Math.abs(state.deviation_pp), 1)} `
+              + `Prozentpunkte ${state.deviation_pp < 0 ? "unter" : "über"} Plan.`);
       }
-    } catch (fehler) {
-      K.melden(fehler.message, "fehler");
+    } catch (failure) {
+      K.report(failure.message, "fehler");
     } finally {
-      knopf.disabled = false;
+      btn.disabled = false;
     }
   }
 
-  async function beenden() {
-    if (!K.zustand.sitzungId) return;
+  async function finish() {
+    if (!K.state.sessionId) return;
     // Was noch in der Warteschlange liegt, gehört zur Fahrt - und nach dem
     // Beenden nimmt der Server nichts mehr an.
-    pufferFuer(K.zustand.sitzungId);
-    if (puffer.length) await pufferAbarbeiten();
-    if (puffer.length) {
-      K.melden(puffer.length + " Messpunkte konnten nicht mehr übertragen "
+    bufferFor(K.state.sessionId);
+    if (buffer.length) await bufferProcess();
+    if (buffer.length) {
+      K.report(buffer.length + " Messpunkte konnten nicht mehr übertragen "
         + "werden - kein Netz.", "warnung");
     }
-    let ergebnis = null;
+    let result = null;
     try {
-      ergebnis = await K.api(`/api/live/${K.zustand.sitzungId}/ende`,
+      result = await K.api(`/api/live/${K.state.sessionId}/ende`,
                              { method: "POST" });
-    } catch (fehler) { /* eine bereits beendete Fahrt ist kein Problem */ }
+    } catch (failure) { /* eine bereits beendete Fahrt ist kein Problem */ }
     // Die Fahrten-Ansicht hat die Liste zwischengespeichert; eine gerade
     // beendete Fahrt gehört hinein.
-    K.zustand.fahrtenVeraltet = true;
-    positionAufgeben();
-    puffer = [];
-    pufferSichern();
-    pufferSitzung = null;
-    ohneNetzGemeldet = false;
-    nachgereicht = 0;
+    K.state.tripsStale = true;
+    positionGiveUp();
+    buffer = [];
+    saveBuffer();
+    bufferSession = null;
+    withoutGridReported = false;
+    supplied_later = 0;
     dongle = false;
-    spur = [];
-    gefahrenKm = 0;
-    verlauf = [];
-    letzteRohwerte = null;
-    letzteRohwerteZeit = 0;
-    stilleGemeldet = false;
-    werteStand = {};
-    nieGekommen = new Set();
-    verbrauchAnfang = null;
-    verbrauchsspur = [];
-    nebenverbrauch = null;
-    if (neuVerbindenUhr) { clearTimeout(neuVerbindenUhr); neuVerbindenUhr = null; }
-    if (steckdose) {
-      try { steckdose.onclose = null; steckdose.close(); } catch (e) {}
+    track = [];
+    drivenKm = 0;
+    history = [];
+    latestRawValues = null;
+    latestRawValuesTime = 0;
+    quietReported = false;
+    valuesAsOf = {};
+    neverCome = new Set();
+    consumptionStart = null;
+    consumption_track = [];
+    aux_load = null;
+    if (reconnectClock) { clearTimeout(reconnectClock); reconnectClock = null; }
+    if (socket) {
+      try { socket.onclose = null; socket.close(); } catch (e) {}
     }
-    K.zustand.sitzungId = null;
-    K.sitzungMerken(null);
-    fahrzustandStart("steht");
+    K.state.sessionId = null;
+    K.sessionRemember(null);
+    drivingStateStart("steht");
     // Die Fahrt ist zu Ende: Die Anzeige im Auto soll verschwinden.
-    try { if (window.joltAnzeige) window.joltAnzeige.beenden(); }
+    try { if (window.joltDisplay) window.joltDisplay.finish(); }
     catch (e) { console.log("[anzeige]", e && e.message); }
     plan = null;
-    const kasten = document.getElementById("live-aenderung");
-    if (kasten) kasten.hidden = true;
+    const box = document.getElementById("live-aenderung");
+    if (box) box.hidden = true;
     document.getElementById("live-inhalt").hidden = true;
     document.getElementById("live-leer").hidden = false;
-    gelerntesMelden(ergebnis);
-    if (ergebnis && ergebnis.stand_verworfen) {
-      K.melden(`Die letzten ${ergebnis.stand_verworfen.verworfen_minuten} min `
+    reportLearned(result);
+    if (result && result.as_of_discarded) {
+      K.report(`Die letzten ${result.as_of_discarded.discarded_minutes} min `
         + "Stillstand wurden verworfen - die Fahrt endet beim letzten Fahren.",
         "hinweis");
     }
@@ -2304,44 +2304,44 @@ window.joltLive = (function () {
    * Verbrauch allein nicht trennen. Fällt die Kartenabfrage aus, geht die
    * Fahrt trotzdem durch - aber dann soll man es wissen, statt die Zahl
    * später für bare Münze zu nehmen. */
-  function hoehenMelden(gebaut) {
-    if (!gebaut || !gebaut.ok) return;
-    if (gebaut.hoehen === "gps") {
-      K.melden("Die Höhen dieser Fahrt kommen aus dem GPS, nicht aus der "
+  function reportElevations(built) {
+    if (!built || !built.ok) return;
+    if (built.elevations === "gps") {
+      K.report("Die Höhen dieser Fahrt kommen aus dem GPS, nicht aus der "
         + "Karte – geglättet, aber ungenauer. Der gelernte Faktor ist "
         + "entsprechend weicher.", "hinweis");
-    } else if (gebaut.hoehen === "flach") {
-      K.melden("Für diese Fahrt gab es keine Höhendaten; sie wurde flach "
+    } else if (built.elevations === "flach") {
+      K.report("Für diese Fahrt gab es keine Höhendaten; sie wurde flach "
         + "gerechnet. Auf einer Runde macht das wenig aus, auf einer Fahrt "
         + "ins Gebirge viel.", "hinweis");
     }
   }
 
-  function gelerntesMelden(ergebnis) {
-    if (!ergebnis) {
-      K.melden("Live-Fahrt beendet.", "hinweis");
+  function reportLearned(result) {
+    if (!result) {
+      K.report("Live-Fahrt beendet.", "hinweis");
       return;
     }
-    hoehenMelden(ergebnis.aufzeichnung);
-    const g = ergebnis.gelernt;
-    if (!g && ergebnis.nicht_gelernt) {
+    reportElevations(result.recording);
+    const g = result.learned;
+    if (!g && result.not_learned) {
       // Der Zuschlag für Träger oder Box ist kein Fehler, sondern der Grund,
       // warum diese Fahrt bewusst nicht in den Fahrzeugfaktor eingeht.
-      K.melden("Fahrt beendet. " + ergebnis.nicht_gelernt
+      K.report("Fahrt beendet. " + result.not_learned
         + " Die Aufzeichnung bleibt erhalten.", "hinweis");
       return;
     }
     if (!g) {
-      K.melden("Fahrt beendet. Für die Kalibrierung war sie nicht verwertbar "
+      K.report("Fahrt beendet. Für die Kalibrierung war sie nicht verwertbar "
         + "– unter 30 km, oder der gemessene Verbrauch lag ausserhalb des "
         + "Plausiblen.", "hinweis");
       return;
     }
-    const richtung = g.nachher > g.vorher ? "mehr" : "weniger";
-    K.melden(`Gelernt: Diese Fahrt brauchte ${K.zahl(g.rohfaktor, 2)}× so viel `
+    const direction = g.after > g.earlier ? "mehr" : "weniger";
+    K.report(`Gelernt: Diese Fahrt brauchte ${K.num(g.raw_factor, 2)}× so viel `
       + `wie gerechnet. Der Korrekturfaktor des Fahrzeugs geht von `
-      + `${K.zahl(g.vorher, 3)} auf ${K.zahl(g.nachher, 3)} – künftige `
-      + `Planungen rechnen also ${richtung}.`, "hinweis");
+      + `${K.num(g.earlier, 3)} auf ${K.num(g.after, 3)} – künftige `
+      + `Planungen rechnen also ${direction}.`, "hinweis");
   }
 
   /* Nach einem Neuladen dort weitermachen, wo es aufhörte.
@@ -2358,7 +2358,7 @@ window.joltLive = (function () {
    * Kommentar "erst wenn die Fahrzeugliste steht". Eine geratene Zahl: Auf
    * einem kalt gestarteten Telefon im französischen Funkloch ist sie zu
    * kurz, und es gab keinen zweiten Versuch. */
-  const FORTSETZEN_VERSUCHE = 6;
+  const RESUME_ATTEMPTS = 6;
 
   /* Spur, Ladestandskurve und Verbrauchsbalken aus den gespeicherten
    * Messpunkten wieder aufbauen.
@@ -2372,83 +2372,83 @@ window.joltLive = (function () {
    * Bewusst nicht über `zustandAnzeigen()`: Das würde je Punkt die Karte
    * neu setzen, Kacheln schreiben und Meldungen auslösen. Hier wird nur
    * der Zustand aufgebaut, gezeichnet wird einmal am Ende. */
-  async function verlaufNachladen(id) {
-    let daten;
+  async function rechargeHistory(id) {
+    let records;
     try {
-      daten = await K.api(`/api/live/${id}/punkte`);
-    } catch (fehler) {
+      records = await K.api(`/api/live/${id}/punkte`);
+    } catch (failure) {
       // Kein Grund, das Fortsetzen scheitern zu lassen - die Fahrt läuft
       // auch ohne die Vorgeschichte weiter, sie sieht nur ärmer aus.
-      console.log("[live] Verlauf nicht nachgeladen:", fehler);
+      console.log("[live] Verlauf nicht nachgeladen:", failure);
       return;
     }
-    const punkte = (daten && daten.punkte) || [];
-    if (!punkte.length) return;
+    const points = (records && records.points) || [];
+    if (!points.length) return;
 
-    spur = [];
-    verlauf = [];
-    verbrauchsspur = [];
-    gefahrenKm = 0;
+    track = [];
+    history = [];
+    consumption_track = [];
+    drivenKm = 0;
 
-    for (const p of punkte) {
+    for (const p of points) {
       if (typeof p.lat === "number" && typeof p.lon === "number") {
         // `spur` hält [lon, lat] - dieselbe Reihenfolge wie `messort()`,
         // und `abstandKm` rechnet damit.
-        const ort = [p.lon, p.lat];
-        const zuletzt = spur[spur.length - 1];
-        if (!zuletzt || zuletzt[0] !== ort[0] || zuletzt[1] !== ort[1]) {
-          if (zuletzt) gefahrenKm += abstandKm(zuletzt, ort);
-          spur.push(ort);
+        const city = [p.lon, p.lat];
+        const most_recent = track[track.length - 1];
+        if (!most_recent || most_recent[0] !== city[0] || most_recent[1] !== city[1]) {
+          if (most_recent) drivenKm += spacingKm(most_recent, city);
+          track.push(city);
         }
       }
-      if (typeof p.km_stand === "number") {
-        const netto = (typeof p.entladen_kwh === "number")
-          ? p.entladen_kwh - (typeof p.geladen_kwh === "number"
-                              ? p.geladen_kwh : 0)
+      if (typeof p.odometer_km === "number") {
+        const net = (typeof p.discharge_kwh === "number")
+          ? p.discharge_kwh - (typeof p.charged_kwh === "number"
+                              ? p.charged_kwh : 0)
           : null;
-        verbrauchsspur.push({
-          zeit: K.zeitMs(p.zeit), km: p.km_stand, netto,
+        consumption_track.push({
+          timestamp: K.timeMs(p.timestamp), km: p.odometer_km, net,
           // Die GPS-Strecke ist hier schon bekannt - anders als im Betrieb,
           // wo sie erst mit der Position nachgetragen wird.
-          gps: gefahrenKm,
-          soc: typeof p.soc_roh === "number" ? p.soc_roh / 2.5 : null });
+          gps: drivenKm,
+          soc: typeof p.soc_raw === "number" ? p.soc_raw / 2.5 : null });
       }
       if (p.soc !== null && p.soc !== undefined) {
-        verlauf.push({
-          km: p.km_auf_route || 0, gefahren_km: gefahrenKm, soc: p.soc,
+        history.push({
+          km: p.km_on_route || 0, driven_km: drivenKm, soc: p.soc,
           /* Ob ein Ladestand gemeldet oder gerechnet war, steht nicht in
            * der Datenbank. Ein Punkt mit Rohwert kam aus dem Auto, das ist
            * sicher eine Messung; ein von Hand eingetippter Wert erscheint
            * hier faelschlich als gerechnet. Lieber so herum: Der Fehler
            * behauptet weniger, als er weiss. */
-          gemeldet: p.soc_roh !== null && p.soc_roh !== undefined });
+          reported: p.soc_raw !== null && p.soc_raw !== undefined });
       }
     }
     // Dieselbe Obergrenze wie im Betrieb.
-    while (verbrauchsspur.length > 20000) verbrauchsspur.shift();
-    while (spur.length > 20000) spur.shift();
+    while (consumption_track.length > 20000) consumption_track.shift();
+    while (track.length > 20000) track.shift();
 
-    const letzter = punkte[punkte.length - 1];
-    if (typeof letzter.km_stand === "number") {
+    const last = points[points.length - 1];
+    if (typeof last.odometer_km === "number") {
       // Über K.zeit: UTC vom Server. Als Ortszeit gelesen wäre der Wert zwei
       // Stunden alt, und `stilleUeberwachen` baute die Verbindung nach jedem
       // Neuladen der Seite neu auf ("antwortet seit zwei Minuten nicht").
-      letzteRohwerteZeit = K.zeitMs(letzter.zeit);
+      latestRawValuesTime = K.timeMs(last.timestamp);
     }
-    verlaufZeichnen();
-    verbrauchZeichnen();
-    if (!K.zustand.fahrt && window.joltKarte) {
-      window.joltKarte.routeSetzen(spur);
+    drawHistory();
+    drawConsumption();
+    if (!K.state.trip && window.joltMap) {
+      window.joltMap.setRoute(track);
     }
   }
 
-  async function sitzungFortsetzen(versuch = 1) {
-    const id = K.gemerkteSitzung();
-    if (!id || K.zustand.sitzungId) return;
-    let zustand;
+  async function resumeSession(attempt = 1) {
+    const id = K.rememberedSession();
+    if (!id || K.state.sessionId) return;
+    let state;
     try {
-      zustand = await K.api(`/api/live/${id}`);
-    } catch (fehler) {
+      state = await K.api(`/api/live/${id}`);
+    } catch (failure) {
       /* Vergessen darf jolt eine laufende Fahrt nur, wenn der Server
        * eindeutig sagt, dass es sie nicht gibt.
        *
@@ -2459,92 +2459,92 @@ window.joltLive = (function () {
        * wieder an. Am 2. September ist genau das den ganzen Tag passiert -
        * eine Reise von 654 km zerfiel in neun Fahrten, weil nach jedem
        * Neuladen von Hand eine neue geplant werden musste. */
-      if (/nicht gefunden|404/i.test(fehler.message)) {
-        K.sitzungMerken(null);
+      if (/nicht gefunden|404/i.test(failure.message)) {
+        K.sessionRemember(null);
         return;
       }
-      if (versuch < FORTSETZEN_VERSUCHE) {
-        setTimeout(() => sitzungFortsetzen(versuch + 1), 4000 * versuch);
+      if (attempt < RESUME_ATTEMPTS) {
+        setTimeout(() => resumeSession(attempt + 1), 4000 * attempt);
       }
       return;
     }
-    if (!zustand || zustand.laeuft === false) { K.sitzungMerken(null); return; }
+    if (!state || state.running === false) { K.sessionRemember(null); return; }
 
-    K.zustand.sitzungId = id;
+    K.state.sessionId = id;
     // Nach einem Neuladen ist unbekannt, wo das Auto steht und ob es offen
     // ist. Also erst fragen, wenn gefahren wird.
-    fahrzustandStart("steht");
-    pufferFuer(id);
-    if (puffer.length) pufferAbarbeiten();
+    drivingStateStart("steht");
+    bufferFor(id);
+    if (buffer.length) bufferProcess();
     /* Die Fahrt dazuholen. Die Live-Ansicht braucht sie fuer das
      * Energieprofil, die Reserve-Marke und die Soll-Kurve; ohne sie zeigt
      * sie nur die halbe Wahrheit. Bei einer Aufzeichnung gibt es sie noch
      * nicht - dann bleibt es bei null, und die Ansicht kommt damit zurecht. */
-    if (!K.zustand.fahrt && zustand.fahrt_id && window.joltRoute) {
-      try { await window.joltRoute.fahrtLaden(zustand.fahrt_id); }
-      catch (fehler) { /* eine Aufzeichnung hat noch keine Geometrie */ }
+    if (!K.state.trip && state.trip_id && window.joltRoute) {
+      try { await window.joltRoute.tripCharging(state.trip_id); }
+      catch (failure) { /* eine Aufzeichnung hat noch keine Geometrie */ }
     }
-    const leer = document.getElementById("live-leer");
-    const inhalt = document.getElementById("live-inhalt");
-    if (leer) leer.hidden = true;
-    if (inhalt) inhalt.hidden = false;
-    if (zustand.plan) { plan = zustand.plan; planZeichnen(); }
+    const empty = document.getElementById("live-leer");
+    const contents = document.getElementById("live-inhalt");
+    if (empty) empty.hidden = true;
+    if (contents) contents.hidden = false;
+    if (state.plan) { plan = state.plan; drawPlan(); }
     // Vor dem Verbinden: Kommt über den WebSocket sofort ein neuer Punkt,
     // soll er auf den nachgeladenen Verlauf treffen und nicht auf nichts.
-    await verlaufNachladen(id);
-    verbinden(id);
-    positionVerfolgen();
-    dongleAnzeigen();
+    await rechargeHistory(id);
+    link(id);
+    positionTrace();
+    showDongle();
     /* In die Live-Ansicht wechseln, wie es `starten()` auch tut.
      *
      * Ohne das blieb man nach dem Neuladen in der Planen-Ansicht stehen:
      * Die Fahrt lief zwar weiter, war aber nirgends zu sehen. Wer nicht
      * wusste, dass er auf "Live" tippen muss, hielt sie für verloren und
      * plante eine neue - und die beendete dann die laufende. */
-    if (window.joltApp) window.joltApp.ansichtZeigen("live");
-    K.melden("Die laufende Fahrt geht weiter – die Messpunkte von vorher "
+    if (window.joltApp) window.joltApp.showView("live");
+    K.report("Die laufende Fahrt geht weiter – die Messpunkte von vorher "
       + "sind erhalten. Falls der Dongle mitlas, einmal neu verbinden.",
       "hinweis");
   }
 
-  function einrichten() {
+  function set_up() {
     // Wie bei der Karte: Im versteckten Abschnitt hat das Canvas die Breite
     // null, und nach dem Einblenden oder Drehen muss neu gezeichnet werden.
-    window.addEventListener("resize", verlaufZeichnen);
-    window.addEventListener("resize", verbrauchZeichnen);
-    K.reglerKoppeln("mehrverbrauch", "mehrverbrauch-wert");
-    K.reglerKoppeln("stau", "stau-wert");
-    K.an("live-starten", "click", starten);
-    K.an("simulieren", "click", simulieren);
-    K.an("live-beenden", "click", beenden);
-    K.an("soc-melden", "click", socMelden);
-    K.an("dongle-an", "click", dongleVerbinden);
+    window.addEventListener("resize", drawHistory);
+    window.addEventListener("resize", drawConsumption);
+    K.sliderCouple("mehrverbrauch", "mehrverbrauch-wert");
+    K.sliderCouple("stau", "stau-wert");
+    K.at("live-starten", "click", launch);
+    K.at("simulieren", "click", simulate);
+    K.at("live-beenden", "click", finish);
+    K.at("soc-melden", "click", reportSoc);
+    K.at("dongle-an", "click", connectDongle);
     // Erst wenn die Fahrzeugliste steht - sonst fehlt die Akkugrösse.
-    setTimeout(sitzungFortsetzen, 800);
-    K.an("dongle-pause", "click", donglePausieren);
-    setInterval(spannungPruefen, SPANNUNG_TAKT_MS);
-    const autoHaken = document.getElementById("dongle-auto");
-    if (autoHaken) {
-      autoHaken.checked = autoModus;
-      autoHaken.addEventListener("change", () => {
-        autoModus = autoHaken.checked;
-        try { localStorage.setItem("jolt-dongle-auto", autoModus ? "1" : "0"); }
+    setTimeout(resumeSession, 800);
+    K.at("dongle-pause", "click", donglePausieren);
+    setInterval(examineVoltage, VOLTAGE_TICK_MS);
+    const autoCheckbox = document.getElementById("dongle-auto");
+    if (autoCheckbox) {
+      autoCheckbox.checked = autoMode;
+      autoCheckbox.addEventListener("change", () => {
+        autoMode = autoCheckbox.checked;
+        try { localStorage.setItem("jolt-dongle-auto", autoMode ? "1" : "0"); }
         catch (e) { /* nur diese Sitzung */ }
-        if (autoModus) fahrZustand = "steht";
-        else dongleWiederverbinden();
+        if (autoMode) driveState = "steht";
+        else reconnectDongle();
       });
     }
     // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
     // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
-    K.an("ist-soc", "keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); socMelden(); }
+    K.at("ist-soc", "keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); reportSoc(); }
     });
   }
 
-  return { einrichten, starten, beenden, verbinden, positionVerfolgen,
-           dongleNutzen, verlaufZeichnen,
-           fahrzustand: () => fahrZustand, fahrzustandStart, lesenErlaubt, dongleVerbinden,
-           spannungPruefen, benachrichtigungenEinrichten, handshakeSicher,
-           dongleWiederverbinden,
-           autoSetzen: (an) => { autoModus = !!an; } };
+  return { set_up, launch, finish, link, positionTrace,
+           dongleUse, drawHistory,
+           driving_state: () => driveState, drivingStateStart, readAllowed, connectDongle,
+           examineVoltage, notificationsSetUp, handshakeSafe,
+           reconnectDongle,
+           setAuto: (at) => { autoMode = !!at; } };
 })();

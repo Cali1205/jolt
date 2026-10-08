@@ -20,16 +20,16 @@ jobs:
 
       - run: pip install -r backend/requirements.txt
 
-      - run: ./tools/check_modell.py
-      - run: ./tools/check_identifikation.py
-      - run: ./tools/check_optimierer.py
-      - run: ./tools/check_umplanung.py
-      - run: ./tools/check_quellen.py
-      - run: ./tools/check_eigene.py
+      - run: ./tools/check_model.py
+      - run: ./tools/check_identification.py
+      - run: ./tools/check_optimizer.py
+      - run: ./tools/check_replanning.py
+      - run: ./tools/check_sources.py
+      - run: ./tools/check_own.py
       - run: ./tools/check_tomtom.py
-      - run: ./tools/check_wetter.py
+      - run: ./tools/check_weather.py
       - run: ./tools/check_ios.py
-      - run: ./tools/check_sicherheit.py
+      - run: ./tools/check_security.py
       - run: ./tools/check_push.py
       - run: ./tools/check_backend.py
 
@@ -50,7 +50,7 @@ jobs:
   # Oberflaeche wird ohne Bauschritt ausgeliefert, also muss die gebuendelte
   # Plugin-Huelle als fertige Datei danebenliegen. Genau daraus entsteht die
   # Gefahr, gegen die dieser Auftrag laeuft - jemand aendert
-  # tools/ble-huelle-eintrag.js oder hebt eine Plugin-Fassung an und vergisst
+  # tools/ble-shell-entry.js oder hebt eine Plugin-Fassung an und vergisst
   # `npm run huelle`. Die App zoege dann weiter die alte Huelle, und der
   # Fehler zeigte sich erst am Auto.
   huelle:
@@ -85,7 +85,7 @@ jobs:
       # wird hier gegen einen nachgebildeten Dongle durchgespielt, samt dem
       # Rueckfall auf echtes Web Bluetooth ohne Capacitor.
       - name: Bluetooth-Bruecke pruefen
-        run: node tools/check_ble_bruecke.js
+        run: node tools/check_ble_bridge.js
 
       # Die Umrechnungen sind aus handgeschriebenen Funktionen zu
       # Tabellenzeilen geworden. Diese Pruefung haelt die alten Funktionen
@@ -93,39 +93,39 @@ jobs:
       # Bytefolgen - genau dort gehen Vorzeichen, Teiler und Bytelage bei
       # so einem Umbau still daneben.
       - name: Messwert-Tabelle gegen die alten Formeln pruefen
-        run: node tools/check_messwerte.js
+        run: node tools/check_readings.js
 
       # Die Warteschlange fuer Messpunkte laeuft in live.js gegen einen
       # Server, der ausfaellt - Funkloch, Nachreichen, abgelehnte Stapel.
       - name: Messpunkt-Warteschlange pruefen
-        run: node tools/check_puffer.js
+        run: node tools/check_buffer.js
 
       # Der Standort-Weg: Browser ueber navigator.geolocation, iOS-App ueber
       # das Hintergrund-Plugin - samt Rueckfall, wenn die App aelter ist als
       # die Oberflaeche, die der Server ihr liefert.
       - name: Standort-Weg pruefen
-        run: node tools/check_standort.js
+        run: node tools/check_location.js
 
       # Wann der Dongle das Auto fragen darf: nur bei Fahrt, nie am
       # verriegelten Auto (Alarmanlage) - und von selbst wieder verbinden.
       - name: Fahrzustand pruefen
-        run: node tools/check_fahrzustand.js
+        run: node tools/check_driving_state.js
 
       # Der Start einer Aufzeichnung gegen einen Dongle, der nicht antwortet:
       # Er bleibt in Benutzung, solange die Verbindung steht.
       - name: Aufzeichnungsstart pruefen
-        run: node tools/check_aufzeichnung.js
+        run: node tools/check_recording.js
 
       # Die Verkehrskachel der gewaehlten Route: Der Verkehr steht nur in der
       # Antwort der letzten Planung, nicht an der gespeicherten Fahrt.
       - name: Verkehrskachel pruefen
-        run: node tools/check_route_anzeige.js
+        run: node tools/check_route_display.js
 
       # Zeiten vom Server: UTC, und der Browser darf sie nie als Ortszeit lesen.
       # Das Ergebnis darf von der Zeitzone nicht abhaengen - die Pruefung laeuft
       # unter vier Zeitzonen.
       - name: Zeiten pruefen
-        run: node tools/check_zeit.js
+        run: node tools/check_timestamp.js
 
       # Die Einstellungen-Ansicht zeigt Zaehler und Protokoll des Dongle-
       # Bausteins. Stimmen die nicht, fuehrt die Diagnose in die Irre - und
@@ -136,27 +136,27 @@ jobs:
       # Das Anzeigemodell fuer CarPlay und Widget: wenige Zahlen, gedrosselt,
       # ohne erfundene Felder - ohne Swift und ohne Mac pruefbar.
       - name: Anzeigemodell pruefen
-        run: node tools/check_anzeige.js
+        run: node tools/check_display.js
 
       # Die Karte sprang beim Kneifen und Ziehen: Gesten gegen eine Attrappe der
       # Leinwand, ohne Browser.
       - name: Kartenbedienung pruefen
-        run: node tools/check_karte.js
+        run: node tools/check_map.js
 
       # Das passive Mithoeren darf nichts auf den CAN senden - was gesendet wird,
       # ist das, woran die Alarmanlage haengt.
       - name: Mithoeren pruefen
-        run: node tools/check_lauschen.js
+        run: node tools/check_listen.js
 
       # Aufzeichnung starten und beenden aus der CarPlay-Liste.
       - name: CarPlay-Aktionen pruefen
-        run: node tools/check_carplay_aktion.js
+        run: node tools/check_carplay_action.js
 
       # Verbinden und Mithoeren aus den Einstellungen, vom Tippen bis zum Text.
       - name: Dongle-Knoepfe der Einstellungen pruefen
-        run: node tools/check_einstellungen.js
+        run: node tools/check_settings.js
 
       # Die gezeichneten CarPlay-Kacheln: kein Text ueber den Rand, keine
       # Kachel stuerzt ohne Wert ab, die Farben melden den richtigen Zustand.
       - name: CarPlay-Kacheln pruefen
-        run: node tools/check_kacheln.js
+        run: node tools/check_tiles.js

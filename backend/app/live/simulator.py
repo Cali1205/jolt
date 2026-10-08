@@ -20,41 +20,41 @@ import logging
 from datetime import datetime, timedelta
 
 from .. import models, push
-from ..energie.profil import eintrag_bei
-from . import kanal, sitzung as live_sitzung
+from ..energy.profile import entry_at
+from . import channel, session as live_session
 
 log = logging.getLogger("uvicorn.error")
 
-SCHRITT_KM = 5.0
+STEP_KM = 5.0
 
 
-def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
-             schritt_km: float = SCHRITT_KM,
-             zeitfaktor: float = 1.0) -> list[dict]:
+def steps(trip: models.Trip, extra_consumption: float = 1.0,
+             step_km: float = STEP_KM,
+             time_factor: float = 1.0) -> list[dict]:
     """Die Messpunkte einer simulierten Fahrt.
 
     Reine Funktion ohne Datenbank und ohne Warten - damit sie sich in einem
     Prüfskript direkt durchrechnen lässt.
     """
-    profil = fahrt.energieprofil or []
-    if not profil:
+    profile = trip.energy_profile or []
+    if not profile:
         return []
 
-    gesamt_km = profil[-1].get("km") or 0.0
-    punkte = []
+    total_km = profile[-1].get("km") or 0.0
+    points = []
     km = 0.0
-    while km <= gesamt_km:
-        eintrag = eintrag_bei(profil, km)
-        verbraucht = fahrt.start_soc - (eintrag.get("soc") or fahrt.start_soc)
-        soc = fahrt.start_soc - verbraucht * mehrverbrauch
-        punkte.append({
-            "lat": eintrag.get("lat"), "lon": eintrag.get("lon"),
+    while km <= total_km:
+        entry = entry_at(profile, km)
+        consumed = trip.start_soc - (entry.get("soc") or trip.start_soc)
+        soc = trip.start_soc - consumed * extra_consumption
+        points.append({
+            "lat": entry.get("lat"), "lon": entry.get("lon"),
             "soc": round(max(0.0, soc), 2),
-            "tempo_kmh": eintrag.get("tempo_kmh"),
-            "aussentemp_c": fahrt.aussentemp_c,
+            "speed_kmh": entry.get("speed_kmh"),
+            "outside_temp_c": trip.outside_temp_c,
             "km": round(km, 1),
             # Minuten seit Abfahrt, wie sie *im Auto* vergangen wären.
-            "minuten": round((eintrag.get("minuten") or 0.0) * zeitfaktor, 3)})
+            "mins": round((entry.get("mins") or 0.0) * time_factor, 3)})
         # Bei null ist Schluss. Ein simuliertes Auto, das mit leerem Akku
         # weiterfährt und dabei brav 0 % meldet, würde genau den Fall
         # verschleiern, den die Simulation sichtbar machen soll: dass es
@@ -62,14 +62,14 @@ def schritte(fahrt: models.Fahrt, mehrverbrauch: float = 1.0,
         # und das muss man an der Zahl der Messpunkte sehen.
         if soc <= 0:
             break
-        km += schritt_km
-    return punkte
+        km += step_km
+    return points
 
 
 
-async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
-                    takt_s: float = 1.0, schritt_km: float = SCHRITT_KM,
-                    zeitfaktor: float = 1.0) -> None:
+async def replay(db_factory, session_id: int, extra_consumption: float = 1.0,
+                    tick_s: float = 1.0, step_km: float = STEP_KM,
+                    time_factor: float = 1.0) -> None:
     """Die Simulation als Hintergrundaufgabe.
 
     Jeder Schritt bekommt eine eigene Datenbanksitzung: Die Aufgabe läuft
@@ -78,49 +78,49 @@ async def abspielen(db_factory, sitzung_id: int, mehrverbrauch: float = 1.0,
     """
     db = db_factory()
     try:
-        sitzung = db.get(models.LiveSitzung, sitzung_id)
-        if not sitzung:
+        session = db.get(models.LiveSession, session_id)
+        if not session:
             return
-        punkte = schritte(sitzung.fahrt, mehrverbrauch, schritt_km, zeitfaktor)
+        points = steps(session.trip, extra_consumption, step_km, time_factor)
     finally:
         db.close()
 
     # Der Nullpunkt der simulierten Uhr. Die Messpunkte tragen ihre Zeit
     # relativ dazu, damit die Nachführung eine plausible Fahrt sieht und
     # nicht sechshundert Kilometer in vier Sekunden.
-    beginn = datetime.utcnow()
+    onset = datetime.utcnow()
 
-    for messpunkt in punkte:
+    for sample in points:
         db = db_factory()
         try:
-            sitzung = db.get(models.LiveSitzung, sitzung_id)
-            if not sitzung or not sitzung.laeuft:
+            session = db.get(models.LiveSession, session_id)
+            if not session or not session.running:
                 return
-            zustand = live_sitzung.messpunkt_aufnehmen(
-                db, sitzung, messpunkt["lat"], messpunkt["lon"], messpunkt["soc"],
-                messpunkt.get("tempo_kmh"), messpunkt.get("aussentemp_c"),
-                zeit=beginn + timedelta(minutes=messpunkt.get("minuten") or 0.0))
-        except Exception as fehler:      # noqa: BLE001
-            log.warning("Simulation abgebrochen: %s", fehler)
+            state = live_session.record_sample(
+                db, session, sample["lat"], sample["lon"], sample["soc"],
+                sample.get("speed_kmh"), sample.get("outside_temp_c"),
+                timestamp=onset + timedelta(minutes=sample.get("mins") or 0.0))
+        except Exception as failure:      # noqa: BLE001
+            log.warning("Simulation abgebrochen: %s", failure)
             return
         finally:
             db.close()
 
-        await kanal.senden(sitzung_id, {"typ": "zustand", "simuliert": True,
-                                        **live_sitzung.zustand_als_dict(zustand)})
+        await channel.send(session_id, {"kind": "zustand", "simulated": True,
+                                        **live_session.state_as_dict(state)})
         # Auch die Simulation benachrichtigt - sonst liesse sich die Kette bis
         # aufs Telefon nie durchspielen, ohne wirklich zu fahren.
-        if zustand.plan_geaendert:
-            push.senden_hintergrund(db_factory, "jolt – Ladeplan geändert",
-                                    zustand.aenderung)
-        await asyncio.sleep(takt_s)
+        if state.plan_changed:
+            push.send_background(db_factory, "jolt – Ladeplan geändert",
+                                    state.change)
+        await asyncio.sleep(tick_s)
 
     db = db_factory()
     try:
-        sitzung = db.get(models.LiveSitzung, sitzung_id)
-        if sitzung:
-            sitzung.laeuft = False
+        session = db.get(models.LiveSession, session_id)
+        if session:
+            session.running = False
             db.commit()
     finally:
         db.close()
-    await kanal.senden(sitzung_id, {"typ": "ende", "simuliert": True})
+    await channel.send(session_id, {"kind": "ende", "simulated": True})

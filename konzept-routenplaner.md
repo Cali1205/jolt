@@ -178,8 +178,8 @@ jolt geht deshalb ehrlich damit um, statt Verfügbarkeit vorzutäuschen:
 
 ## 4. Die Ladestopp-Planung
 
-*(Implementiert in `backend/app/laden/optimierer.py`, geprüft von
-`tools/check_optimierer.py`.)*
+*(Implementiert in `backend/app/charging/optimizer.py`, geprüft von
+`tools/check_optimizer.py`.)*
 
 Die Aufgabe: Finde die Folge von Ladestopps und Lademengen, die die
 **Gesamtreisezeit** minimiert, unter der Nebenbedingung, dass der SoC nie unter
@@ -238,13 +238,13 @@ festhalten.
 
 ```
 backend/app/
-  routing/    provider.py (Interface) · ors.py · korridor.py
-  energie/    modell.py · wetter.py · kalibrierung.py
-  laden/      kurven.py · saeulen_import.py · verfuegbarkeit.py
-  live/       sitzung.py · kanal.py (WebSocket) · simulator.py
+  routing/    provider.py (Interface) · ors.py · corridor.py
+  energie/    model.py · weather.py · calibration.py
+  laden/      curves.py · chargers_import.py · availability.py
+  live/       session.py · channel.py (WebSocket) · simulator.py
   routers/    auth · fahrzeuge · route · saeulen · live
-frontend/     index.html · karte.js · route.js · fahrzeug.js · live.js
-tools/        import_bnetza.py · import_ocm.py · check_modell.py · check_backend.py
+frontend/     index.html · map.js · route.js · vehicle.js · live.js
+tools/        import_bnetza.py · import_ocm.py · check_model.py · check_backend.py
 ```
 
 **Kein PostGIS.** Der einzige Geo-Query, den jolt braucht, ist „alle Ladepunkte
@@ -292,8 +292,8 @@ Zwei Dinge sind dabei anders gekommen als geplant:
 
 **Stufe 3 — die Live-Neuplanung** *(steht)*
 
-Die Auslöser aus 2.3 vollständig, in `live/sitzung.py`; die Umplanung selbst in
-`live/umplanung.py`. Neu geplant wird die **Reststrecke** ab der aktuellen
+Die Auslöser aus 2.3 vollständig, in `live/session.py`; die Umplanung selbst in
+`live/replanning.py`. Neu geplant wird die **Reststrecke** ab der aktuellen
 Position mit dem aktuellen Ladestand — für den Optimierer aus Stufe 2 ist das
 dieselbe Aufgabe wie vor der Abfahrt, nur mit besseren Zahlen.
 
@@ -365,7 +365,7 @@ Netz** — sie bekommt ein geparstes Objekt und gibt einen `Rohpunkt` zurück.
 Ob der aus einem POST kam, aus einer Abfrage bei einem fremden Dienst oder
 aus einer Datei, ist eine Frage des Transports. Genau deshalb lässt sich ein
 neues Format anhand einer aufgezeichneten Antwort einbauen, ohne im Auto zu
-sitzen, und `check_quellen.py` läuft ohne alles.
+sitzen, und `check_sources.py` läuft ohne alles.
 
 **Den Transport gibt es inzwischen, und er kommt ohne fremde Cloud aus.**
 

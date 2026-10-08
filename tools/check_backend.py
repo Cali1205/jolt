@@ -16,15 +16,15 @@ import re
 import sys
 import tempfile
 
-WERKZEUGE = os.path.dirname(os.path.abspath(__file__))
+TOOLS = os.path.dirname(os.path.abspath(__file__))
 # Das Frontend liegt im Repo neben backend/, im Image direkt neben tools/.
 FRONTEND = next(
-    (p for p in (os.path.join(WERKZEUGE, "..", "frontend"),)
-     if os.path.isdir(p)), os.path.join(WERKZEUGE, "..", "frontend"))
-sys.path.insert(0, WERKZEUGE)
-from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+    (p for p in (os.path.join(TOOLS, "..", "frontend"),)
+     if os.path.isdir(p)), os.path.join(TOOLS, "..", "frontend"))
+sys.path.insert(0, TOOLS)
+from examine import Check, application_provide  # noqa: E402
 
-anwendung_bereitstellen("backend", datenbank=False)
+application_provide("backend", db_name=False)
 
 # Vor jedem App-Import setzen: Die Engine wird beim Import gebaut.
 _DB = os.path.join(tempfile.mkdtemp(prefix="jolt-check-"), "check.db")
@@ -35,12 +35,12 @@ os.environ.pop("APP_PASSWORT", None)     # kein Login im Prüflauf
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.database import SessionLocal  # noqa: E402
-from app.laden.saeulen_import import aus_bnetza_csv  # noqa: E402
+from app.charging.chargers_import import from_bnetza_csv  # noqa: E402
 from app.live import simulator  # noqa: E402
 from app.main import app  # noqa: E402
 from app import models  # noqa: E402
 
-pruefe = Pruefung()
+verify = Check()
 
 
 # Ein Ausschnitt im Format des amtlichen Registers: Vorspann, Semikolon,
@@ -77,42 +77,42 @@ def main() -> int:
 
     print("\nStart und Schema")
     status = client.get("/api/status").json()
-    pruefe(status["demo_routing"] is True, "Demo-Routing ist aktiv (kein Schlüssel)")
-    pruefe(status["passwort_noetig"] is False, "ohne APP_PASSWORT offener Zugang")
+    verify(status["demo_routing"] is True, "Demo-Routing ist aktiv (kein Schlüssel)")
+    verify(status["password_required"] is False, "ohne APP_PASSWORT offener Zugang")
 
     print("\nFahrzeuge")
-    fahrzeuge = client.get("/api/fahrzeuge").json()
-    pruefe(len(fahrzeuge) == 1, "beim ersten Start wird ein Fahrzeug angelegt",
-           f"sind {len(fahrzeuge)}")
-    pruefe(len(fahrzeuge[0]["ladekurve"]) >= 5,
+    vehicles = client.get("/api/fahrzeuge").json()
+    verify(len(vehicles) == 1, "beim ersten Start wird ein Fahrzeug angelegt",
+           f"sind {len(vehicles)}")
+    verify(len(vehicles[0]["charge_curve"]) >= 5,
            "und es hat eine Ladekurve mit mehreren Stützstellen")
-    pruefe(len(client.get("/api/fahrzeuge/vorlagen").json()) >= 4,
+    verify(len(client.get("/api/fahrzeuge/vorlagen").json()) >= 4,
            "es gibt mehrere Vorlagen zur Auswahl")
 
-    neu = client.post("/api/fahrzeuge", json={
-        "name": "Prüfwagen", "akku_brutto_kwh": 82.0, "akku_netto_kwh": 77.0,
-        "max_ladeleistung_kw": 150.0,
-        "ladekurve": [[0, 120], [20, 150], [50, 100], [80, 50], [100, 8]]}).json()
-    pruefe(neu["id"] != fahrzeuge[0]["id"], "ein zweites Fahrzeug lässt sich anlegen")
-    pruefe(len(neu["ladekurve"]) == 5, "mit eigener Ladekurve")
-    fehler = client.post("/api/fahrzeuge", json={
-        "name": "Unsinn", "akku_brutto_kwh": 50.0, "akku_netto_kwh": 60.0})
-    pruefe(fehler.status_code == 400, "netto über brutto wird abgelehnt",
-           f"HTTP {fehler.status_code}")
+    fresh = client.post("/api/fahrzeuge", json={
+        "name": "Prüfwagen", "battery_gross_kwh": 82.0, "battery_net_kwh": 77.0,
+        "max_charge_power_kw": 150.0,
+        "charge_curve": [[0, 120], [20, 150], [50, 100], [80, 50], [100, 8]]}).json()
+    verify(fresh["id"] != vehicles[0]["id"], "ein zweites Fahrzeug lässt sich anlegen")
+    verify(len(fresh["charge_curve"]) == 5, "mit eigener Ladekurve")
+    failure = client.post("/api/fahrzeuge", json={
+        "name": "Unsinn", "battery_gross_kwh": 50.0, "battery_net_kwh": 60.0})
+    verify(failure.status_code == 400, "netto über brutto wird abgelehnt",
+           f"HTTP {failure.status_code}")
 
     # Regression: ein doppelter Ladestand in der Kurve verletzt die
     # Unique-Constraint (fahrzeug_id, soc_prozent) - das darf als
     # verständliche 400 ankommen, nicht als nackter 500er beim Commit.
-    doppelt = client.post("/api/fahrzeuge", json={
-        "name": "Doppelte Kurve", "akku_brutto_kwh": 82.0, "akku_netto_kwh": 77.0,
-        "ladekurve": [[0, 180], [20, 180], [80, 80], [90, 90], [90, 60],
+    double = client.post("/api/fahrzeuge", json={
+        "name": "Doppelte Kurve", "battery_gross_kwh": 82.0, "battery_net_kwh": 77.0,
+        "charge_curve": [[0, 180], [20, 180], [80, 80], [90, 90], [90, 60],
                      [100, 45]]})
-    pruefe(doppelt.status_code == 400,
+    verify(double.status_code == 400,
            "ein doppelter Ladestand in der Kurve wird sauber abgelehnt",
-           f"HTTP {doppelt.status_code}: {doppelt.text[:120]}")
-    pruefe("90" in doppelt.json().get("detail", ""),
+           f"HTTP {double.status_code}: {double.text[:120]}")
+    verify("90" in double.json().get("detail", ""),
            "und die Meldung nennt den betroffenen Ladestand",
-           doppelt.json())
+           double.json())
 
     # Regression: Ein Fahrzeug ändern und dabei dieselben Ladestände wie
     # zuvor behalten (nur die kW-Werte ändern - der Normalfall beim
@@ -120,76 +120,76 @@ def main() -> int:
     # sonst die neuen Zeilen vor dem Löschen der alten und verletzt die
     # Unique-Constraint, obwohl die neue Kurve für sich genommen keine
     # Duplikate hat.
-    geaendert = client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
-        "name": fahrzeuge[0]["name"], "akku_brutto_kwh": fahrzeuge[0]["akku_brutto_kwh"],
-        "akku_netto_kwh": fahrzeuge[0]["akku_netto_kwh"],
-        "ladekurve": [[soc, kw + 5] for soc, kw in fahrzeuge[0]["ladekurve"]]})
-    pruefe(geaendert.status_code == 200,
+    changed = client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+        "name": vehicles[0]["name"], "battery_gross_kwh": vehicles[0]["battery_gross_kwh"],
+        "battery_net_kwh": vehicles[0]["battery_net_kwh"],
+        "charge_curve": [[soc, kw + 5] for soc, kw in vehicles[0]["charge_curve"]]})
+    verify(changed.status_code == 200,
            "dieselben Ladestände beim Ändern zu behalten funktioniert",
-           f"HTTP {geaendert.status_code}: {geaendert.text[:150]}")
+           f"HTTP {changed.status_code}: {changed.text[:150]}")
 
     print("\nLadesäulen-Import (Format der Bundesnetzagentur)")
     db = SessionLocal()
     try:
-        zaehler = aus_bnetza_csv(db, CSV_PROBE.encode("utf-8"))
-        nochmal = aus_bnetza_csv(db, CSV_PROBE.encode("utf-8"))
+        counter = from_bnetza_csv(db, CSV_PROBE.encode("utf-8"))
+        again = from_bnetza_csv(db, CSV_PROBE.encode("utf-8"))
     finally:
         db.close()
-    pruefe(zaehler["neu"] == 6, "sechs Ladepunkte eingelesen",
-           f"sind {zaehler['neu']}")
-    pruefe(zaehler["uebersprungen"] == 1,
+    verify(counter["neu"] == 6, "sechs Ladepunkte eingelesen",
+           f"sind {counter['neu']}")
+    verify(counter["skipped"] == 1,
            "die Zeile mit Koordinate 0/0 wird verworfen")
-    pruefe(nochmal["neu"] == 0 and nochmal["aktualisiert"] == 6,
+    verify(again["neu"] == 0 and again["aktualisiert"] == 6,
            "ein zweiter Lauf legt nichts doppelt an - der Import ist idempotent",
-           f"{nochmal}")
+           f"{again}")
 
     db = SessionLocal()
     try:
-        harz = db.query(models.Ladepunkt).filter(
-            models.Ladepunkt.ort == "Goslar").one()
+        harz = db.query(models.ChargePoint).filter(
+            models.ChargePoint.city == "Goslar").one()
         # Nur die Existenz zählt: `.one()` wirft, wenn der Datensatz fehlt
         # oder doppelt ist - beides wäre ein Importfehler.
-        db.query(models.Ladepunkt).filter(
-            models.Ladepunkt.ort == "Westerland").one()
-        lueneburg = db.query(models.Ladepunkt).filter(
-            models.Ladepunkt.ort == "Lüneburg").one()
+        db.query(models.ChargePoint).filter(
+            models.ChargePoint.city == "Westerland").one()
+        lueneburg = db.query(models.ChargePoint).filter(
+            models.ChargePoint.city == "Lüneburg").one()
     finally:
         db.close()
-    pruefe(harz.max_kw == 350.0, "Leistung mit Dezimalkomma korrekt gelesen",
+    verify(harz.max_kw == 350.0, "Leistung mit Dezimalkomma korrekt gelesen",
            f"ist {harz.max_kw}")
-    pruefe("CCS" in harz.steckertypen and "CHAdeMO" in harz.steckertypen,
-           "beide Steckertypen erkannt", harz.steckertypen)
-    pruefe(lueneburg.steckertypen == "Typ2",
+    verify("CCS" in harz.connector_types and "CHAdeMO" in harz.connector_types,
+           "beide Steckertypen erkannt", harz.connector_types)
+    verify(lueneburg.connector_types == "Typ2",
            "'AC Steckdose Typ 2' wird auf Typ2 abgebildet",
-           lueneburg.steckertypen)
-    pruefe(abs(harz.lat - 51.9) < 1e-6, "Koordinate mit Komma korrekt gelesen",
+           lueneburg.connector_types)
+    verify(abs(harz.lat - 51.9) < 1e-6, "Koordinate mit Komma korrekt gelesen",
            f"ist {harz.lat}")
 
-    print("\nDoppelter fremd_id innerhalb eines Imports")
+    print("\nDoppelter foreign_id innerhalb eines Imports")
     # Regression: eine Mehrländer-Abfrage bei Open Charge Map kann einen
     # Standort nahe der Grenze zweimal liefern. Ohne Flush zwischen zwei
     # _speichern()-Aufrufen für dieselbe fremd_id sieht die zweite Suche den
     # ersten, noch nicht committeten INSERT nicht - der zweite INSERT
     # verletzt dann die Unique-Constraint (quelle, fremd_id) und die ganze
     # Charge scheitert mit HTTP 500 (bzw. hier: einer nackten IntegrityError).
-    from app.laden.saeulen_import import _speichern
+    from app.charging.chargers_import import _save
 
     db = SessionLocal()
     try:
-        erst = _speichern(db, "ocm", "pruef-doppelt", {
-            "name": "Erststand", "betreiber": "", "lat": 50.0, "lon": 10.0,
-            "adresse": "", "plz": "", "ort": "", "land": "DE",
-            "anschluesse": [], "max_kw": 50.0, "anzahl_punkte": 1,
-            "steckertypen": "CCS", "stand": ""})
-        zweit = _speichern(db, "ocm", "pruef-doppelt", {
-            "name": "Zweitstand", "betreiber": "", "lat": 50.0, "lon": 10.0,
-            "adresse": "", "plz": "", "ort": "", "land": "DE",
-            "anschluesse": [], "max_kw": 60.0, "anzahl_punkte": 1,
-            "steckertypen": "CCS", "stand": ""})
+        at_first = _save(db, "ocm", "pruef-doppelt", {
+            "name": "Erststand", "operator": "", "lat": 50.0, "lon": 10.0,
+            "address": "", "postcode": "", "city": "", "country": "DE",
+            "connectors": [], "max_kw": 50.0, "point_count": 1,
+            "connector_types": "CCS", "as_of": ""})
+        second = _save(db, "ocm", "pruef-doppelt", {
+            "name": "Zweitstand", "operator": "", "lat": 50.0, "lon": 10.0,
+            "address": "", "postcode": "", "city": "", "country": "DE",
+            "connectors": [], "max_kw": 60.0, "point_count": 1,
+            "connector_types": "CCS", "as_of": ""})
         db.commit()
-        pruefe(erst == "neu" and zweit == "aktualisiert",
-               "der zweite Aufruf für dieselbe fremd_id aktualisiert, statt "
-               "ein Duplikat anzulegen", f"{erst}, {zweit}")
+        verify(at_first == "neu" and second == "aktualisiert",
+               "der zweite Aufruf für dieselbe foreign_id aktualisiert, statt "
+               "ein Duplikat anzulegen", f"{at_first}, {second}")
     finally:
         db.close()
 
@@ -203,12 +203,12 @@ def main() -> int:
     # angefragten Ländern. Beides wird direkt gegen eine gefälschte, aber
     # realistische (verbose) OCM-Antwort geprüft: kein compact-Parameter, und
     # ein Aufruf je Land statt einer kommagetrennten Liste.
-    from app.laden import saeulen_import as saeulen_import_modul
+    from app.charging import chargers_import as chargers_import_module
 
-    gesendete_countrycodes: list = []
-    letzte_params: dict = {}
+    sent_countrycodes: list = []
+    latest_params: dict = {}
 
-    class _GefaelschteOcmAntwort:
+    class _FakeOcmResponse:
         status_code = 200
         def raise_for_status(self): pass
         def json(self):
@@ -234,31 +234,31 @@ def main() -> int:
                 "DateLastVerified": "2026-07-01T00:00:00Z",
             }]
 
-    def _gefaelschtes_ocm_get(url, timeout=None, params=None):
-        letzte_params.clear()
-        letzte_params.update(params or {})
-        gesendete_countrycodes.append((params or {}).get("countrycode"))
-        return _GefaelschteOcmAntwort()
+    def _fake_ocm_get(url, timeout=None, params=None):
+        latest_params.clear()
+        latest_params.update(params or {})
+        sent_countrycodes.append((params or {}).get("countrycode"))
+        return _FakeOcmResponse()
 
-    ocm_get_original = saeulen_import_modul.requests.get
-    saeulen_import_modul.requests.get = _gefaelschtes_ocm_get
+    ocm_get_original = chargers_import_module.requests.get
+    chargers_import_module.requests.get = _fake_ocm_get
     db = SessionLocal()
     try:
-        saeulen_import_modul.aus_ocm(db, "test-schluessel", laender=["AT", "CH"],
-                                     max_ergebnisse=1)
-        pruefe("compact" not in letzte_params,
-               "compact=true wird nicht mehr gesendet", str(letzte_params))
-        pruefe(gesendete_countrycodes == ["AT", "CH"],
+        chargers_import_module.from_ocm(db, "test-schluessel", countries=["AT", "CH"],
+                                     max_results=1)
+        verify("compact" not in latest_params,
+               "compact=true wird nicht mehr gesendet", str(latest_params))
+        verify(sent_countrycodes == ["AT", "CH"],
                "jedes Land wird einzeln angefragt, nicht als kommagetrennte Liste",
-               str(gesendete_countrycodes))
-        eintrag = (db.query(models.Ladepunkt)
-                   .filter_by(quelle="ocm", fremd_id="999001").one())
-        pruefe(eintrag.land == "AT", "das Land wird aus der Antwort übernommen",
-               f"ist {eintrag.land!r}")
-        pruefe(eintrag.betreiber == "EnBW mobility+",
-               "und der Betreiber ebenso", f"ist {eintrag.betreiber!r}")
+               str(sent_countrycodes))
+        entry = (db.query(models.ChargePoint)
+                   .filter_by(source="ocm", foreign_id="999001").one())
+        verify(entry.country == "AT", "das Land wird aus der Antwort übernommen",
+               f"ist {entry.country!r}")
+        verify(entry.operator == "EnBW mobility+",
+               "und der Betreiber ebenso", f"ist {entry.operator!r}")
     finally:
-        saeulen_import_modul.requests.get = ocm_get_original
+        chargers_import_module.requests.get = ocm_get_original
         db.close()
 
     # Was in Worten dasteht, wird jetzt aufgehoben. Ein Ladepunkt kann
@@ -266,23 +266,23 @@ def main() -> int:
     # sein, weil er hinter einer Schranke steht.
     db = SessionLocal()
     try:
-        lp = db.query(models.Ladepunkt).filter_by(quelle="ocm",
-                                                  fremd_id="999001").one()
-        pruefe(lp.betriebsbereit is True,
-               "der Betriebszustand wird übernommen", str(lp.betriebsbereit))
-        pruefe(lp.zugang == "Private - Restricted access",
-               "die Zugangsart auch", str(lp.zugang))
-        pruefe(lp.mitgliedschaft_noetig is True,
+        lp = db.query(models.ChargePoint).filter_by(source="ocm",
+                                                  foreign_id="999001").one()
+        verify(lp.operational is True,
+               "der Betriebszustand wird übernommen", str(lp.operational))
+        verify(lp.access == "Private - Restricted access",
+               "die Zugangsart auch", str(lp.access))
+        verify(lp.membership_required is True,
                "und ob eine Mitgliedschaft nötig ist")
-        pruefe((lp.hinweise or {}).get("kosten") == "0,59 EUR/kWh",
+        verify((lp.hints or {}).get("cost") == "0,59 EUR/kWh",
                "der Preistext der Quelle wird aufgehoben",
-               str(lp.hinweise))
-        pruefe("Kastenwagen" in (lp.hinweise or {}).get("allgemein", ""),
+               str(lp.hints))
+        verify("Kastenwagen" in (lp.hints or {}).get("general", ""),
                "und die Kommentare - hier steht, was kein Datenfeld verrät",
-               str((lp.hinweise or {}).get("allgemein")))
-        pruefe("Schranke" in (lp.hinweise or {}).get("zugang", ""),
+               str((lp.hints or {}).get("general")))
+        verify("Schranke" in (lp.hints or {}).get("access", ""),
                "Zugangshinweise ebenso")
-        pruefe("geprueft_am" in (lp.hinweise or {}),
+        verify("checked_at" in (lp.hints or {}),
                "und wann die Angabe zuletzt geprüft wurde")
     finally:
         db.close()
@@ -293,11 +293,11 @@ def main() -> int:
     # stattdessen mehrere Umkreise entlang der Streckengeometrie ab. Geprüft
     # wird: mehrere Anker bei einer längeren Strecke, und ein Standort, den
     # zwei überlappende Umkreise beide sehen, wird nur einmal gezählt.
-    strecke = [[16.37 + 0.01 * i, 48.21] for i in range(151)]  # ~150 km Ost-West
+    distance = [[16.37 + 0.01 * i, 48.21] for i in range(151)]  # ~150 km Ost-West
 
-    angefragte_anker: list = []
+    requested_anchor: list = []
 
-    class _GefaelschteRoutenAntwort:
+    class _FakeRoutesResponse:
         status_code = 200
         def raise_for_status(self): pass
         def json(self):
@@ -310,24 +310,24 @@ def main() -> int:
                                  "PowerKW": 350.0, "Quantity": 4}],
             }]
 
-    def _gefaelschter_routen_get(url, timeout=None, params=None):
-        angefragte_anker.append((params.get("latitude"), params.get("longitude")))
-        return _GefaelschteRoutenAntwort()
+    def _fake_routes_get(url, timeout=None, params=None):
+        requested_anchor.append((params.get("latitude"), params.get("longitude")))
+        return _FakeRoutesResponse()
 
-    ocm_get_original = saeulen_import_modul.requests.get
-    saeulen_import_modul.requests.get = _gefaelschter_routen_get
+    ocm_get_original = chargers_import_module.requests.get
+    chargers_import_module.requests.get = _fake_routes_get
     db = SessionLocal()
     try:
-        zaehler = saeulen_import_modul.aus_ocm_route(
-            db, "test-schluessel", strecke, radius_km=30.0)
-        pruefe(len(angefragte_anker) >= 2,
+        counter = chargers_import_module.from_ocm_route(
+            db, "test-schluessel", distance, radius_km=30.0)
+        verify(len(requested_anchor) >= 2,
                "eine längere Strecke fragt mehrere Umkreise ab",
-               f"{len(angefragte_anker)} Anker")
-        pruefe(zaehler["neu"] == 1,
+               f"{len(requested_anchor)} Anker")
+        verify(counter["neu"] == 1,
                "ein Standort, den mehrere überlappende Umkreise sehen, "
-               "wird nur einmal gezählt", str(zaehler))
+               "wird nur einmal gezählt", str(counter))
     finally:
-        saeulen_import_modul.requests.get = ocm_get_original
+        chargers_import_module.requests.get = ocm_get_original
         db.close()
 
     print("\nOrtssuche ohne Länderfilter")
@@ -337,43 +337,43 @@ def main() -> int:
     # HTTP-Aufruf, deshalb wird hier der ORS-Adapter direkt geprüft: welche
     # Parameter tatsächlich an openrouteservice gingen.
     from app.routing.ors import ORS
-    import app.routing.ors as ors_modul
+    import app.routing.ors as ors_module
 
-    angefragt: dict = {}
+    requested: dict = {}
 
-    class _GefaelschteAntwort:
+    class _FakeResponse:
         status_code = 200
         def raise_for_status(self): pass
         def json(self): return {"features": []}
 
-    def _gefaelschtes_get(url, timeout=None, params=None, headers=None):
-        angefragt.clear()
-        angefragt.update(params or {})
-        return _GefaelschteAntwort()
+    def _fake_get(url, timeout=None, params=None, headers=None):
+        requested.clear()
+        requested.update(params or {})
+        return _FakeResponse()
 
-    ors_get_original = ors_modul.requests.get
-    ors_modul.requests.get = _gefaelschtes_get
+    ors_get_original = ors_module.requests.get
+    ors_module.requests.get = _fake_get
     try:
-        ORS(api_key="test").suchen("Paris")
-        pruefe("boundary.country" not in angefragt,
+        ORS(api_key="test").seek("Paris")
+        verify("boundary.country" not in requested,
                "ohne Land wird nicht mehr fest auf DE eingeschränkt",
-               str(angefragt))
-        ORS(api_key="test").suchen("Paris", land="FR")
-        pruefe(angefragt.get("boundary.country") == "FR",
+               str(requested))
+        ORS(api_key="test").seek("Paris", country="FR")
+        verify(requested.get("boundary.country") == "FR",
                "ein explizit gesetztes Land wird weiterhin übergeben",
-               str(angefragt))
+               str(requested))
     finally:
-        ors_modul.requests.get = ors_get_original
+        ors_module.requests.get = ors_get_original
 
     print("\nRoute Hamburg - München")
-    antwort = client.post("/api/route", json={
-        "fahrzeug_id": fahrzeuge[0]["id"],
+    response = client.post("/api/route", json={
+        "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
-        "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
+        "destination": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
         "start_soc": 80.0})
-    pruefe(antwort.status_code == 200, "Route wird gerechnet",
-           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-    varianten = antwort.json()["varianten"]
+    verify(response.status_code == 200, "Route wird gerechnet",
+           f"HTTP {response.status_code}: {response.text[:120]}")
+    variants = response.json()["variants"]
     # Der Demo-Adapter kennt keinen Unterschied zwischen den drei ORS-Vorgaben
     # und liefert für alle dieselbe Luftlinie - /api/route erkennt das und legt
     # Vorgabe ist eine einzige Route, die schnellste.
@@ -384,105 +384,105 @@ def main() -> int:
     # gekauft mit fünfeinhalb Stunden. Und "recommended" ergibt auf
     # Autobahnstrecken meist dieselbe Strasse wie "fastest". Drei Anfragen
     # für eine Antwort, bei 2.500 ORS-Anfragen am Tag.
-    pruefe(len(varianten) == 1,
+    verify(len(variants) == 1,
            "ohne Alternative wird genau eine Route gerechnet",
-           f"{len(varianten)} Varianten")
-    route = varianten[0]
-    fahrt_id = route["fahrt_id"]
-    pruefe(route["etiketten"] == ["schnellste"],
-           "und sie ist die schnellste", str(route["etiketten"]))
+           f"{len(variants)} Varianten")
+    route = variants[0]
+    trip_id = route["trip_id"]
+    verify(route["labels"] == ["schnellste"],
+           "und sie ist die schnellste", str(route["labels"]))
 
     # Mit Alternative kommt die mautfreie dazu. Das Demo-Routing erfindet
     # eine Luftlinie und kennt keine Mautstrassen - beide Anfragen ergeben
     # deshalb dieselbe Strecke, und /api/route legt sie zu einer Variante
     # mit beiden Etiketten zusammen. Genau das ist hier zu prüfen: dass die
     # Zusammenlegung greift und nicht zweimal dasselbe angeboten wird.
-    mit_alt = client.post("/api/route", json={
-        "fahrzeug_id": fahrzeuge[0]["id"],
+    with_old = client.post("/api/route", json={
+        "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
-        "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
-        "start_soc": 80.0, "alternative": True}).json()["varianten"]
-    pruefe(len(mit_alt) == 1,
+        "destination": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
+        "start_soc": 80.0, "alternative": True}).json()["variants"]
+    verify(len(with_old) == 1,
            "im Demo-Modus ist die mautfreie Route dieselbe - sie wird "
            "zusammengelegt statt doppelt angeboten",
-           f"{len(mit_alt)} Varianten")
-    pruefe("mautfrei" in mit_alt[0]["etiketten"],
-           "und das Etikett sagt es", str(mit_alt[0]["etiketten"]))
-    pruefe(route["demo"] is True, "und ist als Demo gekennzeichnet")
-    pruefe(500 < route["strecke_km"] < 900, "Strecke plausibel",
-           f"{route['strecke_km']} km")
-    pruefe(14 < route["verbrauch_kwh_100km"] < 30, "Verbrauch plausibel",
-           f"{route['verbrauch_kwh_100km']} kWh/100 km")
-    pruefe(route["reicht"] is False,
+           f"{len(with_old)} Varianten")
+    verify("toll_free" in with_old[0]["labels"],
+           "und das Etikett sagt es", str(with_old[0]["labels"]))
+    verify(route["demo"] is True, "und ist als Demo gekennzeichnet")
+    verify(500 < route["distance_km"] < 900, "Strecke plausibel",
+           f"{route['distance_km']} km")
+    verify(14 < route["consumption_kwh_100km"] < 30, "Verbrauch plausibel",
+           f"{route['consumption_kwh_100km']} kWh/100 km")
+    verify(route["suffices"] is False,
            "ein 60-kWh-Auto schafft die Strecke nicht ohne Nachladen")
-    pruefe(route["reserve_punkt"] is not None,
+    verify(route["reserve_point"] is not None,
            "und die Reserve-Marke hat eine Koordinate für die Karte")
-    pruefe(route["reserve_bei_km"] < route["strecke_km"],
+    verify(route["reserve_at_km"] < route["distance_km"],
            "die Marke liegt vor dem Ziel")
 
-    kurz = client.post("/api/route", json={
-        "fahrzeug_id": fahrzeuge[0]["id"],
+    short = client.post("/api/route", json={
+        "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
-        "ziel": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
-        "start_soc": 80.0}).json()["varianten"][0]
-    pruefe(kurz["reicht"] is True, "Hamburg-Bremen reicht dagegen locker",
-           f"SoC am Ziel {kurz['soc_am_ziel']} %")
+        "destination": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
+        "start_soc": 80.0}).json()["variants"][0]
+    verify(short["suffices"] is True, "Hamburg-Bremen reicht dagegen locker",
+           f"SoC am Ziel {short['soc_at_target']} %")
 
     print("\nAnhänger und Höchstgeschwindigkeit")
     # Der Regler steht auf 150 %: Das Routing-Tempo wird um die Hälfte
     # angehoben - weit über jede Grenze, die ein Gespann hat.
-    def hamburg_bremen(**mehr):
-        antwort = client.post("/api/route", json={
-            "fahrzeug_id": fahrzeuge[0]["id"],
+    def hamburg_bremen(**more):
+        response = client.post("/api/route", json={
+            "vehicle_id": vehicles[0]["id"],
             "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
-            "ziel": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
-            "start_soc": 80.0, "tempo_faktor": 1.5, **mehr})
-        return antwort, (antwort.json()["varianten"][0]
-                         if antwort.status_code == 200 else None)
+            "destination": {"lat": 53.0793, "lon": 8.8017, "text": "Bremen"},
+            "start_soc": 80.0, "speed_factor": 1.5, **more})
+        return response, (response.json()["variants"][0]
+                         if response.status_code == 200 else None)
 
-    _, frei = hamburg_bremen()
-    antwort, begrenzt = hamburg_bremen(tempo_max_kmh=100.0)
-    pruefe(antwort.status_code == 200, "eine Fahrt mit Tempo-Grenze wird gerechnet",
-           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-    pruefe(begrenzt["kwh_gesamt"] < frei["kwh_gesamt"],
+    _, free = hamburg_bremen()
+    response, limited = hamburg_bremen(speed_max_kmh=100.0)
+    verify(response.status_code == 200, "eine Fahrt mit Tempo-Grenze wird gerechnet",
+           f"HTTP {response.status_code}: {response.text[:120]}")
+    verify(limited["kwh_total"] < free["kwh_total"],
            "mit 100 km/h als Grenze braucht dieselbe Strecke weniger Energie "
            "als bei 150 % ungebremst",
-           f"{begrenzt['kwh_gesamt']} gegen {frei['kwh_gesamt']} kWh")
-    pruefe(begrenzt["fahrzeit_minuten"] > frei["fahrzeit_minuten"],
+           f"{limited['kwh_total']} gegen {free['kwh_total']} kWh")
+    verify(limited["drive_time_minutes"] > free["drive_time_minutes"],
            "und dauert länger - die Grenze kostet Zeit, und die Anzeige sagt es",
-           f"{begrenzt['fahrzeit_minuten']} gegen {frei['fahrzeit_minuten']} min")
+           f"{limited['drive_time_minutes']} gegen {free['drive_time_minutes']} min")
 
-    antwort, gespann = hamburg_bremen(tempo_max_kmh=100.0, anhaenger_kg=1300,
-                                      anhaenger_cwa_m2=1.1)
-    pruefe(antwort.status_code == 200, "mit Anhänger auch",
-           f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-    pruefe(gespann["kwh_gesamt"] > begrenzt["kwh_gesamt"] * 1.25,
+    response, rig = hamburg_bremen(speed_max_kmh=100.0, trailer_kg=1300,
+                                      trailer_cwa_m2=1.1)
+    verify(response.status_code == 200, "mit Anhänger auch",
+           f"HTTP {response.status_code}: {response.text[:120]}")
+    verify(rig["kwh_total"] > limited["kwh_total"] * 1.25,
            "der Anhänger kostet bei gleichem Tempo deutlich mehr",
-           f"{begrenzt['kwh_gesamt']} -> {gespann['kwh_gesamt']} kWh")
-    gespeichert = client.get(f"/api/fahrten/{gespann['fahrt_id']}").json()
-    pruefe(gespeichert.get("anhaenger_kg") == 1300
-           and gespeichert.get("tempo_max_kmh") == 100.0,
+           f"{limited['kwh_total']} -> {rig['kwh_total']} kWh")
+    saved = client.get(f"/api/fahrten/{rig['trip_id']}").json()
+    verify(saved.get("trailer_kg") == 1300
+           and saved.get("speed_max_kmh") == 100.0,
            "beides steht an der Fahrt - eine Umplanung unterwegs rechnet damit",
-           f"{gespeichert.get('anhaenger_kg')}, {gespeichert.get('tempo_max_kmh')}")
-    pruefe(client.post("/api/route", json={
-        "fahrzeug_id": fahrzeuge[0]["id"],
-        "start": {"lat": 53.5511, "lon": 9.9937}, "ziel": {"lat": 53.0793, "lon": 8.8017},
-        "tempo_max_kmh": 5}).status_code == 422,
+           f"{saved.get('trailer_kg')}, {saved.get('speed_max_kmh')}")
+    verify(client.post("/api/route", json={
+        "vehicle_id": vehicles[0]["id"],
+        "start": {"lat": 53.5511, "lon": 9.9937}, "destination": {"lat": 53.0793, "lon": 8.8017},
+        "speed_max_kmh": 5}).status_code == 422,
         "eine Grenze von 5 km/h ist ein Tippfehler und wird abgelehnt")
 
-    grenze = client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
-        **fahrzeuge[0],
-        "max_tempo_kmh": 120.0})
-    pruefe(grenze.status_code == 200 and grenze.json().get("max_tempo_kmh") == 120.0,
+    bound = client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+        **vehicles[0],
+        "max_speed_kmh": 120.0})
+    verify(bound.status_code == 200 and bound.json().get("max_speed_kmh") == 120.0,
            "die Höchstgeschwindigkeit lässt sich am Fahrzeug setzen",
-           f"HTTP {grenze.status_code}: {grenze.text[:120]}")
-    _, am_auto = hamburg_bremen()
-    pruefe(am_auto["kwh_gesamt"] < frei["kwh_gesamt"],
+           f"HTTP {bound.status_code}: {bound.text[:120]}")
+    _, at_auto = hamburg_bremen()
+    verify(at_auto["kwh_total"] < free["kwh_total"],
            "und begrenzt jede Fahrt dieses Fahrzeugs",
-           f"{am_auto['kwh_gesamt']} gegen {frei['kwh_gesamt']} kWh")
-    client.put(f"/api/fahrzeuge/{fahrzeuge[0]['id']}", json={
-        **fahrzeuge[0],
-        "max_tempo_kmh": None})
+           f"{at_auto['kwh_total']} gegen {free['kwh_total']} kWh")
+    client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
+        **vehicles[0],
+        "max_speed_kmh": None})
 
     print("\nEigene Strecken als Kandidaten")
     # Eine frühere Fahrt Hamburg - München (60 Messpunkte entlang der
@@ -500,75 +500,75 @@ def main() -> int:
     HH = (53.5511, 9.9937)
     MUC = (48.1351, 11.5820)
 
-    class _Aufrufe(_Demo):
-        aufrufe: list = []
+    class _Calls(_Demo):
+        calls: list = []
 
-        def route(self, start, ziel, zwischenstopps=None, praeferenz="recommended",
-                  mautfrei=False):
-            _Aufrufe.aufrufe.append(list(zwischenstopps or []))
-            return super().route(start, ziel)         # dieselbe Strasse, immer
+        def route(self, start, destination, intermediate_stops=None, preference="recommended",
+                  toll_free=False):
+            _Calls.calls.append(list(intermediate_stops or []))
+            return super().route(start, destination)         # dieselbe Strasse, immer
 
-    def auf_der_linie(anteil):
-        return (HH[0] + (MUC[0] - HH[0]) * anteil,
-                HH[1] + (MUC[1] - HH[1]) * anteil)
+    def on_the_line(share):
+        return (HH[0] + (MUC[0] - HH[0]) * share,
+                HH[1] + (MUC[1] - HH[1]) * share)
 
     db = SessionLocal()
     try:
-        alt = models.LiveSitzung(fahrt_id=fahrt_id, gestartet=_dt(2026, 9, 4, 10, 0),
-                                 beendet=_dt(2026, 9, 4, 16, 0), laeuft=False)
-        db.add(alt)
+        old = models.LiveSession(trip_id=trip_id, started_at=_dt(2026, 9, 4, 10, 0),
+                                 ended_at=_dt(2026, 9, 4, 16, 0), running=False)
+        db.add(old)
         db.flush()
-        alt_id = alt.id
+        old_id = old.id
         for i in range(60):
-            lat, lon = auf_der_linie(i / 59)
-            db.add(models.LivePunkt(sitzung_id=alt_id, lat=lat, lon=lon,
-                                    zeit=_dt(2026, 9, 4, 10, 0) + _td(minutes=5 * i),
-                                    tempo_kmh=100.0))
+            lat, lon = on_the_line(i / 59)
+            db.add(models.LivePoint(session_id=old_id, lat=lat, lon=lon,
+                                    timestamp=_dt(2026, 9, 4, 10, 0) + _td(minutes=5 * i),
+                                    speed_kmh=100.0))
         db.commit()
     finally:
         db.close()
 
-    ersatz = _routing.provider
-    _routing.provider = lambda: _Aufrufe()
+    fallback = _routing.provider
+    _routing.provider = lambda: _Calls()
     try:
-        def planen(start, ziel, **mehr):
-            _Aufrufe.aufrufe = []
-            antwort = client.post("/api/route", json={
-                "fahrzeug_id": fahrzeuge[0]["id"],
+        def schedule(start, destination, **more):
+            _Calls.calls = []
+            response = client.post("/api/route", json={
+                "vehicle_id": vehicles[0]["id"],
                 "start": {"lat": start[0], "lon": start[1], "text": "A"},
-                "ziel": {"lat": ziel[0], "lon": ziel[1], "text": "B"},
-                "start_soc": 80.0, **mehr})
-            pruefe(antwort.status_code == 200, "die Anfrage geht durch",
-                   f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-            etiketten = [e for v in antwort.json()["varianten"] for e in v["etiketten"]]
-            return etiketten, [a for a in _Aufrufe.aufrufe if a]
+                "destination": {"lat": destination[0], "lon": destination[1], "text": "B"},
+                "start_soc": 80.0, **more})
+            verify(response.status_code == 200, "die Anfrage geht durch",
+                   f"HTTP {response.status_code}: {response.text[:120]}")
+            labels = [e for v in response.json()["variants"] for e in v["labels"]]
+            return labels, [a for a in _Calls.calls if a]
 
-        etiketten, mit_via = planen(HH, MUC)
-        pruefe(len(mit_via) == 1 and len(mit_via[0]) >= 5,
+        labels, with_via = schedule(HH, MUC)
+        verify(len(with_via) == 1 and len(with_via[0]) >= 5,
                "dieselbe Strecke noch einmal: Das Routing bekommt die gefahrene "
                "als Zwischenpunkte - einmal, nicht je Messpunkt",
-               f"{len(mit_via)} Aufrufe mit Zwischenpunkten")
-        pruefe(any(e.startswith("meine Strecke vom 04.09.2026") for e in etiketten),
-               "und die Route trägt das Datum der Fahrt", str(etiketten))
-        etiketten, mit_via = planen(HH, MUC, eigene_fahrten=False)
-        pruefe(not mit_via and not any("meine Strecke" in e for e in etiketten),
+               f"{len(with_via)} Aufrufe mit Zwischenpunkten")
+        verify(any(e.startswith("meine Strecke vom 04.09.2026") for e in labels),
+               "und die Route trägt das Datum der Fahrt", str(labels))
+        labels, with_via = schedule(HH, MUC, own_trips=False)
+        verify(not with_via and not any("meine Strecke" in e for e in labels),
                "abgeschaltet gibt es weder Aufruf noch Etikett")
-        etiketten, mit_via = planen(MUC, HH)
-        pruefe(len(mit_via) == 1
-               and any("meine Strecke" in e and "Gegenrichtung" in e for e in etiketten),
+        labels, with_via = schedule(MUC, HH)
+        verify(len(with_via) == 1
+               and any("meine Strecke" in e and "Gegenrichtung" in e for e in labels),
                "andersherum gefahren zählt auch, und das Etikett sagt es",
-               str(etiketten))
-        etiketten, mit_via = planen(auf_der_linie(0.2), auf_der_linie(0.8))
-        pruefe(len(mit_via) == 1 and any("meine Strecke" in e for e in etiketten),
-               "ein Teilstück genügt", str(etiketten))
-        etiketten, mit_via = planen((52.52, 13.405), (51.05, 13.74))
-        pruefe(not mit_via and not any("meine Strecke" in e for e in etiketten),
+               str(labels))
+        labels, with_via = schedule(on_the_line(0.2), on_the_line(0.8))
+        verify(len(with_via) == 1 and any("meine Strecke" in e for e in labels),
+               "ein Teilstück genügt", str(labels))
+        labels, with_via = schedule((52.52, 13.405), (51.05, 13.74))
+        verify(not with_via and not any("meine Strecke" in e for e in labels),
                "eine Strecke, zu der keine Fahrt passt (Berlin - Dresden), "
                "kostet keine Anfrage mehr")
-        etiketten, mit_via = planen((53.5511, 9.9937), (53.0793, 8.8017))
-        pruefe(not mit_via, "und eine kurze, die nur im selben Ort beginnt, auch nicht")
+        labels, with_via = schedule((53.5511, 9.9937), (53.0793, 8.8017))
+        verify(not with_via, "und eine kurze, die nur im selben Ort beginnt, auch nicht")
     finally:
-        _routing.provider = ersatz
+        _routing.provider = fallback
 
     # Wegräumen: Die späteren Abschnitte zählen Sitzungen und Fahrten. Die
     # Messpunkte zuerst: Ein Massen-Delete kaskadiert nicht, und unter SQLite
@@ -576,8 +576,8 @@ def main() -> int:
     # ID und erbte die Waisen.
     db = SessionLocal()
     try:
-        db.query(models.LivePunkt).filter_by(sitzung_id=alt_id).delete()
-        db.query(models.LiveSitzung).filter_by(id=alt_id).delete()
+        db.query(models.LivePoint).filter_by(session_id=old_id).delete()
+        db.query(models.LiveSession).filter_by(id=old_id).delete()
         db.commit()
     finally:
         db.close()
@@ -593,203 +593,203 @@ def main() -> int:
     from app.routing.demo import DemoRouting as _Demo2
     from app.routing.provider import Route as _Route
 
-    class _Zweiwege(_Demo2):
-        aufrufe: list = []
+    class _TwoWay(_Demo2):
+        calls: list = []
 
-        def route(self, start, ziel, zwischenstopps=None, praeferenz="recommended",
-                  mautfrei=False):
-            _Zweiwege.aufrufe.append(list(zwischenstopps or []))
-            r = super().route(start, ziel)
-            if zwischenstopps:
-                return _Route(punkte=r.punkte, tempo_ms=[t * 1.06 for t in r.tempo_ms],
-                              strecke_m=r.strecke_m, fahrzeit_s=r.fahrzeit_s / 1.06)
+        def route(self, start, destination, intermediate_stops=None, preference="recommended",
+                  toll_free=False):
+            _TwoWay.calls.append(list(intermediate_stops or []))
+            r = super().route(start, destination)
+            if intermediate_stops:
+                return _Route(points=r.points, speed_ms=[t * 1.06 for t in r.speed_ms],
+                              distance_m=r.distance_m, drive_time_s=r.drive_time_s / 1.06)
             return r
 
-    linie = [(53.5511 + (48.1351 - 53.5511) * i / 50, 9.9937 + (11.5820 - 9.9937) * i / 50)
+    line = [(53.5511 + (48.1351 - 53.5511) * i / 50, 9.9937 + (11.5820 - 9.9937) * i / 50)
              for i in range(51)]
-    verzoegerungen: list = []
-    zaehler = {"alternativen": 0, "verkehr": 0}
-    abfahrten: list = []                 # was TomTom an Abfahrt bekam
+    delays: list = []
+    counter = {"alternativen": 0, "traffic": 0}
+    departures: list = []                 # was TomTom an Abfahrt bekam
 
-    def alternativen_fake(start, ziel, maximal=5, abfahrt=None):
-        zaehler["alternativen"] += 1
-        abfahrten.append(abfahrt)
-        return [_tt.Vorschlag(punkte=linie, strecke_m=780000.0, zeit_s=30000.0)]
+    def alternativen_fake(start, destination, maximal=5, departure=None):
+        counter["alternativen"] += 1
+        departures.append(departure)
+        return [_tt.Suggestion(points=line, distance_m=780000.0, time_s=30000.0)]
 
-    def verkehr_fake(start, ziel, zwischen, abfahrt=None):
-        nr = zaehler["verkehr"]
-        zaehler["verkehr"] += 1
-        abfahrten.append(abfahrt)
-        minuten = verzoegerungen[nr] if nr < len(verzoegerungen) else 0.0
-        return _tt.Verkehr(verzoegerung_s=minuten * 60.0, zeit_s=30000.0,
-                           ohne_verkehr_s=30000.0 - minuten * 60.0)
+    def traffic_fake(start, destination, between, departure=None):
+        nr = counter["traffic"]
+        counter["traffic"] += 1
+        departures.append(departure)
+        mins = delays[nr] if nr < len(delays) else 0.0
+        return _tt.Traffic(delay_s=mins * 60.0, time_s=30000.0,
+                           without_traffic_s=30000.0 - mins * 60.0)
 
     # Das Wetter ersetzen und mitschreiben: Die Abfahrtszeit gilt auch dafür, und
     # ohne Ersatz ginge dieser Abschnitt ins Netz.
-    from app.energie import wetter as _wetter
-    from app.energie.modell import Umgebung as _Umgebung
-    wetter_aufrufe: list = []
+    from app.energy import weather as _weather
+    from app.energy.model import Environment as _Environment
+    weather_calls: list = []
 
-    def wetter_fake(punkte, anzahl=6, vorgabe=None, abfahrt=None, dauer_s=0.0):
-        wetter_aufrufe.append((abfahrt, dauer_s))
-        return lambda lat, lon: _Umgebung(temp_c=7.0)
+    def weather_fake(points, count=6, preset=None, departure=None, duration_s=0.0):
+        weather_calls.append((departure, duration_s))
+        return lambda lat, lon: _Environment(temp_c=7.0)
 
-    def mittelwert_fake(punkte, abfahrt=None, dauer_s=0.0):
-        return _Umgebung(temp_c=7.0)
+    def mean_fake(points, departure=None, duration_s=0.0):
+        return _Environment(temp_c=7.0)
 
-    echtes_wetter = (_wetter.entlang_route, _wetter.mittelwert)
-    _wetter.entlang_route, _wetter.mittelwert = wetter_fake, mittelwert_fake
-    echte_alt, echter_verkehr = _tt.alternativen, _tt.verkehr
-    ersatz_routing = _routing.provider
-    _routing.provider = lambda: _Zweiwege()
-    _tt.alternativen, _tt.verkehr = alternativen_fake, verkehr_fake
+    real_weather = (_weather.along_route, _weather.mean)
+    _weather.along_route, _weather.mean = weather_fake, mean_fake
+    real_old, real_traffic = _tt.alternativen, _tt.traffic
+    fallback_routing = _routing.provider
+    _routing.provider = lambda: _TwoWay()
+    _tt.alternativen, _tt.traffic = alternativen_fake, traffic_fake
     _os.environ["TOMTOM_API_KEY"] = "test"
 
-    letzte: dict = {}
+    tail: dict = {}
 
-    def tomtom_planen(**mehr):
-        _Zweiwege.aufrufe = []
-        zaehler["alternativen"] = zaehler["verkehr"] = 0
-        antwort = client.post("/api/route", json={
-            "fahrzeug_id": fahrzeuge[0]["id"],
+    def tomtom_plan(**more):
+        _TwoWay.calls = []
+        counter["alternativen"] = counter["traffic"] = 0
+        response = client.post("/api/route", json={
+            "vehicle_id": vehicles[0]["id"],
             "start": {"lat": 53.5511, "lon": 9.9937, "text": "A"},
-            "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
-            "start_soc": 80.0, "eigene_fahrten": False, **mehr})
-        pruefe(antwort.status_code == 200, "die Anfrage geht durch",
-               f"HTTP {antwort.status_code}: {antwort.text[:120]}")
-        letzte["json"] = antwort.json() if antwort.status_code == 200 else {}
-        return antwort.json()["varianten"] if antwort.status_code == 200 else []
+            "destination": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
+            "start_soc": 80.0, "own_trips": False, **more})
+        verify(response.status_code == 200, "die Anfrage geht durch",
+               f"HTTP {response.status_code}: {response.text[:120]}")
+        tail["json"] = response.json() if response.status_code == 200 else {}
+        return response.json()["variants"] if response.status_code == 200 else []
 
-    def roh_planen(**mehr):
+    def raw_plan(**more):
         return client.post("/api/route", json={
-            "fahrzeug_id": fahrzeuge[0]["id"],
+            "vehicle_id": vehicles[0]["id"],
             "start": {"lat": 53.5511, "lon": 9.9937, "text": "A"},
-            "ziel": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
-            "start_soc": 80.0, "eigene_fahrten": False, **mehr})
+            "destination": {"lat": 48.1351, "lon": 11.5820, "text": "B"},
+            "start_soc": 80.0, "own_trips": False, **more})
 
-    def schnellste(varianten):
-        return [v for v in varianten if "insgesamt schnellste" in v["etiketten"]]
+    def fastest(variants):
+        return [v for v in variants if "insgesamt schnellste" in v["labels"]]
 
     try:
-        verzoegerungen[:] = [0.0, 0.0]
-        vs = tomtom_planen()
-        vorschlag = [v for v in vs if any(e.startswith("TomTom-Vorschlag") for e in v["etiketten"])]
-        pruefe(len(vs) == 2 and len(vorschlag) == 1,
+        delays[:] = [0.0, 0.0]
+        vs = tomtom_plan()
+        suggestion = [v for v in vs if any(e.startswith("TomTom-Vorschlag") for e in v["labels"])]
+        verify(len(vs) == 2 and len(suggestion) == 1,
                "ein Vorschlag von TomTom wird zur zweiten Variante, mit Etikett",
-               str([v["etiketten"] for v in vs]))
-        pruefe(any(len(a) >= 5 for a in _Zweiwege.aufrufe),
+               str([v["labels"] for v in vs]))
+        verify(any(len(a) >= 5 for a in _TwoWay.calls),
                "das Routing bekommt ihn als Zwischenpunkte - gespeichert wird die "
                "Strasse von OpenRouteService, nicht die von TomTom")
-        pruefe(zaehler["alternativen"] == 1 and zaehler["verkehr"] == 2,
+        verify(counter["alternativen"] == 1 and counter["traffic"] == 2,
                "eine Anfrage nach Vorschlägen und eine Verkehrsabfrage je Route",
-               str(zaehler))
-        pruefe(all("verkehr_min" in v and v["verkehr_quelle"] == "TomTom" for v in vs),
+               str(counter))
+        verify(all("traffic_min" in v and v["traffic_source"] == "TomTom" for v in vs),
                "der Verkehr steht an jeder Variante, mit Quelle")
-        pruefe(len(schnellste(vs)) == 1,
+        verify(len(fastest(vs)) == 1,
                "ohne Verkehr gewinnt genau eine der beiden",
-               str([v["etiketten"] for v in vs]))
+               str([v["labels"] for v in vs]))
         # Wer ohne Verkehr gewinnt, bekommt zwei Stunden Stau. Welche das ist,
         # entscheidet das Modell (mehr Tempo heisst auch mehr Energie und mehr
         # Ladezeit) - der Test nimmt es nicht vorweg.
-        sieger_war_tomtom = any(e.startswith("TomTom-Vorschlag")
-                                for e in schnellste(vs)[0]["etiketten"])
+        winner_was_tomtom = any(e.startswith("TomTom-Vorschlag")
+                                for e in fastest(vs)[0]["labels"])
         # Die Verzögerungen werden in der Reihenfolge abgefragt, in der die
         # Varianten entstehen: erst die schnellste von OpenRouteService, dann
         # der Vorschlag.
-        verzoegerungen[:] = [0.0, 120.0] if sieger_war_tomtom else [120.0, 0.0]
-        vs = tomtom_planen()
-        sieger_ist_tomtom = any(e.startswith("TomTom-Vorschlag")
-                                for e in schnellste(vs)[0]["etiketten"])
-        pruefe(len(schnellste(vs)) == 1 and sieger_ist_tomtom != sieger_war_tomtom,
+        delays[:] = [0.0, 120.0] if winner_was_tomtom else [120.0, 0.0]
+        vs = tomtom_plan()
+        winner_actual_tomtom = any(e.startswith("TomTom-Vorschlag")
+                                for e in fastest(vs)[0]["labels"])
+        verify(len(fastest(vs)) == 1 and winner_actual_tomtom != winner_was_tomtom,
                "zwei Stunden Stau auf dem bisherigen Sieger drehen die Rangfolge: "
                "Der Verkehr gehört zur Zeit",
-               str([v["etiketten"] for v in vs]))
-        stau = [v for v in vs if v.get("verkehr_min") == 120.0]
-        pruefe(len(stau) == 1 and stau[0]["plan_gesamt_mit_verkehr_min"]
-               == round(stau[0]["plan_gesamt_minuten"] + 120),
+               str([v["labels"] for v in vs]))
+        jam = [v for v in vs if v.get("traffic_min") == 120.0]
+        verify(len(jam) == 1 and jam[0]["plan_total_with_traffic_min"]
+               == round(jam[0]["plan_total_minutes"] + 120),
                "und die Gesamtzeit mit Verkehr steht daneben")
 
-        _tt.alternativen = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomFehler("Kontingent erschöpft."))
-        _tt.verkehr = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomFehler("Kontingent erschöpft."))
-        vs = tomtom_planen()
-        pruefe(len(vs) == 1 and "verkehr_min" not in vs[0]
-               and not any(e.startswith("TomTom") for e in vs[0]["etiketten"]),
+        _tt.alternativen = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomError("Kontingent erschöpft."))
+        _tt.traffic = lambda *a, **k: (_ for _ in ()).throw(_tt.TomTomError("Kontingent erschöpft."))
+        vs = tomtom_plan()
+        verify(len(vs) == 1 and "traffic_min" not in vs[0]
+               and not any(e.startswith("TomTom") for e in vs[0]["labels"]),
                "scheitert TomTom, läuft die Planung ohne weiter - ein Berater, der "
                "sie abbrechen liesse, wäre schlechter als keiner",
-               str([v["etiketten"] for v in vs]))
+               str([v["labels"] for v in vs]))
 
-        _tt.alternativen, _tt.verkehr = alternativen_fake, verkehr_fake
-        vs = tomtom_planen(tomtom=False)
-        pruefe(zaehler == {"alternativen": 0, "verkehr": 0}
-               and not any("verkehr_min" in v for v in vs),
-               "abgeschaltet wird TomTom nicht gefragt", str(zaehler))
+        _tt.alternativen, _tt.traffic = alternativen_fake, traffic_fake
+        vs = tomtom_plan(tomtom=False)
+        verify(counter == {"alternativen": 0, "traffic": 0}
+               and not any("traffic_min" in v for v in vs),
+               "abgeschaltet wird TomTom nicht gefragt", str(counter))
         # --- Abfahrtszeit: Verkehr und Wetter gelten für diese Zeit ---------
         from datetime import datetime as _dt3, timedelta as _td3, timezone as _tz3
-        morgen = (_dt3.now(_tz3.utc) + _td3(days=1)).replace(microsecond=0)
-        verzoegerungen[:] = [0.0, 0.0]
-        abfahrten.clear()
-        wetter_aufrufe.clear()
-        vs = tomtom_planen(abfahrt=morgen.isoformat().replace("+00:00", "Z"))
-        pruefe(abfahrten and all(a == morgen for a in abfahrten) and len(abfahrten) == 3,
+        tomorrow = (_dt3.now(_tz3.utc) + _td3(days=1)).replace(microsecond=0)
+        delays[:] = [0.0, 0.0]
+        departures.clear()
+        weather_calls.clear()
+        vs = tomtom_plan(departure=tomorrow.isoformat().replace("+00:00", "Z"))
+        verify(departures and all(a == tomorrow for a in departures) and len(departures) == 3,
                "die Abfahrt geht an jede TomTom-Anfrage: Vorschläge und Verkehr je Route",
-               str(abfahrten))
-        pruefe(wetter_aufrufe and all(a == morgen and d > 0 for a, d in wetter_aufrufe),
+               str(departures))
+        verify(weather_calls and all(a == tomorrow and d > 0 for a, d in weather_calls),
                "und ans Wetter, mit der Fahrzeit - sonst läge eine Fahrt morgen "
-               "früh auf dem Wetter von heute Nachmittag", str(wetter_aufrufe))
-        pruefe(all(v["verkehr_basis"] == "prognose" for v in vs),
+               "früh auf dem Wetter von heute Nachmittag", str(weather_calls))
+        verify(all(v["traffic_basis"] == "prognose" for v in vs),
                "der Verkehr ist als Prognose gekennzeichnet")
-        pruefe(letzte["json"].get("abfahrt") == morgen.isoformat(),
+        verify(tail["json"].get("departure") == tomorrow.isoformat(),
                "und die Antwort nennt die Abfahrt, mit der gerechnet wurde",
-               str(letzte["json"].get("abfahrt")))
+               str(tail["json"].get("departure")))
 
-        abfahrten.clear()
-        wetter_aufrufe.clear()
-        vs = tomtom_planen()
-        pruefe(all(a is None for a in abfahrten) and letzte["json"]["abfahrt"] is None
-               and all(v["verkehr_basis"] == "live" for v in vs),
+        departures.clear()
+        weather_calls.clear()
+        vs = tomtom_plan()
+        verify(all(a is None for a in departures) and tail["json"]["departure"] is None
+               and all(v["traffic_basis"] == "live" for v in vs),
                "ohne Abfahrt gilt jetzt: Live-Verkehr, keine Abfahrt in der Antwort")
-        pruefe(wetter_aufrufe and all(a is None for a, _ in wetter_aufrufe),
+        verify(weather_calls and all(a is None for a, _ in weather_calls),
                "und das aktuelle Wetter")
 
-        abfahrten.clear()
-        tomtom_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(minutes=3)).isoformat())
-        pruefe(all(a is None for a in abfahrten) and letzte["json"]["abfahrt"] is None,
+        departures.clear()
+        tomtom_plan(departure=(_dt3.now(_tz3.utc) + _td3(minutes=3)).isoformat())
+        verify(all(a is None for a in departures) and tail["json"]["departure"] is None,
                "eine Abfahrt in drei Minuten ist jetzt - wer die Uhrzeit eintippt, "
                "braucht eine Weile")
-        tomtom_planen(abfahrt=(_dt3.now(_tz3.utc) - _td3(minutes=4)).isoformat())
-        pruefe(letzte["json"]["abfahrt"] is None,
+        tomtom_plan(departure=(_dt3.now(_tz3.utc) - _td3(minutes=4)).isoformat())
+        verify(tail["json"]["departure"] is None,
                "und vor vier Minuten auch - es gilt jetzt")
 
-        abfahrten.clear()
+        departures.clear()
         naiv = (_dt3.now(_tz3.utc) + _td3(days=2)).replace(microsecond=0, tzinfo=None)
-        tomtom_planen(abfahrt=naiv.isoformat())
-        pruefe(abfahrten and all(a.replace(tzinfo=None) == naiv for a in abfahrten),
+        tomtom_plan(departure=naiv.isoformat())
+        verify(departures and all(a.replace(tzinfo=None) == naiv for a in departures),
                "ohne Zeitzone gilt UTC - nicht stillschweigend die Ortszeit des Servers")
 
-        vergangen = roh_planen(abfahrt=(_dt3.now(_tz3.utc) - _td3(days=1)).isoformat())
-        pruefe(vergangen.status_code == 422 and "Vergangenheit" in vergangen.text,
+        elapsed = raw_plan(departure=(_dt3.now(_tz3.utc) - _td3(days=1)).isoformat())
+        verify(elapsed.status_code == 422 and "Vergangenheit" in elapsed.text,
                "eine Abfahrt von gestern ist ein Tippfehler und wird abgelehnt, "
                "statt stillschweigend mit jetzt zu rechnen",
-               f"HTTP {vergangen.status_code}: {vergangen.text[:100]}")
-        fern = roh_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(days=61)).isoformat())
-        pruefe(fern.status_code == 422 and "60 Tage" in fern.text,
+               f"HTTP {elapsed.status_code}: {elapsed.text[:100]}")
+        far = raw_plan(departure=(_dt3.now(_tz3.utc) + _td3(days=61)).isoformat())
+        verify(far.status_code == 422 and "60 Tage" in far.text,
                "und eine in 61 Tagen auch - so weit reicht keine Prognose",
-               f"HTTP {fern.status_code}: {fern.text[:100]}")
-        ok60 = roh_planen(abfahrt=(_dt3.now(_tz3.utc) + _td3(days=59)).isoformat())
-        pruefe(ok60.status_code == 200, "59 Tage gehen",
+               f"HTTP {far.status_code}: {far.text[:100]}")
+        ok60 = raw_plan(departure=(_dt3.now(_tz3.utc) + _td3(days=59)).isoformat())
+        verify(ok60.status_code == 200, "59 Tage gehen",
                f"HTTP {ok60.status_code}: {ok60.text[:100]}")
-        quatsch = roh_planen(abfahrt="morgen früh")
-        pruefe(quatsch.status_code == 422, "und ein Wert, der kein Zeitpunkt ist, auch")
+        nonsense = raw_plan(departure="morgen früh")
+        verify(nonsense.status_code == 422, "und ein Wert, der kein Zeitpunkt ist, auch")
 
         del _os.environ["TOMTOM_API_KEY"]
-        vs = tomtom_planen()
-        pruefe(zaehler == {"alternativen": 0, "verkehr": 0} and len(vs) == 1,
+        vs = tomtom_plan()
+        verify(counter == {"alternativen": 0, "traffic": 0} and len(vs) == 1,
                "und ohne Schlüssel auch nicht - die Planung läuft wie bisher",
-               str(zaehler))
+               str(counter))
     finally:
-        _tt.alternativen, _tt.verkehr = echte_alt, echter_verkehr
-        _wetter.entlang_route, _wetter.mittelwert = echtes_wetter
-        _routing.provider = ersatz_routing
+        _tt.alternativen, _tt.traffic = real_old, real_traffic
+        _weather.along_route, _weather.mean = real_weather
+        _routing.provider = fallback_routing
         _os.environ.pop("TOMTOM_API_KEY", None)
 
     print("\nZeitangaben und Aufzeichnungsstart")
@@ -802,450 +802,450 @@ def main() -> int:
     # schätzen liesse. Ohne Messung blieb die Live-Anzeige leer - bis das Auto
     # zum ersten Mal antwortete, und das tut es im Stand nicht (Alarmanlage).
     start = client.post("/api/live/aufzeichnung", json={
-        "fahrzeug_id": fahrzeuge[0]["id"], "lat": 48.4770, "lon": 9.1444,
+        "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
         "soc": 79.6, "name": "Start"}).json()
-    sid = start["sitzung_id"]
-    erste = client.get(f"/api/live/{sid}/punkte").json()["punkte"]
-    pruefe(len(erste) == 1 and erste[0]["soc"] == 79.6,
+    sid = start["session_id"]
+    first_item = client.get(f"/api/live/{sid}/punkte").json()["points"]
+    verify(len(first_item) == 1 and first_item[0]["soc"] == 79.6,
            "der Startladestand ist der erste Messpunkt der Aufzeichnung",
-           f"{len(erste)} Punkte, erster: {erste[:1]}")
+           f"{len(first_item)} Punkte, erster: {first_item[:1]}")
     gps = client.post(f"/api/live/{sid}/punkt", json={
         "lat": 48.4771, "lon": 9.1445}).json()
-    pruefe(gps["ist_soc"] == 79.6 and gps["soc_gemeldet"] is False
-           and gps["soc_quelle"] == "zuletzt",
+    verify(gps["actual_soc"] == 79.6 and gps["soc_reported"] is False
+           and gps["soc_source"] == "zuletzt",
            "ein Punkt nur mit Position zeigt die letzte Messung - und sagt, dass "
            "sie es ist, statt leer zu bleiben",
-           f"{gps['ist_soc']} / {gps['soc_gemeldet']} / {gps['soc_quelle']}")
-    gemessen = client.post(f"/api/live/{sid}/punkt", json={
+           f"{gps['actual_soc']} / {gps['soc_reported']} / {gps['soc_source']}")
+    measured = client.post(f"/api/live/{sid}/punkt", json={
         "lat": 48.4772, "lon": 9.1446, "soc": 79.2}).json()
-    pruefe(gemessen["ist_soc"] == 79.2 and gemessen["soc_gemeldet"] is True
-           and gemessen["soc_quelle"] == "gemessen",
-           "und ein gemessener Wert ersetzt sie", str(gemessen["soc_quelle"]))
-    nur_gps = client.post(f"/api/live/{sid}/punkt", json={
+    verify(measured["actual_soc"] == 79.2 and measured["soc_reported"] is True
+           and measured["soc_source"] == "gemessen",
+           "und ein gemessener Wert ersetzt sie", str(measured["soc_source"]))
+    only_gps = client.post(f"/api/live/{sid}/punkt", json={
         "lat": 48.4773, "lon": 9.1447}).json()
-    pruefe(nur_gps["ist_soc"] == 79.2 and nur_gps["soc_quelle"] == "zuletzt",
+    verify(only_gps["actual_soc"] == 79.2 and only_gps["soc_source"] == "zuletzt",
            "danach gilt die neueste Messung, nicht die vom Start")
     client.post(f"/api/live/{sid}/ende")
 
-    punkte_zeit = client.get(f"/api/live/{sid}/punkte").json()["punkte"]
-    pruefe(punkte_zeit and all(p["zeit"].endswith("Z") for p in punkte_zeit),
+    points_time = client.get(f"/api/live/{sid}/punkte").json()["points"]
+    verify(points_time and all(p["timestamp"].endswith("Z") for p in points_time),
            "die Messzeiten tragen ein Z - sonst läse der Browser UTC als Ortszeit",
-           str(punkte_zeit[:1]))
-    pruefe(all(_dz.fromisoformat(p["zeit"]).tzinfo is not None for p in punkte_zeit),
+           str(points_time[:1]))
+    verify(all(_dz.fromisoformat(p["timestamp"]).tzinfo is not None for p in points_time),
            "und sind für Python zonenbewusst lesbar")
-    fahrten_liste = client.get("/api/fahrten").json()
-    pruefe(fahrten_liste and all(f["angelegt"].endswith("Z") for f in fahrten_liste),
-           "auch das Datum in der Fahrtenliste", str(fahrten_liste[:1]))
-    jetzt_utc = _dz.now(_tzz.utc)
-    neueste = max(_dz.fromisoformat(f["angelegt"]) for f in fahrten_liste)
-    pruefe(abs((jetzt_utc - neueste).total_seconds()) < 3600,
+    trips_list = client.get("/api/fahrten").json()
+    verify(trips_list and all(f["created_at"].endswith("Z") for f in trips_list),
+           "auch das Datum in der Fahrtenliste", str(trips_list[:1]))
+    now_utc = _dz.now(_tzz.utc)
+    newest = max(_dz.fromisoformat(f["created_at"]) for f in trips_list)
+    verify(abs((now_utc - newest).total_seconds()) < 3600,
            "und es ist wirklich UTC: die jüngste Fahrt liegt höchstens eine "
            "Stunde zurück, nicht zwei Stunden daneben",
-           f"{neueste} gegen {jetzt_utc}")
+           f"{newest} gegen {now_utc}")
 
-    ohne = client.post("/api/live/aufzeichnung", json={
-        "fahrzeug_id": fahrzeuge[0]["id"], "lat": 48.4770, "lon": 9.1444,
+    without = client.post("/api/live/aufzeichnung", json={
+        "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
         "name": "Ohne Auto"}).json()
-    pruefe(client.get(f"/api/live/{ohne['sitzung_id']}/punkte").json()["punkte"] == [],
+    verify(client.get(f"/api/live/{without['session_id']}/punkte").json()["points"] == [],
            "ohne gemeldeten Startladestand gibt es keinen Startpunkt - es wird "
            "nichts erfunden")
-    leer = client.post(f"/api/live/{ohne['sitzung_id']}/punkt", json={
+    empty = client.post(f"/api/live/{without['session_id']}/punkt", json={
         "lat": 48.4771, "lon": 9.1445}).json()
-    pruefe(leer["ist_soc"] is None,
+    verify(empty["actual_soc"] is None,
            "und der Ladestand bleibt unbekannt, statt mit 100 % zu raten",
-           str(leer["ist_soc"]))
-    client.post(f"/api/live/{ohne['sitzung_id']}/ende")
+           str(empty["actual_soc"]))
+    client.post(f"/api/live/{without['session_id']}/ende")
 
     print("\nLadepunkte im Korridor")
-    korridor = client.get(f"/api/saeulen/entlang/{fahrt_id}",
+    corridor = client.get(f"/api/saeulen/entlang/{trip_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()
-    orte = {k["name"].split()[0] for k in korridor["kandidaten"]}
-    pruefe(korridor["anzahl"] == 4,
+    places = {k["name"].split()[0] for k in corridor["candidates"]}
+    verify(corridor["count"] == 4,
            "alle vier Schnelllader entlang der Route gefunden",
-           f"sind {korridor['anzahl']}: {orte}")
-    pruefe(not any("Sylt" in k["name"] for k in korridor["kandidaten"]),
-           "Sylt liegt nicht auf dem Weg und taucht nicht auf", str(orte))
-    pruefe(not any(k["max_kw"] < 100 for k in korridor["kandidaten"]),
+           f"sind {corridor['count']}: {places}")
+    verify(not any("Sylt" in k["name"] for k in corridor["candidates"]),
+           "Sylt liegt nicht auf dem Weg und taucht nicht auf", str(places))
+    verify(not any(k["max_kw"] < 100 for k in corridor["candidates"]),
            "der 22-kW-Anschluss in Lüneburg fällt durch den Leistungsfilter")
-    km = [k["km_auf_route"] for k in korridor["kandidaten"]]
-    pruefe(km == sorted(km), "sortiert nach Fortschritt entlang der Route", str(km))
-    pruefe(all(k["umweg_minuten"] > 0 for k in korridor["kandidaten"]),
+    km = [k["km_on_route"] for k in corridor["candidates"]]
+    verify(km == sorted(km), "sortiert nach Fortschritt entlang der Route", str(km))
+    verify(all(k["detour_minutes"] > 0 for k in corridor["candidates"]),
            "jeder Kandidat hat einen bezifferten Umweg")
 
-    erster = korridor["kandidaten"][0]
-    client.post(f"/api/saeulen/{erster['id']}/belegt")
-    nachher = client.get(f"/api/saeulen/entlang/{fahrt_id}",
+    first = corridor["candidates"][0]
+    client.post(f"/api/saeulen/{first['id']}/belegt")
+    after = client.get(f"/api/saeulen/entlang/{trip_id}",
                          params={"min_kw": 100, "radius_km": 25}).json()
-    gemeldet = [k for k in nachher["kandidaten"] if k["id"] == erster["id"]]
-    pruefe(gemeldet and gemeldet[0]["belegt_gemeldet"] is True,
+    reported = [k for k in after["candidates"] if k["id"] == first["id"]]
+    verify(reported and reported[0]["occupied_reported"] is True,
            "eine Belegt-Meldung schlägt in der Korridor-Antwort durch")
-    client.delete(f"/api/saeulen/{erster['id']}/belegt")
+    client.delete(f"/api/saeulen/{first['id']}/belegt")
 
     print("\nLadeplan")
     # Die Demo-Route ist die Luftlinie, die Ladepunkte der Probe stehen an der
     # A7. Dadurch liegen sie weiter neben der Strecke, als sie es neben einer
     # echten Strasse täten - deshalb hier eine grosszügigere Umweg-Grenze als
     # die zehn Minuten, mit denen der Optimierer sonst arbeitet.
-    LADEPLAN = {"min_kw": 100, "radius_km": 25, "umweg_grenze_min": 15}
-    plan = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
-                       params=LADEPLAN).json()
-    pruefe(plan["machbar"] is True,
+    CHARGE_PLAN = {"min_kw": 100, "radius_km": 25, "detour_limit_min": 15}
+    plan = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+                       params=CHARGE_PLAN).json()
+    verify(plan["feasible"] is True,
            "für die Strecke, die ohne Nachladen nicht reicht, entsteht ein Plan",
-           plan.get("grund", ""))
-    pruefe(plan["anzahl_stopps"] >= 1, "mit mindestens einem Ladestopp",
-           f"{plan['anzahl_stopps']}")
-    pruefe(plan["soc_am_ziel"] >= fahrzeuge[0]["ziel_soc"] - 0.5,
+           plan.get("reason", ""))
+    verify(plan["stop_count"] >= 1, "mit mindestens einem Ladestopp",
+           f"{plan['stop_count']}")
+    verify(plan["soc_at_target"] >= vehicles[0]["target_soc"] - 0.5,
            "und der Ziel-Ladestand wird erreicht",
-           f"{plan['soc_am_ziel']} % statt {fahrzeuge[0]['ziel_soc']} %")
-    pruefe(plan["gesamt_minuten"] > plan["fahrzeit_minuten"],
+           f"{plan['soc_at_target']} % statt {vehicles[0]['target_soc']} %")
+    verify(plan["total_minutes"] > plan["drive_time_minutes"],
            "die Gesamtzeit liegt über der reinen Fahrzeit - Laden kostet Zeit")
-    km_stopps = [s["km_auf_route"] for s in plan["stopps"]]
-    pruefe(km_stopps == sorted(km_stopps),
-           "die Stopps stehen in Fahrtreihenfolge", str(km_stopps))
-    pruefe(all(s["ankunft_soc"] >= fahrzeuge[0]["reserve_soc"] - 0.5
-               for s in plan["stopps"]),
+    km_stops = [s["km_on_route"] for s in plan["stops"]]
+    verify(km_stops == sorted(km_stops),
+           "die Stopps stehen in Fahrtreihenfolge", str(km_stops))
+    verify(all(s["arrival_soc"] >= vehicles[0]["reserve_soc"] - 0.5
+               for s in plan["stops"]),
            "an keinem Stopp wird unter der Reserve angekommen",
-           str([s["ankunft_soc"] for s in plan["stopps"]]))
-    pruefe(all(s["abfahrt_soc"] > s["ankunft_soc"] for s in plan["stopps"]),
+           str([s["arrival_soc"] for s in plan["stops"]]))
+    verify(all(s["departure_soc"] > s["arrival_soc"] for s in plan["stops"]),
            "und an jedem Stopp wird tatsächlich geladen")
-    pruefe(all(s["lat"] and s["lon"] for s in plan["stopps"]),
+    verify(all(s["lat"] and s["lon"] for s in plan["stops"]),
            "jeder Stopp hat eine Koordinate für die Karte")
 
     # Die Belegt-Meldung ist die einzige Verfügbarkeitsinformation, die stimmt -
     # sie muss den Plan verändern, nicht nur die Liste einfärben.
-    if plan["stopps"]:
-        geplant = plan["stopps"][0]["id"]
-        client.post(f"/api/saeulen/{geplant}/belegt")
-        danach = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
-                             params=LADEPLAN).json()
-        pruefe(geplant not in [s["id"] for s in danach["stopps"]],
+    if plan["stops"]:
+        planned = plan["stops"][0]["id"]
+        client.post(f"/api/saeulen/{planned}/belegt")
+        afterwards = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+                             params=CHARGE_PLAN).json()
+        verify(planned not in [s["id"] for s in afterwards["stops"]],
                "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
-        client.delete(f"/api/saeulen/{geplant}/belegt")
+        client.delete(f"/api/saeulen/{planned}/belegt")
 
     # Der Regler "Aufwand je Halt" bis zum Optimierer durchgereicht. Bei null
     # ist Anhalten gratis, und der Plan zersplittert in Kurzstopps - genau das
     # Verhalten, das die Vorgabe von fünf Minuten verhindert.
-    gratis = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
-                         params={**LADEPLAN, "stopp_fixkosten_min": 0}).json()
-    teuer = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
-                        params={**LADEPLAN, "stopp_fixkosten_min": 20}).json()
-    pruefe(gratis["haltekosten_minuten"] == 0,
+    gratis = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+                         params={**CHARGE_PLAN, "stop_fixed_cost_min": 0}).json()
+    expensive = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+                        params={**CHARGE_PLAN, "stop_fixed_cost_min": 20}).json()
+    verify(gratis["holding_cost_minutes"] == 0,
            "mit Aufwand null kostet ein Halt nichts",
-           str(gratis["haltekosten_minuten"]))
-    pruefe(teuer["anzahl_stopps"] <= gratis["anzahl_stopps"],
+           str(gratis["holding_cost_minutes"]))
+    verify(expensive["stop_count"] <= gratis["stop_count"],
            "und je teurer ein Halt, desto weniger Halte plant jolt",
-           f"{teuer['anzahl_stopps']} bei 20 min gegen "
-           f"{gratis['anzahl_stopps']} bei 0 min")
-    pruefe(teuer["haltekosten_minuten"] == teuer["anzahl_stopps"] * 20,
+           f"{expensive['stop_count']} bei 20 min gegen "
+           f"{gratis['stop_count']} bei 0 min")
+    verify(expensive["holding_cost_minutes"] == expensive["stop_count"] * 20,
            "die Haltekosten in der Bilanz sind Anzahl mal Aufwand",
-           f"{teuer['haltekosten_minuten']} bei {teuer['anzahl_stopps']} Stopps")
+           f"{expensive['holding_cost_minutes']} bei {expensive['stop_count']} Stopps")
 
-    eng = client.post(f"/api/fahrten/{fahrt_id}/ladeplan",
-                      params={**LADEPLAN, "umweg_grenze_min": 0.5}).json()
-    pruefe(eng["machbar"] is False,
+    eng = client.post(f"/api/fahrten/{trip_id}/ladeplan",
+                      params={**CHARGE_PLAN, "detour_limit_min": 0.5}).json()
+    verify(eng["feasible"] is False,
            "mit einer Umweg-Grenze unter jedem Kandidaten bleibt nichts übrig")
-    pruefe(bool(eng["grund"]),
+    verify(bool(eng["reason"]),
            "und die Antwort sagt, warum - nicht nur, dass es nicht geht",
-           eng["grund"])
+           eng["reason"])
 
-    ohne_profil = client.post("/api/fahrten/999999/ladeplan")
-    pruefe(ohne_profil.status_code == 404,
+    without_profile = client.post("/api/fahrten/999999/ladeplan")
+    verify(without_profile.status_code == 404,
            "eine unbekannte Fahrt wird sauber abgelehnt",
-           f"HTTP {ohne_profil.status_code}")
+           f"HTTP {without_profile.status_code}")
 
     print("\nLive-Nachführung")
-    sitzung = client.post(f"/api/live/start/{fahrt_id}").json()
-    sitzung_id = sitzung["sitzung_id"]
+    session = client.post(f"/api/live/start/{trip_id}").json()
+    session_id = session["session_id"]
 
     db = SessionLocal()
     try:
-        fahrt = db.get(models.Fahrt, fahrt_id)
-        punkte_planmaessig = simulator.schritte(fahrt, mehrverbrauch=1.0)
-        punkte_hungrig = simulator.schritte(fahrt, mehrverbrauch=1.25)
+        trip = db.get(models.Trip, trip_id)
+        points_scheduled = simulator.steps(trip, extra_consumption=1.0)
+        points_hungry = simulator.steps(trip, extra_consumption=1.25)
     finally:
         db.close()
-    pruefe(len(punkte_planmaessig) > 12, "der Simulator erzeugt Messpunkte",
-           f"sind {len(punkte_planmaessig)}")
-    pruefe(len(punkte_hungrig) < len(punkte_planmaessig),
+    verify(len(points_scheduled) > 12, "der Simulator erzeugt Messpunkte",
+           f"sind {len(points_scheduled)}")
+    verify(len(points_hungry) < len(points_scheduled),
            "mit 25 % Mehrverbrauch kommt er sichtbar kürzer, bevor der Akku "
            "leer ist",
-           f"{punkte_hungrig[-1]['km']} km gegen "
-           f"{punkte_planmaessig[-1]['km']} km")
-    pruefe(punkte_hungrig[8]["soc"] < punkte_planmaessig[8]["soc"] - 1.0,
+           f"{points_hungry[-1]['km']} km gegen "
+           f"{points_scheduled[-1]['km']} km")
+    verify(points_hungry[8]["soc"] < points_scheduled[8]["soc"] - 1.0,
            "und liegt auf halber Strecke deutlich tiefer",
-           f"{punkte_hungrig[8]['soc']} gegen {punkte_planmaessig[8]['soc']} %")
+           f"{points_hungry[8]['soc']} gegen {points_scheduled[8]['soc']} %")
 
     # Plangemäss fahren: die Nachführung darf nicht anschlagen.
-    for messpunkt in punkte_planmaessig[:12]:
-        zustand = client.post(f"/api/live/{sitzung_id}/punkt", json={
-            "lat": messpunkt["lat"], "lon": messpunkt["lon"],
-            "soc": messpunkt["soc"]}).json()
-    pruefe(abs(zustand["abweichung_pp"]) < 1.0,
+    for sample in points_scheduled[:12]:
+        state = client.post(f"/api/live/{session_id}/punkt", json={
+            "lat": sample["lat"], "lon": sample["lon"],
+            "soc": sample["soc"]}).json()
+    verify(abs(state["deviation_pp"]) < 1.0,
            "wer nach Plan fährt, weicht nicht ab",
-           f"{zustand['abweichung_pp']} Prozentpunkte")
-    pruefe(0.9 < zustand["verbrauchsfaktor"] < 1.1,
+           f"{state['deviation_pp']} Prozentpunkte")
+    verify(0.9 < state["consumption_factor"] < 1.1,
            "und der Verbrauchsfaktor bleibt bei 1",
-           f"ist {zustand['verbrauchsfaktor']}")
-    pruefe(zustand["abstand_zur_route_m"] < 500,
+           f"ist {state['consumption_factor']}")
+    verify(state["spacing_to_route_m"] < 500,
            "die Position liegt auf der Route")
 
     # Mehrverbrauch: jetzt muss die Nachführung anschlagen.
-    sitzung2 = client.post(f"/api/live/start/{fahrt_id}").json()["sitzung_id"]
-    for messpunkt in punkte_hungrig[:12]:
+    sitzung2 = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
+    for sample in points_hungry[:12]:
         zustand2 = client.post(f"/api/live/{sitzung2}/punkt", json={
-            "lat": messpunkt["lat"], "lon": messpunkt["lon"],
-            "soc": messpunkt["soc"]}).json()
-    pruefe(zustand2["verbrauchsfaktor"] > 1.15,
+            "lat": sample["lat"], "lon": sample["lon"],
+            "soc": sample["soc"]}).json()
+    verify(zustand2["consumption_factor"] > 1.15,
            "25 % Mehrverbrauch werden als Faktor erkannt",
-           f"ist {zustand2['verbrauchsfaktor']}")
-    pruefe(zustand2["abweichung_pp"] < zustand["abweichung_pp"],
+           f"ist {zustand2['consumption_factor']}")
+    verify(zustand2["deviation_pp"] < state["deviation_pp"],
            "der Ist-SoC liegt unter dem Soll",
-           f"{zustand2['abweichung_pp']} Prozentpunkte")
-    pruefe(zustand2["reserve_bei_km"] is not None
-           and zustand2["reserve_bei_km"] < route["reserve_bei_km"],
+           f"{zustand2['deviation_pp']} Prozentpunkte")
+    verify(zustand2["reserve_at_km"] is not None
+           and zustand2["reserve_at_km"] < route["reserve_at_km"],
            "und die Reserve rückt nach vorn - genau das ist die Live-Funktion",
-           f"geplant km {route['reserve_bei_km']}, "
-           f"jetzt km {zustand2['reserve_bei_km']}")
-    pruefe(zustand2["neuplanung_noetig"] is True,
-           "die Neuplanung wird angefordert", zustand2["grund"])
+           f"geplant km {route['reserve_at_km']}, "
+           f"jetzt km {zustand2['reserve_at_km']}")
+    verify(zustand2["replanning_required"] is True,
+           "die Neuplanung wird angefordert", zustand2["reason"])
 
     # Abseits der Route. Geprüft wird hier nur die Messung - dass daraus erst
     # nach einer Minute eine Neuplanung wird, hängt an Zeitstempeln und steht
-    # deshalb in check_umplanung.py, wo sie sich setzen lassen.
-    abseits = client.post(f"/api/live/{sitzung2}/punkt", json={
+    # deshalb in check_replanning.py, wo sie sich setzen lassen.
+    off_route = client.post(f"/api/live/{sitzung2}/punkt", json={
         "lat": 54.9, "lon": 8.31, "soc": 40.0}).json()
-    pruefe(abseits["abstand_zur_route_m"] > 500,
+    verify(off_route["spacing_to_route_m"] > 500,
            "ein Sprung weg von der Route wird als Abstand erkannt",
-           f"{abseits['abstand_zur_route_m']} m")
+           f"{off_route['spacing_to_route_m']} m")
 
-    beendet = client.post(f"/api/live/{sitzung2}/ende").json()
-    pruefe(beendet["ok"] is True, "die Sitzung lässt sich beenden")
-    gesperrt = client.post(f"/api/live/{sitzung2}/punkt", json={
+    ended_at = client.post(f"/api/live/{sitzung2}/ende").json()
+    verify(ended_at["ok"] is True, "die Sitzung lässt sich beenden")
+    locked = client.post(f"/api/live/{sitzung2}/punkt", json={
         "lat": 52.0, "lon": 10.0, "soc": 30.0})
-    pruefe(gesperrt.status_code == 409,
+    verify(locked.status_code == 409,
            "danach werden keine Messpunkte mehr angenommen",
-           f"HTTP {gesperrt.status_code}")
+           f"HTTP {locked.status_code}")
 
     print("\nNachgereichte Messpunkte (Funkloch-Puffer)")
     # Ein Telefon ohne Netz sammelt Punkte und reicht sie nach. Dafür braucht
     # der Punkt eine Messzeit - sonst lägen alle auf der Sekunde des
     # Nachreichens, und der Zeitfaktor (der den Stau abbildet) wäre Unsinn.
     from datetime import datetime, timedelta, timezone
-    puffer = client.post(f"/api/live/start/{fahrt_id}").json()["sitzung_id"]
-    jetzt = datetime.now(timezone.utc)
-    stapel = []
-    for nr, mp in enumerate(punkte_planmaessig[:6]):
-        stapel.append({"lat": mp["lat"], "lon": mp["lon"], "soc": mp["soc"],
-                       "zeit": (jetzt - timedelta(minutes=60 - 5 * nr)
+    buffer = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
+    now_ts = datetime.now(timezone.utc)
+    batch = []
+    for nr, mp in enumerate(points_scheduled[:6]):
+        batch.append({"lat": mp["lat"], "lon": mp["lon"], "soc": mp["soc"],
+                       "timestamp": (now_ts - timedelta(minutes=60 - 5 * nr)
                                 ).isoformat().replace("+00:00", "Z")})
     # Absichtlich in falscher Reihenfolge: Der Server ordnet nach Messzeit.
-    stapel.reverse()
-    antwort = client.post(f"/api/live/{puffer}/punkte", json={"punkte": stapel})
-    pruefe(antwort.status_code == 200, "ein Stapel wird angenommen",
-           f"HTTP {antwort.status_code} {antwort.text[:120]}")
-    zeiten = client.get(f"/api/live/{puffer}/punkte").json()["punkte"]
-    pruefe(len(zeiten) == 6, "alle sechs Punkte sind gespeichert", f"{len(zeiten)}")
-    ts = [z["zeit"] for z in zeiten]
-    pruefe(ts == sorted(ts) and len(set(ts)) == 6,
+    batch.reverse()
+    response = client.post(f"/api/live/{buffer}/punkte", json={"points": batch})
+    verify(response.status_code == 200, "ein Stapel wird angenommen",
+           f"HTTP {response.status_code} {response.text[:120]}")
+    times = client.get(f"/api/live/{buffer}/punkte").json()["points"]
+    verify(len(times) == 6, "alle sechs Punkte sind gespeichert", f"{len(times)}")
+    ts = [z["timestamp"] for z in times]
+    verify(ts == sorted(ts) and len(set(ts)) == 6,
            "mit ihrer Messzeit und nicht mit der des Nachreichens, in "
            "richtiger Reihenfolge", str(ts[:3]))
-    erwartet = jetzt - timedelta(minutes=60)
-    pruefe(abs((datetime.fromisoformat(ts[0]) - erwartet).total_seconds()) < 5,
+    expected = now_ts - timedelta(minutes=60)
+    verify(abs((datetime.fromisoformat(ts[0]) - expected).total_seconds()) < 5,
            "der erste Punkt liegt eine Stunde zurück - Zone Z wurde als UTC gelesen",
            ts[0])
-    pruefe(antwort.json().get("typ") == "zustand"
-           and "verbrauchsfaktor" in antwort.json(),
+    verify(response.json().get("kind") == "zustand"
+           and "consumption_factor" in response.json(),
            "die Antwort hat dieselbe Form wie bei /punkt")
 
-    einzel = client.post(f"/api/live/{puffer}/punkt", json={
-        "lat": punkte_planmaessig[6]["lat"], "lon": punkte_planmaessig[6]["lon"],
-        "soc": punkte_planmaessig[6]["soc"],
-        "zeit": (jetzt - timedelta(minutes=29)).isoformat()})
-    pruefe(einzel.status_code == 200, "auch /punkt kennt die Messzeit",
-           f"HTTP {einzel.status_code}")
+    single = client.post(f"/api/live/{buffer}/punkt", json={
+        "lat": points_scheduled[6]["lat"], "lon": points_scheduled[6]["lon"],
+        "soc": points_scheduled[6]["soc"],
+        "timestamp": (now_ts - timedelta(minutes=29)).isoformat()})
+    verify(single.status_code == 200, "auch /punkt kennt die Messzeit",
+           f"HTTP {single.status_code}")
 
-    zukunft = client.post(f"/api/live/{puffer}/punkt", json={
+    future = client.post(f"/api/live/{buffer}/punkt", json={
         "lat": 52.0, "lon": 10.0, "soc": 50.0,
-        "zeit": (jetzt + timedelta(hours=1)).isoformat()})
-    pruefe(zukunft.status_code == 422,
+        "timestamp": (now_ts + timedelta(hours=1)).isoformat()})
+    verify(future.status_code == 422,
            "ein Zeitstempel aus der Zukunft wird abgelehnt",
-           f"HTTP {zukunft.status_code}")
-    alt = client.post(f"/api/live/{puffer}/punkt", json={
-        "lat": 52.0, "lon": 10.0, "soc": 50.0, "zeit": "1970-01-01T00:00:00Z"})
-    pruefe(alt.status_code == 422, "und einer aus dem Jahr 1970",
-           f"HTTP {alt.status_code}")
-    vorher = len(client.get(f"/api/live/{puffer}/punkte").json()["punkte"])
-    halb = client.post(f"/api/live/{puffer}/punkte", json={"punkte": [
+           f"HTTP {future.status_code}")
+    old = client.post(f"/api/live/{buffer}/punkt", json={
+        "lat": 52.0, "lon": 10.0, "soc": 50.0, "timestamp": "1970-01-01T00:00:00Z"})
+    verify(old.status_code == 422, "und einer aus dem Jahr 1970",
+           f"HTTP {old.status_code}")
+    earlier = len(client.get(f"/api/live/{buffer}/punkte").json()["points"])
+    half = client.post(f"/api/live/{buffer}/punkte", json={"points": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0},
-        {"lat": 52.0, "lon": 10.0, "soc": 50.0, "zeit": "1970-01-01T00:00:00Z"}]})
-    nachher = len(client.get(f"/api/live/{puffer}/punkte").json()["punkte"])
-    pruefe(halb.status_code == 422 and vorher == nachher,
+        {"lat": 52.0, "lon": 10.0, "soc": 50.0, "timestamp": "1970-01-01T00:00:00Z"}]})
+    after = len(client.get(f"/api/live/{buffer}/punkte").json()["points"])
+    verify(half.status_code == 422 and earlier == after,
            "ein schlechter Punkt im Stapel lehnt den ganzen Stapel ab - "
            "ohne dass der gute vorher geschrieben wurde",
-           f"HTTP {halb.status_code}, {vorher} -> {nachher} Punkte")
-    leer = client.post(f"/api/live/{puffer}/punkte", json={"punkte": []})
-    pruefe(leer.status_code == 422, "ein leerer Stapel ist ein Fehler",
-           f"HTTP {leer.status_code}")
+           f"HTTP {half.status_code}, {earlier} -> {after} Punkte")
+    empty = client.post(f"/api/live/{buffer}/punkte", json={"points": []})
+    verify(empty.status_code == 422, "ein leerer Stapel ist ein Fehler",
+           f"HTTP {empty.status_code}")
     # Im Stand fragt jolt das Auto nichts, misst aber weiter die 12-V-Spannung
     # und schickt sie mit: ein Punkt, dessen Rohwerte nur `batt_v` enthalten.
-    nur_spannung = client.post(f"/api/live/{puffer}/punkt", json={
-        "lat": punkte_planmaessig[6]["lat"], "lon": punkte_planmaessig[6]["lon"],
-        "rohwerte": {"batt_v": 13.9}})
-    pruefe(nur_spannung.status_code == 200
-           and nur_spannung.json().get("typ") == "zustand",
+    only_voltage = client.post(f"/api/live/{buffer}/punkt", json={
+        "lat": points_scheduled[6]["lat"], "lon": points_scheduled[6]["lon"],
+        "raw_values": {"batt_v": 13.9}})
+    verify(only_voltage.status_code == 200
+           and only_voltage.json().get("kind") == "zustand",
            "ein Punkt ohne Fahrzeugabfrage, nur mit der 12-V-Spannung, wird "
            "angenommen - ohne Zähler und ohne Ladestand",
-           f"HTTP {nur_spannung.status_code}: {nur_spannung.text[:120]}")
-    client.post(f"/api/live/{puffer}/ende")
-    zu = client.post(f"/api/live/{puffer}/punkte", json={"punkte": [
+           f"HTTP {only_voltage.status_code}: {only_voltage.text[:120]}")
+    client.post(f"/api/live/{buffer}/ende")
+    to = client.post(f"/api/live/{buffer}/punkte", json={"points": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0}]})
-    pruefe(zu.status_code == 409,
-           "in eine beendete Sitzung geht auch kein Stapel", f"HTTP {zu.status_code}")
+    verify(to.status_code == 409,
+           "in eine beendete Sitzung geht auch kein Stapel", f"HTTP {to.status_code}")
 
     print("\nLogger im Auto meldet sich über das Fahrzeug")
     # Ein Gerät, das fest im Auto sitzt, kann die Sitzungs-ID nicht kennen:
     # Sie entsteht beim Losfahren in der App und wechselt mit jeder Fahrt.
     # Es weist sich deshalb mit dem Logger-Token des Fahrzeugs aus.
-    fahrzeug_id = fahrzeuge[0]["id"]
-    client.post(f"/api/live/{sitzung_id}/ende")      # erst mal Ruhe schaffen
+    vehicle_id = vehicles[0]["id"]
+    client.post(f"/api/live/{session_id}/ende")      # erst mal Ruhe schaffen
 
-    falsch = client.post("/api/live/melden", json={
+    wrong = client.post("/api/live/melden", json={
         "token": "gibtesnicht", "lat": 53.5, "lon": 10.0, "soc": 50.0})
-    pruefe(falsch.status_code == 401,
+    verify(wrong.status_code == 401,
            "ein unbekanntes Token wird abgewiesen",
-           f"HTTP {falsch.status_code}")
+           f"HTTP {wrong.status_code}")
 
     token = client.post(
-        f"/api/fahrzeuge/{fahrzeug_id}/logger-token").json()["logger_token"]
-    pruefe(len(token) >= 32, "ein Logger-Token lässt sich erzeugen",
+        f"/api/fahrzeuge/{vehicle_id}/logger-token").json()["logger_token"]
+    verify(len(token) >= 32, "ein Logger-Token lässt sich erzeugen",
            f"{len(token)} Zeichen")
-    liste = client.get("/api/fahrzeuge").json()[0]
-    pruefe(liste.get("logger_aktiv") is True,
+    lst = client.get("/api/fahrzeuge").json()[0]
+    verify(lst.get("logger_active") is True,
            "das Fahrzeug meldet, dass ein Logger eingerichtet ist")
-    pruefe("logger_token" not in liste,
+    verify("logger_token" not in lst,
            "das Token selbst steht in keiner Listenantwort - es wird genau "
-           "einmal gezeigt", str(list(liste.keys())))
+           "einmal gezeigt", str(list(lst.keys())))
 
     # Das Auto steht vor der Tür und der Logger sendet trotzdem. Das ist kein
     # Fehler: Ein unbeaufsichtigtes Gerät, das Fehlerantworten bekommt, fängt
     # an zu protokollieren oder schaltet sich ab.
-    ruhend = client.post("/api/live/melden", json={
+    idle = client.post("/api/live/melden", json={
         "token": token, "lat": 53.5, "lon": 10.0, "soc": 50.0})
-    pruefe(ruhend.status_code == 200
-           and ruhend.json().get("aufgenommen") is False,
+    verify(idle.status_code == 200
+           and idle.json().get("recorded") is False,
            "ohne laufende Fahrt wird nichts aufgenommen - aber es ist kein "
-           "Fehler", f"HTTP {ruhend.status_code}: {ruhend.text[:120]}")
+           "Fehler", f"HTTP {idle.status_code}: {idle.text[:120]}")
 
-    sitzung3 = client.post(f"/api/live/start/{fahrt_id}").json()["sitzung_id"]
-    messpunkt = punkte_planmaessig[3]
-    gemeldet = client.post("/api/live/melden", json={
-        "token": token, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
-        "soc": messpunkt["soc"]})
-    pruefe(gemeldet.status_code == 200
-           and gemeldet.json().get("aufgenommen") is True,
+    sitzung3 = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
+    sample = points_scheduled[3]
+    reported = client.post("/api/live/melden", json={
+        "token": token, "lat": sample["lat"], "lon": sample["lon"],
+        "soc": sample["soc"]})
+    verify(reported.status_code == 200
+           and reported.json().get("recorded") is True,
            "sobald eine Fahrt läuft, findet der Logger sie von allein",
-           f"HTTP {gemeldet.status_code}: {gemeldet.text[:120]}")
-    pruefe(gemeldet.json().get("sitzung_id") == sitzung3,
-           "und zwar die richtige", f"{gemeldet.json().get('sitzung_id')} "
+           f"HTTP {reported.status_code}: {reported.text[:120]}")
+    verify(reported.json().get("session_id") == sitzung3,
+           "und zwar die richtige", f"{reported.json().get('session_id')} "
            f"statt {sitzung3}")
-    pruefe(client.get(f"/api/live/{sitzung3}").json()["punkte"] == 1,
+    verify(client.get(f"/api/live/{sitzung3}").json()["points"] == 1,
            "der Messpunkt liegt in dieser Sitzung")
 
     # Fremdes Format: dieselbe Meldung, in der Sprache von Iternio/ABRP. Das
     # ist der Weg, auf dem die OBD2-Daten hereinkommen werden - übersetzt
-    # wird in live/quellen/, geprüft im Einzelnen von check_quellen.py.
-    fremd = client.post("/api/live/melden", json={
+    # wird in live/quellen/, geprüft im Einzelnen von check_sources.py.
+    foreign = client.post("/api/live/melden", json={
         "token": token, "format": "abrp",
-        "tlm": {"utc": 1787654321, "soc": 44.0, "lat": messpunkt["lat"],
-                "lon": messpunkt["lon"], "speed": 98.0, "ext_temp": 19.0,
+        "tlm": {"utc": 1787654321, "soc": 44.0, "lat": sample["lat"],
+                "lon": sample["lon"], "speed": 98.0, "ext_temp": 19.0,
                 "is_charging": 0}})
-    pruefe(fremd.status_code == 200
-           and fremd.json().get("aufgenommen") is True,
+    verify(foreign.status_code == 200
+           and foreign.json().get("recorded") is True,
            "eine Meldung im ABRP-Format wird angenommen",
-           f"HTTP {fremd.status_code}: {fremd.text[:140]}")
-    pruefe(fremd.json().get("ist_soc") == 44.0,
+           f"HTTP {foreign.status_code}: {foreign.text[:140]}")
+    verify(foreign.json().get("actual_soc") == 44.0,
            "und der Ladestand kommt übersetzt an",
-           str(fremd.json().get("ist_soc")))
-    pruefe(client.get(f"/api/live/{sitzung3}").json()["punkte"] == 2,
+           str(foreign.json().get("actual_soc")))
+    verify(client.get(f"/api/live/{sitzung3}").json()["points"] == 2,
            "der übersetzte Punkt liegt in derselben Sitzung")
 
-    kaputt = client.post("/api/live/melden", json={
+    broken = client.post("/api/live/melden", json={
         "token": token, "format": "abrp",
         "tlm": {"utc": 1787654321, "lat": 48.0, "lon": 11.0}})
-    pruefe(kaputt.status_code == 400,
+    verify(broken.status_code == 400,
            "eine Meldung ohne Ladestand wird abgelehnt",
-           f"HTTP {kaputt.status_code}")
-    pruefe("soc" in kaputt.text.lower(),
-           "und der Grund nennt das fehlende Feld", kaputt.text[:140])
+           f"HTTP {broken.status_code}")
+    verify("soc" in broken.text.lower(),
+           "und der Grund nennt das fehlende Feld", broken.text[:140])
 
-    unbekannt = client.post("/api/live/melden", json={
+    unknown = client.post("/api/live/melden", json={
         "token": token, "format": "torque", "lat": 48.0, "lon": 11.0,
         "soc": 50.0})
-    pruefe(unbekannt.status_code == 400,
+    verify(unknown.status_code == 400,
            "ein unbekanntes Format wird abgelehnt",
-           f"HTTP {unbekannt.status_code}")
+           f"HTTP {unknown.status_code}")
 
     # Ein neues Token entwertet das alte - sonst wäre "erneuern" wertlos.
-    neues = client.post(
-        f"/api/fahrzeuge/{fahrzeug_id}/logger-token").json()["logger_token"]
-    pruefe(neues != token, "ein erneuertes Token ist ein anderes")
-    alt = client.post("/api/live/melden", json={
-        "token": token, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
-        "soc": messpunkt["soc"]})
-    pruefe(alt.status_code == 401, "und das alte gilt nicht mehr",
-           f"HTTP {alt.status_code}")
+    newOne = client.post(
+        f"/api/fahrzeuge/{vehicle_id}/logger-token").json()["logger_token"]
+    verify(newOne != token, "ein erneuertes Token ist ein anderes")
+    old = client.post("/api/live/melden", json={
+        "token": token, "lat": sample["lat"], "lon": sample["lon"],
+        "soc": sample["soc"]})
+    verify(old.status_code == 401, "und das alte gilt nicht mehr",
+           f"HTTP {old.status_code}")
 
-    client.delete(f"/api/fahrzeuge/{fahrzeug_id}/logger-token")
-    pruefe(client.get("/api/fahrzeuge").json()[0].get("logger_aktiv") is False,
+    client.delete(f"/api/fahrzeuge/{vehicle_id}/logger-token")
+    verify(client.get("/api/fahrzeuge").json()[0].get("logger_active") is False,
            "der Logger lässt sich wieder abmelden")
-    entwertet = client.post("/api/live/melden", json={
-        "token": neues, "lat": messpunkt["lat"], "lon": messpunkt["lon"],
-        "soc": messpunkt["soc"]})
-    pruefe(entwertet.status_code == 401,
+    invalidated = client.post("/api/live/melden", json={
+        "token": newOne, "lat": sample["lat"], "lon": sample["lon"],
+        "soc": sample["soc"]})
+    verify(invalidated.status_code == 401,
            "danach wird von ihm nichts mehr angenommen",
-           f"HTTP {entwertet.status_code}")
+           f"HTTP {invalidated.status_code}")
     client.post(f"/api/live/{sitzung3}/ende")
 
     print("\nOberfläche wird ausgeliefert")
-    seite = client.get("/")
-    pruefe(seite.status_code == 200 and b"jolt" in seite.content.lower(),
+    page = client.get("/")
+    verify(page.status_code == 200 and b"jolt" in page.content.lower(),
            "index.html kommt zurück")
-    pruefe(client.get("/manifest.json").status_code == 200, "manifest.json auch")
+    verify(client.get("/manifest.json").status_code == 200, "manifest.json auch")
 
     # Der Fehler, der viermal zugeschlagen hat: index.html wird nie
     # zwischengespeichert, die Dateien unter /static aber schon - Cloudflare
     # ersetzt dort das no-cache des Ursprungs durch max-age=14400. Der
     # Browser holt frisches HTML und fragt fürs JavaScript gar nicht erst
     # nach. Vier Stunden lang neue Oberfläche mit alter Logik.
-    inhalt = seite.content
-    pruefe(b"/static/app.js?v=" in inhalt and b"/static/fahrten.js?v=" in inhalt,
+    contents = page.content
+    verify(b"/static/app.js?v=" in contents and b"/static/trips.js?v=" in contents,
            "die Skriptverweise in index.html tragen eine Version - sonst "
            "zieht frisches HTML altes JavaScript nach",
-           str([z for z in inhalt.split() if b"app.js" in z][:2]))
-    pruefe(b'"/static/core.js"' not in inhalt,
+           str([z for z in contents.split() if b"app.js" in z][:2]))
+    verify(b'"/static/core.js"' not in contents,
            "und zwar alle, nicht nur einige",
            "core.js steht ohne Version im HTML")
     # Der Fall, der bei einem neuen Skript immer wieder droht: Es steht im HTML,
     # aber nicht in INDEX_DATEIEN (backend/app/main.py) - dann bleibt es bis zu
     # vier Stunden im Cache haengen. Deshalb geprueft wird *jeder* Verweis.
     import re as _re
-    ohne_version = _re.findall(rb'src="(/static/[^"?]+\.js)"', inhalt)
-    pruefe(not ohne_version,
+    without_version = _re.findall(rb'src="(/static/[^"?]+\.js)"', contents)
+    verify(not without_version,
            "kein einziger Skriptverweis in index.html ohne Version - ein neues "
-           "Skript gehoert in INDEX_DATEIEN", str(ohne_version))
+           "Skript gehoert in INDEX_FILES", str(without_version))
 
     # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
     # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
     # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
     # wirkt nicht" und "die Änderung ist noch gar nicht da".
     obd = client.get("/obd")
-    pruefe(obd.status_code == 200 and b"aufzeichnen" in obd.content.lower(),
+    verify(obd.status_code == 200 and b"aufzeichnen" in obd.content.lower(),
            "die Aufzeichnungsseite wird unter /obd ausgeliefert",
            f"HTTP {obd.status_code}")
-    pruefe("no-cache" in obd.headers.get("Cache-Control", ""),
+    verify("no-cache" in obd.headers.get("Cache-Control", ""),
            "und zwar ohne Cache - sonst hängt das Telefon auf einer alten "
            "Fassung fest", obd.headers.get("Cache-Control", "(keiner)"))
-    pruefe(b"/static/obd.js?v=" in obd.content
+    verify(b"/static/obd.js?v=" in obd.content
            and b"/static/obd.css?v=" in obd.content,
            "die Verweise auf Skript und Stylesheet tragen eine Version - "
            "sonst zieht eine frische Seite altes JavaScript nach",
@@ -1255,65 +1255,65 @@ def main() -> int:
     # und die Adresszeile - und damit etwas, das man sich für "nächstes Mal"
     # aufhebt.
     obd_manifest = client.get("/manifest-obd.json")
-    pruefe(obd_manifest.status_code == 200
+    verify(obd_manifest.status_code == 200
            and obd_manifest.json().get("start_url") == "/obd",
            "und hat ein eigenes Manifest, das direkt auf /obd startet",
            f"HTTP {obd_manifest.status_code}")
-    pruefe(b"/manifest-obd.json" in obd.content,
+    verify(b"/manifest-obd.json" in obd.content,
            "auf das die Seite auch verweist - ein Manifest, das niemand "
            "verlinkt, legt kein Symbol an")
 
-    pruefe(client.get("/static/karte.js").status_code == 200, "und die Skripte")
+    verify(client.get("/static/map.js").status_code == 200, "und die Skripte")
 
     # Die Einstellungen: ein Reiter, ein Abschnitt, ein Skript - und im
     # Service-Worker-Gerüst, sonst fehlt die Ansicht bei schlechtem Empfang.
-    seite_text = client.get("/").text
+    page_text = client.get("/").text
     sw_text = client.get("/sw.js").text
-    pruefe('data-ansicht="einstellungen"' in seite_text
-           and 'id="ansicht-einstellungen"' in seite_text
-           and "/static/einstellungen.js" in seite_text,
+    verify('data-ansicht="einstellungen"' in page_text
+           and 'id="ansicht-einstellungen"' in page_text
+           and "/static/settings.js" in page_text,
            "die Einstellungen haben Reiter, Abschnitt und Skript")
-    pruefe("/static/kacheln.js" in seite_text and "/static/kacheln.js" in sw_text
-           and client.get("/static/kacheln.js").status_code == 200,
+    verify("/static/tiles.js" in page_text and "/static/tiles.js" in sw_text
+           and client.get("/static/tiles.js").status_code == 200,
            "die gezeichneten CarPlay-Kacheln werden ausgeliefert und stehen im Gerüst")
-    pruefe(client.get("/static/einstellungen.js").status_code == 200
-           and "/static/einstellungen.js" in sw_text,
+    verify(client.get("/static/settings.js").status_code == 200
+           and "/static/settings.js" in sw_text,
            "das Skript wird ausgeliefert und steht im Gerüst des Service Workers")
 
     # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
     # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste steht als Tabelle
-    # in messwerte.js, der Interpreter in obd-kern.js, und die Oberflaeche
+    # in readings.js, der Interpreter in obd-core.js, und die Oberflaeche
     # bezieht sie ueber `FELDER` - sonst taucht eine neue Datenkennung dort
     # nie auf. Kommentare fallen vorher weg, damit ein Wort darin nicht als
     # Feld zaehlt.
-    kern = open(os.path.join(FRONTEND, "obd-kern.js"), encoding="utf-8").read()
-    tabelle = open(os.path.join(FRONTEND, "messwerte.js"),
+    core = open(os.path.join(FRONTEND, "obd-core.js"), encoding="utf-8").read()
+    table = open(os.path.join(FRONTEND, "readings.js"),
                    encoding="utf-8").read()
-    tabelle = re.sub(r"/\*.*?\*/", "", tabelle, flags=re.S)
-    tabelle = re.sub(r"^\s*//.*$", "", tabelle, flags=re.M)
+    table = re.sub(r"/\*.*?\*/", "", table, flags=re.S)
+    table = re.sub(r"^\s*//.*$", "", table, flags=re.M)
     # Hauptwerte (4 Leerzeichen) und die Werte aus `auch` (8) gleichermassen.
-    eintraege = re.findall(
-        r'\{ name: "([a-z_]+)",(.*?)(?=\{ name:|\n  \],\n\};)', tabelle, re.S)
+    entries = re.findall(
+        r'\{ name: "([a-z_]+)",(.*?)(?=\{ name:|\n  \],\n\};)', table, re.S)
 
-    def eintrag(name: str) -> str:
+    def entry(name: str) -> str:
         """Der Tabellentext eines Hauptwerts, samt seiner `auch`-Werte."""
-        treffer = re.search(r'\n    \{ name: "%s",(.*?)(?=\n    \{ name:|\n  \],\n\};)'
-                            % name, tabelle, re.S)
-        return treffer.group(1) if treffer else ""
+        hit = re.search(r'\n    \{ name: "%s",(.*?)(?=\n    \{ name:|\n  \],\n\};)'
+                            % name, table, re.S)
+        return hit.group(1) if hit else ""
 
-    ohne = [n for n, rest in eintraege if "titel:" not in rest]
-    pruefe(eintraege and not ohne,
-           f"alle {len(eintraege)} ausgelesenen Messwerte tragen eine "
-           f"Beschriftung fürs Dashboard", str(ohne))
-    fehlende_einheit = [n for n, rest in eintraege
-                        if "einheit:" not in rest]
-    pruefe(not fehlende_einheit,
+    without = [n for n, rest in entries if "title:" not in rest]
+    verify(entries and not without,
+           f"alle {len(entries)} ausgelesenen Messwerte tragen eine "
+           f"Beschriftung fürs Dashboard", str(without))
+    missing_unit = [n for n, rest in entries
+                        if "unit:" not in rest]
+    verify(not missing_unit,
            "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
-           "dastehen", str(fehlende_einheit))
-    pruefe("FELDER: MESSWERTE.flatMap" in kern,
+           "dastehen", str(missing_unit))
+    verify("FIELDS: READINGS.flatMap" in core,
            "die Liste wird exportiert statt in der Oberfläche wiederholt")
     live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
-    pruefe("joltObd.FELDER" in live,
+    verify("joltObd.FIELDS" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
     # Das Aufzeichnen braucht eine **eigene** Fahrzeugwahl. Vorher griff es
@@ -1322,17 +1322,17 @@ def main() -> int:
     # "Allgemeine E-Auto". Zwei echte Testfahrten sind so dem falschen Auto
     # zugeschrieben worden.
     html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
-    fahrten_js = open(os.path.join(FRONTEND, "fahrten.js"),
+    trips_js = open(os.path.join(FRONTEND, "trips.js"),
                       encoding="utf-8").read()
-    pruefe('id="aufz-fahrzeug"' in html,
+    verify('id="aufz-fahrzeug"' in html,
            "der Aufzeichnungs-Abschnitt hat eine eigene Fahrzeugwahl")
-    pruefe("aufz-fahrzeug" in fahrten_js and "fahrzeug-wahl" not in fahrten_js,
+    verify("aufz-fahrzeug" in trips_js and "fahrzeug-wahl" not in trips_js,
            "und das Aufzeichnen nimmt sie, nicht die aus der Planen-Ansicht",
-           "fahrten.js greift noch auf fahrzeug-wahl zu")
-    pruefe("K.zustand.fahrzeuge || [])[0]" not in fahrten_js,
+           "trips.js greift noch auf fahrzeug-wahl zu")
+    verify("K.state.vehicles || [])[0]" not in trips_js,
            "ohne Rückfall auf das erste Fahrzeug der Liste - lieber gar "
            "nicht aufzeichnen als dem falschen Auto")
-    pruefe("aufz-fahrzeug" in open(os.path.join(FRONTEND, "fahrzeug.js"),
+    verify("aufz-fahrzeug" in open(os.path.join(FRONTEND, "vehicle.js"),
                                    encoding="utf-8").read(),
            "und sie wird mit den Fahrzeugen gefüllt")
 
@@ -1340,56 +1340,56 @@ def main() -> int:
     # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
     # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
     # wird im finally zurueckgenommen.
-    namen = re.findall(r'\n    \{ name: "([a-z_]+)"', tabelle)
-    klima = [n for n in ("aussentemp_c", "innentemp_c") if n in namen]
-    pruefe(klima and all(namen.index(n) > namen.index("soc_roh")
-                         for n in klima),
+    names = re.findall(r'\n    \{ name: "([a-z_]+)"', table)
+    climate = [n for n in ("outside_temp_c", "inside_temp_c") if n in names]
+    verify(climate and all(names.index(n) > names.index("soc_raw")
+                         for n in climate),
            "die Messwerte mit Protokollwechsel stehen hinter dem Ladestand - "
            "ein misslungener Wechsel darf die Pflichtwerte nicht mitreissen",
-           str(namen))
-    pruefe(namen and namen[-1] in ("aussentemp_c", "innentemp_c"),
-           "und ganz am Ende der Runde", str(namen[-2:]))
-    pruefe("} finally {" in kern and 'befehl("ATSP7")' in kern,
+           str(names))
+    verify(names and names[-1] in ("outside_temp_c", "inside_temp_c"),
+           "und ganz am Ende der Runde", str(names[-2:]))
+    verify("} finally {" in core and 'command("ATSP7")' in core,
            "das Protokoll wird im finally zurückgesetzt - eine Sitzung, die "
            "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
     # Der Wiederaufbau darf nicht aufgeben, solange die Fahrt laeuft. Mit
     # der alten Obergrenze von sechs Versuchen war nach zweieinhalb Minuten
     # Schluss - fuenf Minuten mit der Seite im Hintergrund haben auf einer
     # echten Fahrt zwanzig Kilometer ohne einen Fahrzeugwert gekostet.
-    pruefe("versuch >= grenze" not in kern,
+    verify("attempt >= bound" not in core,
            "der Wiederaufbau gibt nicht nach sechs Versuchen auf - `weiter` "
            "beendet ihn, wenn die Fahrt endet")
-    pruefe("WIEDER_HOECHSTABSTAND_MS" in kern,
+    verify("AGAIN_MAX_DISTANCE_MS" in core,
            "stattdessen ist nur der Abstand gedeckelt")
     # Was eine **lange** Fahrt anders macht.
-    kern_js = open(os.path.join(FRONTEND, "core.js"), encoding="utf-8").read()
-    pruefe("sitzungMerken" in kern_js and "gemerkteSitzung" in kern_js,
+    core_js = open(os.path.join(FRONTEND, "core.js"), encoding="utf-8").read()
+    verify("sessionRemember" in core_js and "rememberedSession" in core_js,
            "die laufende Sitzung überlebt ein Neuladen - sonst beginnt jeder "
            "versehentliche Wisch eine neue")
-    pruefe("sitzungFortsetzen" in live,
+    verify("resumeSession" in live,
            "und die Live-Ansicht nimmt sie beim Start wieder auf")
-    pruefe("donglePause" in live and "function trennen" in kern,
+    verify("donglePause" in live and "function detach" in core,
            "der Dongle lässt sich trennen und pausieren - ein verriegeltes "
            "Auto, das weiter über CAN gefragt wird, löst die Alarmanlage aus")
-    pruefe('id="dongle-an"' in html,
+    verify('id="dongle-an"' in html,
            "und er lässt sich auch auf einer geplanten Fahrt verbinden, "
            "nicht nur beim Aufzeichnen")
 
-    pruefe("BREITEN_MIN" in live and "BALKEN_HOECHSTENS" in live,
+    verify("WIDTHS_MIN" in live and "BAR_AT_MOST" in live,
            "die Balkenbreite wächst mit der Fahrt - sechs Stunden wären "
            "sonst 360 Balken auf 340 Pixeln")
-    pruefe("LADEN_STAND_KWH" in live,
+    verify("CHARGING_AS_OF_KWH" in live,
            "und der Verbrauch der Fahrt wird abschnittsweise summiert, "
            "damit ein Ladestopp ihn nicht auf null zieht")
-    pruefe("verbrauchsspur.length > 20000" in live,
+    verify("consumption_track.length > 20000" in live,
            "die Messreihe reicht für mehr als zehn Stunden")
 
-    pruefe("stilleGemeldet" in live and "alter > 180" in live,
+    verify("quietReported" in live and "age > 180" in live,
            "und das Dashboard sagt einmal deutlich, wenn nichts mehr aus dem "
            "Auto kommt - eine Aufzeichnung ohne Ladestand taugt nicht zum "
            "Lernen, und das erfährt man sonst erst hinterher")
 
-    pruefe("wechselGescheitert" in kern,
+    verify("changeFailed" in core,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
 
     # Ohne Flusskontrolle scheitert jede Antwort, die nicht in einen CAN-
@@ -1397,28 +1397,28 @@ def main() -> int:
     # Flow-Control-Paket schickt. Das WiCAN-Fahrzeugprofil setzt die drei
     # Befehle vor jeder Abfrage; jolt setzte sie gar nicht, und genau
     # deshalb kam der Batteriestrom in keiner einzigen Runde an.
-    for befehl in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
-        pruefe(befehl in kern, f"die Flusskontrolle setzt {befehl}")
-    pruefe(kern.count("await flusskontrolle(ziel)") >= 2,
+    for command in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
+        verify(command in core, f"die Flusskontrolle setzt {command}")
+    verify(core.count("await flusskontrolle(destination)") >= 2,
            "und zwar auf beiden Wegen - mit und ohne Protokollwechsel")
-    pruefe(all(f'fcsh: "{h}"' in tabelle
+    verify(all(f'fcsh: "{h}"' in table
                for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
            "jede Zieladresse bringt ihren eigenen Flow-Control-Kopf mit")
 
-    pruefe("function mehrrahmen" in kern,
+    verify("function multiframe" in core,
            "lange Antworten werden aus mehreren CAN-Rahmen zusammengesetzt - "
            "ohne das landen Köpfe und Steuerbytes als Nutzdaten im Ergebnis")
-    pruefe("hex.slice(3) : hex.slice(8)" in kern,
+    verify("hex.slice(3) : hex.slice(8)" in core,
            "und zwar für beide Rahmenbreiten: acht Kopfzeichen bei 29 Bit, "
            "drei bei 11 - der Klimakompressor sitzt auf der 11-Bit-Seite")
-    pruefe("min: 10, max: 200" in eintrag("akku_kwh"),
+    verify("min: 10, max: 200" in entry("battery_kwh"),
            "die Akkukapazität wird gegen eine Plausibilitätsgrenze gehalten - "
            "die Umrechnung ist nicht belegt, also lieber leer als erfunden")
-    pruefe("K.zahl(z.ist_soc, 1)" in live,
+    verify("K.num(z.actual_soc, 1)" in live,
            "der Ladestand steht mit einer Nachkommastelle da - der Dongle "
            "liefert ihn in Schritten von 0,4 pp, auf ganze Prozent gerundet "
            "steht die Zahl minutenlang still")
-    pruefe("verbrauchZeichnen" in live and "verbrauchsabschnitte" in live,
+    verify("drawConsumption" in live and "verbrauchsabschnitte" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
     # Die Plausibilitaetspruefung im Stand. Der Kreuzvergleich ist der
     # schaerfere Teil: Entladezaehler geteilt durch Kilometerstand muss
@@ -1426,96 +1426,96 @@ def main() -> int:
     # Byte-Lagen auf einmal - ohne eine einzige gefahrene Minute.
     obd_js = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     obd_html = open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8").read()
-    pruefe('id="pruefen"' in obd_html and "werteRuefen" in obd_js,
+    verify('id="pruefen"' in obd_html and "valuesCall" in obd_js,
            "die Diagnoseseite kann alle Werte im Stand prüfen")
-    pruefe("BEREICHE" in obd_js and "Kreuzvergleich" in obd_js,
+    verify("RANGES" in obd_js and "Kreuzvergleich" in obd_js,
            "gegen Bereiche und über einen Kreuzvergleich - der prüft zwei "
            "Formeln auf einmal, ohne dass gefahren werden muss")
-    pruefe('id="klima-a"' in obd_html and 'id="klima-b"' in obd_html
-           and "klimaZeigen" in obd_js,
+    verify('id="klima-a"' in obd_html and 'id="klima-b"' in obd_html
+           and "showClimate" in obd_js,
            "und der Klimakompressor über eine Differenzmessung statt über "
            "eine geratene Formel")
-    pruefe("nutzbytes," in kern,
+    verify("payload_bytes," in core,
            "dafür gibt der Baustein die rohen Nutzbytes heraus")
 
-    pruefe("ab: 5, laenge: 2" in eintrag("kompressor_w"),
+    verify("downhill: 5, len_total: 2" in entry("compressor_w"),
            "die Kompressorleistung steht drin - aus einer Differenzmessung "
            "abgeleitet, weil keine der drei Quellen eine Formel nennt")
-    pruefe("i += 2" in obd_js,
+    verify("i += 2" in obd_js,
            "die Differenzanzeige richtet die Byte-Paare aus, statt ein "
            "Fenster byteweise zu schieben - eine Mehrbyte-Zahl fängt nicht "
            "an jedem Byte an")
 
-    pruefe("vorzeichen: true" in eintrag("entladen_kwh")
-           and "Math.pow(2, laenge * 8 - 1)" in kern,
+    verify("sign: true" in entry("discharge_kwh")
+           and "Math.pow(2, len_total * 8 - 1)" in core,
            "der Entladezähler wird vorzeichenbehaftet gelesen - unsigned "
            "ergab am Fahrzeug 482 961 statt 17 439 kWh")
-    pruefe("entladen_kwh: [100, 100000" in obd_js,
+    verify("discharge_kwh: [100, 100000" in obd_js,
            "und seine Plausibilitätsschranke fängt genau diesen Fehler - "
            "die alte [1, 999999] liess ihn durch")
-    pruefe("if (drin) gut += 1; else schlecht += 1;" in obd_js,
+    verify("if (inside) good += 1; else bad += 1;" in obd_js,
            "der Kreuzvergleich zählt in die Zusammenfassung - rot in der "
            "Tabelle und \"0 auffällig\" darüber ist schlimmer als nichts")
 
-    pruefe("teiler: 8583.07" in eintrag("entladen_kwh")
-           and "teiler: 8583.07" in eintrag("entladen_kwh").split("auch:")[-1],
+    verify("divider: 8583.07" in entry("discharge_kwh")
+           and "divider: 8583.07" in entry("discharge_kwh").split("auch:")[-1],
            "die Energiezähler des Fahrzeugs werden gelesen - ihre Differenz "
            "ist die verbrauchte Energie, 0,117 Wh statt 339 Wh Auflösung")
-    pruefe('name: "geladen_kwh"' in eintrag("entladen_kwh")
-           and "Object.assign(roh, wert.weitere)" in kern,
+    verify('name: "charged_kwh"' in entry("discharge_kwh")
+           and "Object.assign(raw, val.further)" in core,
            "und Lade- wie Entladezähler kommen aus **einer** Abfrage - eine "
            "Mehrrahmen-Antwort zweimal zu holen kostet Zeit")
-    pruefe("...(m.auch || []).map" in kern,
+    verify("...(m.also || []).map" in core,
            "auch der mitgelieferte Wert steht in der Feldliste, sonst zeigt "
            "die Tabelle weniger, als gemessen wird")
-    pruefe("ABSCHNITT_MIT_ZAEHLER_S = 60" in live
-           and "ABSCHNITT_AUS_SOC_S = 300" in live,
+    verify("SECTION_WITH_COUNTER_S = 60" in live
+           and "SECTION_FROM_SOC_S = 300" in live,
            "die Balkenbreite folgt der Quelle: eine Minute mit Zähler, "
            "fünf ohne - nicht dem Wunsch")
-    pruefe("letzt.netto - erst.netto" in live,
+    verify("final.net - at_first.net" in live,
            "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
-    pruefe("letzt.gps - erst.gps" in live,
+    verify("final.gps - at_first.gps" in live,
            "die Strecke je Balken kommt dagegen aus dem GPS - der "
            "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
            "sind rund 1,2 km")
     # Die Rohwerte gehoeren hinter eine Klappe: siebzehn Zeilen mitten im
     # Fahrbild sind Laerm. Und die Kacheln, die man liest, gehoeren ueber
     # die Diagramme, nicht darunter.
-    pruefe('<details id="live-roh"' in html,
+    verify('<details id="live-roh"' in html,
            "die Rohwerte stehen hinter einer Klappe, nicht im Fahrbild")
-    pruefe(html.index('id="live-werte"') < html.index('id="live-verlauf"'),
+    verify(html.index('id="live-werte"') < html.index('id="live-verlauf"'),
            "und die Kacheln über den Diagrammen - was man im Fahren liest, "
            "steht oben")
-    pruefe('id="live-auto-stand"' in html.split("<summary>")[1].split("</summary>")[0],
+    verify('id="live-auto-stand"' in html.split("<summary>")[1].split("</summary>")[0],
            "das Alter steht in der zugeklappten Zeile - man soll ohne "
            "Aufklappen sehen, ob es lebt")
 
-    pruefe('fillText("kWh/100"' in live,
+    verify('fillText("kWh/100"' in live,
            "der Balkenplot hat eine beschriftete Achse - ohne sie sieht man "
            "Unterschiede, aber keine Grössenordnung")
     html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
-    pruefe("knopf.disabled = true" in html_obd and "läuft …" in html_obd,
+    verify("btn.disabled = true" in html_obd and "läuft …" in html_obd,
            "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "
            "sonst fällt ein zweiter Start dem ersten in den Rücken")
 
-    pruefe("laufenderVerbrauch" in live and "VERBRAUCH_AB_KM" in live,
+    verify("runningConsumption" in live and "CONSUMPTION_FROM_KM" in live,
            "der Verbrauch der laufenden Fahrt wird aus Ladestand und "
            "Kilometerstand gerechnet, erst ab einer Mindeststrecke")
-    pruefe("aufzFahrzeug" in live,
+    verify("recVehicle" in live,
            "und kennt dafür das Fahrzeug der Aufzeichnung - ohne Akkugrösse "
            "wird aus einem Ladestand keine Kilowattstunde")
 
-    pruefe("_leer" in kern and "roh._leer = roh._leer" in kern,
+    verify("_empty" in core and "raw._empty = raw._empty" in core,
            "ein Messwert, der antwortet aber nichts liefert, wird vermerkt - "
            "vorher fiel er stumm durch, und vier von dreizehn Werten fehlten "
            "eine ganze Fahrt lang ohne Spur")
-    pruefe("werteStand" in live and "nieGekommen" in live,
+    verify("valuesAsOf" in live and "neverCome" in live,
            "das Dashboard hält den letzten bekannten Wert je Messgrösse fest, "
            "statt die Zeile leer zu lassen")
-    pruefe("alterText" in live and 'class="wann"' in live,
+    verify("ageText" in live and 'class="wann"' in live,
            "und schreibt sein Alter daneben - ein alter Wert ist nützlich, "
            "solange man ihm ansieht, dass er alt ist")
-    pruefe("letzteRohwerteZeit" in live,
+    verify("latestRawValuesTime" in live,
            "das Dashboard zeigt, wie alt der letzte Satz aus dem Auto ist - "
            "eine eingefrorene Anzeige sieht sonst aus wie eine laufende")
 
@@ -1523,37 +1523,37 @@ def main() -> int:
     # Paket als /srv/app neben /srv/tools, lokal dagegen unter backend/app -
     # wer nur ein Layout kennt, scheitert im jeweils anderen mit
     # `ModuleNotFoundError: No module named 'app'`. Genau das war der Fall:
-    # `pruefen.py` hing auf `../backend` fest, und damit lief per
+    # `examine.py` hing auf `../backend` fest, und damit lief per
     # `docker exec` kein einziges Prüfskript - der Weg, für den `tools/`
     # überhaupt ins Image aufgenommen wurde.
-    werkzeuge = sorted(pfad for pfad in os.listdir(WERKZEUGE)
-                       if pfad.endswith(".py"))
-    ohne_beide = []
-    for name in werkzeuge:
-        quelle = open(os.path.join(WERKZEUGE, name), encoding="utf-8").read()
+    tools = sorted(fs_path for fs_path in os.listdir(TOOLS)
+                       if fs_path.endswith(".py"))
+    without_both = []
+    for name in tools:
+        source = open(os.path.join(TOOLS, name), encoding="utf-8").read()
         # Nur wer das Paket wirklich importiert, braucht den Suchpfad - das
         # blosse Wort "app" steht auch in Werkzeugen ohne Anwendung.
-        if not re.search(r"^\s*(from|import) app\b", quelle, re.M):
+        if not re.search(r"^\s*(from|import) app\b", source, re.M):
             continue
         # Entweder das Skript kennt beide Layouts selbst, oder es überlässt
         # das `pruefen.anwendung_bereitstellen`.
-        if re.search(r'os\.path\.join\(_?(?:HIER|hier|_hier), "\.\."\)', quelle) \
-                or "anwendung_bereitstellen" in quelle \
-                or name == "pruefen.py":
+        if re.search(r'os\.path\.join\(_?(?:HERE|here|_here), "\.\."\)', source) \
+                or "application_provide" in source \
+                or name == "examine.py":
             continue
-        ohne_beide.append(name)
-    pruefe(not ohne_beide,
+        without_both.append(name)
+    verify(not without_both,
            "jedes Werkzeug in tools/ findet das Paket in beiden Layouten - "
            "im Repo unter backend/app, im Image daneben als app",
-           str(ohne_beide))
-    pruefe('os.path.join(hier, "..")' in
-           open(os.path.join(WERKZEUGE, "pruefen.py"), encoding="utf-8").read(),
-           "und pruefen.py selbst auch - sonst läuft per docker exec kein "
+           str(without_both))
+    verify('os.path.join(here, "..")' in
+           open(os.path.join(TOOLS, "examine.py"), encoding="utf-8").read(),
+           "und examine.py selbst auch - sonst läuft per docker exec kein "
            "einziges Prüfskript")
-    pruefe("Content-Security-Policy" in seite.headers,
+    verify("Content-Security-Policy" in page.headers,
            "die Security-Header sitzen")
 
-    return pruefe.bilanz()
+    return verify.balance()
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 
-class RoutingFehler(RuntimeError):
+class RoutingError(RuntimeError):
     """Das Routing konnte keine Route liefern - mit einem Grund für den Nutzer."""
 
 
@@ -23,15 +23,15 @@ class RoutingFehler(RuntimeError):
 class Route:
     # [[lon, lat, hoehe_m], ...] - die Reihenfolge lon/lat ist die von GeoJSON,
     # und Abweichen davon wäre eine dauerhafte Fehlerquelle.
-    punkte: list = field(default_factory=list)
+    points: list = field(default_factory=list)
     # Geschwindigkeit in m/s je Teilstück; Länge len(punkte) - 1.
-    tempo_ms: list = field(default_factory=list)
-    strecke_m: float = 0.0
-    fahrzeit_s: float = 0.0
+    speed_ms: list = field(default_factory=list)
+    distance_m: float = 0.0
+    drive_time_s: float = 0.0
 
 
 @dataclass
-class Ort:
+class City:
     name: str
     lat: float
     lon: float
@@ -41,14 +41,14 @@ class Ort:
 # /api/route parallel abfragt: Zeit, Distanz, und das, was ORS ohne weitere
 # Angabe für die beste Abwägung hält. Verbrauchsoptimal ist bewusst keine
 # eigene Anfrage - das kann ORS nicht als Kantengewicht, siehe unten.
-PRAEFERENZEN = ("fastest", "shortest", "recommended")
+PREFERENCES = ("fastest", "shortest", "recommended")
 
 
 class RoutingProvider(Protocol):
-    def route(self, start: tuple[float, float], ziel: tuple[float, float],
-              zwischenstopps: list[tuple[float, float]] | None = None,
-              praeferenz: str = "recommended",
-              mautfrei: bool = False) -> Route:
+    def route(self, start: tuple[float, float], destination: tuple[float, float],
+              intermediate_stops: list[tuple[float, float]] | None = None,
+              preference: str = "recommended",
+              toll_free: bool = False) -> Route:
         """Route von Start nach Ziel. Koordinaten als (lat, lon).
 
         `mautfrei` meidet Mautstrassen. Fuer Frankreich ist das die einzige
@@ -67,7 +67,7 @@ class RoutingProvider(Protocol):
         """
         ...
 
-    def hoehen(self, punkte: list) -> list | None:
+    def elevations(self, points: list) -> list | None:
         """Höhen zu einer Liste [[lon, lat], ...] nachschlagen.
 
         Gebraucht für aufgezeichnete Fahrten: Dort steht die Strecke erst
@@ -84,7 +84,7 @@ class RoutingProvider(Protocol):
         """
         ...
 
-    def suchen(self, text: str, land: str = "") -> list[Ort]:
+    def seek(self, text: str, country: str = "") -> list[City]:
         """Ortsnamen zu Koordinaten auflösen.
 
         `land` (ISO-3166-Alpha-2, z.B. "DE") schränkt die Suche auf ein Land

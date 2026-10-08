@@ -29,9 +29,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pruefen import Pruefung, anwendung_bereitstellen  # noqa: E402
+from examine import Check, application_provide  # noqa: E402
 
-anwendung_bereitstellen("push")
+application_provide("push")
 
 import http_ece  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
@@ -44,11 +44,11 @@ from app import models, push  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 
-pruefe = Pruefung()
+verify = Check()
 
 
-def b64(rohdaten: bytes) -> str:
-    return base64.urlsafe_b64encode(rohdaten).rstrip(b"=").decode("ascii")
+def b64(raw_data: bytes) -> str:
+    return base64.urlsafe_b64encode(raw_data).rstrip(b"=").decode("ascii")
 
 
 class Browserabo:
@@ -60,255 +60,255 @@ class Browserabo:
 
     def __init__(self, endpoint: str = "https://push.example.org/abo-1"):
         self.endpoint = endpoint
-        self.privat = ec.generate_private_key(ec.SECP256R1())
+        self.private_ = ec.generate_private_key(ec.SECP256R1())
         self.auth = os.urandom(16)
-        self.p256dh = self.privat.public_key().public_bytes(
+        self.p256dh = self.private_.public_key().public_bytes(
             serialization.Encoding.X962,
             serialization.PublicFormat.UncompressedPoint)
 
-    def als_json(self) -> dict:
+    def as_json(self) -> dict:
         return {"endpoint": self.endpoint, "p256dh": b64(self.p256dh),
-                "auth": b64(self.auth), "geraet": "Prüf-Browser"}
+                "auth": b64(self.auth), "device": "Prüf-Browser"}
 
-    def entschluesseln(self, koerper: bytes) -> dict:
-        klar = http_ece.decrypt(koerper, private_key=self.privat,
+    def decipher(self, content: bytes) -> dict:
+        clear = http_ece.decrypt(content, private_key=self.private_,
                                 auth_secret=self.auth, version="aes128gcm")
-        return json.loads(klar.decode("utf-8"))
+        return json.loads(clear.decode("utf-8"))
 
 
 # ---------------------------------------------------------------------------
 
-def teil_schluessel():
+def part_key():
     print("\nVAPID-Schlüssel")
-    privat, oeffentlich = push.schluessel_erzeugen()
-    roh_oeffentlich = base64.urlsafe_b64decode(
-        oeffentlich + "=" * (-len(oeffentlich) % 4))
-    pruefe(len(roh_oeffentlich) == 65,
+    private_, publicly = push.generate_key()
+    raw_public_ = base64.urlsafe_b64decode(
+        publicly + "=" * (-len(publicly) % 4))
+    verify(len(raw_public_) == 65,
            "der öffentliche Schlüssel ist ein unkomprimierter Punkt (65 Byte) - "
-           "genau das erwartet der Browser", f"{len(roh_oeffentlich)} Byte")
-    pruefe(roh_oeffentlich[0] == 0x04,
+           "genau das erwartet der Browser", f"{len(raw_public_)} Byte")
+    verify(raw_public_[0] == 0x04,
            "und beginnt mit 0x04, wie es die Kodierung verlangt")
 
     # Nimmt py_vapid den privaten Schlüssel an, und gehören beide zusammen?
-    vapid = Vapid01.from_string(privat)
-    abgeleitet = vapid.public_key.public_bytes(
+    vapid = Vapid01.from_string(private_)
+    derived = vapid.public_key.public_bytes(
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-    pruefe(b64(abgeleitet) == oeffentlich,
+    verify(b64(derived) == publicly,
            "der öffentliche Schlüssel gehört zum privaten - sonst nimmt kein "
            "Push-Dienst die Nachricht an")
 
-    kopfzeilen = vapid.sign({"aud": "https://push.example.org",
+    header_rows = vapid.sign({"aud": "https://push.example.org",
                              "sub": "mailto:jolt@example.org"})
-    pruefe("Authorization" in kopfzeilen
-           and kopfzeilen["Authorization"].startswith("WebPush "),
+    verify("Authorization" in header_rows
+           and header_rows["Authorization"].startswith("WebPush "),
            "aus dem Schlüssel entsteht eine gültige Authorization-Kopfzeile",
-           str(sorted(kopfzeilen))[:80])
+           str(sorted(header_rows))[:80])
 
 
-def teil_verschluesselung():
+def part_encryption():
     print("\nNutzlast verschlüsseln und wieder lesen (RFC 8291)")
     browser = Browserabo()
-    inhalt = json.dumps({"titel": "jolt – Ladeplan geändert",
+    contents = json.dumps({"title": "jolt – Ladeplan geändert",
                          "text": "Nächster Stopp jetzt Rasthof Nord bei km 212.",
                          "url": "/"}, ensure_ascii=False).encode("utf-8")
 
-    verschluesselt = WebPusher({"endpoint": browser.endpoint,
+    encrypted = WebPusher({"endpoint": browser.endpoint,
                                 "keys": {"p256dh": b64(browser.p256dh),
                                          "auth": b64(browser.auth)}}
-                               ).encode(inhalt, content_encoding="aes128gcm")
-    koerper = verschluesselt["body"] if isinstance(verschluesselt, dict) \
-        else verschluesselt
-    pruefe(len(koerper) > len(inhalt),
+                               ).encode(contents, content_encoding="aes128gcm")
+    content = encrypted["body"] if isinstance(encrypted, dict) \
+        else encrypted
+    verify(len(content) > len(contents),
            "die verschlüsselte Nachricht ist länger als der Klartext",
-           f"{len(koerper)} statt {len(inhalt)} Byte")
-    pruefe(inhalt not in koerper,
+           f"{len(content)} statt {len(contents)} Byte")
+    verify(contents not in content,
            "und der Klartext steht nicht mehr darin - der Push-Dienst kann "
            "nicht mitlesen")
 
-    zurueck = browser.entschluesseln(koerper)
-    pruefe(zurueck["text"].startswith("Nächster Stopp"),
-           "der Empfänger bekommt den Klartext zurück", str(zurueck)[:70])
-    pruefe("Ladeplan geändert" in zurueck["titel"],
-           "auch Umlaute überstehen den Rundlauf", zurueck["titel"])
+    back = browser.decipher(content)
+    verify(back["text"].startswith("Nächster Stopp"),
+           "der Empfänger bekommt den Klartext zurück", str(back)[:70])
+    verify("Ladeplan geändert" in back["title"],
+           "auch Umlaute überstehen den Rundlauf", back["title"])
 
 
-def teil_abos():
+def part_subscriptions():
     print("\nAbos anlegen, auffrischen, abmelden")
     db = SessionLocal()
     try:
-        db.query(models.PushAbo).delete()
+        db.query(models.PushSubscription).delete()
         db.commit()
 
         browser = Browserabo()
-        daten = browser.als_json()
-        push.abo_speichern(db, daten["endpoint"], daten["p256dh"],
-                           daten["auth"], daten["geraet"])
-        pruefe(db.query(models.PushAbo).count() == 1, "ein Abo ist angelegt")
+        records = browser.as_json()
+        push.save_subscription(db, records["endpoint"], records["p256dh"],
+                           records["auth"], records["device"])
+        verify(db.query(models.PushSubscription).count() == 1, "ein Abo ist angelegt")
 
-        push.abo_speichern(db, daten["endpoint"], daten["p256dh"],
-                           daten["auth"], "Anderes Gerät")
-        anzahl = db.query(models.PushAbo).count()
-        pruefe(anzahl == 1,
+        push.save_subscription(db, records["endpoint"], records["p256dh"],
+                           records["auth"], "Anderes Gerät")
+        count = db.query(models.PushSubscription).count()
+        verify(count == 1,
                "ein zweiter Aufruf legt nichts doppelt an - sonst käme jede "
-               "Meldung mehrfach", f"{anzahl} Abos")
-        gespeichert = db.query(models.PushAbo).one()
-        pruefe(gespeichert.geraet == "Anderes Gerät",
-               "aber er frischt das Abo auf", gespeichert.geraet)
+               "Meldung mehrfach", f"{count} Abos")
+        saved = db.query(models.PushSubscription).one()
+        verify(saved.device == "Anderes Gerät",
+               "aber er frischt das Abo auf", saved.device)
 
-        pruefe(push.abo_loeschen(db, daten["endpoint"]) is True,
+        verify(push.delete_subscription(db, records["endpoint"]) is True,
                "das Abo lässt sich abmelden")
-        pruefe(db.query(models.PushAbo).count() == 0, "und ist dann weg")
-        pruefe(push.abo_loeschen(db, "gibt-es-nicht") is False,
+        verify(db.query(models.PushSubscription).count() == 0, "und ist dann weg")
+        verify(push.delete_subscription(db, "gibt-es-nicht") is False,
                "ein unbekanntes Abo abzumelden ist kein Fehler")
     finally:
         db.close()
 
 
-def teil_versand():
+def part_dispatch():
     print("\nVersand: wer bekommt was, und was passiert bei Fehlern")
     db = SessionLocal()
     try:
-        db.query(models.PushAbo).delete()
+        db.query(models.PushSubscription).delete()
         db.commit()
 
         lebt = Browserabo("https://push.example.org/lebt")
-        abgemeldet = Browserabo("https://push.example.org/abgemeldet")
-        gestoert = Browserabo("https://push.example.org/gestoert")
-        for browser in (lebt, abgemeldet, gestoert):
-            d = browser.als_json()
-            push.abo_speichern(db, d["endpoint"], d["p256dh"], d["auth"])
+        signed_out = Browserabo("https://push.example.org/abgemeldet")
+        disturbed = Browserabo("https://push.example.org/gestoert")
+        for browser in (lebt, signed_out, disturbed):
+            d = browser.as_json()
+            push.save_subscription(db, d["endpoint"], d["p256dh"], d["auth"])
 
         empfangen: dict[str, bytes] = {}
 
-        def versender(abo, nachricht):
-            empfangen[abo.endpoint] = nachricht
-            if abo.endpoint.endswith("abgemeldet"):
+        def dispatcher(subscription, msg):
+            empfangen[subscription.endpoint] = msg
+            if subscription.endpoint.endswith("abgemeldet"):
                 return 410      # der Browser hat die Erlaubnis entzogen
-            if abo.endpoint.endswith("gestoert"):
+            if subscription.endpoint.endswith("gestoert"):
                 return 500      # der Push-Dienst hat gerade ein Problem
             return 201
 
-        ergebnis = push.senden(db, "jolt", "Ladeplan geändert", versender=versender)
-        pruefe(ergebnis["gesendet"] == 1, "ein Gerät hat die Meldung bekommen",
-               str(ergebnis))
-        pruefe(ergebnis["entfernt"] == 1, "ein abgemeldetes Abo wurde entfernt",
-               str(ergebnis))
-        pruefe(ergebnis["fehler"] == 1, "eine Störung wurde als Fehler gezählt",
-               str(ergebnis))
+        result = push.send(db, "jolt", "Ladeplan geändert", dispatcher=dispatcher)
+        verify(result["sent"] == 1, "ein Gerät hat die Meldung bekommen",
+               str(result))
+        verify(result["removed"] == 1, "ein abgemeldetes Abo wurde entfernt",
+               str(result))
+        verify(result["failure"] == 1, "eine Störung wurde als Fehler gezählt",
+               str(result))
 
-        uebrig = {a.endpoint for a in db.query(models.PushAbo).all()}
-        pruefe(abgemeldet.endpoint not in uebrig,
+        left = {a.endpoint for a in db.query(models.PushSubscription).all()}
+        verify(signed_out.endpoint not in left,
                "das abgemeldete Gerät steht nicht mehr in der Datenbank")
-        pruefe(gestoert.endpoint in uebrig,
+        verify(disturbed.endpoint in left,
                "das gestörte dagegen schon - eine 500 sagt nichts über das Abo, "
                "und wer es wegwirft, schaltet Benachrichtigungen dauerhaft ab")
 
-        inhalt = json.loads(empfangen[lebt.endpoint].decode("utf-8"))
-        pruefe(inhalt["titel"] == "jolt" and inhalt["text"] == "Ladeplan geändert",
-               "die Nutzlast trägt Titel und Text", str(inhalt))
-        pruefe("url" in inhalt,
+        contents = json.loads(empfangen[lebt.endpoint].decode("utf-8"))
+        verify(contents["title"] == "jolt" and contents["text"] == "Ladeplan geändert",
+               "die Nutzlast trägt Titel und Text", str(contents))
+        verify("url" in contents,
                "und ein Ziel für den Klick auf die Meldung")
 
         # Ein Versender, der wirft, darf den Versand an die anderen nicht
         # abbrechen - im Funkloch ist das der Normalfall.
-        def wirft(abo, nachricht):
-            if abo.endpoint.endswith("lebt"):
+        def raises(subscription, msg):
+            if subscription.endpoint.endswith("lebt"):
                 raise OSError("Netz weg")
             return 201
 
-        ergebnis = push.senden(db, "jolt", "zweiter Versuch", versender=wirft)
-        pruefe(ergebnis["fehler"] == 1 and ergebnis["gesendet"] == 1,
+        result = push.send(db, "jolt", "zweiter Versuch", dispatcher=raises)
+        verify(result["failure"] == 1 and result["sent"] == 1,
                "ein geworfener Fehler bricht den Versand an die anderen nicht ab",
-               str(ergebnis))
+               str(result))
     finally:
         db.close()
 
 
-def teil_ohne_schluessel():
+def part_without_key():
     print("\nOhne VAPID-Schlüssel")
-    alt = (os.environ.pop("VAPID_PRIVATE_KEY", None),
+    old = (os.environ.pop("VAPID_PRIVATE_KEY", None),
            os.environ.pop("VAPID_PUBLIC_KEY", None))
     try:
-        pruefe(push.ist_eingerichtet() is False,
+        verify(push.actual_configured() is False,
                "die Funktion meldet sich als nicht eingerichtet")
 
         db = SessionLocal()
         try:
-            ergebnis = push.senden(db, "jolt", "sollte nicht rausgehen")
+            result = push.send(db, "jolt", "sollte nicht rausgehen")
         finally:
             db.close()
-        pruefe(ergebnis.get("aus") is True and ergebnis["gesendet"] == 0,
+        verify(result.get("origin_of") is True and result["sent"] == 0,
                "und es wird nichts verschickt - statt es vorzutäuschen",
-               str(ergebnis))
+               str(result))
 
         client = TestClient(app)
-        antwort = client.get("/api/push/schluessel").json()
-        pruefe(antwort["eingerichtet"] is False,
+        response = client.get("/api/push/schluessel").json()
+        verify(response["configured"] is False,
                "die Oberfläche erfährt das über /api/push/schluessel",
-               str(antwort))
+               str(response))
 
-        angelegt = client.post("/api/push/abo", json={
+        created_at = client.post("/api/push/abo", json={
             "endpoint": "https://push.example.org/x", "p256dh": "a" * 20,
             "auth": "b" * 10})
-        pruefe(angelegt.status_code == 409,
+        verify(created_at.status_code == 409,
                "ein Abo anzulegen wird sauber abgelehnt, nicht still verschluckt",
-               f"HTTP {angelegt.status_code}")
+               f"HTTP {created_at.status_code}")
     finally:
-        for name, wert in zip(("VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY"), alt):
-            if wert is not None:
-                os.environ[name] = wert
+        for name, val in zip(("VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY"), old):
+            if val is not None:
+                os.environ[name] = val
 
 
-def teil_mit_schluessel():
+def part_with_key():
     print("\nMit VAPID-Schlüssel über die Endpunkte")
-    privat, oeffentlich = push.schluessel_erzeugen()
-    os.environ["VAPID_PRIVATE_KEY"] = privat
-    os.environ["VAPID_PUBLIC_KEY"] = oeffentlich
+    private_, publicly = push.generate_key()
+    os.environ["VAPID_PRIVATE_KEY"] = private_
+    os.environ["VAPID_PUBLIC_KEY"] = publicly
     os.environ["VAPID_SUBJECT"] = "mailto:jolt@example.org"
     try:
         client = TestClient(app)
         # Ohne Netz gilt jeder https-Name als öffentlich; die Prüfung selbst
-        # steht in check_sicherheit.py.
-        push.endpoint_erlaubt = lambda url: url.startswith("https://")
-        antwort = client.get("/api/push/schluessel").json()
-        pruefe(antwort["eingerichtet"] is True, "eingerichtet")
-        pruefe(antwort["schluessel"] == oeffentlich,
+        # steht in check_security.py.
+        push.endpoint_allowed = lambda url: url.startswith("https://")
+        response = client.get("/api/push/schluessel").json()
+        verify(response["configured"] is True, "eingerichtet")
+        verify(response["keyname"] == publicly,
                "und der öffentliche Schlüssel kommt heraus")
 
         browser = Browserabo("https://push.example.org/ueber-api")
-        angelegt = client.post("/api/push/abo", json=browser.als_json())
-        pruefe(angelegt.status_code == 200, "ein Abo lässt sich anlegen",
-               f"HTTP {angelegt.status_code}: {angelegt.text[:100]}")
+        created_at = client.post("/api/push/abo", json=browser.as_json())
+        verify(created_at.status_code == 200, "ein Abo lässt sich anlegen",
+               f"HTTP {created_at.status_code}: {created_at.text[:100]}")
 
         db = SessionLocal()
         try:
-            gefunden = db.query(models.PushAbo).filter_by(
+            found = db.query(models.PushSubscription).filter_by(
                 endpoint=browser.endpoint).one_or_none()
         finally:
             db.close()
-        pruefe(gefunden is not None, "und steht in der Datenbank")
+        verify(found is not None, "und steht in der Datenbank")
 
-        ab = client.request("DELETE", "/api/push/abo",
+        downhill = client.request("DELETE", "/api/push/abo",
                             json={"endpoint": browser.endpoint})
-        pruefe(ab.status_code == 200 and ab.json()["ok"] is True,
-               "und wieder abmelden", f"HTTP {ab.status_code}")
+        verify(downhill.status_code == 200 and downhill.json()["ok"] is True,
+               "und wieder abmelden", f"HTTP {downhill.status_code}")
     finally:
         for name in ("VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY", "VAPID_SUBJECT"):
             os.environ.pop(name, None)
 
 
 def main() -> int:
-    teil_schluessel()
-    teil_verschluesselung()
-    teil_abos()
-    teil_versand()
-    teil_ohne_schluessel()
-    teil_mit_schluessel()
+    part_key()
+    part_encryption()
+    part_subscriptions()
+    part_dispatch()
+    part_without_key()
+    part_with_key()
 
     # Was dieses Skript nicht kann, gehört in die Ausgabe und nicht nur in
     # den Quelltext - ein bestandener Lauf, der verschweigt, was er nicht
     # angefasst hat, weckt mehr Vertrauen als er verdient.
-    return pruefe.bilanz(
+    return verify.balance(
         "Nicht geprüft (und nicht prüfbar ohne echtes Gerät): der Sprung zum\n"
         "Push-Dienst. Dafür gibt es POST /api/push/probe.")
 

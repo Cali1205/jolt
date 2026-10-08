@@ -9,9 +9,9 @@ from ..security import login_limit
 router = APIRouter(prefix="/api", tags=["zugang"])
 
 
-class Anmeldung(BaseModel):
-    passwort: str = ""
-    geraet: str = ""
+class SignIn(BaseModel):
+    password: str = ""
+    device: str = ""
 
 
 @router.get("/status")
@@ -22,24 +22,24 @@ def status():
     Karte aus wie eine echte, und der Unterschied muss in der Oberfläche
     ankommen - nicht nur im Log.
     """
-    return {"passwort_noetig": deps.passwort_gesetzt(),
-            "demo_routing": routing.ist_demo()}
+    return {"password_required": deps.password_set(),
+            "demo_routing": routing.is_demo()}
 
 
 @router.post("/login")
-def login(daten: Anmeldung, request: Request, db: Session = Depends(get_db)):
+def login(records: SignIn, request: Request, db: Session = Depends(get_db)):
     login_limit(request)
-    if not deps.passwort_gesetzt():
-        return {"token": "", "hinweis": "Kein Passwort gesetzt - Zugang offen."}
-    if not deps.passwort_pruefen(daten.passwort):
+    if not deps.password_set():
+        return {"token": "", "hint": "Kein Passwort gesetzt - Zugang offen."}
+    if not deps.examine_password(records.password):
         raise HTTPException(401, "Passwort stimmt nicht.")
-    return {"token": deps.sitzung_anlegen(db, daten.geraet)}
+    return {"token": deps.create_session(db, records.device)}
 
 
 @router.post("/logout")
-def logout(sitzung: models.Sitzung | None = Depends(deps.aktuelle_sitzung),
+def logout(session: models.AuthSession | None = Depends(deps.current_session),
            db: Session = Depends(get_db)):
-    if sitzung:
-        db.delete(sitzung)
+    if session:
+        db.delete(session)
         db.commit()
     return {"ok": True}

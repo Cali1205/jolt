@@ -1,0 +1,104 @@
+"""Das Gerüst, das alle Prüfskripte teilen.
+
+Sechs Skripte hatten dieselbe `pruefe`-Funktion - in fünf davon byteweise
+identisch -, dieselbe Fehlerliste, dieselbe Auswertung am Ende und dieselbe
+Präambel, die den Suchpfad setzt und eine Wegwerf-Datenbank einrichtet. Das
+ist nicht viel Code, aber es ist Code, der sechsmal auseinanderlaufen kann,
+und zweimal war er es schon.
+
+Bewusst kein Testrahmen von der Stange. Was die Skripte tun, ist keine
+Sammlung von Zusicherungen, sondern eine **lesbare Behauptung je Zeile**:
+"kalte Luft ist mindestens 7 % dichter als warme". Diese Sätze sind der Sinn
+der Sache - sie stehen so in der Ausgabe, und wer sie liest, weiss, was jolt
+über sich selbst behauptet. Ein Rahmen, der stattdessen
+`test_luftdichte_kalt PASSED` ausgibt, hätte diesen Nutzen nicht.
+
+Ebenso bewusst ohne Abhängigkeiten: Die Skripte laufen ohne Netz, ohne
+Postgres und ohne API-Schlüssel, und `check_modell`, `check_optimierer` und
+`check_quellen` laufen sogar ohne installierte Anwendung. Das bleibt so.
+"""
+import os
+import sys
+import tempfile
+
+
+class Check:
+    """Sammelt Ergebnisse und weiss am Ende, ob etwas fehlt.
+
+    Eine Klasse und keine Modulvariablen, damit zwei Skripte im selben
+    Prozess sich nicht die Fehlerliste teilen - beim Zusammenfassen mehrerer
+    Prüfungen ist das sonst eine stille Fehlerquelle.
+    """
+
+    def __init__(self) -> None:
+        self.failure: list[str] = []
+
+    def __call__(self, condition, text: str, extra: str = "") -> None:
+        """Eine Behauptung prüfen und sie in einem Satz protokollieren.
+
+        `zusatz` erscheint nur im Fehlerfall und soll den **gemessenen Wert**
+        tragen, nicht die Wiederholung der Behauptung: Wer sieht, dass 2,077
+        herauskam statt 1,23, weiss sofort, wonach er sucht.
+        """
+        if condition:
+            print(f"  ok    {text}")
+        else:
+            print(f"  FEHLT {text}   {extra}")
+            self.failure.append(text)
+
+    def section(self, title: str) -> None:
+        print(f"\n{title}")
+
+    def balance(self, suffix: str = "") -> int:
+        """Rückgabewert für `sys.exit` - 0, wenn alles hielt.
+
+        `nachsatz` ist für das, was ein Skript *nicht* prüfen kann. Diese
+        Einschränkung gehört in die Ausgabe und nicht nur in den Quelltext:
+        Ein bestandener Lauf, der verschweigt, was er nicht angefasst hat,
+        weckt mehr Vertrauen als er verdient.
+        """
+        print()
+        if self.failure:
+            print(f"{len(self.failure)} Prüfung(en) fehlgeschlagen:")
+            for text in self.failure:
+                print(f"  - {text}")
+            return 1
+        print("Alle Prüfungen bestanden.")
+        if suffix:
+            print(f"\n{suffix}")
+        return 0
+
+
+def application_provide(brand: str, *, db_name: bool = True) -> None:
+    """Suchpfad setzen und, falls nötig, eine Wegwerf-Datenbank einrichten.
+
+    **Vor jedem App-Import aufrufen.** `app.database` baut die Engine schon
+    beim Import; wer `DATABASE_URL` danach setzt, ändert nichts mehr und
+    schreibt in die Entwicklungsdatenbank - im schlimmsten Fall in die echte.
+
+    `ORS_API_KEY` und `APP_PASSWORT` werden entfernt, damit ein Lauf auf
+    einem eingerichteten Rechner dasselbe tut wie auf einem nackten: Demo-
+    Routing, kein Login. Ein Prüfskript, dessen Ergebnis von der Umgebung
+    abhängt, prüft die Umgebung.
+    """
+    # Zwei Layouts, und beide müssen gehen. Lokal liegt das Paket unter
+    # `backend/app`; im Docker-Image liegt es direkt neben `tools/` als
+    # `app/`. Die vier Import-Werkzeuge in diesem Ordner können das seit
+    # jeher, `examine.py` konnte es nicht - es hing fest auf `../backend`.
+    # Damit lief per `docker exec jolt-app python tools/check_*.py` **kein
+    # einziges** Prüfskript, sondern jedes brach mit `ModuleNotFoundError:
+    # No module named 'app'` ab. Ausgerechnet der Weg, für den `tools/`
+    # überhaupt ins Image aufgenommen wurde.
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "..", "backend"),
+                     os.path.join(here, "..")):
+        if os.path.isdir(os.path.join(candidate, "app")):
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+            break
+
+    if db_name:
+        folder = tempfile.mkdtemp(prefix=f"jolt-{brand}-")
+        os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(folder, 'check.db')}"
+    os.environ.pop("ORS_API_KEY", None)
+    os.environ.pop("APP_PASSWORT", None)

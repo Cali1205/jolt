@@ -1,4 +1,4 @@
-from . import auth, fahrzeuge, live, push, route, saeulen
+from . import auth, vehicles, live, push, route, chargers
 
-ALLE_ROUTER = [auth.router, fahrzeuge.router, route.router, saeulen.router,
+ALL_ROUTER = [auth.router, vehicles.router, route.router, chargers.router,
                live.router, push.router]

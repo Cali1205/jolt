@@ -20,13 +20,13 @@ als Aussage über eine reale Fahrt taugt sie nicht.
 import math
 
 from ..geo import haversine_m
-from .provider import Ort, Route
+from .provider import City, Route
 
 # Grobe Koordinaten einiger Städte, damit die Ortssuche offline etwas
 # zurückgeben kann. Keine Geokodierung, nur eine Handvoll Stützpunkte.
-ORTE = {
+PLACES = {
     "hamburg": (53.5511, 9.9937), "münchen": (48.1351, 11.5820),
-    "muenchen": (48.1351, 11.5820), "berlin": (52.5200, 13.4050),
+    "munich": (48.1351, 11.5820), "berlin": (52.5200, 13.4050),
     "köln": (50.9375, 6.9603), "koeln": (50.9375, 6.9603),
     "frankfurt": (50.1109, 8.6821), "stuttgart": (48.7758, 9.1829),
     "hannover": (52.3759, 9.7320), "leipzig": (51.3397, 12.3731),
@@ -35,42 +35,42 @@ ORTE = {
     "kassel": (51.3127, 9.4797), "würzburg": (49.7913, 9.9534),
 }
 
-PUNKTABSTAND_KM = 1.0
+POINT_DISTANCE_KM = 1.0
 
 
 class DemoRouting:
-    ist_demo = True
+    is_demo = True
 
-    def route(self, start, ziel, zwischenstopps=None,
-             praeferenz: str = "recommended",
-             mautfrei: bool = False) -> Route:
+    def route(self, start, destination, intermediate_stops=None,
+             preference: str = "recommended",
+             toll_free: bool = False) -> Route:
         # Es gibt kein echtes Strassennetz, aus dem sich schnellste und
         # empfohlene Route unterscheiden liessen, und eine erfundene
         # Luftlinie hat auch keine Mautstrassen. `praeferenz` und `mautfrei`
         # werden deshalb entgegengenommen und ignoriert; /api/route erkennt
         # die identischen Ergebnisse selbst und legt sie zu einer Variante
         # mit mehreren Etiketten zusammen.
-        stationen = [start] + list(zwischenstopps or []) + [ziel]
-        punkte: list[list[float]] = []
-        tempo: list[float] = []
+        stations = [start] + list(intermediate_stops or []) + [destination]
+        points: list[list[float]] = []
+        velocity: list[float] = []
 
-        for a, b in zip(stationen, stationen[1:]):
-            teil_punkte, teil_tempo = self._abschnitt(a, b, erster=not punkte)
-            punkte.extend(teil_punkte)
-            tempo.extend(teil_tempo)
+        for a, b in zip(stations, stations[1:]):
+            part_points, part_speed = self._section(a, b, first=not points)
+            points.extend(part_points)
+            velocity.extend(part_speed)
 
-        strecke = sum(self._abstand_m(punkte[i][1], punkte[i][0],
-                                      punkte[i + 1][1], punkte[i + 1][0])
-                      for i in range(len(punkte) - 1))
-        fahrzeit = sum(
-            self._abstand_m(punkte[i][1], punkte[i][0],
-                            punkte[i + 1][1], punkte[i + 1][0]) / max(1.0, tempo[i])
-            for i in range(len(punkte) - 1))
+        distance = sum(self._spacing_m(points[i][1], points[i][0],
+                                      points[i + 1][1], points[i + 1][0])
+                      for i in range(len(points) - 1))
+        drive_time = sum(
+            self._spacing_m(points[i][1], points[i][0],
+                            points[i + 1][1], points[i + 1][0]) / max(1.0, velocity[i])
+            for i in range(len(points) - 1))
 
-        return Route(punkte=punkte, tempo_ms=tempo, strecke_m=strecke,
-                     fahrzeit_s=fahrzeit)
+        return Route(points=points, speed_ms=velocity, distance_m=distance,
+                     drive_time_s=drive_time)
 
-    def hoehen(self, punkte: list) -> list | None:
+    def elevations(self, points: list) -> list | None:
         """Das Demo-Routing erfindet Routen, aber keine Höhen.
 
         Eine erfundene Höhe wäre hier schädlicher als gar keine: Sie sähe
@@ -78,38 +78,38 @@ class DemoRouting:
         """
         return None
 
-    def suchen(self, text: str, land: str = "") -> list[Ort]:
-        schluessel = (text or "").strip().lower()
-        for name, (lat, lon) in ORTE.items():
-            if schluessel and schluessel in name:
-                return [Ort(name=f"{name.capitalize()} (Demo)", lat=lat, lon=lon)]
+    def seek(self, text: str, country: str = "") -> list[City]:
+        keyname = (text or "").strip().lower()
+        for name, (lat, lon) in PLACES.items():
+            if keyname and keyname in name:
+                return [City(name=f"{name.capitalize()} (Demo)", lat=lat, lon=lon)]
         return []
 
     # ---------- intern ----------
 
     @staticmethod
-    def _abstand_m(lat1, lon1, lat2, lon2) -> float:
+    def _spacing_m(lat1, lon1, lat2, lon2) -> float:
         return haversine_m(lat1, lon1, lat2, lon2)
 
-    def _abschnitt(self, a, b, erster: bool):
-        gesamt_m = self._abstand_m(a[0], a[1], b[0], b[1])
-        anzahl = max(2, int(gesamt_m / 1000.0 / PUNKTABSTAND_KM))
+    def _section(self, a, b, first: bool):
+        total_m = self._spacing_m(a[0], a[1], b[0], b[1])
+        count = max(2, int(total_m / 1000.0 / POINT_DISTANCE_KM))
 
-        punkte, tempo = [], []
-        for i in range(anzahl + 1):
-            t = i / anzahl
+        points, velocity = [], []
+        for i in range(count + 1):
+            t = i / count
             lat = a[0] + (b[0] - a[0]) * t
             lon = a[1] + (b[1] - a[1]) * t
             # Zwei überlagerte Wellen: ein langes Mittelgebirge und kleinere
             # Kuppen. Damit hat das Höhenprofil Steigung und Gefälle, und die
             # Rekuperation wird tatsächlich durchlaufen.
-            hoehe = (120.0 + 220.0 * math.sin(math.pi * t)
+            elevation = (120.0 + 220.0 * math.sin(math.pi * t)
                      + 45.0 * math.sin(t * 14.0))
-            if i > 0 or erster:
-                punkte.append([round(lon, 6), round(lat, 6), round(hoehe, 1)])
-            if i < anzahl:
+            if i > 0 or first:
+                points.append([round(lon, 6), round(lat, 6), round(elevation, 1)])
+            if i < count:
                 # Auffahrt und Abfahrt langsamer, dazwischen Autobahn.
-                rand = min(t, 1.0 - t)
-                v = 16.0 + 20.0 * min(1.0, rand / 0.04)
-                tempo.append(round(v, 2))
-        return punkte, tempo
+                edge = min(t, 1.0 - t)
+                v = 16.0 + 20.0 * min(1.0, edge / 0.04)
+                velocity.append(round(v, 2))
+        return points, velocity
