@@ -38,7 +38,7 @@ public final class JoltDisplayStore {
     private var resultObserver: [UUID: (String, Bool, String) -> Void] = [:]
 
     private init() {
-        if let records = UserDefaults.std_default.data(forKey: keyname),
+        if let records = UserDefaults.standard.data(forKey: keyname),
            let model = try? JSONDecoder().decode(JoltDisplay.self, from: records) {
             tail = model
         }
@@ -64,9 +64,9 @@ public final class JoltDisplayStore {
         var saveTo = model
         saveTo?.tileImages = nil
         if let safe = saveTo, let records = try? JSONEncoder().encode(safe) {
-            UserDefaults.std_default.set(records, forKey: keyname)
+            UserDefaults.standard.set(records, forKey: keyname)
         } else {
-            UserDefaults.std_default.removeObject(forKey: keyname)
+            UserDefaults.standard.removeObject(forKey: keyname)
         }
         // CarPlay's templates may only be touched on the main thread.
         DispatchQueue.main.async {
