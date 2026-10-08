@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-/* Prueft die Dongle-Knoepfe der Einstellungen: Verbinden und Mithoeren.
+/* Checks the dongle buttons in the settings: connect and listen.
  *
- * Auslöser: Der Mithoer-Knopf tat im Auto scheinbar nichts. Nach dem Parken
- * ist der Dongle getrennt, die Einstellungen hatten keinen Weg, ihn zu
- * verbinden, und der Knopf meldete "Kein Dongle verbunden" als Hinweis, der
- * nach sechs Sekunden verschwand. Geprueft wird deshalb der ganze Weg
- * vom Tippen bis zum Text im Ergebnisfeld - gegen einen nachgebildeten
- * Dongle-Baustein, ohne Browser.
+ * Trigger: the listen button seemingly did nothing in the car. After parking
+ * the dongle is disconnected, the settings had no way to
+ * connect it, and the button reported "Kein Dongle verbunden" as a hint that
+ * vanished after six seconds. So the whole path is checked,
+ * from the tap to the text in the result field - against a simulated
+ * dongle module, without a browser.
  *
  *     node tools/check_settings.js
  */

@@ -1,21 +1,22 @@
-"""Das Gerüst, das alle Prüfskripte teilen.
+"""The scaffolding that all check scripts share.
 
-Sechs Skripte hatten dieselbe `pruefe`-Funktion - in fünf davon byteweise
-identisch -, dieselbe Fehlerliste, dieselbe Auswertung am Ende und dieselbe
-Präambel, die den Suchpfad setzt und eine Wegwerf-Datenbank einrichtet. Das
-ist nicht viel Code, aber es ist Code, der sechsmal auseinanderlaufen kann,
-und zweimal war er es schon.
+Six scripts had the same `verify` function - in five of them byte-for-byte
+identical -, the same failure list, the same evaluation at the end and the
+same preamble that sets the search path and sets up a throwaway database.
+That is not much code, but it is code that can drift apart six times, and
+twice it already had.
 
-Bewusst kein Testrahmen von der Stange. Was die Skripte tun, ist keine
-Sammlung von Zusicherungen, sondern eine **lesbare Behauptung je Zeile**:
-"kalte Luft ist mindestens 7 % dichter als warme". Diese Sätze sind der Sinn
-der Sache - sie stehen so in der Ausgabe, und wer sie liest, weiss, was jolt
-über sich selbst behauptet. Ein Rahmen, der stattdessen
-`test_luftdichte_kalt PASSED` ausgibt, hätte diesen Nutzen nicht.
+Deliberately not an off-the-shelf test framework. What the scripts do is
+not a collection of assertions but **one readable claim per line**:
+"cold air is at least 7 % denser than warm". These sentences are the point
+of the whole thing - they appear like that in the output, and whoever reads
+them knows what jolt claims about itself. A framework that outputs
+`test_air_density_cold PASSED` instead would not have this benefit.
 
-Ebenso bewusst ohne Abhängigkeiten: Die Skripte laufen ohne Netz, ohne
-Postgres und ohne API-Schlüssel, und `check_modell`, `check_optimierer` und
-`check_quellen` laufen sogar ohne installierte Anwendung. Das bleibt so.
+Equally deliberately without dependencies: the scripts run without network,
+without Postgres and without API key, and `check_model`, `check_optimizer`
+and `check_sources` even run without the application installed. That stays
+so.
 """
 import os
 import sys
@@ -23,22 +24,22 @@ import tempfile
 
 
 class Check:
-    """Sammelt Ergebnisse und weiss am Ende, ob etwas fehlt.
+    """Collects results and knows at the end whether anything is missing.
 
-    Eine Klasse und keine Modulvariablen, damit zwei Skripte im selben
-    Prozess sich nicht die Fehlerliste teilen - beim Zusammenfassen mehrerer
-    Prüfungen ist das sonst eine stille Fehlerquelle.
+    A class and not module variables, so that two scripts in the same
+    process do not share the failure list - when combining several checks
+    that would otherwise be a silent source of errors.
     """
 
     def __init__(self) -> None:
         self.failure: list[str] = []
 
     def __call__(self, condition, text: str, extra: str = "") -> None:
-        """Eine Behauptung prüfen und sie in einem Satz protokollieren.
+        """Check a claim and log it in one sentence.
 
-        `zusatz` erscheint nur im Fehlerfall und soll den **gemessenen Wert**
-        tragen, nicht die Wiederholung der Behauptung: Wer sieht, dass 2,077
-        herauskam statt 1,23, weiss sofort, wonach er sucht.
+        `extra` appears only in the failure case and is meant to carry the
+        **measured value**, not a repetition of the claim: whoever sees that
+        2.077 came out instead of 1.23 knows immediately what to look for.
         """
         if condition:
             print(f"  ok    {text}")
@@ -50,12 +51,11 @@ class Check:
         print(f"\n{title}")
 
     def balance(self, suffix: str = "") -> int:
-        """Rückgabewert für `sys.exit` - 0, wenn alles hielt.
+        """Return value for `sys.exit` - 0 if everything held.
 
-        `nachsatz` ist für das, was ein Skript *nicht* prüfen kann. Diese
-        Einschränkung gehört in die Ausgabe und nicht nur in den Quelltext:
-        Ein bestandener Lauf, der verschweigt, was er nicht angefasst hat,
-        weckt mehr Vertrauen als er verdient.
+        `suffix` is for whatever a script *cannot* check. This limitation
+        belongs in the output and not only in the source: a passed run that
+        conceals what it did not touch inspires more trust than it deserves.
         """
         print()
         if self.failure:
@@ -70,25 +70,25 @@ class Check:
 
 
 def application_provide(brand: str, *, db_name: bool = True) -> None:
-    """Suchpfad setzen und, falls nötig, eine Wegwerf-Datenbank einrichten.
+    """Set the search path and, if necessary, set up a throwaway database.
 
-    **Vor jedem App-Import aufrufen.** `app.database` baut die Engine schon
-    beim Import; wer `DATABASE_URL` danach setzt, ändert nichts mehr und
-    schreibt in die Entwicklungsdatenbank - im schlimmsten Fall in die echte.
+    **Call before any app import.** `app.database` builds the engine at
+    import time; whoever sets `DATABASE_URL` afterwards changes nothing any
+    more and writes to the development database - in the worst case the real
+    one.
 
-    `ORS_API_KEY` und `APP_PASSWORT` werden entfernt, damit ein Lauf auf
-    einem eingerichteten Rechner dasselbe tut wie auf einem nackten: Demo-
-    Routing, kein Login. Ein Prüfskript, dessen Ergebnis von der Umgebung
-    abhängt, prüft die Umgebung.
+    `ORS_API_KEY` and `APP_PASSWORT` are removed so that a run on a set-up
+    machine does the same as on a bare one: demo routing, no login. A check
+    script whose result depends on the environment checks the environment.
     """
-    # Zwei Layouts, und beide müssen gehen. Lokal liegt das Paket unter
-    # `backend/app`; im Docker-Image liegt es direkt neben `tools/` als
-    # `app/`. Die vier Import-Werkzeuge in diesem Ordner können das seit
-    # jeher, `examine.py` konnte es nicht - es hing fest auf `../backend`.
-    # Damit lief per `docker exec jolt-app python tools/check_*.py` **kein
-    # einziges** Prüfskript, sondern jedes brach mit `ModuleNotFoundError:
-    # No module named 'app'` ab. Ausgerechnet der Weg, für den `tools/`
-    # überhaupt ins Image aufgenommen wurde.
+    # Two layouts, and both must work. Locally the package lives under
+    # `backend/app`; in the Docker image it sits directly next to `tools/` as
+    # `app/`. The four import tools in this folder have always been able to do
+    # that, `examine.py` could not - it was hard-wired to `../backend`.
+    # As a result, `docker exec jolt-app python tools/check_*.py` ran **not a
+    # single** check script; each one aborted with `ModuleNotFoundError:
+    # No module named 'app'`. Of all things the very route for which `tools/`
+    # was included in the image in the first place.
     here = os.path.dirname(os.path.abspath(__file__))
     for candidate in (os.path.join(here, "..", "backend"),
                      os.path.join(here, "..")):

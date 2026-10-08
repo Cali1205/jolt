@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Die ganze Kette einmal durchspielen - ohne Netz, ohne Postgres, ohne Auto.
+"""The whole chain, played through once - no network, no Postgres, no car.
 
-Geprüft wird gegen eine frische SQLite-Datei mit dem Demo-Routing: Schema,
-Fahrzeuge, Route, Ladesäulen-Import, Korridor-Suche und die Live-Nachführung
-inklusive Simulator.
+Checks run against a fresh SQLite file with the demo routing: schema,
+vehicles, route, charger import, corridor search and the live tracking
+including the simulator.
 
-Genau das ist der Punkt: Ohne diesen Lauf liesse sich die Live-Funktion erst
-prüfen, wenn ein Auto, ein Datenlieferant und eine echte Langstrecke
-zusammenkommen - also nie beim Entwickeln.
+That is the whole point: without this run, the live feature could only be
+checked once a car, a data supplier and a real long-distance trip come
+together - in other words never, during development.
 
     ./tools/check_backend.py
 """
@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
-# Das Frontend liegt im Repo neben backend/, im Image direkt neben tools/.
+# The frontend sits in the repo next to backend/, in the image directly next to tools/.
 FRONTEND = next(
     (p for p in (os.path.join(TOOLS, "..", "frontend"),)
      if os.path.isdir(p)), os.path.join(TOOLS, "..", "frontend"))
@@ -26,11 +26,11 @@ from examine import Check, application_provide  # noqa: E402
 
 application_provide("backend", db_name=False)
 
-# Vor jedem App-Import setzen: Die Engine wird beim Import gebaut.
+# Set before any app import: the engine is built at import time.
 _DB = os.path.join(tempfile.mkdtemp(prefix="jolt-check-"), "check.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB}"
-os.environ.pop("ORS_API_KEY", None)      # Demo-Routing erzwingen
-os.environ.pop("APP_PASSWORT", None)     # kein Login im Prüflauf
+os.environ.pop("ORS_API_KEY", None)      # force demo routing
+os.environ.pop("APP_PASSWORT", None)     # no login in the check run
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -43,12 +43,12 @@ from app import models  # noqa: E402
 verify = Check()
 
 
-# Ein Ausschnitt im Format des amtlichen Registers: Vorspann, Semikolon,
-# Dezimalkomma, Steckerblöcke.
+# An excerpt in the format of the official register: preamble, semicolons,
+# decimal comma, connector blocks.
 #
-# Die Koordinaten liegen auf der Luftlinie Hamburg-München, weil das
-# Demo-Routing genau diese Linie erzeugt. Die Ortsnamen sind deshalb nur
-# Etiketten - ein echtes Routing führt über andere Punkte.
+# The coordinates lie on the straight line Hamburg-Munich, because the demo
+# routing produces exactly that line. The place names are therefore just
+# labels - a real routing leads over other points.
 CSV_PROBE = """Ladesäulenregister der Bundesnetzagentur;;;;;;;;;;;;;;;;;;
 Stand: 01.08.2026;;;;;;;;;;;;;;;;;;
 Hinweis: Diese Datei enthält alle gemeldeten Ladeeinrichtungen.;;;;;;;;;;;;;;;;;;
@@ -100,9 +100,9 @@ def main() -> int:
     verify(failure.status_code == 400, "netto über brutto wird abgelehnt",
            f"HTTP {failure.status_code}")
 
-    # Regression: ein doppelter Ladestand in der Kurve verletzt die
-    # Unique-Constraint (fahrzeug_id, soc_prozent) - das darf als
-    # verständliche 400 ankommen, nicht als nackter 500er beim Commit.
+    # Regression: a duplicate charge level in the curve violates the
+    # unique constraint (vehicle_id, soc_percent) - that must arrive as an
+    # understandable 400, not as a bare 500 on commit.
     double = client.post("/api/fahrzeuge", json={
         "name": "Doppelte Kurve", "battery_gross_kwh": 82.0, "battery_net_kwh": 77.0,
         "charge_curve": [[0, 180], [20, 180], [80, 80], [90, 90], [90, 60],
@@ -114,12 +114,11 @@ def main() -> int:
            "und die Meldung nennt den betroffenen Ladestand",
            double.json())
 
-    # Regression: Ein Fahrzeug ändern und dabei dieselben Ladestände wie
-    # zuvor behalten (nur die kW-Werte ändern - der Normalfall beim
-    # Bearbeiten) darf nicht crashen. SQLAlchemy schreibt im selben Flush
-    # sonst die neuen Zeilen vor dem Löschen der alten und verletzt die
-    # Unique-Constraint, obwohl die neue Kurve für sich genommen keine
-    # Duplikate hat.
+    # Regression: changing a vehicle while keeping the same charge levels as
+    # before (only the kW values change - the normal case when editing) must
+    # not crash. SQLAlchemy would otherwise write the new rows before deleting
+    # the old ones in the same flush and violate the unique constraint, even
+    # though the new curve on its own has no duplicates.
     changed = client.put(f"/api/fahrzeuge/{vehicles[0]['id']}", json={
         "name": vehicles[0]["name"], "battery_gross_kwh": vehicles[0]["battery_gross_kwh"],
         "battery_net_kwh": vehicles[0]["battery_net_kwh"],
@@ -147,8 +146,8 @@ def main() -> int:
     try:
         harz = db.query(models.ChargePoint).filter(
             models.ChargePoint.city == "Goslar").one()
-        # Nur die Existenz zählt: `.one()` wirft, wenn der Datensatz fehlt
-        # oder doppelt ist - beides wäre ein Importfehler.
+        # Only existence counts: `.one()` raises if the record is missing
+        # or duplicated - either would be an import error.
         db.query(models.ChargePoint).filter(
             models.ChargePoint.city == "Westerland").one()
         lueneburg = db.query(models.ChargePoint).filter(
@@ -166,12 +165,12 @@ def main() -> int:
            f"ist {harz.lat}")
 
     print("\nDoppelter foreign_id innerhalb eines Imports")
-    # Regression: eine Mehrländer-Abfrage bei Open Charge Map kann einen
-    # Standort nahe der Grenze zweimal liefern. Ohne Flush zwischen zwei
-    # _speichern()-Aufrufen für dieselbe fremd_id sieht die zweite Suche den
-    # ersten, noch nicht committeten INSERT nicht - der zweite INSERT
-    # verletzt dann die Unique-Constraint (quelle, fremd_id) und die ganze
-    # Charge scheitert mit HTTP 500 (bzw. hier: einer nackten IntegrityError).
+    # Regression: a multi-country query at Open Charge Map can return a
+    # site near the border twice. Without a flush between two
+    # _speichern() calls for the same foreign_id, the second lookup does not see
+    # the first, not yet committed INSERT - the second INSERT then violates
+    # the unique constraint (quelle, foreign_id) and the whole batch fails with
+    # HTTP 500 (here: a bare IntegrityError).
     from app.charging.chargers_import import _save
 
     db = SessionLocal()
@@ -194,15 +193,15 @@ def main() -> int:
         db.close()
 
     print("\nOpen-Charge-Map-Import ohne compact=true")
-    # Regression 1: compact=true lässt OCM AddressInfo.Country und
-    # OperatorInfo als blosse IDs statt als Objekte liefern - "land" und
-    # "betreiber" kamen dadurch für jeden importierten Punkt leer an.
-    # Regression 2: eine Anfrage mit kommagetrennten Ländercodes
-    # (countrycode=AT,CH,...) wird von OCM nicht zuverlässig eingehalten - in
-    # der Praxis kamen Standorte aus der ganzen Welt zurück, nicht nur aus den
-    # angefragten Ländern. Beides wird direkt gegen eine gefälschte, aber
-    # realistische (verbose) OCM-Antwort geprüft: kein compact-Parameter, und
-    # ein Aufruf je Land statt einer kommagetrennten Liste.
+    # Regression 1: compact=true makes OCM deliver AddressInfo.Country and
+    # OperatorInfo as bare IDs instead of objects - "land" and
+    # "betreiber" therefore arrived empty for every imported point.
+    # Regression 2: a request with comma-separated country codes
+    # (countrycode=AT,CH,...) is not reliably honoured by OCM - in
+    # practice sites from all over the world came back, not just from the
+    # requested countries. Both are checked directly against a fake but
+    # realistic (verbose) OCM response: no compact parameter, and
+    # one call per country instead of a comma-separated list.
     from app.charging import chargers_import as chargers_import_module
 
     sent_countrycodes: list = []
@@ -221,10 +220,9 @@ def main() -> int:
                 "Connections": [{"ConnectionType": {"Title": "CCS"},
                                  "PowerKW": 150.0, "Quantity": 2}],
                 "NumberOfPoints": 2, "DateLastStatusUpdate": "2026-08-24T00:00:00Z",
-                # Genau die Felder, die der Import bisher weggeworfen hat.
-                # Darin steht, was einen Ladepunkt für eine Fahrt
-                # unbrauchbar macht - und das entscheidet mehr als jede
-                # Zielfunktion.
+                # Exactly the fields the import used to throw away.
+                # They say what makes a charging point unusable for a trip
+                # - and that matters more than any objective function.
                 "StatusType": {"Title": "Operational", "IsOperational": True},
                 "UsageType": {"Title": "Private - Restricted access",
                               "IsMembershipRequired": True},
@@ -261,9 +259,9 @@ def main() -> int:
         chargers_import_module.requests.get = ocm_get_original
         db.close()
 
-    # Was in Worten dasteht, wird jetzt aufgehoben. Ein Ladepunkt kann
-    # tadellos aussehen - 150 kW, zwei Säulen - und trotzdem unbrauchbar
-    # sein, weil er hinter einer Schranke steht.
+    # What is stated in words is now kept. A charging point can look
+    # flawless - 150 kW, two posts - and still be unusable
+    # because it sits behind a barrier.
     db = SessionLocal()
     try:
         lp = db.query(models.ChargePoint).filter_by(source="ocm",
@@ -288,12 +286,12 @@ def main() -> int:
         db.close()
 
     print("\nOpen-Charge-Map-Import entlang einer Strecke")
-    # Regression: aus_ocm()s offset-Pagination blättert bei einem sehr grossen
-    # Land nicht zuverlässig durch (siehe oben) - aus_ocm_route() fragt
-    # stattdessen mehrere Umkreise entlang der Streckengeometrie ab. Geprüft
-    # wird: mehrere Anker bei einer längeren Strecke, und ein Standort, den
-    # zwei überlappende Umkreise beide sehen, wird nur einmal gezählt.
-    distance = [[16.37 + 0.01 * i, 48.21] for i in range(151)]  # ~150 km Ost-West
+    # Regression: from_ocm()'s offset pagination does not reliably page through
+    # a very large country (see above) - from_ocm_route() instead queries
+    # several radii along the route geometry. Checked: several anchors on
+    # a longer route, and a site that two overlapping radii both see is
+    # counted only once.
+    distance = [[16.37 + 0.01 * i, 48.21] for i in range(151)]  # ~150 km east-west
 
     requested_anchor: list = []
 
@@ -331,11 +329,11 @@ def main() -> int:
         db.close()
 
     print("\nOrtssuche ohne Länderfilter")
-    # Regression: `land` stand früher fest auf "DE" und /api/orte fragte damit
-    # nie explizit - jedes Ziel jenseits der Grenze verschwand über
-    # ORS' boundary.country-Filter. Das Demo-Routing kennt keinen echten
-    # HTTP-Aufruf, deshalb wird hier der ORS-Adapter direkt geprüft: welche
-    # Parameter tatsächlich an openrouteservice gingen.
+    # Regression: `land` used to be hard-coded to "DE", so /api/orte never
+    # asked explicitly - every destination across the border vanished through
+    # ORS' boundary.country filter. The demo routing makes no real
+    # HTTP call, so the ORS adapter is checked directly here: which
+    # parameters actually went to openrouteservice.
     from app.routing.ors import ORS
     import app.routing.ors as ors_module
 
@@ -374,16 +372,16 @@ def main() -> int:
     verify(response.status_code == 200, "Route wird gerechnet",
            f"HTTP {response.status_code}: {response.text[:120]}")
     variants = response.json()["variants"]
-    # Der Demo-Adapter kennt keinen Unterschied zwischen den drei ORS-Vorgaben
-    # und liefert für alle dieselbe Luftlinie - /api/route erkennt das und legt
-    # Vorgabe ist eine einzige Route, die schnellste.
+    # The demo adapter makes no difference between the three ORS presets
+    # and returns the same straight line for all - /api/route notices this and
+    # the default is a single route, the fastest.
     #
-    # Vorher waren es drei ("fastest", "shortest", "recommended"). "shortest"
-    # ist inzwischen ganz raus: Auf Le Gurp - Montchanin liefert sie 554 km
-    # in 11,8 Stunden gegen 654 km in 6,3 - hundert Kilometer weniger,
-    # gekauft mit fünfeinhalb Stunden. Und "recommended" ergibt auf
-    # Autobahnstrecken meist dieselbe Strasse wie "fastest". Drei Anfragen
-    # für eine Antwort, bei 2.500 ORS-Anfragen am Tag.
+    # Before, there were three ("fastest", "shortest", "recommended"). "shortest"
+    # is gone entirely by now: on Le Gurp - Montchanin it returns 554 km
+    # in 11.8 hours against 654 km in 6.3 - a hundred kilometres less,
+    # bought with five and a half hours. And "recommended" on motorway
+    # routes usually yields the same road as "fastest". Three requests
+    # for one answer, with 2,500 ORS requests a day.
     verify(len(variants) == 1,
            "ohne Alternative wird genau eine Route gerechnet",
            f"{len(variants)} Varianten")
@@ -392,11 +390,11 @@ def main() -> int:
     verify(route["labels"] == ["schnellste"],
            "und sie ist die schnellste", str(route["labels"]))
 
-    # Mit Alternative kommt die mautfreie dazu. Das Demo-Routing erfindet
-    # eine Luftlinie und kennt keine Mautstrassen - beide Anfragen ergeben
-    # deshalb dieselbe Strecke, und /api/route legt sie zu einer Variante
-    # mit beiden Etiketten zusammen. Genau das ist hier zu prüfen: dass die
-    # Zusammenlegung greift und nicht zweimal dasselbe angeboten wird.
+    # With the alternative, the toll-free one is added. The demo routing invents
+    # a straight line and knows no toll roads - both requests therefore
+    # yield the same route, and /api/route merges them into one variant
+    # with both labels. That is exactly what is to be checked here: that the
+    # merging works and the same thing is not offered twice.
     with_old = client.post("/api/route", json={
         "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
@@ -429,8 +427,8 @@ def main() -> int:
            f"SoC am Ziel {short['soc_at_target']} %")
 
     print("\nAnhänger und Höchstgeschwindigkeit")
-    # Der Regler steht auf 150 %: Das Routing-Tempo wird um die Hälfte
-    # angehoben - weit über jede Grenze, die ein Gespann hat.
+    # The slider is at 150%: the routing speed is raised by half
+    # - far beyond any limit a trailer combination has.
     def hamburg_bremen(**more):
         response = client.post("/api/route", json={
             "vehicle_id": vehicles[0]["id"],
@@ -485,15 +483,15 @@ def main() -> int:
         "max_speed_kmh": None})
 
     print("\nEigene Strecken als Kandidaten")
-    # Eine frühere Fahrt Hamburg - München (60 Messpunkte entlang der
-    # Strecke, mit Tempo) macht aus derselben Anfrage einen Kandidaten mehr.
+    # An earlier trip Hamburg - Munich (60 measurement points along the
+    # route, with speed) turns the same request into one more candidate.
     #
-    # Das Demo-Routing erfindet für jedes Teilstück eine leicht andere Linie;
-    # der Kandidat wäre darin immer länger und langsamer und würde als
-    # aussichtslos verworfen, bevor er ein Etikett bekäme. Deshalb steht hier
-    # ein Routing, das jeden Aufruf mitschreibt und immer dieselbe Strasse
-    # liefert: Geprüft wird, was dieses Modul verantwortet - dass die
-    # Zwischenpunkte beim Routing ankommen und das Etikett an der Route steht.
+    # The demo routing invents a slightly different line for every leg;
+    # the candidate would always be longer and slower in it and would be discarded
+    # as hopeless before it got a label. That is why a routing is used here that
+    # records every call and always returns the same road: what is checked is
+    # what this module is responsible for - that the intermediate points reach
+    # the routing and the label sits on the route.
     from datetime import datetime as _dt, timedelta as _td
     from app import routing as _routing
     from app.routing.demo import DemoRouting as _Demo
@@ -506,7 +504,7 @@ def main() -> int:
         def route(self, start, destination, intermediate_stops=None, preference="recommended",
                   toll_free=False):
             _Calls.calls.append(list(intermediate_stops or []))
-            return super().route(start, destination)         # dieselbe Strasse, immer
+            return super().route(start, destination)         # same road, always
 
     def on_the_line(share):
         return (HH[0] + (MUC[0] - HH[0]) * share,
@@ -570,10 +568,10 @@ def main() -> int:
     finally:
         _routing.provider = fallback
 
-    # Wegräumen: Die späteren Abschnitte zählen Sitzungen und Fahrten. Die
-    # Messpunkte zuerst: Ein Massen-Delete kaskadiert nicht, und unter SQLite
-    # erzwingt niemand den Fremdschlüssel - die nächste Sitzung bekäme dieselbe
-    # ID und erbte die Waisen.
+    # Cleaning up: the later sections count sessions and trips. The
+    # measurement points first: a bulk delete does not cascade, and under SQLite
+    # nobody enforces the foreign key - the next session would get the same
+    # ID and inherit the orphans.
     db = SessionLocal()
     try:
         db.query(models.LivePoint).filter_by(session_id=old_id).delete()
@@ -583,11 +581,11 @@ def main() -> int:
         db.close()
 
     print("\nTomTom als Berater")
-    # TomTom liefert Vorschläge und Verkehr, gespeichert wird davon nichts. Hier
-    # ersetzen zwei Funktionen das Netz: ein Vorschlag entlang der Luftlinie und
-    # eine Verzögerung je Route. Das Routing ist eines, das einen Weg mit
-    # Zwischenpunkten um sechs Prozent schneller macht - dann ist der Vorschlag
-    # ohne Verkehr die schnellste Route, und genau das soll der Verkehr drehen.
+    # TomTom delivers suggestions and traffic, nothing of it is stored. Here
+    # two functions replace the network: a suggestion along the straight line and
+    # a delay per route. The routing is one that makes a path with
+    # intermediate points six percent faster - then the suggestion
+    # without traffic is the fastest route, and that is exactly what traffic should flip.
     import os as _os
     from app.routing import tomtom as _tt
     from app.routing.demo import DemoRouting as _Demo2
@@ -609,7 +607,7 @@ def main() -> int:
              for i in range(51)]
     delays: list = []
     counter = {"alternativen": 0, "traffic": 0}
-    departures: list = []                 # was TomTom an Abfahrt bekam
+    departures: list = []                 # the departure TomTom received
 
     def alternativen_fake(start, destination, maximal=5, departure=None):
         counter["alternativen"] += 1
@@ -624,8 +622,8 @@ def main() -> int:
         return _tt.Traffic(delay_s=mins * 60.0, time_s=30000.0,
                            without_traffic_s=30000.0 - mins * 60.0)
 
-    # Das Wetter ersetzen und mitschreiben: Die Abfahrtszeit gilt auch dafür, und
-    # ohne Ersatz ginge dieser Abschnitt ins Netz.
+    # Replace the weather and record the calls: the departure time applies to it too, and
+    # without a replacement this section would go to the network.
     from app.energy import weather as _weather
     from app.energy.model import Environment as _Environment
     weather_calls: list = []
@@ -688,14 +686,14 @@ def main() -> int:
         verify(len(fastest(vs)) == 1,
                "ohne Verkehr gewinnt genau eine der beiden",
                str([v["labels"] for v in vs]))
-        # Wer ohne Verkehr gewinnt, bekommt zwei Stunden Stau. Welche das ist,
-        # entscheidet das Modell (mehr Tempo heisst auch mehr Energie und mehr
-        # Ladezeit) - der Test nimmt es nicht vorweg.
+        # Whoever wins without traffic gets two hours of congestion. Which one that is
+        # is decided by the model (more speed also means more energy and more
+        # charging time) - the test does not anticipate it.
         winner_was_tomtom = any(e.startswith("TomTom-Vorschlag")
                                 for e in fastest(vs)[0]["labels"])
-        # Die Verzögerungen werden in der Reihenfolge abgefragt, in der die
-        # Varianten entstehen: erst die schnellste von OpenRouteService, dann
-        # der Vorschlag.
+        # The delays are requested in the order in which the
+        # variants come into being: first the fastest from OpenRouteService, then
+        # the suggestion.
         delays[:] = [0.0, 120.0] if winner_was_tomtom else [120.0, 0.0]
         vs = tomtom_plan()
         winner_actual_tomtom = any(e.startswith("TomTom-Vorschlag")
@@ -723,7 +721,7 @@ def main() -> int:
         verify(counter == {"alternativen": 0, "traffic": 0}
                and not any("traffic_min" in v for v in vs),
                "abgeschaltet wird TomTom nicht gefragt", str(counter))
-        # --- Abfahrtszeit: Verkehr und Wetter gelten für diese Zeit ---------
+        # --- Departure time: traffic and weather apply for this time ---------
         from datetime import datetime as _dt3, timedelta as _td3, timezone as _tz3
         tomorrow = (_dt3.now(_tz3.utc) + _td3(days=1)).replace(microsecond=0)
         delays[:] = [0.0, 0.0]
@@ -793,14 +791,14 @@ def main() -> int:
         _os.environ.pop("TOMTOM_API_KEY", None)
 
     print("\nZeitangaben und Aufzeichnungsstart")
-    # Der Server speichert UTC ohne Zone. `isoformat()` einer solchen Zeit hat
-    # kein Z - und ein Browser liest das als Ortszeit: In Sommerzeit stand
-    # 15:56 Uhr, wo es 17:56 war, und jeder Vergleich mit Date.now() lag zwei
-    # Stunden daneben. Jede Zeit verlässt den Server deshalb mit Z.
+    # The server stores UTC without a zone. `isoformat()` of such a time has
+    # no Z - and a browser reads that as local time: in summer time it showed
+    # 15:56 where it was 17:56, and every comparison with Date.now() was two
+    # hours off. Every time therefore leaves the server with a Z.
     from datetime import datetime as _dz, timezone as _tzz
-    # Eine Aufzeichnung hat kein Energieprofil, aus dem sich ein Ladestand
-    # schätzen liesse. Ohne Messung blieb die Live-Anzeige leer - bis das Auto
-    # zum ersten Mal antwortete, und das tut es im Stand nicht (Alarmanlage).
+    # A recording has no energy profile from which a charge level could be
+    # estimated. Without a measurement the live display stayed empty - until the car
+    # answered for the first time, and it does not while parked (alarm system).
     start = client.post("/api/live/aufzeichnung", json={
         "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
         "soc": 79.6, "name": "Start"}).json()
@@ -882,10 +880,10 @@ def main() -> int:
     client.delete(f"/api/saeulen/{first['id']}/belegt")
 
     print("\nLadeplan")
-    # Die Demo-Route ist die Luftlinie, die Ladepunkte der Probe stehen an der
-    # A7. Dadurch liegen sie weiter neben der Strecke, als sie es neben einer
-    # echten Strasse täten - deshalb hier eine grosszügigere Umweg-Grenze als
-    # die zehn Minuten, mit denen der Optimierer sonst arbeitet.
+    # The demo route is the straight line, the charging points of the sample sit on
+    # the A7. That puts them further off the route than they would be beside a
+    # real road - hence a more generous detour limit here than
+    # the ten minutes the optimizer otherwise works with.
     CHARGE_PLAN = {"min_kw": 100, "radius_km": 25, "detour_limit_min": 15}
     plan = client.post(f"/api/fahrten/{trip_id}/ladeplan",
                        params=CHARGE_PLAN).json()
@@ -911,8 +909,8 @@ def main() -> int:
     verify(all(s["lat"] and s["lon"] for s in plan["stops"]),
            "jeder Stopp hat eine Koordinate für die Karte")
 
-    # Die Belegt-Meldung ist die einzige Verfügbarkeitsinformation, die stimmt -
-    # sie muss den Plan verändern, nicht nur die Liste einfärben.
+    # The occupied report is the only availability information that is accurate -
+    # it must change the plan, not just colour the list.
     if plan["stops"]:
         planned = plan["stops"][0]["id"]
         client.post(f"/api/saeulen/{planned}/belegt")
@@ -922,9 +920,9 @@ def main() -> int:
                "ein als belegt gemeldeter Stopp verschwindet aus dem Plan")
         client.delete(f"/api/saeulen/{planned}/belegt")
 
-    # Der Regler "Aufwand je Halt" bis zum Optimierer durchgereicht. Bei null
-    # ist Anhalten gratis, und der Plan zersplittert in Kurzstopps - genau das
-    # Verhalten, das die Vorgabe von fünf Minuten verhindert.
+    # The "effort per stop" slider is passed through to the optimizer. At zero
+    # stopping is free, and the plan shatters into short stops - exactly the
+    # behaviour the default of five minutes prevents.
     gratis = client.post(f"/api/fahrten/{trip_id}/ladeplan",
                          params={**CHARGE_PLAN, "stop_fixed_cost_min": 0}).json()
     expensive = client.post(f"/api/fahrten/{trip_id}/ladeplan",
@@ -975,7 +973,7 @@ def main() -> int:
            "und liegt auf halber Strecke deutlich tiefer",
            f"{points_hungry[8]['soc']} gegen {points_scheduled[8]['soc']} %")
 
-    # Plangemäss fahren: die Nachführung darf nicht anschlagen.
+    # Driving according to plan: the tracking must not trigger.
     for sample in points_scheduled[:12]:
         state = client.post(f"/api/live/{session_id}/punkt", json={
             "lat": sample["lat"], "lon": sample["lon"],
@@ -989,7 +987,7 @@ def main() -> int:
     verify(state["spacing_to_route_m"] < 500,
            "die Position liegt auf der Route")
 
-    # Mehrverbrauch: jetzt muss die Nachführung anschlagen.
+    # Excess consumption: now the tracking must trigger.
     sitzung2 = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
     for sample in points_hungry[:12]:
         zustand2 = client.post(f"/api/live/{sitzung2}/punkt", json={
@@ -1009,9 +1007,9 @@ def main() -> int:
     verify(zustand2["replanning_required"] is True,
            "die Neuplanung wird angefordert", zustand2["reason"])
 
-    # Abseits der Route. Geprüft wird hier nur die Messung - dass daraus erst
-    # nach einer Minute eine Neuplanung wird, hängt an Zeitstempeln und steht
-    # deshalb in check_replanning.py, wo sie sich setzen lassen.
+    # Off the route. Only the measurement is checked here - that a re-plan only
+    # follows after a minute depends on timestamps and is therefore in
+    # check_replanning.py, where they can be set.
     off_route = client.post(f"/api/live/{sitzung2}/punkt", json={
         "lat": 54.9, "lon": 8.31, "soc": 40.0}).json()
     verify(off_route["spacing_to_route_m"] > 500,
@@ -1027,9 +1025,9 @@ def main() -> int:
            f"HTTP {locked.status_code}")
 
     print("\nNachgereichte Messpunkte (Funkloch-Puffer)")
-    # Ein Telefon ohne Netz sammelt Punkte und reicht sie nach. Dafür braucht
-    # der Punkt eine Messzeit - sonst lägen alle auf der Sekunde des
-    # Nachreichens, und der Zeitfaktor (der den Stau abbildet) wäre Unsinn.
+    # A phone without network collects points and submits them later. For that the
+    # point needs a measurement time - otherwise all would sit on the second of
+    # the submission, and the time factor (which models the congestion) would be nonsense.
     from datetime import datetime, timedelta, timezone
     buffer = client.post(f"/api/live/start/{trip_id}").json()["session_id"]
     now_ts = datetime.now(timezone.utc)
@@ -1038,7 +1036,7 @@ def main() -> int:
         batch.append({"lat": mp["lat"], "lon": mp["lon"], "soc": mp["soc"],
                        "timestamp": (now_ts - timedelta(minutes=60 - 5 * nr)
                                 ).isoformat().replace("+00:00", "Z")})
-    # Absichtlich in falscher Reihenfolge: Der Server ordnet nach Messzeit.
+    # Deliberately in the wrong order: the server sorts by measurement time.
     batch.reverse()
     response = client.post(f"/api/live/{buffer}/punkte", json={"points": batch})
     verify(response.status_code == 200, "ein Stapel wird angenommen",
@@ -1086,8 +1084,8 @@ def main() -> int:
     empty = client.post(f"/api/live/{buffer}/punkte", json={"points": []})
     verify(empty.status_code == 422, "ein leerer Stapel ist ein Fehler",
            f"HTTP {empty.status_code}")
-    # Im Stand fragt jolt das Auto nichts, misst aber weiter die 12-V-Spannung
-    # und schickt sie mit: ein Punkt, dessen Rohwerte nur `batt_v` enthalten.
+    # While parked jolt asks the car nothing, but keeps measuring the 12 V voltage
+    # and sends it along: a point whose raw values contain only `batt_v`.
     only_voltage = client.post(f"/api/live/{buffer}/punkt", json={
         "lat": points_scheduled[6]["lat"], "lon": points_scheduled[6]["lon"],
         "raw_values": {"batt_v": 13.9}})
@@ -1103,11 +1101,11 @@ def main() -> int:
            "in eine beendete Sitzung geht auch kein Stapel", f"HTTP {to.status_code}")
 
     print("\nLogger im Auto meldet sich über das Fahrzeug")
-    # Ein Gerät, das fest im Auto sitzt, kann die Sitzungs-ID nicht kennen:
-    # Sie entsteht beim Losfahren in der App und wechselt mit jeder Fahrt.
-    # Es weist sich deshalb mit dem Logger-Token des Fahrzeugs aus.
+    # A device permanently installed in the car cannot know the session ID:
+    # it is created when setting off in the app and changes with every trip.
+    # It therefore identifies itself with the vehicle's logger token.
     vehicle_id = vehicles[0]["id"]
-    client.post(f"/api/live/{session_id}/ende")      # erst mal Ruhe schaffen
+    client.post(f"/api/live/{session_id}/ende")      # first create some quiet
 
     wrong = client.post("/api/live/melden", json={
         "token": "gibtesnicht", "lat": 53.5, "lon": 10.0, "soc": 50.0})
@@ -1126,9 +1124,9 @@ def main() -> int:
            "das Token selbst steht in keiner Listenantwort - es wird genau "
            "einmal gezeigt", str(list(lst.keys())))
 
-    # Das Auto steht vor der Tür und der Logger sendet trotzdem. Das ist kein
-    # Fehler: Ein unbeaufsichtigtes Gerät, das Fehlerantworten bekommt, fängt
-    # an zu protokollieren oder schaltet sich ab.
+    # The car is parked outside and the logger sends anyway. That is not an
+    # error: an unattended device that receives error responses starts
+    # logging or switches itself off.
     idle = client.post("/api/live/melden", json={
         "token": token, "lat": 53.5, "lon": 10.0, "soc": 50.0})
     verify(idle.status_code == 200
@@ -1151,9 +1149,9 @@ def main() -> int:
     verify(client.get(f"/api/live/{sitzung3}").json()["points"] == 1,
            "der Messpunkt liegt in dieser Sitzung")
 
-    # Fremdes Format: dieselbe Meldung, in der Sprache von Iternio/ABRP. Das
-    # ist der Weg, auf dem die OBD2-Daten hereinkommen werden - übersetzt
-    # wird in live/quellen/, geprüft im Einzelnen von check_sources.py.
+    # Foreign format: the same message, in the language of Iternio/ABRP. That
+    # is the way the OBD2 data will come in - translation
+    # happens in live/quellen/, details are checked by check_sources.py.
     foreign = client.post("/api/live/melden", json={
         "token": token, "format": "abrp",
         "tlm": {"utc": 1787654321, "soc": 44.0, "lat": sample["lat"],
@@ -1185,7 +1183,7 @@ def main() -> int:
            "ein unbekanntes Format wird abgelehnt",
            f"HTTP {unknown.status_code}")
 
-    # Ein neues Token entwertet das alte - sonst wäre "erneuern" wertlos.
+    # A new token invalidates the old one - otherwise "renew" would be worthless.
     newOne = client.post(
         f"/api/fahrzeuge/{vehicle_id}/logger-token").json()["logger_token"]
     verify(newOne != token, "ein erneuertes Token ist ein anderes")
@@ -1212,11 +1210,11 @@ def main() -> int:
            "index.html kommt zurück")
     verify(client.get("/manifest.json").status_code == 200, "manifest.json auch")
 
-    # Der Fehler, der viermal zugeschlagen hat: index.html wird nie
-    # zwischengespeichert, die Dateien unter /static aber schon - Cloudflare
-    # ersetzt dort das no-cache des Ursprungs durch max-age=14400. Der
-    # Browser holt frisches HTML und fragt fürs JavaScript gar nicht erst
-    # nach. Vier Stunden lang neue Oberfläche mit alter Logik.
+    # The bug that has struck four times: index.html is never
+    # cached, but the files under /static are - Cloudflare
+    # replaces the origin's no-cache there with max-age=14400. The
+    # browser fetches fresh HTML and does not even ask for the JavaScript.
+    # Four hours of new UI with old logic.
     contents = page.content
     verify(b"/static/app.js?v=" in contents and b"/static/trips.js?v=" in contents,
            "die Skriptverweise in index.html tragen eine Version - sonst "
@@ -1225,19 +1223,19 @@ def main() -> int:
     verify(b'"/static/core.js"' not in contents,
            "und zwar alle, nicht nur einige",
            "core.js steht ohne Version im HTML")
-    # Der Fall, der bei einem neuen Skript immer wieder droht: Es steht im HTML,
-    # aber nicht in INDEX_DATEIEN (backend/app/main.py) - dann bleibt es bis zu
-    # vier Stunden im Cache haengen. Deshalb geprueft wird *jeder* Verweis.
+    # The case that always threatens with a new script: it is in the HTML,
+    # but not in INDEX_FILES (backend/app/main.py) - then it stays stuck in the cache for up to
+    # four hours. That is why *every* reference is checked.
     import re as _re
     without_version = _re.findall(rb'src="(/static/[^"?]+\.js)"', contents)
     verify(not without_version,
            "kein einziger Skriptverweis in index.html ohne Version - ein neues "
            "Skript gehoert in INDEX_FILES", str(without_version))
 
-    # Die OBD2-Seite liegt ausserhalb von /static, weil Cloudflare allem
-    # darunter eine Browser-Frist von vier Stunden aufdrückt. Beim
-    # Fehlersuchen im Auto ist das der Unterschied zwischen "die Änderung
-    # wirkt nicht" und "die Änderung ist noch gar nicht da".
+    # The OBD2 page sits outside /static, because Cloudflare imposes a
+    # browser lifetime of four hours on everything below it. When troubleshooting
+    # in the car that is the difference between "the change has
+    # no effect" and "the change is not even there yet".
     obd = client.get("/obd")
     verify(obd.status_code == 200 and b"aufzeichnen" in obd.content.lower(),
            "die Aufzeichnungsseite wird unter /obd ausgeliefert",
@@ -1250,10 +1248,9 @@ def main() -> int:
            "die Verweise auf Skript und Stylesheet tragen eine Version - "
            "sonst zieht eine frische Seite altes JavaScript nach",
            str([z for z in obd.content.split() if b"obd." in z][:3]))
-    # Ein eigenes Manifest, damit die Seite als Symbol auf dem
-    # Home-Bildschirm liegt. Ohne das ist Aufzeichnen ein Weg durch Bluefy
-    # und die Adresszeile - und damit etwas, das man sich für "nächstes Mal"
-    # aufhebt.
+    # A manifest of its own, so that the page sits as an icon on the
+    # home screen. Without it, recording is a detour through Bluefy
+    # and the address bar - and thus something you put off until "next time".
     obd_manifest = client.get("/manifest-obd.json")
     verify(obd_manifest.status_code == 200
            and obd_manifest.json().get("start_url") == "/obd",
@@ -1265,8 +1262,8 @@ def main() -> int:
 
     verify(client.get("/static/map.js").status_code == 200, "und die Skripte")
 
-    # Die Einstellungen: ein Reiter, ein Abschnitt, ein Skript - und im
-    # Service-Worker-Gerüst, sonst fehlt die Ansicht bei schlechtem Empfang.
+    # The settings: one tab, one section, one script - and in the
+    # service worker shell, otherwise the view is missing on poor reception.
     page_text = client.get("/").text
     sw_text = client.get("/sw.js").text
     verify('data-ansicht="einstellungen"' in page_text
@@ -1280,23 +1277,23 @@ def main() -> int:
            and "/static/settings.js" in sw_text,
            "das Skript wird ausgeliefert und steht im Gerüst des Service Workers")
 
-    # Jeder ausgelesene Messwert braucht eine Beschriftung, sonst steht im
-    # Dashboard "ptc_strom_a" statt "Heizstrom". Die Liste steht als Tabelle
-    # in readings.js, der Interpreter in obd-core.js, und die Oberflaeche
-    # bezieht sie ueber `FELDER` - sonst taucht eine neue Datenkennung dort
-    # nie auf. Kommentare fallen vorher weg, damit ein Wort darin nicht als
-    # Feld zaehlt.
+    # Every value read out needs a label, otherwise the dashboard shows
+    # "ptc_current_a" instead of "Heizstrom". The list sits as a table
+    # in readings.js, the interpreter in obd-core.js, and the UI
+    # obtains it via `FELDER` - otherwise a new data identifier never shows up
+    # there. Comments are dropped beforehand so that a word in one does not count
+    # as a field.
     core = open(os.path.join(FRONTEND, "obd-core.js"), encoding="utf-8").read()
     table = open(os.path.join(FRONTEND, "readings.js"),
                    encoding="utf-8").read()
     table = re.sub(r"/\*.*?\*/", "", table, flags=re.S)
     table = re.sub(r"^\s*//.*$", "", table, flags=re.M)
-    # Hauptwerte (4 Leerzeichen) und die Werte aus `auch` (8) gleichermassen.
+    # Main values (4 spaces) and the values from `auch` (8) alike.
     entries = re.findall(
         r'\{ name: "([a-z_]+)",(.*?)(?=\{ name:|\n  \],\n\};)', table, re.S)
 
     def entry(name: str) -> str:
-        """Der Tabellentext eines Hauptwerts, samt seiner `auch`-Werte."""
+        """The table text of a main value, including its `auch` values."""
         hit = re.search(r'\n    \{ name: "%s",(.*?)(?=\n    \{ name:|\n  \],\n\};)'
                             % name, table, re.S)
         return hit.group(1) if hit else ""
@@ -1316,11 +1313,10 @@ def main() -> int:
     verify("joltObd.FIELDS" in live,
            "und das Dashboard bezieht sie von dort - eine neue Datenkennung "
            "taucht damit von selbst auf")
-    # Das Aufzeichnen braucht eine **eigene** Fahrzeugwahl. Vorher griff es
-    # auf die der Planen-Ansicht zu und fiel, wenn die leer war, auf das
-    # erste Fahrzeug der Liste zurueck - das beim ersten Start angelegte
-    # "Allgemeine E-Auto". Zwei echte Testfahrten sind so dem falschen Auto
-    # zugeschrieben worden.
+    # Recording needs a **separate** vehicle choice. Before, it used
+    # the one from the Plan view and, when that was empty, fell back on the
+    # first vehicle in the list - the "Allgemeine E-Auto" created at first
+    # start. Two real test drives were attributed to the wrong car that way.
     html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
     trips_js = open(os.path.join(FRONTEND, "trips.js"),
                       encoding="utf-8").read()
@@ -1336,10 +1332,10 @@ def main() -> int:
                                    encoding="utf-8").read(),
            "und sie wird mit den Fahrzeugen gefüllt")
 
-    # Ein Steuergeraet auf 11-Bit-Kennung braucht ein anderes Protokoll.
-    # Geht der Wechsel schief, darf das die Pflichtwerte derselben Runde
-    # nicht kosten - deshalb stehen diese Abfragen zuletzt und der Wechsel
-    # wird im finally zurueckgenommen.
+    # A control unit with an 11-bit identifier needs a different protocol.
+    # If the switch goes wrong, it must not cost the mandatory values of the same round
+    # - that is why these queries come last and the switch
+    # is undone in the finally.
     names = re.findall(r'\n    \{ name: "([a-z_]+)"', table)
     climate = [n for n in ("outside_temp_c", "inside_temp_c") if n in names]
     verify(climate and all(names.index(n) > names.index("soc_raw")
@@ -1352,16 +1348,16 @@ def main() -> int:
     verify("} finally {" in core and 'command("ATSP7")' in core,
            "das Protokoll wird im finally zurückgesetzt - eine Sitzung, die "
            "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
-    # Der Wiederaufbau darf nicht aufgeben, solange die Fahrt laeuft. Mit
-    # der alten Obergrenze von sechs Versuchen war nach zweieinhalb Minuten
-    # Schluss - fuenf Minuten mit der Seite im Hintergrund haben auf einer
-    # echten Fahrt zwanzig Kilometer ohne einen Fahrzeugwert gekostet.
+    # The reconnection must not give up as long as the trip is running. With
+    # the old limit of six attempts it was over after two and a half minutes
+    # - five minutes with the page in the background cost twenty kilometres
+    # without a single vehicle value on a real trip.
     verify("attempt >= bound" not in core,
            "der Wiederaufbau gibt nicht nach sechs Versuchen auf - `weiter` "
            "beendet ihn, wenn die Fahrt endet")
     verify("AGAIN_MAX_DISTANCE_MS" in core,
            "stattdessen ist nur der Abstand gedeckelt")
-    # Was eine **lange** Fahrt anders macht.
+    # What a **long** trip does differently.
     core_js = open(os.path.join(FRONTEND, "core.js"), encoding="utf-8").read()
     verify("sessionRemember" in core_js and "rememberedSession" in core_js,
            "die laufende Sitzung überlebt ein Neuladen - sonst beginnt jeder "
@@ -1392,11 +1388,11 @@ def main() -> int:
     verify("changeFailed" in core,
            "und ein gescheiterter Wechsel wird nicht endlos wiederholt")
 
-    # Ohne Flusskontrolle scheitert jede Antwort, die nicht in einen CAN-
-    # Rahmen passt - der ELM327 muss wissen, mit welchem Kopf er das
-    # Flow-Control-Paket schickt. Das WiCAN-Fahrzeugprofil setzt die drei
-    # Befehle vor jeder Abfrage; jolt setzte sie gar nicht, und genau
-    # deshalb kam der Batteriestrom in keiner einzigen Runde an.
+    # Without flow control every response that does not fit into a CAN
+    # frame fails - the ELM327 must know with which header it sends the
+    # flow-control packet. The WiCAN vehicle profile sets the three
+    # commands before every query; jolt did not set them at all, and that is
+    # exactly why the battery current never arrived in a single round.
     for command in ("ATFCSH", "ATFCSD300000", "ATFCSM1"):
         verify(command in core, f"die Flusskontrolle setzt {command}")
     verify(core.count("await flusskontrolle(destination)") >= 2,
@@ -1420,10 +1416,10 @@ def main() -> int:
            "steht die Zahl minutenlang still")
     verify("drawConsumption" in live and "verbrauchsabschnitte" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
-    # Die Plausibilitaetspruefung im Stand. Der Kreuzvergleich ist der
-    # schaerfere Teil: Entladezaehler geteilt durch Kilometerstand muss
-    # einen sinnvollen Lebensdauerverbrauch ergeben, und das prueft beide
-    # Byte-Lagen auf einmal - ohne eine einzige gefahrene Minute.
+    # The plausibility check while parked. The cross-check is the
+    # sharper part: discharge counter divided by odometer must
+    # yield a sensible lifetime consumption, and that checks both
+    # byte layouts at once - without a single minute driven.
     obd_js = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     obd_html = open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8").read()
     verify('id="pruefen"' in obd_html and "valuesCall" in obd_js,
@@ -1478,9 +1474,9 @@ def main() -> int:
            "die Strecke je Balken kommt dagegen aus dem GPS - der "
            "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
            "sind rund 1,2 km")
-    # Die Rohwerte gehoeren hinter eine Klappe: siebzehn Zeilen mitten im
-    # Fahrbild sind Laerm. Und die Kacheln, die man liest, gehoeren ueber
-    # die Diagramme, nicht darunter.
+    # The raw values belong behind a flap: seventeen lines in the middle of the
+    # driving view are noise. And the tiles you read belong above
+    # the charts, not below them.
     verify('<details id="live-roh"' in html,
            "die Rohwerte stehen hinter einer Klappe, nicht im Fahrbild")
     verify(html.index('id="live-werte"') < html.index('id="live-verlauf"'),
@@ -1519,24 +1515,24 @@ def main() -> int:
            "das Dashboard zeigt, wie alt der letzte Satz aus dem Auto ist - "
            "eine eingefrorene Anzeige sieht sonst aus wie eine laufende")
 
-    # Die Betriebsskripte müssen auch im Container laufen. Dort liegt das
-    # Paket als /srv/app neben /srv/tools, lokal dagegen unter backend/app -
-    # wer nur ein Layout kennt, scheitert im jeweils anderen mit
-    # `ModuleNotFoundError: No module named 'app'`. Genau das war der Fall:
-    # `examine.py` hing auf `../backend` fest, und damit lief per
-    # `docker exec` kein einziges Prüfskript - der Weg, für den `tools/`
-    # überhaupt ins Image aufgenommen wurde.
+    # The operations scripts must also run in the container. There the
+    # package sits as /srv/app next to /srv/tools, locally under backend/app -
+    # whoever knows only one layout fails in the other with
+    # `ModuleNotFoundError: No module named 'app'`. That is exactly what happened:
+    # `examine.py` was hard-wired to `../backend`, so not a single check script
+    # ran via `docker exec` - the very route for which `tools/`
+    # was included in the image at all.
     tools = sorted(fs_path for fs_path in os.listdir(TOOLS)
                        if fs_path.endswith(".py"))
     without_both = []
     for name in tools:
         source = open(os.path.join(TOOLS, name), encoding="utf-8").read()
-        # Nur wer das Paket wirklich importiert, braucht den Suchpfad - das
-        # blosse Wort "app" steht auch in Werkzeugen ohne Anwendung.
+        # Only whoever really imports the package needs the search path - the
+        # mere word "app" also appears in tools without an application.
         if not re.search(r"^\s*(from|import) app\b", source, re.M):
             continue
-        # Entweder das Skript kennt beide Layouts selbst, oder es überlässt
-        # das `pruefen.anwendung_bereitstellen`.
+        # Either the script knows both layouts itself, or it leaves it to
+        # `pruefen.application_provide`.
         if re.search(r'os\.path\.join\(_?(?:HERE|here|_here), "\.\."\)', source) \
                 or "application_provide" in source \
                 or name == "examine.py":

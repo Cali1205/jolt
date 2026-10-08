@@ -1,9 +1,9 @@
-"""Live-Endpunkte: Messpunkte herein, Zustand hinaus.
+"""Live endpoints: measurement points in, state out.
 
-Der POST-Endpunkt ist bewusst so schlicht gehalten, dass ein OBD2-Logger oder
-ein Apple-Kurzbefehl ihn ohne Bibliothek bedienen kann - ein JSON-Objekt mit
-Position und Ladestand, mehr braucht es nicht. Das ist die Schnittstelle, an
-der später die echten Fahrzeugdaten andocken.
+The POST endpoint is deliberately kept so simple that an OBD2 logger or an
+Apple Shortcut can use it without a library - a JSON object with position
+and state of charge, nothing more is needed. This is the interface where the
+real vehicle data will dock on later.
 """
 import asyncio
 import json
@@ -27,7 +27,7 @@ log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/live", tags=["live"])
 
 
-# Die Messung des Dongles hat knapp zwanzig Werte; das Vierfache ist Luft.
+# The dongle's measurement has just under twenty values; four times that is headroom.
 RAW_VALUES_MAX_KEY = 80
 RAW_VALUES_MAX_BYTES = 8000
 
@@ -35,30 +35,30 @@ RAW_VALUES_MAX_BYTES = 8000
 class Sample(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
-    # Ohne Ladestand ist es eine reine Positionsmeldung - der Normalfall,
-    # solange das Auto seinen Ladestand nicht selbst liefert. Das Telefon
-    # liefert die Position im Sekundentakt, der Ladestand kommt gelegentlich
-    # von Hand dazu. Ohne diese Punkte gäbe es unterwegs weder Zeitfaktor
-    # noch Ankunftsprognose.
+    # Without a state of charge this is a pure position report - the normal
+    # case as long as the car does not supply its state of charge itself.
+    # The phone delivers the position every second, the state of charge is
+    # occasionally added by hand. Without these points there would be
+    # neither a time factor nor an arrival forecast on the road.
     soc: float | None = Field(default=None, ge=0, le=100)
-    # Grenzen, die kein Auto verlässt: Ein Wert aus einem kaputten Logger
-    # (Einheit vertauscht, Überlauf) würde sonst ungeprüft in die Kalibrierung
-    # laufen und den Lernfaktor verziehen.
+    # Limits no car exceeds: a value from a broken logger (unit mixed up,
+    # overflow) would otherwise flow unchecked into the calibration and
+    # distort the learning factor.
     speed_kmh: float | None = Field(default=None, ge=0, le=500,
                                     allow_inf_nan=False)
     outside_temp_c: float | None = Field(default=None, ge=-80, le=70,
                                        allow_inf_nan=False)
-    # Alles Weitere, was die Quelle liefert - wird nur aufbewahrt, nicht
-    # verrechnet. Siehe models.LivePunkt.rohwerte.
+    # Everything else the source delivers - only kept, not used in
+    # calculations. See models.LivePoint.rohwerte.
     raw_values: dict | None = None
 
     @field_validator("raw_values")
     @classmethod
     def _limit_raw_values(cls, val):
-        """Aufbewahrt wird es je Punkt als JSON - also muss es klein bleiben.
+        """It is stored per point as JSON - so it has to stay small.
 
-        Ein Stapel hat bis zu 500 Punkte; ohne Grenze liesse sich mit einer
-        einzigen Anfrage Datenbank und Speicher füllen.
+        A batch has up to 500 points; without a limit a single request could
+        fill the database and memory.
         """
         if val is None:
             return val
@@ -68,10 +68,11 @@ class Sample(BaseModel):
             raise ValueError(f"Rohwerte höchstens {RAW_VALUES_MAX_BYTES} Zeichen")
         return val
 
-    # Zeitpunkt der **Messung**. Fehlt er, gilt der Eingang. Gesetzt wird er
-    # von einem Gerät, das einen Funkloch-Puffer nachreicht - sonst lägen alle
-    # nachgereichten Punkte auf derselben Sekunde, und der Zeitfaktor wäre
-    # Unsinn. Mit Zeitzone (`Z`) oder ohne; ohne gilt UTC.
+    # Time of the **measurement**. If missing, the time of receipt applies.
+    # It is set by a device that submits a dead-zone buffer later - otherwise
+    # all the late-submitted points would fall on the same second, and the
+    # time factor would be nonsense. With time zone (`Z`) or without; without
+    # one, UTC applies.
     timestamp: datetime | None = None
 
 
@@ -79,19 +80,19 @@ class SampleBatch(BaseModel):
     points: list[Sample] = Field(min_length=1, max_length=500)
 
 
-# Wie weit ein Zeitstempel von der Gegenwart abweichen darf. Nach vorn nur
-# ein Uhrenfehler des Telefons, nach hinten eine lange Fahrt ohne Netz.
+# How far a timestamp may deviate from the present. Forward only a clock
+# error of the phone, backward a long trip without network.
 TIME_AHEAD = timedelta(minutes=5)
 TIME_BACK = timedelta(hours=48)
 
 
 def _examine_time(timestamp: datetime | None) -> datetime | None:
-    """Zeitstempel eines Geräts auf naives UTC bringen - oder ablehnen.
+    """Bring a device timestamp to naive UTC - or reject it.
 
-    Die Datenbank führt naive UTC-Zeiten (`datetime.utcnow`). Ein Stempel mit
-    Zeitzone wird umgerechnet statt abgeschnitten, sonst wäre `+02:00` zwei
-    Stunden daneben. Ein Stempel aus der Zukunft oder aus dem Jahr 1970 ist
-    ein Uhrenfehler und würde die Reihenfolge der Punkte zerlegen.
+    The database holds naive UTC times (`datetime.utcnow`). A stamp with a
+    time zone is converted instead of truncated, otherwise `+02:00` would be
+    two hours off. A stamp from the future or from the year 1970 is a clock
+    error and would wreck the order of the points.
     """
     if timestamp is None:
         return None
@@ -105,14 +106,14 @@ def _examine_time(timestamp: datetime | None) -> datetime | None:
 
 
 class LoggerReport(BaseModel):
-    """Eine Meldung von einem Gerät im Auto.
+    """A report from a device in the car.
 
-    Ausser `token` und `format` ist hier bewusst nichts festgeschrieben: Die
-    übrigen Felder gehören dem jeweiligen Format und werden von dessen
-    Übersetzer in `live/quellen/` geprüft. Sie hier ein zweites Mal zu
-    beschreiben hiesse, jede Formatänderung an zwei Stellen nachzuziehen -
-    und die Prüfung läge dann bei Pydantic statt bei dem Modul, das das
-    Format wirklich kennt.
+    Apart from `token` and `format`, nothing is deliberately fixed here: the
+    remaining fields belong to the respective format and are validated by its
+    translator in `live/quellen/`. Describing them here a second time would
+    mean updating every format change in two places - and the validation
+    would then lie with Pydantic instead of the module that really knows the
+    format.
     """
     model_config = ConfigDict(extra="allow")
 
@@ -151,15 +152,16 @@ def _active_session_to_vehicle(db: Session, vehicle_id: int):
 async def _process_point(db: Session, session: models.LiveSession,
                              point: sources.RawPoint,
                              new_plan: bool = True) -> dict:
-    """Einen Messpunkt einsortieren und alle unterrichten, die es angeht.
+    """File a measurement point and notify everyone concerned.
 
-    `neu_planen=False` heisst: nachgereichter Punkt, nicht die Gegenwart.
-    Dann wird weder umgeplant noch an die Zuschauer gesendet - ein Zustand
-    von vor zehn Minuten liesse die Anzeige zurückspringen.
+    `new_plan=False` (re-plan) means: late-submitted point, not the
+    present. Then there is neither re-planning nor sending to the viewers - a
+    state from ten minutes ago would make the display jump back.
     """
-    # Im Threadpool: `messpunkt_aufnehmen` rechnet und schreibt synchron, und
-    # in einem `async def` hielte das den Event-Loop an - ein Stapel von 500
-    # Punkten liess jede andere Anfrage und jeden WebSocket warten.
+    # In the thread pool: `record_sample` (record sample) calculates
+    # and writes synchronously, and in an `async def` that would block the
+    # event loop - a batch of 500 points made every other request and every
+    # WebSocket wait.
     state = await run_in_threadpool(
         live_session.record_sample,
         db, session, point.lat, point.lon, point.soc,
@@ -171,10 +173,10 @@ async def _process_point(db: Session, session: models.LiveSession,
     if not new_plan:
         return msg
     await channel.send(session.id, msg)
-    # Eine geänderte Planung ist der einzige Anlass, jemanden am Steuer zu
-    # stören - und der einzige, der auch ein dunkles Telefon erreichen muss.
-    # Im Hintergrund, weil die Antwort an ein fahrendes Auto nicht auf einen
-    # Push-Dienst warten darf.
+    # A changed plan is the only reason to disturb someone at the wheel -
+    # and the only one that also has to reach a dark phone. In the
+    # background, because the response to a moving car must not wait for a
+    # push service.
     if state.plan_changed:
         push.send_background(SessionLocal, "jolt – Ladeplan geändert",
                                 state.change)
@@ -197,9 +199,9 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     if not trip:
         raise HTTPException(404, "Fahrt nicht gefunden.")
 
-    # Eine zweite laufende Sitzung zur selben Fahrt wäre nur verwirrend:
-    # Zwei Verbrauchsfaktoren zu derselben Strecke, und niemand weiss, welcher
-    # gilt. Die alte wird deshalb beendet.
+    # A second running session for the same trip would only be confusing:
+    # two consumption factors for the same route, and nobody knows which one
+    # applies. The old one is therefore ended.
     for old in db.query(models.LiveSession).filter_by(trip_id=trip_id,
                                                       running=True).all():
         old.running = False
@@ -207,10 +209,10 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
 
     session = models.LiveSession(trip_id=trip_id)
 
-    # Der Plan beim Losfahren. Er ist der Bezugspunkt für alles Weitere: Ohne
-    # ihn liesse sich unterwegs nicht sagen, *dass* sich etwas geändert hat -
-    # nur, dass etwas anders ist als das Energieprofil erwartet hat. Und die
-    # Suchparameter bleiben für die ganze Fahrt dieselben.
+    # The plan at departure. It is the reference point for everything else:
+    # without it one could not say on the road *that* something has changed -
+    # only that something differs from what the energy profile expected. And
+    # the search parameters stay the same for the whole trip.
     parameter = {"radius_km": radius_km, "min_kw": min_kw,
                  "connector_type": connector_type, "detour_limit_min": detour_limit_min,
                  "stop_fixed_cost_min": stop_fixed_cost_min,
@@ -221,9 +223,9 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
             session.plan = replanning.schedule(db, trip, 0.0, trip.start_soc,
                                             parameter)
         except Exception as failure:      # noqa: BLE001
-            # Ohne Startplan läuft die Fahrt trotzdem - die Nachführung
-            # arbeitet dann gegen das Energieprofil, wie in Stufe 1.
-            log.warning("Startplan fehlgeschlagen: %s", failure)
+            # Without a start plan the trip runs anyway - the tracking then
+            # works against the energy profile, as in stage 1.
+            log.warning("Start plan failed: %s", failure)
 
     db.add(session)
     db.commit()
@@ -234,13 +236,12 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
 @router.post("/{session_id}/punkt", dependencies=[Depends(deps.current_session)])
 async def report_point(session_id: int, sample: Sample,
                        db: Session = Depends(get_db)):
-    """Einen Messpunkt einsortieren.
+    """File a measurement point.
 
-    Nur mit Anmeldung (`X-Token`). Vorher stand hier, die Sitzungs-ID sei
-    der Schlüssel - eine fortlaufende Zahl, die jeder raten konnte, mit der
-    sich Position und Ladestand lesen und falsche Messpunkte einspielen
-    liessen. Ein Gerät im Auto ohne Anmeldung nimmt `/melden` mit dem
-    Logger-Token seines Fahrzeugs.
+    Only with login (`X-Token`). This used to say the session ID was the key
+    - a sequential number anyone could guess, which allowed reading position
+    and state of charge and injecting false measurement points. A device in
+    the car without login uses `/melden` with its vehicle's logger token.
     """
     session = await run_in_threadpool(_fetch_active_session, db, session_id)
     return await _process_point(db, session, sources.RawPoint(
@@ -252,17 +253,16 @@ async def report_point(session_id: int, sample: Sample,
 @router.post("/{session_id}/punkte", dependencies=[Depends(deps.current_session)])
 async def report_points(session_id: int, batch: SampleBatch,
                         db: Session = Depends(get_db)):
-    """Mehrere Messpunkte auf einmal - der Weg für einen Funkloch-Puffer.
+    """Several measurement points at once - the way for a dead-zone buffer.
 
-    Die Punkte werden nach Messzeit geordnet und der Reihe nach aufgenommen;
-    die Reihenfolge der Anfrage ist gleichgültig. Neu geplant wird nur beim
-    **letzten** (siehe `messpunkt_aufnehmen`), und nur ihn gibt es als
-    Zustand an die Zuschauer. Antwort ist der Zustand nach dem letzten Punkt
-    - dieselbe Form wie bei `/punkt`, damit die Oberfläche beides gleich
-    behandelt.
+    The points are sorted by measurement time and recorded in order; the
+    order in the request does not matter. Re-planning happens only for the
+    **last** one (see `record_sample`), and only it is sent as state
+    to the viewers. The response is the state after the last point - the
+    same shape as for `/punkt`, so the UI treats both alike.
 
-    Alles oder nichts: Ein ungültiger Zeitstempel lehnt den ganzen Stapel ab,
-    bevor irgendetwas geschrieben wurde.
+    All or nothing: an invalid timestamp rejects the whole batch before
+    anything has been written.
     """
     session = await run_in_threadpool(_fetch_active_session, db, session_id)
     now_ts = datetime.utcnow()
@@ -289,29 +289,29 @@ class RecordingStart(BaseModel):
 @router.post("/aufzeichnung", dependencies=[Depends(deps.current_session)])
 def start_recording(start: RecordingStart,
                          db: Session = Depends(get_db)):
-    """Eine Fahrt aufzeichnen, ohne sie vorher zu planen.
+    """Record a trip without planning it beforehand.
 
-    Der Weg für den Fall, für den sich Planen nicht lohnt: eine bekannte
-    kurze Strecke, ein paarmal gefahren, um den Verbrauch des Fahrzeugs zu
-    lernen. Strecke, Höhenprofil und Prognose entstehen erst beim Beenden
-    aus den Messpunkten (`live/recording.py`).
+    The way for the case where planning is not worthwhile: a known short
+    route, driven a few times to learn the vehicle's consumption. Route,
+    elevation profile and forecast only arise when ending, from the
+    measurement points (`live/recording.py`).
 
-    Start ist, wo das Gerät gerade steht - das Ziel ist zu diesem Zeitpunkt
-    noch unbekannt und wird zunächst gleichgesetzt. Beides wird beim
-    Abschliessen aus dem ersten und letzten Messpunkt berichtigt.
+    The start is wherever the device currently is - the destination is still
+    unknown at this point and is initially set equal to it. Both are
+    corrected when finishing, from the first and last measurement point.
     """
     vehicle = db.get(models.Vehicle, start.vehicle_id)
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
-    # Eine noch laufende Sitzung desselben Fahrzeugs weicht - aber sie wird
-    # **abgeschlossen** und nicht stumm fallengelassen.
+    # A session of the same vehicle that is still running gives way - but it
+    # is **finished** and not silently dropped.
     #
-    # Hier stand nur `alt.laeuft = False`. Fuer eine Aufzeichnung war das der
-    # Totalverlust: Strecke und Energieprofil entstehen erst beim Abschliessen
-    # aus den Messpunkten, und mit `laeuft = False` sieht auch das Aufraeumen
-    # sie nie wieder. Wer eine vergessene Fahrt dadurch bemerkte, dass er eine
-    # neue startete, loeschte damit genau die, die er retten wollte.
+    # This used to be only `alt.laeuft = False`. For a recording that meant
+    # total loss: route and energy profile only arise when finishing, from
+    # the measurement points, and with `laeuft = False` (running = False) the
+    # cleanup never sees it again either. Whoever noticed a forgotten trip by
+    # starting a new one thereby deleted exactly the one they wanted to save.
     for old in (db.query(models.LiveSession)
                 .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
                 .filter(models.Trip.vehicle_id == vehicle.id,
@@ -321,9 +321,9 @@ def start_recording(start: RecordingStart,
         try:
             cleanup.end_and_learn(db, old)
         except Exception as failure:      # noqa: BLE001
-            # Die neue Fahrt darf daran nicht scheitern - jemand sitzt im
-            # Auto und will losfahren.
-            log.warning("Vorige Sitzung %s nicht abzuschliessen: %s",
+            # The new trip must not fail because of this - someone is sitting
+            # in the car and wants to drive off.
+            log.warning("Could not finish previous session %s: %s",
                         old.id, failure)
 
     label = (start.name or "").strip() or "Aufzeichnung"
@@ -341,21 +341,24 @@ def start_recording(start: RecordingStart,
     db.add(session)
     db.commit()
 
-    # Der Startladestand ist eine Messung - die erste der Fahrt. Als Messpunkt
-    # aufgenommen, hat die Aufzeichnung von der ersten Sekunde an einen
-    # Ladestand: Die Live-Anzeige zeigt ihn, und die Rekonstruktion beim
-    # Abschliessen beginnt bei dem, was das Auto gemeldet hat, nicht bei 100 %.
+    # The starting state of charge is a measurement - the first of the trip.
+    # Recorded as a measurement point, the recording has a state of charge
+    # from the first second: the live display shows it, and the
+    # reconstruction when finishing starts at what the car reported, not at
+    # 100 %.
     #
-    # Bisher stand er nur an der Fahrt. Eine Aufzeichnung hat kein Profil, aus
-    # dem sich ein Ladestand schätzen liesse - ohne Messung blieb die Anzeige
-    # leer, bis das Auto zum ersten Mal antwortete.
+    # Until now it was only stored on the trip. A recording has no profile
+    # from which a state of charge could be estimated - without a
+    # measurement the display stayed empty until the car answered for the
+    # first time.
     if start.soc is not None:
         try:
             live_session.record_sample(db, session, start.lat, start.lon,
                                              soc=start.soc)
         except Exception as failure:      # noqa: BLE001
-            # Die Fahrt darf daran nicht scheitern - jemand sitzt im Auto.
-            log.warning("Startpunkt der Aufzeichnung %s nicht aufgenommen: %s",
+            # The trip must not fail because of this - someone is sitting in
+            # the car.
+            log.warning("Start point of recording %s not recorded: %s",
                         session.id, failure)
             db.rollback()
     return {"session_id": session.id, "trip_id": trip.id,
@@ -365,35 +368,34 @@ def start_recording(start: RecordingStart,
 @router.post("/melden")
 async def report_logger(report: LoggerReport, request: Request,
                         db: Session = Depends(get_db)):
-    """Einen Messpunkt melden, ohne die Sitzungs-ID zu kennen.
+    """Report a measurement point without knowing the session ID.
 
-    Der Weg für ein Gerät, das fest im Auto sitzt: ein OBD2-Dongle, ein
-    Kurzbefehl, ein Skript auf einem Kleinstrechner. Es weist sich mit dem
-    Logger-Token des **Fahrzeugs** aus - einem Geheimnis, das bleibt - und das
-    Backend sucht sich die laufende Live-Sitzung dieses Fahrzeugs selbst. Die
-    wechselt mit jeder Fahrt, und ein verbautes Gerät hat keine Möglichkeit,
-    davon zu erfahren.
+    The way for a device permanently installed in the car: an OBD2 dongle, a
+    shortcut, a script on a single-board computer. It identifies itself with
+    the **vehicle's** logger token - a secret that stays - and the backend
+    finds the running live session of this vehicle itself. That changes with
+    every trip, and an installed device has no way of learning about it.
 
-    Läuft gerade keine Fahrt, ist das **kein Fehler**: Das Auto steht dann
-    einfach vor der Tür, und der Logger sendet trotzdem. Er bekommt deshalb
-    200 mit `aufgenommen: false` und nicht 404 - ein unbeaufsichtigtes Gerät,
-    das auf Fehlerantworten stösst, fängt an, Fehler zu protokollieren oder
-    sich abzuschalten, und beides hilft niemandem.
+    If no trip is running, that is **not an error**: the car is simply
+    parked outside, and the logger sends anyway. It therefore gets 200 with
+    `aufgenommen: false` (recorded: false) and not 404 - an unattended device
+    that runs into error responses starts logging errors or switching itself
+    off, and neither helps anyone.
 
-    In welchem Format die Messwerte stehen, sagt `format`; übersetzt wird in
-    `live/quellen/`. Ohne Angabe gilt jolts eigenes.
+    The format of the measurement values is given by `format`; translation
+    happens in `live/quellen/`. If omitted, jolt's own format applies.
     """
-    # Das Token zuerst: Wer keines hat, soll nicht erst die Übersetzung und
-    # damit Rechenzeit bekommen. Und wer zu oft ein falsches schickt, wird
-    # gebremst - der Pfad ist vom allgemeinen Limit ausgenommen.
+    # The token first: whoever has none should not get the translation and
+    # thus computing time. And whoever sends a wrong one too often is
+    # throttled - the path is exempt from the general limit.
     if security.report_locked(request):
         raise HTTPException(429, "Zu viele ungültige Logger-Token. "
                                  "Später erneut versuchen.")
     vehicle = await run_in_threadpool(_vehicle_to_token, db, report.token)
     if not vehicle:
-        # Ein falsches Token ist ein Fehler - sonst liesse sich nicht
-        # unterscheiden, ob der Logger falsch eingerichtet ist oder ob nur
-        # gerade keine Fahrt läuft.
+        # A wrong token is an error - otherwise one could not tell whether
+        # the logger is set up wrongly or whether there is just no trip
+        # running at the moment.
         security.count_report_error(request)
         raise HTTPException(401, "Logger-Token unbekannt.")
 
@@ -402,8 +404,9 @@ async def report_logger(report: LoggerReport, request: Request,
         point = translator.normalize(
             report.model_dump(exclude={"token", "format"}))
     except sources.SourcesError as failure:
-        # 400 und nicht 422: Der Satz aus dem Übersetzer sagt, was der Logger
-        # falsch schickt, und der soll ungefiltert beim Einrichtenden ankommen.
+        # 400 and not 422: the sentence from the translator says what the
+        # logger sends wrongly, and it should reach whoever is setting it up
+        # unfiltered.
         raise HTTPException(400, str(failure))
 
     session = await run_in_threadpool(_active_session_to_vehicle, db,
@@ -424,8 +427,8 @@ def read_state(session_id: int, db: Session = Depends(get_db)):
             "running": session.running, "hint": session.hint,
             "consumption_factor": round(session.consumption_factor, 3),
             "time_factor": round(session.time_factor, 3),
-            # Der aktuell gültige Plan, damit ein Gerät, das sich neu
-            # verbindet, nicht auf den nächsten Messpunkt warten muss.
+            # The currently valid plan, so that a device that reconnects does
+            # not have to wait for the next measurement point.
             "plan": session.plan,
             "viewer": channel.viewer(session_id),
             "points": len(session.points),
@@ -438,19 +441,18 @@ def read_state(session_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{session_id}/punkte", dependencies=[Depends(deps.current_session)])
 def read_points(session_id: int, db: Session = Depends(get_db)):
-    """Die Messpunkte einer Sitzung - fuer ein Geraet, das neu dazukommt.
+    """The measurement points of a session - for a device that newly joins.
 
-    Der Zustand allein reicht dafuer nicht: Er kennt nur den *letzten*
-    Punkt. Wer die Seite neu laedt, bekam bisher eine leere Spur, ein leeres
-    Balkendiagramm und eine Ladestandskurve, die bei null anfing - die Fahrt
-    lief weiter, sah aber aus wie neu. Genau das hat am 2. September dazu
-    gefuehrt, dass eine laufende Fahrt fuer verloren gehalten und eine neue
-    geplant wurde.
+    The state alone is not enough for that: it only knows the *last* point.
+    Whoever reloaded the page used to get an empty track, an empty bar chart
+    and a state-of-charge curve that started at zero - the trip continued but
+    looked like a new one. That is exactly what led, on 2 September, to a
+    running trip being considered lost and a new one being planned.
 
-    Aus `rohwerte` kommen nur die vier Zahlen mit, aus denen die Oberflaeche
-    den Verbrauch zurueckrechnet. Der ganze Satz waere je Punkt siebzehnmal
-    so gross, und auf einer Langstrecke mit ein paar tausend Punkten laedt
-    das niemand ueber Mobilfunk.
+    From `rohwerte` (raw values) only the four numbers are included from
+    which the UI back-calculates the consumption. The full set would be
+    seventeen times as large per point, and on a long trip with a few
+    thousand points nobody downloads that over mobile data.
     """
     session = _fetch_session(db, session_id)
     origin_of = []
@@ -470,20 +472,20 @@ def read_points(session_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{session_id}/ende", dependencies=[Depends(deps.current_session)])
 def finish(session_id: int, db: Session = Depends(get_db)):
-    """Fahrt abschliessen - und aus ihr lernen.
+    """Finish the trip - and learn from it.
 
-    Der Verbrauchsfaktor der Sitzung gilt nur für diese eine Fahrt; er stirbt
-    mit ihr. Was bleiben soll, ist die Erkenntnis dahinter: Wenn das Modell
-    systematisch zu optimistisch rechnet, soll die *nächste* Planung das schon
-    wissen, statt es nach achtzig Kilometern erneut zu lernen. Genau dafür
-    trägt das Fahrzeug einen Korrekturfaktor, und genau hier wird er
-    fortgeschrieben - gedämpft, damit eine einzelne Fahrt mit Dachbox ihn
-    nicht dauerhaft verbiegt.
+    The session's consumption factor applies only to this one trip; it dies
+    with it. What should remain is the insight behind it: if the model
+    systematically calculates too optimistically, the *next* plan should
+    already know that instead of learning it again after eighty kilometers.
+    That is exactly why the vehicle carries a correction factor, and exactly
+    here it is updated - damped, so that a single trip with a roof box does
+    not bend it permanently.
     """
     session = _fetch_session(db, session_id)
-    # Zweimal beenden (Wiederholung nach Funkloch, Doppeltippen, oder das
-    # Aufraeumen war schneller) darf nicht zweimal lernen: Der Korrekturfaktor
-    # des Fahrzeugs wuerde aus derselben Fahrt doppelt fortgeschrieben.
+    # Ending twice (retry after a dead zone, double tap, or the cleanup was
+    # faster) must not learn twice: the vehicle's correction factor would be
+    # updated twice from the same trip.
     if not session.running:
         return {"ok": True, "already_ended_at": True, "recording": None,
                 "as_of_discarded": None, "not_learned": None,
@@ -492,12 +494,13 @@ def finish(session_id: int, db: Session = Depends(get_db)):
     session.running = False
     session.ended_at = datetime.utcnow()
 
-    # Eine Aufzeichnung wird hier erst zur Fahrt: Strecke, Höhenprofil und
-    # Prognose entstehen aus den Messpunkten. Das muss **vor** der
-    # Kalibrierung geschehen - die vergleicht Soll und Ist an den Punkten,
-    # und der Sollwert steht erst danach dort.
-    # Strecke bauen, dann lernen - der Ablauf steht in
-    # `live/aufraeumen.beenden_und_lernen`, weil ihn drei Wege brauchen.
+    # A recording only becomes a trip here: route, elevation profile and
+    # forecast arise from the measurement points. This has to happen
+    # **before** the calibration - it compares target and actual at the
+    # points, and the target value is only there afterwards.
+    # Build the route, then learn - the procedure lives in
+    # `live/aufraeumen.end_and_learn` (cleanup, end_and_learn), because
+    # three paths need it.
     result = cleanup.end_and_learn(db, session)
     built = result["recording"]
     learned = result["learned"]
@@ -508,8 +511,8 @@ def finish(session_id: int, db: Session = Depends(get_db)):
             "as_of_discarded": result.get("as_of_discarded"),
             "not_learned": not_learned,
             "consumption_factor": round(session.consumption_factor, 3),
-            # None heisst "diese Fahrt war nicht verwertbar" - zu kurz, oder
-            # der Faktor lag ausserhalb der Plausibilitätsgrenzen.
+            # None means "this trip was not usable" - too short, or the
+            # factor was outside the plausibility limits.
             "learned": learned}
 
 
@@ -521,8 +524,9 @@ def _session_exists(session_id: int) -> bool:
         db.close()
 
 
-# Hintergrundaufgaben: Die Ereignisschleife hält nur eine schwache Referenz.
-# Ohne eigene kann der Müllsammler eine laufende Simulation abräumen.
+# Background tasks: the event loop holds only a weak reference. Without a
+# strong one of our own, the garbage collector can clean up a running
+# simulation.
 _tasks: set = set()
 _simulations: dict = {}
 
@@ -540,15 +544,16 @@ async def simulate(session_id: int,
                      tick_s: float = Query(0.5, ge=0.05, le=10.0),
                      time_factor: float = Query(1.0, ge=0.5, le=3.0),
                      db: Session = Depends(get_db)):
-    """Die geplante Fahrt abspielen, mit einstellbarem Mehrverbrauch.
+    """Replay the planned trip, with adjustable extra consumption.
 
-    Mit 1.0 folgt die Simulation dem Plan exakt, mit 1.2 verbraucht sie
-    zwanzig Prozent mehr - dann muss die Nachführung anschlagen und die
-    Reserve vorziehen. Das ist der Prüfstein der Live-Funktion.
+    With 1.0 the simulation follows the plan exactly, with 1.2 it consumes
+    twenty percent more - then the tracking has to kick in and bring the
+    reserve forward. This is the acid test of the live function.
 
-    `zeitfaktor` simuliert Stau: 1.4 heisst "vierzig Prozent länger unterwegs".
-    Der Verbrauch merkt das kaum, die Ankunftszeit sehr wohl - und damit
-    lässt sich der Auslöser prüfen, den der Verbrauch allein nie auslöst.
+    `zeitfaktor` (time factor) simulates congestion: 1.4 means "forty percent
+    longer on the road". Consumption barely notices, arrival time very much
+    so - and that lets one test the trigger that consumption alone never
+    fires.
     """
     def examine():
         session = _fetch_active_session(db, session_id)
@@ -570,13 +575,13 @@ async def simulate(session_id: int,
 
 @router.websocket("/{session_id}/ws")
 async def live_channel(websocket: WebSocket, session_id: int):
-    """Der Zustand einer Fahrt, live.
+    """The state of a trip, live.
 
-    Ein Browser kann beim WebSocket keine Header setzen, und ein Token in der
-    Adresse stünde in jedem Proxy-Protokoll. Deshalb schickt der Client den
-    Token als **erste Nachricht** (`{"token": "..."}`); erst danach wird er
-    in den Verteiler aufgenommen und bekommt etwas zu sehen. Ohne Passwort
-    entfällt das, die Antwort `{"typ": "bereit"}` kommt trotzdem.
+    A browser cannot set headers on a WebSocket, and a token in the URL
+    would appear in every proxy log. So the client sends the token as the
+    **first message** (`{"token": "..."}`); only then is it added to the
+    distributor and gets to see anything. Without a password this does not
+    apply, the response `{"typ": "bereit"}` (kind: ready) comes anyway.
     """
     await websocket.accept()
     if deps.password_set():
@@ -604,12 +609,12 @@ async def live_channel(websocket: WebSocket, session_id: int):
     try:
         await websocket.send_json({"kind": "bereit"})
         while True:
-            # Es wird nichts erwartet; der Empfang hält nur die Verbindung
-            # offen und meldet ihren Abbruch.
+            # Nothing is expected; receiving only keeps the connection open
+            # and reports its termination.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     except Exception as failure:      # noqa: BLE001
-        log.debug("Live-WebSocket beendet: %s", failure)
+        log.debug("Live WebSocket ended: %s", failure)
     finally:
         await channel.sign_out(session_id, websocket)

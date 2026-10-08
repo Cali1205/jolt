@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/* Prueft die gezeichneten CarPlay-Kacheln (frontend/tiles.js) ohne Browser.
+/* Checks the drawn CarPlay tiles (frontend/tiles.js) without a browser.
  *
- * Gezeichnet wird in einen Aufzeichner statt auf eine Leinwand: Er merkt sich
- * jeden Textaufruf mit Schriftgroesse und Ausrichtung. Damit lassen sich die
- * Fehler finden, die man sonst erst im Auto sieht - ein Text, der ueber den
- * Rand ragt ("kWh/100" war in der ersten Fassung rechts abgeschnitten), eine
- * Kachel, die bei fehlendem Wert abstuerzt, eine Farbe, die den falschen
- * Zustand meldet.
+ * Drawing goes into a recorder instead of a canvas: it remembers
+ * every text call with font size and alignment. That makes it possible to
+ * find the errors that otherwise only show up in the car - a text that sticks out
+ * past the edge ("kWh/100" was cut off on the right in the first version), a
+ * tile that crashes on a missing value, a colour that reports the wrong
+ * state.
  *
- * Wie es *aussieht*, sagt das nicht - dafuer gibt es die Vorschau in den
- * Einstellungen.
+ * How it *looks* this does not tell - that is what the preview in the
+ * settings is for.
  */
 "use strict";
 
@@ -23,9 +23,9 @@ function verify(planApply, text, extra) {
   else { console.log("  FEHLT " + text + (extra ? "   " + extra : "")); failure += 1; }
 }
 
-/* Ein Zeichenkontext, der alles annimmt und Texte mitschreibt. Die Breite
- * eines Textes ist grob: 0,62 Schriftgroesse je Zeichen (Festbreite). Das
- * ist eher zu breit als zu schmal - die Pruefung bleibt auf der sicheren Seite. */
+/* A drawing context that accepts everything and records texts. The width
+ * of a text is rough: 0.62 font size per character (fixed width). That
+ * is rather too wide than too narrow - the check stays on the safe side. */
 function recorder() {
   const texte = [];
   let typeface = 10, orientation = "left";
@@ -43,7 +43,7 @@ function recorder() {
     createLinearGradient: () => ({ addColorStop() {} }),
     setLineDash() {}, save() {}, restore() {}, scale() {},
   };
-  // Alles andere (Pfade, Fuellen, Linien) nimmt der Aufzeichner kommentarlos an.
+  // Everything else (paths, fills, lines) the recorder accepts without comment.
   return new Proxy(c, {
     get(destination, name) { return name in destination ? destination[name] : () => {}; },
     set(destination, name, val) { destination[name] = val; return true; },
@@ -94,14 +94,14 @@ for (const look of ["a", "b"]) {
     let ok = true;
     try {
       K.draw(look, slot, d[slot], recorder());
-      K.draw(look, slot, null, recorder());       // leere Kachel
+      K.draw(look, slot, null, recorder());       // empty tile
     } catch (e) { ok = false; console.log("   ", look, slot, e.message); }
     verify(ok, `Stil ${look}, ${slot}: zeichnet mit und ohne Wert ohne Fehler`);
   }
 }
 
 console.log("\nKein Text über den Rand");
-// Die ungünstigsten Werte je Platz: lange Zahlen, Stunden, grosse Entfernungen.
+// The worst-case values per slot: long numbers, hours, large distances.
 const extrem = {
   soc: [{ val: 100 }, { val: 7.4, source: "gerechnet" }, { val: 0 }],
   arrival: [{ min: 5, text: "+5 min" }, { min: 125, text: "+2 h 05" }, { min: -125, text: "−2 h 05" },
@@ -121,7 +121,7 @@ for (const look of ["a", "b"]) {
       K.draw(look, slot, vals, c);
       for (const t of c.texte) {
         rows += 1;
-        // Ein Rand von 4 Einheiten: Die Kachel hat selbst eine Rundung und einen Rahmen.
+        // A margin of 4 units: the tile itself has a rounding and a frame.
         if (t.left_side < 4 || t.right > PAGE - 4 || t.y > PAGE - 2 || t.y - t.typeface < 0) {
           verify(false, `Stil ${look}, ${slot}: "${t.s}" liegt ausserhalb`,
                  `x ${t.left_side.toFixed(0)}..${t.right.toFixed(0)}, y ${t.y}, ${t.typeface}px`);
@@ -133,7 +133,7 @@ for (const look of ["a", "b"]) {
 verify(rows > 100, `${rows} Textstellen in allen Stilen und Grenzfällen geprüft, keine ragt über den Rand`);
 
 console.log("\nLesbarkeit");
-// Im Auto ist eine Kachel klein: Alles unter 11 Einheiten wäre dort kaum zu lesen.
+// In the car a tile is small: anything under 11 units would hardly be readable there.
 let minor = [];
 for (const look of ["a", "b"]) {
   for (const slot of K.SLOTS) {

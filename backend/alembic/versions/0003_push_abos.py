@@ -1,4 +1,4 @@
-"""Web Push: Abos der Geraete, die Benachrichtigungen bekommen wollen.
+"""Web Push: subscriptions of the devices that want to receive notifications.
 
 Revision ID: 0003
 Revises: 0002
@@ -17,8 +17,8 @@ def upgrade() -> None:
     op.create_table(
         'push_abos',
         sa.Column('id', sa.Integer(), nullable=False),
-        # Die Adresse beim Push-Dienst. Eindeutig, weil derselbe Browser sie
-        # erneut liefert - ein zweites Abo hiesse doppelte Benachrichtigungen.
+        # The address at the push service. Unique, because the same browser
+        # delivers it again - a second subscription would mean duplicate notifications.
         sa.Column('endpoint', sa.String(length=500), nullable=False),
         sa.Column('p256dh', sa.String(length=200), nullable=False),
         sa.Column('auth', sa.String(length=100), nullable=False),

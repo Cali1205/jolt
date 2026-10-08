@@ -1,29 +1,29 @@
-"""Im gerechneten Energieprofil nachschlagen.
+"""Look things up in the calculated energy profile.
 
-Das Profil ist eine Liste von Stützstellen entlang der Route, rund alle
-250 m eine: `{"km", "soc", "kwh", "hoehe", "tempo_kmh", "minuten", "lat",
-"lon"}`. Danach zu fragen ist eine der häufigsten Operationen in jolt - und
-sie kam dreimal in zwei verschiedenen Bedeutungen vor, was der eigentliche
-Grund für dieses Modul ist.
+The profile is a list of support points along the route, one roughly every
+250 m: `{"km", "soc", "kwh", "hoehe", "speed_kmh", "minuten", "lat",
+"lon"}`. Asking for it is one of the most common operations in jolt - and it
+occurred three times in two different meanings, which is the actual reason
+for this module.
 
-Die beiden Bedeutungen sind wirklich verschieden, und sie zu verwechseln
-kostet Genauigkeit an genau den Stellen, an denen es zählt:
+The two meanings really are different, and mixing them up costs accuracy at
+exactly the places where it matters:
 
-`wert_bei` **interpoliert** zwischen den Stützstellen. Das ist richtig für
-alles, was verglichen oder verrechnet wird - der Soll-Ladestand an der
-gemeldeten Position etwa. Bei 250 m Abstand ist die Gerade dazwischen genau
-genug, und der Sprung von einer Stützstelle zur nächsten wäre bei einem
-Ladestand mit zwei Nachkommastellen ein sichtbarer Fehler.
+`value_at` **interpolates** between the support points. That is right for
+everything that is compared or computed - the planned charge level at the
+reported position, for example. At 250 m spacing the straight line in between
+is accurate enough, and the jump from one support point to the next would be
+a visible error for a charge level with two decimal places.
 
-`eintrag_bei` gibt die **Stützstelle selbst** zurück, ungemischt. Das ist
-richtig, wenn man eine zusammengehörige Zeile braucht - Position, Höhe und
-Ladestand *desselben* Punktes. Zwischen zwei Stützstellen zu interpolieren
-ergäbe hier eine Koordinate, die auf keiner Route liegt.
+`entry_at` returns the **support point itself**, unblended. That is right
+when a coherent row is needed - position, elevation and charge level of the
+*same* point. Interpolating between two support points would yield a
+coordinate that lies on no route.
 """
 
 
 def value_at(profile: list, km: float, field: str) -> float | None:
-    """Einen einzelnen Wert an einem Kilometerstand, linear interpoliert."""
+    """A single value at a kilometre mark, linearly interpolated."""
     if not profile:
         return None
     if km <= (profile[0].get("km") or 0.0):
@@ -40,27 +40,27 @@ def value_at(profile: list, km: float, field: str) -> float | None:
 
 
 def soc_at(profile: list, km: float) -> float | None:
-    """Der geplante Ladestand an einem Kilometerstand."""
+    """The planned charge level at a kilometre mark."""
     return value_at(profile, km, "soc")
 
 
 def minutes_at(profile: list, km: float) -> float | None:
-    """Die geplante **Fahrzeit** bis zu einem Kilometerstand.
+    """The planned **driving time** up to a kilometre mark.
 
-    Ausdrücklich ohne Ladezeit - die steht im Ladeplan, nie im Profil. Wer
-    das verwechselt, hält die Wanduhr gegen eine reine Fahrzeit und hat nach
-    dem ersten Ladestopp eine Verspätung in Höhe der Ladedauer. Siehe
-    `live/session.py`.
+    Explicitly without charging time - that is in the charging plan, never in
+    the profile. Anyone who mixes this up holds the wall clock against a pure
+    driving time and, after the first charging stop, sees a delay equal to
+    the charging duration. See `live/session.py`.
     """
     return value_at(profile, km, "mins")
 
 
 def entry_at(profile: list, km: float) -> dict:
-    """Die Stützstelle an einem Kilometerstand - die erste ab `km`.
+    """The support point at a kilometre mark - the first one from `km`.
 
-    Leeres Profil ergibt ein leeres Objekt statt eines Fehlers: Aufrufer
-    holen sich daraus einzelne Felder mit `.get`, und ein fehlendes Profil
-    ist kein Grund abzustürzen.
+    An empty profile yields an empty object instead of an error: callers pick
+    individual fields from it with `.get`, and a missing profile is no reason
+    to crash.
     """
     if not profile:
         return {}

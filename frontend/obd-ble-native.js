@@ -1,36 +1,36 @@
-/* Bluetooth nativ, in der Gestalt von Web Bluetooth.
+/* Bluetooth natively, in the shape of Web Bluetooth.
  *
- * Safari kennt `navigator.bluetooth` auf iOS nicht, und daran wird sich
- * nichts ändern. In der Web-Oberfläche hilft heute Bluefy, eine fremde App,
- * die die Web-API nachbildet. In der iOS-App übernimmt das hier: Capacitor
- * spricht über das Plugin `@capacitor-community/bluetooth-le` mit
- * CoreBluetooth, und diese Datei setzt dem OBD-Kern dieselbe Oberfläche
- * davor, die er vom Browser kennt.
+ * Safari does not know `navigator.bluetooth` on iOS, and that will not
+ * change. In the web UI Bluefy helps today, a third-party app that
+ * emulates the Web API. In the iOS app this file takes over: Capacitor
+ * talks to CoreBluetooth through the plugin
+ * `@capacitor-community/bluetooth-le`, and this file puts the same
+ * surface in front of the OBD core that it knows from the browser.
  *
- * **Warum nachgebildet statt umgeschrieben.** In `obd-core.js` stecken
- * siebzehn Messwerte mit ihren Datenkennungen, die Adressumschaltung
- * zwischen 11 und 29 Bit und die Byte-Formeln - teils am Fahrzeug
- * erarbeitet, nicht abgeschrieben. Genau dort gehen Vorzeichen, Skalierung
- * und Bytereihenfolge bei einer Portierung still daneben, und ein falscher
- * Wert sieht plausibel aus. Diese Datei lässt den Kern deshalb unberührt:
- * Er redet weiter mit `requestDevice`, `gatt.connect` und
- * `characteristicvaluechanged`, nur beantwortet das hier CoreBluetooth
- * statt WebKit. Nachgebildet ist ausschliesslich, was der Kern benutzt -
- * das ist kein vollständiger Ersatz der Web-Bluetooth-Norm und will keiner
- * sein.
+ * **Why emulated instead of rewritten.** `obd-core.js` contains seventeen
+ * readings with their data identifiers, the address switching between 11
+ * and 29 bit and the byte formulas - partly worked out at the vehicle,
+ * not copied. This is exactly where sign, scaling and byte order silently
+ * go wrong in a port, and a wrong value looks plausible. This file
+ * therefore leaves the core untouched: it keeps talking to
+ * `requestDevice`, `gatt.connect` and `characteristicvaluechanged`, it is
+ * just CoreBluetooth answering instead of WebKit. Only what the core uses
+ * is emulated - this is not a complete replacement of the Web Bluetooth
+ * standard and does not want to be one.
  *
- * Ist kein Capacitor da (normaler Browser, Bluefy), meldet `verfuegbar()`
- * falsch, und der Kern nimmt unverändert das echte `navigator.bluetooth`.
+ * If there is no Capacitor (normal browser, Bluefy), `obtainable()`
+ * reports false, and the core unchangedly takes the real
+ * `navigator.bluetooth`.
  */
 window.joltBleNative = (function () {
   "use strict";
 
-  /* Die gebündelte Hülle des Plugins, siehe frontend/ble-plugin.js. Sie
-   * liegt als eigene Datei vor, weil die Oberfläche ohne Bauschritt
-   * ausgeliefert wird - und weil sie den Draht nach nativ selbst kennt:
-   * Werte gehen dort als Hex-Zeichenkette hinüber, durch eine
-   * Warteschlange und mit normalisierten UUIDs. Das von Hand nachzubauen
-   * wäre die Sorte Fehler, die erst im Auto auffällt. */
+  /* The bundled shell of the plugin, see frontend/ble-plugin.js. It exists
+   * as its own file because the UI is delivered without a build step - and
+   * because it knows the wire to native itself: values cross over there as
+   * a hex string, through a queue and with normalized UUIDs. Rebuilding
+   * that by hand would be the kind of error that only shows up in the
+   * car. */
   function shell() { return window.joltBlePlugin || null; }
 
   function native() {
@@ -38,13 +38,13 @@ window.joltBleNative = (function () {
     return !!(h && h.Capacitor && h.Capacitor.isNativePlatform());
   }
 
-  /* Die Gerätekennung überdauert den Neustart der App.
+  /* The device identifier survives restarting the app.
    *
-   * Web Bluetooth merkt sich erteilte Erlaubnisse selbst - `getDevices()`
-   * gibt sie ohne Zutun zurück. Das Plugin kann das nicht: Sein
-   * `getDevices()` verlangt die Kennungen, nach denen es suchen soll. Ohne
-   * diesen Merkposten käme nach jedem Start der Auswahldialog, und zwar
-   * mitten in der Abfahrt. */
+   * Web Bluetooth remembers granted permissions itself - `getDevices()`
+   * returns them without further ado. The plugin cannot do that: its
+   * `getDevices()` requires the identifiers to search for. Without this
+   * memo, the selection dialog would appear after every start, in the
+   * middle of the departure. */
   const KEY = "jolt-ble-geraet";
 
   function rememberedId() {
@@ -54,12 +54,12 @@ window.joltBleNative = (function () {
 
   function idRemember(ident) {
     try { window.localStorage.setItem(KEY, ident); }
-    catch (failure) { /* privater Modus - dann eben jedes Mal der Dialog */ }
+    catch (failure) { /* private mode - then the dialog every time */ }
   }
 
   function idForget() {
     try { window.localStorage.removeItem(KEY); }
-    catch (failure) { /* nichts gemerkt, nichts zu tun */ }
+    catch (failure) { /* nothing remembered, nothing to do */ }
   }
 
   let ready = false;
@@ -70,25 +70,25 @@ window.joltBleNative = (function () {
     ready = true;
   }
 
-  /* ---------- Charakteristik ---------- */
+  /* ---------- Characteristic ---------- */
 
-  /* `startNotifications()` und `addEventListener` sind in Web Bluetooth zwei
-   * Schritte, beim Plugin ist es einer: Der Rückruf wird beim Anmelden
-   * übergeben. Der Kern ruft aber erst `startNotifications()` und hängt
-   * sich **danach** ein. Deshalb sammelt dieses Objekt die Zuhörer und
-   * verteilt an sie, was das Plugin liefert - unabhängig davon, wann sie
-   * dazugekommen sind. */
+  /* `startNotifications()` and `addEventListener` are two steps in Web
+   * Bluetooth; with the plugin it is one: the callback is passed on
+   * subscribing. The core, however, first calls `startNotifications()` and
+   * hooks in **afterwards**. That is why this object collects the
+   * listeners and distributes to them whatever the plugin delivers -
+   * regardless of when they were added. */
   function charakteristik(ident, serviceUuid, charUuid, attrs) {
     const listener = [];
     let signed_in = false;
 
     function distribute(val) {
-      // Web Bluetooth reicht ein Ereignis mit `target.value` herein, und
-      // genau darauf greift `beiDaten` im Kern zu. `wert` ist bereits ein
-      // DataView, den `TextDecoder` direkt verarbeitet.
+      // Web Bluetooth passes in an event with `target.value`, and that is
+      // exactly what `atData` in the core accesses. `val` is already a
+      // DataView, which `TextDecoder` processes directly.
       const event = { target: { value: val } };
       for (const call of listener.slice()) {
-        try { call(event); } catch (failure) { /* ein Zuhörer darf scheitern */ }
+        try { call(event); } catch (failure) { /* a listener may fail */ }
       }
     }
 
@@ -127,17 +127,17 @@ window.joltBleNative = (function () {
     };
   }
 
-  /* Der Kern schickt ein Uint8Array (aus `TextEncoder`), das Plugin will
-   * einen DataView. `byteOffset` und `byteLength` gehören mit übergeben:
-   * Ein Uint8Array kann ein Ausschnitt eines grösseren Puffers sein, und
-   * ohne die beiden ginge dann der ganze Puffer hinaus. */
+  /* The core sends a Uint8Array (from `TextEncoder`), the plugin wants a
+   * DataView. `byteOffset` and `byteLength` have to be passed along: a
+   * Uint8Array can be a slice of a larger buffer, and without the two the
+   * whole buffer would go out. */
   function asDataView(records) {
     if (records instanceof DataView) return records;
     const field = records instanceof Uint8Array ? records : new Uint8Array(records);
     return new DataView(field.buffer, field.byteOffset, field.byteLength);
   }
 
-  /* ---------- Gerät ---------- */
+  /* ---------- Device ---------- */
 
   function device(ident, name) {
     const dropout_listener = [];
@@ -146,7 +146,7 @@ window.joltBleNative = (function () {
     function reportDropout() {
       linked = false;
       for (const call of dropout_listener.slice()) {
-        try { call(); } catch (failure) { /* siehe oben */ }
+        try { call(); } catch (failure) { /* see above */ }
       }
     }
 
@@ -155,9 +155,9 @@ window.joltBleNative = (function () {
 
       async connect() {
         await prepare();
-        // Der Abriss-Rückruf gehört hier hinein und nicht in ein eigenes
-        // Ereignis: Das Plugin kennt nur diesen einen Weg, und der Kern
-        // hängt sich über `gattserverdisconnected` ein, bevor er verbindet.
+        // The dropout callback belongs in here and not in an event of its own:
+        // the plugin knows only this one way, and the core hooks in via
+        // `gattserverdisconnected` before it connects.
         await shell().BleClient.connect(ident, reportDropout);
         linked = true;
         return server;
@@ -166,7 +166,7 @@ window.joltBleNative = (function () {
       async disconnect() {
         linked = false;
         try { await shell().BleClient.disconnect(ident); }
-        catch (failure) { /* schon getrennt ist kein Fehler */ }
+        catch (failure) { /* already disconnected is not an error */ }
       },
     };
 
@@ -201,14 +201,14 @@ window.joltBleNative = (function () {
     };
   }
 
-  /* ---------- Die nachgebildete Schnittstelle ---------- */
+  /* ---------- The emulated interface ---------- */
 
-  /* Der Kern probiert vier Gestalten von `requestDevice` durch, weil sich
-   * die Browser darin unterscheiden. Nativ gibt es diesen Unterschied
-   * nicht: Das Plugin zeigt eine eigene Geräteliste. Die Filter werden
-   * deshalb bewusst **nicht** übersetzt - eine ungefilterte Liste, aus der
-   * einmal der Dongle gewählt wird, ist hier das Richtige, und danach
-   * greift ohnehin die gemerkte Kennung. */
+  /* The core tries four shapes of `requestDevice` in turn, because
+   * browsers differ in that. Natively there is no such difference: the
+   * plugin shows a device list of its own. The filters are therefore
+   * deliberately **not** translated - an unfiltered list from which the
+   * dongle is chosen once is the right thing here, and after that the
+   * remembered identifier takes over anyway. */
   async function requestDevice(options) {
     await prepare();
     const services = (options && options.optionalServices) || [];
@@ -224,12 +224,12 @@ window.joltBleNative = (function () {
     return device(chosen.deviceId, chosen.name);
   }
 
-  /* Ein weggetippter Dialog muss aussehen wie in Web Bluetooth.
+  /* A dismissed dialog must look like in Web Bluetooth.
    *
-   * Der Kern bricht seine Variantenschleife ab, wenn er einen
-   * `NotFoundError` mit "cancel" darin sieht - sonst öffnet er den Dialog
-   * noch drei weitere Male. Das Plugin meldet den Abbruch anders, also
-   * wird er hier in die Gestalt gebracht, auf die der Kern prüft. */
+   * The core breaks off its variant loop when it sees a `NotFoundError`
+   * with "cancel" in it - otherwise it opens the dialog three more times.
+   * The plugin reports the cancellation differently, so it is brought into
+   * the shape the core checks for here. */
   function asAbort(failure) {
     const text = (failure && failure.message) || String(failure);
     if (/cancel|abbruch|abort|dismiss|denied/i.test(text)) {
@@ -240,9 +240,9 @@ window.joltBleNative = (function () {
     return failure instanceof Error ? failure : new Error(text);
   }
 
-  /* Ohne Dialog wiederfinden, was schon einmal gewählt wurde. Gibt eine
-   * Liste zurück wie Web Bluetooth, damit der Kern nicht unterscheiden
-   * muss - sie ist nur nie länger als ein Eintrag. */
+  /* Find again without a dialog what was chosen once before. Returns a
+   * list like Web Bluetooth, so that the core need not distinguish - it is
+   * just never longer than one entry. */
   async function getDevices() {
     const ident = rememberedId();
     if (!ident) return [];
@@ -256,15 +256,15 @@ window.joltBleNative = (function () {
   }
 
   return {
-    /* Wahr nur in der nativen App **und** wenn die Hülle geladen ist.
-     * Beides einzeln reicht nicht: Im Browser fehlt Capacitor, und ohne
-     * die gebündelte Datei gäbe es kein BleClient. */
+    /* True only in the native app **and** when the shell is loaded. Either
+     * alone is not enough: in the browser Capacitor is missing, and without
+     * the bundled file there would be no BleClient. */
     obtainable() { return native() && !!shell().BleClient; },
     bluetooth: { requestDevice, getDevices },
-    /* Für die Fehlersuche auf der Diagnoseseite. */
+    /* For troubleshooting on the diagnostics page. */
     ident: rememberedId,
-    /* Das gemerkte Gerät löschen (Einstellungen): danach fragt der nächste
-     * Aufbau wieder mit dem Auswahldialog. */
+    /* Delete the remembered device (settings): the next setup then asks
+     * with the selection dialog again. */
     forget: idForget,
   };
 })();

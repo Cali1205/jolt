@@ -1,32 +1,31 @@
-"""Eine gefahrene Strecke nachträglich zu einer Fahrt machen.
+"""Turn a route that was driven into a trip after the fact.
 
-Der umgekehrte Weg zur Planung: Dort steht die Route vorher fest und die
-Fahrt wird dagegen gehalten; hier wird gefahren, mitgeschrieben, und die
-Route entsteht hinterher aus dem, was das Telefon aufgezeichnet hat.
+The reverse of planning: there the route is fixed beforehand and the trip is
+held against it; here the car is driven, logged, and the route is created
+afterwards from what the phone recorded.
 
-**Wozu.** Der Korrekturfaktor eines Fahrzeugs lernt aus dem Vergleich von
-Prognose und Wirklichkeit. Dafür eine Route planen zu müssen, ist für den
-naheliegendsten Fall zu umständlich - eine bekannte kurze Strecke, immer
-dieselbe, ein paarmal gefahren, ist die sauberste Messung überhaupt: kein
-Ladestopp, gleiche Bedingungen, wiederholbar.
+**What for.** A vehicle's correction factor learns from the comparison of
+forecast and reality. Having to plan a route for that is too cumbersome for
+the most obvious case - a known short route, always the same, driven a few
+times, is the cleanest measurement there is: no charging stop, identical
+conditions, repeatable.
 
-**Warum es überhaupt eine Rekonstruktion braucht.** Eine Verbrauchsmessung
-ohne Höhenprofil ist nicht deutbar. Ob 22 kWh/100 km am Fahrstil lagen oder
-an vierhundert Höhenmetern, lässt sich aus dem Verbrauch allein nicht
-trennen - und wer es trotzdem in den Korrekturfaktor schreibt, bringt dem
-Fahrzeug den Hügel bei, über den er zufällig gefahren ist.
+**Why a reconstruction is needed at all.** A consumption measurement without
+an elevation profile cannot be interpreted. Whether 22 kWh/100 km was due to
+driving style or to four hundred metres of climb cannot be separated from
+the consumption alone - and whoever writes it into the correction factor
+anyway teaches the vehicle the hill it happened to drive over.
 
-Die Höhe kommt deshalb aus Kartendaten (openrouteservice), nicht aus dem
-GPS: Dessen Höhenangabe streut um zehn bis zwanzig Meter, und wer solche
-Differenzen aufsummiert, erhält für eine Fahrt durch die Ebene mehrere
-hundert Meter Steigung. Für die *Position* ist GPS genau genug, für die
-Höhe nicht. Die GPS-Höhe wird trotzdem mitgeschrieben - als Rückfall, wenn
-kein Schlüssel vorliegt, und weil sie nichts kostet.
+That is why the elevation comes from map data (openrouteservice), not from
+the GPS: its elevation reading scatters by ten to twenty metres, and summing
+up such differences yields several hundred metres of climb for a trip across
+flat land. For the *position*, GPS is accurate enough, for the elevation it
+is not. The GPS elevation is recorded anyway - as a fallback if no key is
+available, and because it costs nothing.
 
-**Und das Tempo?** Das ist der Gewinn dieser Betriebsart: Es wird nicht
-angenommen, sondern aus den Zeitstempeln der Messpunkte gerechnet. Eine
-aufgezeichnete Fahrt kennt ihre Geschwindigkeit je Teilstück genau - die
-geplante muss sie schätzen.
+**And the speed?** That is the gain of this mode: it is not assumed but
+calculated from the timestamps of the samples. A recorded trip knows its
+speed for each segment exactly - a planned one has to estimate it.
 """
 import logging
 
@@ -38,30 +37,30 @@ from ..routing.corridor import point_on_route
 
 log = logging.getLogger("uvicorn.error")
 
-# Höchstzahl der Stützpunkte für die Höhenabfrage. openrouteservice nimmt
-# nicht beliebig viele, und feiner als rund alle hundert Meter bringt das
-# Höhenprofil ohnehin nichts.
+# Maximum number of support points for the elevation query. openrouteservice
+# does not accept arbitrarily many, and finer than about every hundred metres
+# does nothing for the elevation profile anyway.
 AT_MOST_SUPPORT_POINTS = 1800
 
-# Punkte, die enger beieinanderliegen, werden zusammengefasst. Ein stehendes
-# Auto liefert sonst hunderte Punkte auf demselben Fleck, und die verzerren
-# jede Geschwindigkeit, die daraus gerechnet wird.
+# Points that lie closer together are merged. A stationary car otherwise
+# delivers hundreds of points on the same spot, and they distort every speed
+# calculated from them.
 MIN_DISTANCE_M = 25.0
 
-# Fensterbreite, über die GPS-Höhen gemittelt werden. Fünfhundert Meter sind
-# ein Kompromiss: schmal genug, dass eine echte Autobahnsteigung stehen
-# bleibt (die zieht sich über Kilometer), und breit genug, dass vom
-# hochfrequenten Rauschen wenig übrig ist.
+# Window width over which GPS elevations are averaged. Five hundred metres is
+# a compromise: narrow enough that a real motorway gradient remains (it
+# stretches over kilometres), and wide enough that little of the
+# high-frequency noise is left.
 SMOOTHING_M = 500.0
 
 
 def distance_build(points: list) -> list:
-    """Aus den Messpunkten eine Geometrie [[lon, lat], ...].
+    """From the samples, a geometry [[lon, lat], ...].
 
-    Zusammengefasst wird alles, was enger als `MINDESTABSTAND_M` liegt: An
-    einer Ampel oder an der Säule stehen sonst dutzende Punkte übereinander,
-    aus denen sich eine Geschwindigkeit von null und ein Teilstück der Länge
-    null ergäbe - beides bringt die Rechnung dahinter durcheinander.
+    Everything closer together than `MIN_DISTANCE_M` is merged: at a traffic
+    light or at the charger, dozens of points would otherwise stack up,
+    yielding a speed of zero and a segment of length zero - both throw the
+    calculation behind them off.
     """
     built: list = []
     last = None
@@ -82,45 +81,43 @@ def _thin_out(points: list, at_most: int) -> list:
         return points
     step = len(points) / at_most
     chosen = [points[int(i * step)] for i in range(at_most)]
-    # Der letzte Punkt muss dabei sein - sonst endet die rekonstruierte
-    # Strecke vor dem Ziel und die Bilanz stimmt nicht.
+    # The last point has to be included - otherwise the reconstructed route
+    # ends before the destination and the balance is off.
     if chosen[-1] is not points[-1]:
         chosen.append(points[-1])
     return chosen
 
 
 def gps_elevations_smooth(geometry: list, elevations: list) -> list:
-    """GPS-Höhen über ein Streckenfenster mitteln.
+    """Average GPS elevations over a stretch window.
 
-    **Warum das nötig ist.** Das Verbrauchsmodell interessiert sich nicht
-    für Höhen, sondern für Höhen*unterschiede* zwischen aufeinanderfolgenden
-    Punkten - und davon summiert es die positiven auf. Genau diese
-    Gleichrichtung ist der Haken: Aus mittelwertfreiem Rauschen wird dabei
-    ein systematischer Zuschlag (der Erwartungswert des positiven Anteils
-    ist rund 0,4·σ), und der addiert sich linear über die Punkte auf, nicht
-    mit der Wurzel. Eine 40-km-Fahrt hat bei 25 m Mindestabstand rund 1600
-    Stützpunkte; schon bei σ = 5 m je Differenz kommen so kilometerweise
-    erfundene Steigung zusammen. Bei 2,5 t sind 1000 m Steigung etwa 7 kWh -
-    die Ebene sähe aus wie eine Alpenetappe, und das ginge ungebremst in
-    den Korrekturfaktor.
+    **Why this is necessary.** The consumption model is not interested in
+    elevations but in elevation *differences* between consecutive points - and
+    of those it sums up the positive ones. This very rectification is the
+    catch: zero-mean noise turns into a systematic surcharge (the expected
+    value of the positive part is about 0.4·σ), and that adds up linearly over
+    the points, not with the square root. A 40 km trip has about 1600 support
+    points at a minimum spacing of 25 m; even at σ = 5 m per difference, that
+    adds up to kilometres of invented climb. At 2.5 t, 1000 m of climb is
+    about 7 kWh - flat land would look like an Alpine stage, and that would go
+    unchecked into the correction factor.
 
-    **Warum Mitteln hilft.** Der Fehler der GPS-Höhe hat zwei Anteile. Der
-    langsam veränderliche (gleiche Satellitengeometrie über Minuten) ist
-    der harmlosere: Er sieht aus wie ein langer Hügel, ist falsch, aber
-    beschränkt. Der hochfrequente, von Messung zu Messung unabhängige Anteil
-    ist der, der die Gleichrichtung füttert - und genau den nimmt ein
-    gleitendes Mittel heraus. Die Glättung greift also da an, wo der Schaden
-    entsteht.
+    **Why averaging helps.** The error of the GPS elevation has two parts. The
+    slowly varying one (same satellite geometry over minutes) is the more
+    harmless: it looks like a long hill, is wrong, but bounded. The
+    high-frequency part, independent from measurement to measurement, is the
+    one that feeds the rectification - and a moving average takes out exactly
+    that. So the smoothing acts where the damage arises.
 
-    Gemittelt wird über die **Strecke**, nicht über eine Punktzahl: Die
-    Messpunkte stehen im Stau dicht und auf der Autobahn weit auseinander,
-    ein Fenster aus zwanzig Punkten wäre einmal 300 m und einmal 3 km breit.
+    Averaging is done over the **distance**, not over a number of points: the
+    samples are dense in a traffic jam and far apart on the motorway, a window
+    of twenty points would be 300 m wide at one time and 3 km at another.
     """
     if len(geometry) != len(elevations) or len(geometry) < 3:
         return list(elevations)
 
-    # Laufende Strecke entlang der Route - einmal gerechnet, danach ist das
-    # Fenster ein Schieben zweier Ränder.
+    # Running distance along the route - calculated once, after that the
+    # window is a sliding of two edges.
     odometer_km = [0.0]
     for (lon1, lat1), (lon2, lat2) in zip(geometry, geometry[1:]):
         odometer_km.append(odometer_km[-1] + haversine_m(lat1, lon1, lat2, lon2))
@@ -142,80 +139,78 @@ def gps_elevations_smooth(geometry: list, elevations: list) -> list:
 
 def complete_elevations(geometry: list, gps_elevations: list | None = None
                      ) -> tuple[list, str]:
-    """[[lon, lat], ...] zu [[lon, lat, hoehe], ...] machen.
+    """Turn [[lon, lat], ...] into [[lon, lat, elevation], ...].
 
-    Gibt die Geometrie **und die Quelle** zurück. Die Quelle ist keine
-    Nebensache: Hier stand vorher nur die Geometrie, und der Aufrufer riet
-    aus "irgendeine Höhe ist ungleich null" auf `karte`. Fiel die
-    ORS-Abfrage aus - erschöpftes Kontingent, Netzhänger -, rutschte es
-    still auf GPS und meldete trotzdem `karte`. Man konnte einer Fahrt
-    hinterher nicht ansehen, ob ihre Höhen etwas taugen.
+    Returns the geometry **and the source**. The source is not a side issue:
+    previously only the geometry was returned, and the caller guessed `karte`
+    (map) from "some elevation is not zero". If the ORS query failed -
+    exhausted quota, network hiccup - it silently slid to GPS and still
+    reported `karte`. Afterwards you could not tell from a trip whether its
+    elevations were any good.
 
-    Erste Wahl sind Kartendaten. Ihr Fehler ist zwar absolut ähnlich gross
-    wie beim GPS, aber räumlich korreliert und **immer derselbe**: Dieselbe
-    Strasse bekommt bei jeder Fahrt dasselbe Profil. Für den Zweck der
-    Fahrtenansicht - Januar gegen Juni, leer gegen beladen - kürzt sich ein
-    Fehler, der bei beiden Fahrten gleich ist, gerade heraus.
+    First choice is map data. Its error is similarly large in absolute terms
+    as with GPS, but spatially correlated and **always the same**: the same
+    road gets the same profile on every trip. For the purpose of the trip
+    view - January against June, empty against loaded - an error that is the
+    same on both trips simply cancels out.
 
-    Fällt die Abfrage aus, gilt die geglättete GPS-Höhe (roh ist sie
-    unbrauchbar, siehe `gps_hoehen_glaetten`), und wenn auch die fehlt, wird
-    flach gerechnet. Eine flach gerechnete Strecke ist ausdrücklich **kein**
-    Beinbruch für die Kalibrierung, solange Start und Ziel gleich hoch
-    liegen - über eine geschlossene Runde hebt sich die Höhe ohnehin auf.
-    Für eine Fahrt ins Gebirge taugt sie nicht, und das steht dann auch im
-    Log.
+    If the query fails, the smoothed GPS elevation applies (raw it is
+    unusable, see `gps_elevations_smooth`), and if that is missing too, the
+    calculation is done flat. A route calculated flat is explicitly **not** a
+    disaster for the calibration, as long as start and destination are at the
+    same height - over a closed loop the elevation cancels out anyway. For a
+    trip into the mountains it is no good, and the log then says so as well.
     """
     try:
         with_elevation = routing.provider().elevations(geometry)
         if with_elevation:
             return with_elevation, "karte"
     except Exception as failure:      # noqa: BLE001
-        log.warning("Höhenabfrage fehlgeschlagen: %s", failure)
+        log.warning("Elevation query failed: %s", failure)
 
     if gps_elevations and len(gps_elevations) == len(geometry) \
             and any(h is not None for h in gps_elevations):
         smoothed = gps_elevations_smooth(geometry, gps_elevations)
-        log.info("Höhen aus dem GPS, über %.0f m geglättet - ungenauer als "
-                 "Kartendaten.", SMOOTHING_M)
+        log.info("Elevations from GPS, smoothed over %.0f m - less accurate "
+                 "than map data.", SMOOTHING_M)
         return ([[lon, lat, elevation] for (lon, lat), elevation
                  in zip(geometry, smoothed)], "gps")
 
-    log.warning("Keine Höhendaten - die Strecke wird flach gerechnet.")
+    log.warning("No elevation data - the route is calculated flat.")
     return [[lon, lat, 0.0] for lon, lat in geometry], "flach"
 
 
-# Ab welcher Fahrstrecke der Kilometerstand des Fahrzeugs die Strecke
-# bestimmen darf. Er loest in ganzen Kilometern auf: Auf einer Fahrt von vier
-# Kilometern ist das ein Viertel Unsicherheit, auf hundert ein Prozent.
+# From which driven distance on the vehicle's odometer may determine the
+# distance. It resolves in whole kilometres: on a trip of four kilometres
+# that is a quarter of uncertainty, on a hundred one percent.
 ODOMETER_MIN_DISTANCE_KM = 5.0
 
-# Wie weit Kilometerstand und GPS-Strecke auseinanderliegen duerfen, bevor
-# der Kilometerstand als unglaubwuerdig gilt. Unter 1.0 waere die GPS-Spur
-# laenger als die gefahrene Strecke - das kann nur Rauschen sein. Ueber 3.0
-# stimmt etwas anderes nicht (ein Ableseformat, ein Fahrzeugwechsel), und
-# eine Strecke zu verdreifachen ist zu folgenreich, um es zu raten.
+# How far odometer and GPS distance may differ before the odometer is deemed
+# not credible. Below 1.0 the GPS track would be longer than the distance
+# driven - that can only be noise. Above 3.0 something else is wrong (a
+# reading format, a vehicle change), and tripling a distance is too
+# consequential to guess.
 ODOMETER_LIMITS = (1.0, 3.0)
 
 
 def odometer_factor(points: list, gps_km: float) -> tuple[float, dict]:
-    """Um wie viel die GPS-Spur zu kurz ist - laut Kilometerstand des Autos.
+    """By how much the GPS track is too short - according to the car's odometer.
 
-    **Warum das noetig ist.** Die Strecke einer Aufzeichnung entsteht aus den
-    Messpunkten, und die kommen alle dreissig Sekunden. Bei Landstrassentempo
-    liegen dazwischen vierhundert Meter, und die Luftlinie schneidet jede
-    Kurve ab. Bei einer Funkloch-Luecke fehlt gleich ein ganzes Stueck. Beides
-    macht die Strecke zu kurz - und weil der gemessene Verbrauch in
-    Kilowattstunden **pro hundert Kilometer** gerechnet wird, wandert der
-    Fehler direkt in den Korrekturfaktor des Fahrzeugs.
+    **Why this is needed.** The distance of a recording is built from the
+    samples, and they arrive every thirty seconds. At country-road speed
+    there are four hundred metres in between, and the straight line cuts off
+    every bend. With a dead-zone gap, a whole stretch is missing. Both make
+    the distance too short - and because the measured consumption is
+    calculated in kilowatt hours **per hundred kilometres**, the error goes
+    straight into the vehicle's correction factor.
 
-    Das Auto weiss es genauer. Sein Kilometerstand zaehlt Radumdrehungen und
-    kennt weder Kurven noch Funkloecher.
+    The car knows better. Its odometer counts wheel revolutions and knows
+    neither bends nor dead zones.
 
-    Zurueckgegeben wird ein Faktor auf die **ganze** Strecke, nicht je
-    Teilstueck: Der Zaehler loest in ganzen Kilometern auf, und zwischen zwei
-    Messpunkten im Abstand von vierhundert Metern springt er um null oder
-    eins. Fuer das einzelne Teilstueck ist er damit unbrauchbar, fuer die
-    Summe ueber eine Fahrt genau richtig.
+    What is returned is a factor on the **whole** distance, not per segment:
+    the counter resolves in whole kilometres, and between two samples four
+    hundred metres apart it jumps by zero or one. For the single segment it
+    is therefore useless, for the sum over a trip exactly right.
     """
     as_of = [(p.raw_values or {}).get("odometer_km") for p in points]
     as_of = [k for k in as_of if isinstance(k, (int, float))]
@@ -232,8 +227,8 @@ def odometer_factor(points: list, gps_km: float) -> tuple[float, dict]:
 
     factor = driven / gps_km
     if not ODOMETER_LIMITS[0] <= factor <= ODOMETER_LIMITS[1]:
-        log.warning("Kilometerstand verworfen: %.0f km laut Zaehler gegen "
-                    "%.1f km aus dem GPS (Faktor %.2f).", driven, gps_km,
+        log.warning("Odometer discarded: %.0f km per counter against "
+                    "%.1f km from GPS (factor %.2f).", driven, gps_km,
                     factor)
         return 1.0, {"reason": f"Faktor {factor:.2f} ausserhalb der Grenzen",
                      "odometer_km": driven, "gps_km": round(gps_km, 1)}
@@ -242,18 +237,18 @@ def odometer_factor(points: list, gps_km: float) -> tuple[float, dict]:
 
 
 def speed_per_segment(points: list, distance_factor: float = 1.0) -> list:
-    """Gefahrene Geschwindigkeit in m/s je Teilstück, aus den Zeitstempeln.
+    """Speed driven in m/s per segment, from the timestamps.
 
-    `strecke_faktor` gehört hier genauso hinein wie ins Energieprofil: Wer
-    die Strecke streckt, ohne das Tempo mitzuziehen, lässt das Modell zu
-    langsam fahren - und über v² sagt es dann deutlich zu wenig Verbrauch
-    voraus.
+    `distance_factor` belongs here just as much as in the energy profile:
+    whoever stretches the distance without stretching the speed along makes
+    the model drive too slowly - and via v² it then predicts distinctly too
+    little consumption.
 
-    Der eigentliche Vorzug einer Aufzeichnung: Die geplante Fahrt muss das
-    Tempo annehmen, die gefahrene weiss es. Zeitsprünge und Standzeiten
-    ergeben absurde Werte, deshalb die Schranken - unter 2 m/s rechnet das
-    Modell ohnehin mit seinem eigenen Mindestwert, über 70 m/s (252 km/h)
-    war es kein Auto, sondern eine kaputte Uhr.
+    The real advantage of a recording: the planned trip has to assume the
+    speed, the driven one knows it. Time jumps and standing times yield
+    absurd values, hence the limits - below 2 m/s the model uses its own
+    minimum value anyway, above 70 m/s (252 km/h) it was not a car but a
+    broken clock.
     """
     speeds = []
     for earlier, after in zip(points, points[1:]):
@@ -267,18 +262,18 @@ def speed_per_segment(points: list, distance_factor: float = 1.0) -> list:
 
 
 def determine_environment(points: list, geometry: list):
-    """Das Wetter der Fahrt - gemessen, wenn es gemessen wurde.
+    """The weather of the trip - measured, if it was measured.
 
-    Ein Logger am OBD2-Anschluss liefert die Aussentemperatur des Fahrzeugs.
-    Die ist jeder Vorhersage überlegen: Sie stammt von der Strecke, zur
-    richtigen Zeit, und sie ist der grösste Einzelposten der Kälte. Nur wenn
-    keine mitkam, wird nachgefragt - und dann liefert der Wetterdienst das
-    Wetter von *jetzt*, nicht das von der Fahrt.
+    A logger on the OBD2 port delivers the vehicle's outside temperature. It
+    is superior to any forecast: it comes from the route, at the right time,
+    and it is the largest single item of the cold. Only if none came along is
+    a query made - and then the weather service delivers the weather of
+    *now*, not that of the trip.
     """
     measured = [p.outside_temp_c for p in points if p.outside_temp_c is not None]
     if measured:
         avg = sum(measured) / len(measured)
-        log.info("Aufzeichnung: gemessene Aussentemperatur %.1f °C", avg)
+        log.info("Recording: measured outside temperature %.1f °C", avg)
         return lambda lat, lon: Environment(temp_c=avg), avg
 
     fetch = weather.along_route(geometry)
@@ -287,13 +282,12 @@ def determine_environment(points: list, geometry: list):
 
 
 def complete(db, trip: models.Trip, session: models.LiveSession) -> dict:
-    """Aus den Messpunkten einer Sitzung Geometrie und Energieprofil bauen.
+    """Build geometry and energy profile from the samples of a session.
 
-    Danach ist die Aufzeichnung eine Fahrt wie jede andere: Sie hat eine
-    Strecke, ein Höhenprofil und eine Prognose, gegen die sich der gemessene
-    Verbrauch halten lässt. Erst dadurch kann `energie/calibration.py`
-    überhaupt etwas lernen - es vergleicht `soll_soc` mit `soc`, und beides
-    steht erst jetzt fest.
+    After that the recording is a trip like any other: it has a route, an
+    elevation profile and a forecast against which the measured consumption
+    can be held. Only then can `energy/calibration.py` learn anything at all -
+    it compares `plan_soc` with `soc`, and both are only settled now.
     """
     raw = distance_build(list(session.points))
     if len(raw) < 2:
@@ -306,13 +300,13 @@ def complete(db, trip: models.Trip, session: models.LiveSession) -> dict:
 
     fetch_environment, avg_temp = determine_environment(chosen, flat)
 
-    # Was das GPS hergibt - und was das Auto dazu sagt.
+    # What the GPS yields - and what the car says about it.
     gps_km = sum(haversine_m(a.lat, a.lon, b.lat, b.lon)
                  for a, b in zip(chosen, chosen[1:])) / 1000.0
     factor, odo = odometer_factor(list(session.points), gps_km)
     if factor != 1.0:
-        log.info("Strecke nach Kilometerstand gestreckt: %.1f km aus dem GPS "
-                 "-> %g km laut Zaehler (Faktor %.3f).",
+        log.info("Route stretched per odometer: %.1f km from GPS "
+                 "-> %g km per counter (factor %.3f).",
                  gps_km, odo.get("odometer_km"), factor)
 
     profile = model.compute_profile(
@@ -331,22 +325,22 @@ def complete(db, trip: models.Trip, session: models.LiveSession) -> dict:
     trip.outside_temp_c = round(avg_temp, 1)
     trip.start_lat, trip.start_lon = chosen[0].lat, chosen[0].lon
     trip.target_lat, trip.target_lon = chosen[-1].lat, chosen[-1].lon
-    # Beim Anlegen stand hier "unterwegs" - das Ziel war da noch unbekannt.
-    # Jetzt ist es bekannt, nur hat es keinen Namen: jolt kann Orte suchen,
-    # aber nicht umgekehrt aus einer Koordinate einen Ortsnamen machen. Das
-    # Platzhalterwort stehen zu lassen war die schlechteste der Möglichkeiten
-    # - in der Fahrtenliste stand danach dauerhaft "Aufzeichnung →
-    # unterwegs", also eine Behauptung über eine Fahrt, die längst zu Ende
-    # ist. Leer heisst hier ehrlich "kein Ortsname"; die Liste zeigt dann
-    # den Namen der Aufzeichnung allein.
+    # When it was created, this said "unterwegs" (on the way) - the
+    # destination was still unknown then. Now it is known, but it has no name:
+    # jolt can search for places, but cannot turn a coordinate into a place
+    # name the other way round. Leaving the placeholder word was the worst of
+    # the options - the trip list would permanently have said "Aufzeichnung →
+    # unterwegs", i.e. a claim about a trip that is long over. Empty honestly
+    # means "no place name" here; the list then shows the name of the
+    # recording alone.
     if (trip.target_text or "") == "unterwegs":
         trip.target_text = ""
     if chosen[0].soc is not None:
         trip.start_soc = chosen[0].soc
 
-    # Die Messpunkte tragen bisher weder Kilometerstand noch Sollwert - beim
-    # Eintreffen gab es ja keine Strecke, auf die man sie hätte legen können.
-    # Ohne das findet die Kalibrierung nichts Verwertbares.
+    # So far the samples carry neither odometer reading nor target value - on
+    # arrival there was no route to put them on. Without this the calibration
+    # finds nothing usable.
     for point in session.points:
         km, _ = point_on_route(geometry, point.lat, point.lon)
         point.km_on_route = km
@@ -358,15 +352,15 @@ def complete(db, trip: models.Trip, session: models.LiveSession) -> dict:
             "consumption_kwh": round(profile.kwh_total, 2),
             "outside_temp_c": trip.outside_temp_c,
             "elevations": elevations_source,
-            # Woher die Strecke stammt - eine aus dem Kilometerstand
-            # korrigierte ist etwas anderes als eine reine GPS-Spur, und man
-            # soll es der Fahrt ansehen.
+            # Where the route comes from - one corrected from the odometer is
+            # something different from a pure GPS track, and the trip should
+            # show it.
             "distance_source": "kilometerstand" if factor != 1.0 else "gps",
             "odometer": odo}
 
 
 def _plan_at(energy_profile: list, km: float):
-    # Bewusst hier und nicht über energie/profile.py: Das Profil ist gerade
-    # erst entstanden und liegt als Liste von dicts vor, nicht am Fahrt-Objekt.
+    # Deliberately here and not via energy/profile.py: the profile has only
+    # just been created and exists as a list of dicts, not on the trip object.
     from ..energy.profile import soc_at
     return soc_at(energy_profile, km)

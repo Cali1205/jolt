@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Prueft den Standort-Weg aus frontend/live.js: im Browser ueber
-// navigator.geolocation, in der iOS-App ueber das Hintergrund-Plugin.
+// Checks the location path from frontend/live.js: in the browser via
+// navigator.geolocation, in the iOS app via the background plugin.
 //
-// Was sich ohne Geraet pruefen laesst, wird hier geprueft: dass das Plugin mit
-// der Option angelegt wird, die den Hintergrund erst moeglich macht, dass die
-// Messpunkte mit der Zeit des Fixes (nicht des Eintreffens) hinausgehen, dass
-// Fehler und Abbruch sauber aufgeraeumt werden. Ob iOS die App bei gesperrtem
-// Bildschirm wirklich weiterlaufen laesst, zeigt nur eine Fahrt.
+// What can be checked without a device is checked here: that the plugin is created with
+// the option that makes the background possible in the first place, that the
+// measurement points go out with the fix's time (not the arrival time), that
+// errors and cancellation are cleaned up properly. Whether iOS keeps the app
+// running with a locked screen, only a trip shows.
 //
 //     node tools/check_location.js
 const fs = require("fs");
@@ -60,8 +60,8 @@ vm.createContext(context);
 vm.runInContext(source, context);
 const live = timeframe.joltLive;
 
-/* Das Anzeigemodell (frontend/display.js): live.js meldet ihm jeden Zustand und
- * das Ende der Fahrt. Hier nur ein Mitschreiber - das Modell selbst prueft
+/* The display model (frontend/display.js): live.js reports every state and
+ * the end of the trip to it. Only a recorder here - the model itself is checked by
  * tools/check_display.js. */
 const display = { report: [], finish: 0, raises: false };
 timeframe.joltDisplay = {
@@ -70,12 +70,12 @@ timeframe.joltDisplay = {
 };
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Die Meldesperre (12 s Wanduhr) laeuft sonst im Test mit.
+// The report throttle (12 s wall clock) would otherwise run along in the test.
 let now_ts = Date.now();
 const realNow = Date.now;
 Date.now = () => (now_ts += 13000);
 
-/* Ein nachgebautes Plugin: haelt fest, womit es angelegt und entfernt wurde. */
+/* A simulated plugin: records what it was created and removed with. */
 function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
   const p = { created_at: [], removed: [], callback: null, hold_awake: 0 };
   p.BackgroundGeolocation = {

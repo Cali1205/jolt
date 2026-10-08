@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/* Prueft die Beobachtung im Dongle-Baustein - Protokoll, Zaehler, Konsole.
+/* Checks the observation in the dongle module - log, counters, console.
  *
- * Die Einstellungen-Ansicht zeigt, was `joltObd.diagnose()` und
- * `joltObd.protokoll()` liefern. Stimmen diese Zahlen nicht, fuehrt die
- * Diagnose in die Irre - und sie wird gerade dann gebraucht, wenn im Auto
- * etwas nicht stimmt, also genau dort, wo man sich auf sie verlassen muss.
+ * The settings view shows what `joltObd.diagnose()` and
+ * `joltObd.protokoll()` return. If these numbers are wrong, the
+ * diagnosis misleads - and it is needed precisely when something in the car
+ * is off, i.e. exactly where one has to be able to rely on it.
  *
- * Gegen einen nachgebildeten Dongle (Web Bluetooth) laufen lassen:
- *   verbinden -> Handshake -> Satz lesen -> Zaehler und Protokoll ansehen.
- * Dazu der Gegenbeweis, dass die Beobachtung nichts veraendert: Was
- * gesendet wird, ist dieselbe Befehlsfolge wie ohne.
+ * Run against a simulated dongle (Web Bluetooth):
+ *   connect -> handshake -> read a set -> inspect counters and log.
+ * Plus the counter-proof that the observation changes nothing: what is
+ * sent is the same command sequence as without it.
  */
 "use strict";
 
@@ -29,8 +29,8 @@ function verify(planApply, text, extra) {
   }
 }
 
-/* Ein ELM327, der auf bekannte Abfragen antwortet, auf eine gar nicht
- * (Zeitablauf) und auf den Rest mit NO DATA. */
+/* An ELM327 that answers known queries, one not at all
+ * (timeout) and the rest with NO DATA. */
 function dongle(sent, options) {
   const listener = [];
   const responses = {
@@ -125,7 +125,7 @@ async function main() {
   verify(d.lastRecord && d.lastRecord.vals.soc_raw === 180,
          "der letzte Satz steht zur Anzeige bereit");
 
-  // Selten gelesene Werte: in Runde 0 dran, in Runde 1 nicht.
+  // Rarely read values: due in round 0, not in round 1.
   const earlierN = d.readings.battery_kwh ? (d.readings.battery_kwh.ok + d.readings.battery_kwh.empty + d.readings.battery_kwh.failure) : 0;
   await O.readRecord(1);
   d = O.diagnose();
@@ -145,7 +145,7 @@ async function main() {
   verify(O.trace_log(false)[0].text !== "veraendert",
          "das Protokoll nach aussen ist eine Kopie");
 
-  // Ringpuffer
+  // Ring buffer
   const f2 = environment(dongle([]));
   await f2.joltObd.link();
   for (let i = 0; i < 400; i++) await f2.joltObd.command("ATRV");

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Prüft Anmeldung und Rate-Limit - `deps.py` und `security.py`.
+"""Checks login and rate limit - `deps.py` and `security.py`.
 
-Entstanden aus dem Bug-Scan #49: Drei Fehler dort fielen erst auf, als jemand
-den Code las, weil bisher keine Prüfung die Härtung im Betrieb ansah - der
-Prüflauf von `check_backend.py` läuft ausdrücklich ohne Passwort und mit
-unbegrenzter Anfragezahl.
+Born from bug scan #49: three errors there were only noticed when someone
+read the code, because no check had looked at the hardening in operation so
+far - the run of `check_backend.py` explicitly runs without a password and
+with an unlimited number of requests.
 
-Ohne Netz, ohne Postgres, ohne API-Schlüssel:
+Without network, without Postgres, without API key:
 
     ./tools/check_security.py
 """
@@ -21,7 +21,7 @@ application_provide("sicherheit", db_name=False)
 
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(
     tempfile.mkdtemp(prefix="jolt-sicherheit-"), "check.db")
-# Ein Passwort mit Umlaut: genau das, woran compare_digest bisher scheiterte.
+# A password with an umlaut: exactly what compare_digest used to fail on.
 PASSWORD = "Gehäimnis-ü-123"
 os.environ["APP_PASSWORT"] = PASSWORD
 os.environ["RATE_LIMIT_PER_MIN"] = "100000"
@@ -61,7 +61,7 @@ def part_limit() -> None:
     verify.section("Rate-Limit")
     client = TestClient(app)
     security._hit.clear()
-    security.GLOBAL_MAX = 5       # in den übrigen Abschnitten wäre das im Weg
+    security.GLOBAL_MAX = 5       # in the remaining sections this would be in the way
     codes = [client.get("/api/status").status_code for _ in range(8)]
     verify(codes[:5] == [200] * 5,
            "die ersten Anfragen innerhalb der Grenze gehen durch", str(codes))
@@ -78,14 +78,14 @@ def part_limit() -> None:
 
     security.GLOBAL_MAX = 100000
 
-    # Speicher: Schlüssel abgelaufener Absender dürfen nicht ewig bleiben.
+    # Memory: keys of expired senders must not stay forever.
     security._hit.clear()
     for nr in range(50):
         security._count(security._hit, f"10.0.0.{nr}", 60, 100)
     verify(len(security._hit) == 50, "50 Absender werden gezählt")
     for queue in security._hit.values():
         queue.clear()
-        queue.append(0.0)     # lange her
+        queue.append(0.0)     # long ago
     security._count(security._hit, "10.9.9.9", 60, 100,
                       cleanup_from=0.0)
     verify(len(security._hit) == 1,
@@ -95,10 +95,10 @@ def part_limit() -> None:
 
 
 def part_live() -> None:
-    """Die Live-Endpunkte verlangen die Anmeldung - Bug-Scan #49, Punkt 1.
+    """The live endpoints require login - bug scan #49, point 1.
 
-    Vorher waren Lesen, Messpunkte und WebSocket ohne Anmeldung erreichbar, und
-    der einzige "Schlüssel" war eine fortlaufende Sitzungs-ID.
+    Before, reading, measurement points and WebSocket were reachable without
+    login, and the only "key" was a sequential session ID.
     """
     verify.section("Live-Endpunkte")
     security._hit.clear()
@@ -121,7 +121,7 @@ def part_live() -> None:
                f"und mit Anmeldung geht es bis zur Sitzung (404 - es gibt keine)",
                f"HTTP {response.status_code}")
 
-    # WebSocket: der Token kommt als erste Nachricht.
+    # WebSocket: the token arrives as the first message.
     def ws_result(first_item):
         try:
             with client.websocket_connect("/api/live/1/ws") as ws:
@@ -133,7 +133,7 @@ def part_live() -> None:
 
     from app.routers import live as live_router
     real = live_router._session_exists
-    live_router._session_exists = lambda _id: True     # Sitzung 1 gibt es hier nicht
+    live_router._session_exists = lambda _id: True     # session 1 does not exist here
     try:
         verify(ws_result('{"token": "' + token + '"}') == {"kind": "bereit"},
                "der WebSocket nimmt den Token als erste Nachricht an und meldet 'bereit'")
@@ -150,8 +150,8 @@ def part_live() -> None:
            and ws_result("[1]") == "WebSocketDisconnect",
            "und mit einem Token, der keine Zeichenkette ist")
 
-    # /melden bleibt offen, aber nur mit gültigem Logger-Token - und wer zu
-    # oft ein falsches schickt, wird gebremst.
+    # /melden stays open, but only with a valid logger token - and whoever sends
+    # a wrong one too often gets throttled.
     security._report_error.clear()
     report = {"token": "gibt-es-nicht", "lat": 50, "lon": 10, "soc": 50}
     response = client.post("/api/live/melden", json=report)
@@ -169,8 +169,8 @@ def part_live() -> None:
            "der Pfad ausgenommen, also braucht er ein eigenes", str(codes[-3:]))
     security._report_error.clear()
 
-    # Die Gegenstelle: Eine Oberfläche, die den Token nicht schickt, wäre nach
-    # der Absicherung stumm - der WebSocket schlösse sich, `/punkt` gäbe 401.
+    # The other end: a UI that does not send the token would be mute after the
+    # hardening - the WebSocket would close, `/punkt` would give 401.
     frontend = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "frontend")
     live = open(os.path.join(frontend, "live.js"), encoding="utf-8").read()
@@ -184,7 +184,7 @@ def part_live() -> None:
 
 
 class _Request:
-    """Gerade genug Request für security.client_ip."""
+    """Just enough of a request for security.client_ip."""
 
     def __init__(self, peer, xff=None):
         self.client = type("C", (), {"host": peer})()
@@ -215,7 +215,7 @@ def part_client_ip() -> None:
 
 
 def part_inputs() -> None:
-    """Grenzen bei Messpunkten und Fahrzeugen - Bug-Scan #49, Punkte 7 und 9."""
+    """Limits on measurement points and vehicles - bug scan #49, points 7 and 9."""
     verify.section("Eingaben begrenzen")
     security._hit.clear()
     client = TestClient(app)
@@ -257,7 +257,7 @@ def part_inputs() -> None:
     verify(response.status_code == 422, "NaN als Zahl wird abgelehnt - es verseucht jede Rechnung danach",
            f"HTTP {response.status_code}")
 
-    # Messpunkte
+    # Measurement points
     point = {"lat": 50.0, "lon": 10.0, "soc": 60}
     for text, change in (("Tempo über 500 km/h", {"speed_kmh": 900}),
                             ("negatives Tempo", {"speed_kmh": -3}),
@@ -276,11 +276,11 @@ def part_inputs() -> None:
 
 
 def part_eventloop() -> None:
-    """Die Handler, die synchron rechnen, dürfen den Event-Loop nicht anhalten.
+    """Handlers that compute synchronously must not stop the event loop.
 
-    Eine Verhaltensprüfung wäre hier ein Zeitmesser auf einem Rechner, dessen
-    Takt niemand kennt - deshalb die Bauart: Alle `async def`-Handler reichen
-    ihre Datenbankarbeit an den Threadpool.
+    A behavioural check here would be a stopwatch on a machine whose clock
+    speed nobody knows - hence the structural approach: all `async def`
+    handlers hand their database work to the thread pool.
     """
     verify.section("Event-Loop frei halten")
     source = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
@@ -299,7 +299,7 @@ def part_eventloop() -> None:
 
 
 def part_55() -> None:
-    """Bug-Scan #55: SSRF über den Push-Endpunkt, Kanal-Obergrenze, Simulation."""
+    """Bug scan #55: SSRF via the push endpoint, channel cap, simulation."""
     import asyncio
     import socket
     from app import push

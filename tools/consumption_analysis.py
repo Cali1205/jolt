@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Den Verbrauch einer gefahrenen Sitzung nach Tempo und Steigung auswerten.
+"""Evaluate the consumption of a driven session by speed and gradient.
 
-    docker exec jolt-app python3 tools/consumption_analysis.py [sitzung_id]
+    docker exec jolt-app python3 tools/consumption_analysis.py [session_id]
 
-Ohne Angabe wird die jüngste Sitzung genommen.
+Without an argument the most recent session is taken.
 
-**Wozu das neben `calibration.py` steht.** Die Kalibrierung lernt einen
-Korrekturfaktor - eine Zahl, die die Verbrauchskurve verschiebt. Dieses
-Werkzeug beantwortet die andere Frage: *Stimmt die Form der Kurve?* Ein
-Modell, das bei 90 km/h passt und bei 130 um ein Viertel danebenliegt, lässt
-sich durch keinen Faktor retten, und genau daran hängt jeder Ladeplan auf der
-Autobahn.
+**Why this stands next to `calibration.py`.** The calibration learns a
+correction factor - a number that shifts the consumption curve. This tool
+answers the other question: *is the shape of the curve right?* A model that
+fits at 90 km/h and is off by a quarter at 130 cannot be rescued by any
+factor, and every charging plan on the motorway hinges on exactly that.
 
-Es schreibt nichts. Was es findet, ist ein Befund und keine Einstellung -
-ob daraus ein geänderter c_w-Wert im Fahrzeugprofil wird, entscheidet ein
-Mensch, der die Warnungen gelesen hat.
+It writes nothing. What it finds is a finding and not a setting -
+whether it turns into a changed c_w value in the vehicle profile is decided
+by a human who has read the warnings.
 
-**Die Höhe kommt aus Kartendaten**, nicht aus dem GPS. Dessen Höhenangabe
-streut um zehn bis zwanzig Meter; wer solche Differenzen aufsummiert, findet
-für eine Fahrt durch die Ebene mehrere hundert Höhenmeter und schreibt sie
-dem Steigungsterm zu. Dieselbe Begründung wie in live/recording.py.
+**The elevation comes from map data**, not from the GPS. Its elevation
+reading scatters by ten to twenty metres; whoever sums such differences
+finds several hundred metres of climb for a trip across the plain and
+attributes them to the gradient term. The same reasoning as in
+live/recording.py.
 """
 import os
 import sys
 
-# Suchpfad wie in examine.py - aber *ohne* dessen Wegwerf-Datenbank und ohne
-# das Löschen von ORS_API_KEY: Dieses Werkzeug soll die echte Datenbank
-# lesen und echte Höhen holen.
+# Search path as in examine.py - but *without* its throwaway database and
+# without deleting ORS_API_KEY: this tool is meant to read the real database
+# and fetch real elevations.
 _here = os.path.dirname(os.path.abspath(__file__))
 for _candidate in (os.path.join(_here, "..", "backend"), os.path.join(_here, "..")):
     if os.path.isdir(os.path.join(_candidate, "app")):
@@ -46,7 +46,7 @@ TEMP_C = 15.0
 
 
 def fetch_elevations(points):
-    """Geländehöhe je Messpunkt - Karte zuerst, GPS als Rückfall."""
+    """Terrain elevation per measurement point - map first, GPS as fallback."""
     geometry = [[p.lon, p.lat] for p in points]
     try:
         with_elevation = routing.provider().elevations(geometry)
@@ -87,7 +87,7 @@ def session_charging(db, session_id):
 
 
 def samples(points, elevations):
-    """LivePunkt -> Messpunkt. Die Zähler stehen in `rohwerte` in kWh."""
+    """LivePoint -> measurement point. The counters are in `rohwerte` in kWh."""
     t0 = points[0].timestamp
     origin_of = []
     for p, h in zip(points, elevations):
@@ -102,7 +102,7 @@ def samples(points, elevations):
 
 
 def model_wh_km(vals, speed_kmh, gradient_pct=0.0):
-    """Was `model.py` heute für dieselbe Lage vorhersagt."""
+    """What `model.py` predicts today for the same situation."""
     from app.energy.model import hvac_power_w, air_density
     v = speed_kmh / 3.6
     rho = air_density(TEMP_C, 400.0)
@@ -146,9 +146,9 @@ def main():
 
         res = ident.identifizieren(timeframe, vals.mass_kg)
         print(f"  R² = {res.r2:.3f}   Konditionszahl {res.condition_number:.0f}\n")
-        # Verglichen werden *wirksame* Werte, also mit eingerechnetem
-        # Wirkungsgrad - anders ist die Messung an der Batterie nicht zu
-        # deuten. Deshalb steht in der Modellspalte überall das /eta.
+        # Effective values are compared, i.e. with the efficiency factored in -
+        # otherwise the measurement at the battery cannot be interpreted.
+        # That is why the model column everywhere has the /eta.
         print(f"  {'Anteil (wirksam)':20s} {'gemessen':>20s} {'im Modell':>11s}")
         for title, val, failure, preset in (
                 ("Rollwiderstand [N]", res.f_roll_n, res.failure["f_roll"],

@@ -1,34 +1,33 @@
-"""Der Ladestopp-Optimierer - Abschnitt 4 des Konzepts in Code.
+"""The charge stop optimizer - section 4 of the concept in code.
 
-Die Aufgabe: Finde die Folge von Ladestopps und Lademengen, die die
-**Gesamtreisezeit** minimiert, unter der Nebenbedingung, dass der SoC nie unter
-die Reserve fällt und am Ziel der gewünschte Ziel-SoC erreicht ist.
+The task: find the sequence of charge stops and charge amounts that
+minimizes the **total travel time**, subject to the constraint that the SoC
+never falls below the reserve and that the desired target SoC is reached at
+the destination.
 
-Das ist kein kürzester Weg, sondern ein kürzester Weg mit einer kontinuierlichen
-Entscheidungsvariablen je Knoten: wie viel wird geladen. Deshalb die fünf
-Schritte aus dem Konzept:
+This is not a shortest path, but a shortest path with a continuous decision
+variable per node: how much to charge. Hence the five steps from the concept:
 
-1. **Kandidaten** - Ladepunkte im Korridor, nach Umwegzeit gefiltert und je
-   Streckenabschnitt ausgedünnt.
-2. **Graph** - Knoten sind Start, Kandidaten, Ziel; eine Kante existiert, wenn
-   die Etappe mit voller Batterie fahrbar ist.
-3. **Pareto-Dijkstra** über den Zustand `(Knoten, Ankunfts-SoC)`. Je Knoten wird
-   eine Pareto-Front von Labels `(Kosten, SoC)` geführt: Ein Label fällt weg,
-   wenn ein anderes gleichzeitig billiger *und* mit mehr Ladung dort ist.
-4. **Nachoptimierung** - bei feststehender Stoppfolge wandern die Ladehübe auf
-   einem feinen Raster in den steilen Teil der Ladekurve.
-5. **Ausweichstandorte** - zu jedem Stopp der beste Alternativstopp, der ohne
-   Nachladen noch erreichbar ist.
+1. **Candidates** - charge points in the corridor, filtered by detour time
+   and thinned out per route section.
+2. **Graph** - nodes are start, candidates, destination; an edge exists if
+   the leg can be driven on a full battery.
+3. **Pareto-Dijkstra** over the state `(node, arrival SoC)`. Each node keeps
+   a Pareto front of labels `(cost, SoC)`: a label is dropped if another one
+   is at the same time cheaper *and* has more charge there.
+4. **Post-optimization** - with the stop sequence fixed, the charge swings
+   move on a fine grid into the steep part of the charge curve.
+5. **Alternative sites** - for each stop the best alternative stop that is
+   still reachable without recharging.
 
-Warum nicht gierig? Ein gieriger Planer scheitert systematisch an zwei Stellen:
-vor langen Lücken ohne Schnelllader, wo man *vorher* mehr hätte laden müssen,
-und bei der Wahl zwischen einem 50-kW- und einem 300-kW-Standort zwanzig
-Kilometer später. Genau das sind die Fälle, in denen sich ein Planer lohnt.
+Why not greedy? A greedy planner fails systematically in two places: before
+long gaps without a fast charger, where one should have charged *more*
+beforehand, and when choosing between a 50 kW and a 300 kW site twenty
+kilometers later. Those are exactly the cases in which a planner pays off.
 
-Dieses Modul kennt weder Datenbank noch Netz: Es bekommt ein fertig gerechnetes
-Streckenprofil und eine Liste von Ladeoptionen. Damit lässt es sich in
-tools/check_optimizer.py vollständig durchrechnen - so wie das Verbrauchsmodell
-auch.
+This module knows neither database nor network: it gets a fully computed
+route profile and a list of charge options. That allows it to be run through
+completely in tools/check_optimizer.py - just like the consumption model.
 """
 import heapq
 import math
@@ -39,95 +38,95 @@ from .curves import power_at
 from .availability import (CHARGE_PARK_BONUS_MIN, operator_bonus,
                              redundancy_bonus)
 
-# Kandidaten mit mehr Umweg fallen raus: Sie gewinnen die Zeit an der Säule
-# fast nie zurück. Fünfzehn Minuten Umweg sind fünfzehn Minuten Ladezeit, und
-# die bekommt man an einem 150-kW-Lader für rund 30 kWh.
+# Candidates with more detour are dropped: they almost never win the time
+# back at the charger. Fifteen minutes of detour are fifteen minutes of
+# charging time, and at a 150 kW charger that buys about 30 kWh.
 #
-# War zuvor 10.0. Auf langen Strecken mit dünnerer Korridor-Abdeckung (z.B.
-# Besançon-Dijon-Chalon-Brive auf dem Weg nach Südwestfrankreich) lag jeder
-# erreichbare Kandidat 11-23 Minuten abseits der Route und fiel komplett aus
-# der Planung, obwohl die Etappe mit einem einzigen zusätzlichen Umweg von
-# gut zehn Minuten fahrbar gewesen wäre.
+# Used to be 10.0. On long routes with thinner corridor coverage (e.g.
+# Besançon-Dijon-Chalon-Brive on the way to southwest France) every reachable
+# candidate was 11-23 minutes off the route and dropped out of the planning
+# entirely, although the leg could have been driven with a single extra
+# detour of a good ten minutes.
 DETOUR_LIMIT_MIN = 15.0
 
-# Raster der Ladeziele in der Suche. Fünf Prozentpunkte halten den Graphen
-# klein; die Quantisierung holt Schritt 4 anschliessend wieder herein.
+# Grid of the charge targets in the search. Five percentage points keep the
+# graph small; step 4 recovers the quantization afterwards.
 SOC_GRID = 5.0
-# Raster der Nachoptimierung - fünfmal feiner, weil dort die Stoppfolge schon
-# feststeht und nur noch die Lademengen gesucht werden.
+# Grid of the post-optimization - five times finer, because there the stop
+# sequence is already fixed and only the charge amounts are left to find.
 SOC_GRID_FINE = 1.0
 
-# Was ein Halt kostet, bevor das erste Elektron fliesst - und nachdem das
-# letzte geflossen ist. Von der Route abfahren und wieder auffädeln steckt
-# bereits in `umweg_minuten`; hier stehen Einparken, Kabel holen,
-# Freischalten, das Warten auf den Handshake und hinterher dasselbe rückwärts.
+# What a stop costs before the first electron flows - and after the last one
+# has flowed. Leaving the route and merging back is already in
+# `detour_minutes`; here go parking, fetching the cable, unlocking, waiting
+# for the handshake and afterwards the same in reverse.
 #
-# **Ohne diesen Posten war die Zielfunktion blind für die Anzahl der Stopps.**
-# Sie zählte Ladezeit und Umweg, sonst nichts. Ein Akku lädt bei 10 % aber
-# weit schneller als bei 60 %, und deshalb ist es unter dieser Annahme immer
-# günstiger, dieselbe Energie auf viele kurze Halte bei niedrigem Ladestand zu
-# verteilen, statt auf wenige lange. Der Optimierer tat genau das: auf der
-# Fahrt Périgueux-Vichy sieben Stopps von zwei bis sechs Minuten, jedes Mal
-# bis auf 10-12 % herunter und dann ein Schluck im steilsten Teil der Kurve.
-# Rechnerisch optimal, praktisch Unsinn - niemand fährt siebenmal ab, um
-# dreimal zwei Minuten zu laden.
+# **Without this item the objective function was blind to the number of
+# stops.** It counted charging time and detour, nothing else. A battery
+# charges much faster at 10 % than at 60 %, so under this assumption it is
+# always cheaper to spread the same energy over many short stops at a low
+# state of charge instead of a few long ones. The optimizer did exactly
+# that: on the Périgueux-Vichy trip seven stops of two to six minutes, each
+# time down to 10-12 % and then a sip in the steepest part of the curve.
+# Mathematically optimal, practically nonsense - nobody leaves the route
+# seven times to charge for three times two minutes.
 #
-# Fünf Minuten sind bewusst nicht knapp gewählt. Wer den Posten zu klein
-# ansetzt, bekommt die Zersplitterung abgeschwächt zurück; wer ihn zu gross
-# ansetzt, verliert höchstens einen sinnvollen Zwischenstopp - und das ist
-# der harmlosere Fehler.
+# Five minutes are deliberately not chosen tightly. Anyone who sets the item
+# too small gets the fragmentation back in weakened form; anyone who sets it
+# too large loses at most a sensible intermediate stop - and that is the
+# more harmless error.
 STOP_FIXED_COST_MIN = 5.0
 
-# Wie viel an einem Halt mindestens geladen werden muss, damit er sich lohnt.
+# How much must at least be charged at a stop for it to be worthwhile.
 #
-# Seit die Fixkosten oben in der Zielfunktion stehen, ist das nur noch ein
-# Sicherheitsnetz und nicht mehr der Mechanismus: Ein Halt, der sich nicht
-# lohnt, wird jetzt schon deshalb nicht gewählt, weil er fünf Minuten kostet.
-# Die Schranke bleibt trotzdem - sie hält Halte aus dem Plan, die an einer
-# schwachen Säule rechnerisch knapp aufgehen, und kostet nichts.
+# Since the fixed costs above are in the objective function, this is only a
+# safety net and no longer the mechanism: a stop that is not worthwhile is
+# now not chosen anyway because it costs five minutes. The limit stays
+# regardless - it keeps stops out of the plan that just barely add up
+# mathematically at a weak charger, and costs nothing.
 MIN_CHARGE_SWING = 8.0
 
-# Ausdünnung der Kandidaten: je Streckenabschnitt die besten N. Ohne das
-# stünden an einem Autobahnkreuz zwanzig gleichwertige Standorte im Graphen
-# und kosteten Rechenzeit ohne Erkenntnis.
+# Thinning out the candidates: the best N per route section. Without it,
+# twenty equivalent sites would sit in the graph at a motorway junction and
+# cost computing time without insight.
 CANDIDATES_PER_SECTION = 3
 SECTION_KM = 15.0
 AT_MOST_CANDIDATES = 60
 
-# Die Ankunfts-SoC der Labels wird auf dieses Raster **abgerundet**. Das hält
-# die Pareto-Front endlich, ohne je mehr Ladung zu behaupten, als da ist -
-# Abrunden ist die pessimistische Richtung.
+# The arrival SoC of the labels is **rounded down** to this grid. That keeps
+# the Pareto front finite without ever claiming more charge than there is -
+# rounding down is the pessimistic direction.
 LABEL_GRID = 0.5
 
-# Was eine Stunde des Fahrers wert ist, in Euro. Damit wird aus Geld eine
-# Zeit, und die Zielfunktion bleibt eine einzige Grösse - Dijkstra braucht
-# das, und man kann weiter alles in Minuten lesen.
+# What one hour of the driver's time is worth, in euros. This turns money
+# into time, and the objective function stays a single quantity - Dijkstra
+# needs that, and everything can still be read in minutes.
 #
-# 30 EUR/h heisst: Ein Euro wiegt zwei Minuten. Wer 60 einstellt, kauft Zeit
-# teuer und fährt schneller; wer 10 einstellt, nimmt Umwege für billigen
-# Strom in Kauf. **Null heisst "Kosten sind mir gleich"** - dann rechnet
-# jolt wie bisher rein auf Zeit.
+# 30 EUR/h means: one euro weighs two minutes. Whoever sets 60 buys time
+# dearly and drives faster; whoever sets 10 accepts detours for cheap
+# electricity. **Zero means "I don't care about cost"** - then jolt
+# calculates purely on time, as before.
 #
-# Ohne diesen Posten war der Wunsch nach einem bestimmten Anbieter nur als
-# Zeitgutschrift auszudrücken - eine Vorliebe, als Minuten verkleidet. Der
-# Handel, um den es wirklich geht, liess sich damit gar nicht formulieren:
-# länger laden, dafür billiger.
+# Without this item the wish for a specific provider could only be expressed
+# as a time credit - a preference disguised as minutes. The trade-off that
+# is really at stake could not be formulated at all: charge longer, but
+# cheaper.
 TIME_VALUE_EUR_H = 30.0
 
 _EPS = 1e-9
 
 
 # ---------------------------------------------------------------------------
-# Eingaben
+# Inputs
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ChargeOption:
-    """Ein möglicher Halt - alles, was der Optimierer über ihn wissen muss.
+    """A possible stop - everything the optimizer needs to know about it.
 
-    Bewusst kein ORM-Objekt: Der Optimierer soll ohne Datenbank prüfbar sein,
-    und ein hypothetischer Standort ("was wäre, wenn hier ein 300-kW-Lader
-    stünde?") ist so eine Zeile Code statt eines DB-Eintrags.
+    Deliberately not an ORM object: the optimizer should be testable without
+    a database, and a hypothetical site ("what if a 300 kW charger stood
+    here?") is then one line of code instead of a DB entry.
     """
     id: int
     km_on_route: float
@@ -139,7 +138,7 @@ class ChargeOption:
     city: str = ""
     lat: float = 0.0
     lon: float = 0.0
-    # Als belegt gemeldet: fällt aus der Planung, bleibt aber als Datensatz da.
+    # Reported as occupied: dropped from the planning, but stays as a record.
     locked: bool = False
 
     def as_dict(self) -> dict:
@@ -152,13 +151,13 @@ class ChargeOption:
 
 @dataclass
 class RouteProfile:
-    """Kumulierte Energie und Zeit über den Kilometerstand.
+    """Cumulative energy and time over the odometer.
 
-    Der entscheidende Punkt: Der Energiebedarf einer Etappe hängt **nicht** vom
-    Ladestand ab - ein E-Auto wird beim Laden nicht schwerer. Deshalb genügt
-    ein einziger Durchlauf des Verbrauchsmodells, und der Optimierer liest den
-    Bedarf jeder Etappe als Differenz zweier kumulierter Werte ab, statt das
-    Profil für jede Variante neu zu rechnen.
+    The decisive point: the energy demand of a leg does **not** depend on the
+    state of charge - an EV does not get heavier when charging. So a single
+    run of the consumption model suffices, and the optimizer reads the demand
+    of each leg as the difference of two cumulative values, instead of
+    recomputing the profile for every variant.
     """
     km: list[float]
     kwh: list[float]
@@ -172,7 +171,7 @@ class RouteProfile:
 
     @classmethod
     def from_dicts(cls, entries: list[dict]) -> "RouteProfile":
-        """Aus dem gespeicherten `Fahrt.energieprofil`."""
+        """From the stored `Trip.energy_profile`."""
         return cls(km=[float(e.get("km", 0.0)) for e in entries],
                    kwh=[float(e.get("kwh", 0.0)) for e in entries],
                    mins=[float(e.get("mins", 0.0)) for e in entries])
@@ -186,7 +185,7 @@ class RouteProfile:
         return self.mins[-1] if self.mins else 0.0
 
     def val(self, vals: list[float], km: float) -> float:
-        """Linear interpoliert - die Stützpunkte liegen rund 250 m auseinander."""
+        """Linearly interpolated - the support points are about 250 m apart."""
         if not self.km:
             return 0.0
         if km <= self.km[0]:
@@ -213,15 +212,15 @@ class Stop:
     charge_time_minutes: float
     detour_minutes: float
     kwh_charged: float
-    # Minuten seit Abfahrt, inklusive aller vorherigen Stopps und Umwege.
+    # Minutes since departure, including all previous stops and detours.
     arrival_minute: float
     departure_minute: float
-    # Was diese Ladung kostet. Hinter den Feldern ohne Vorgabewert, weil
-    # eine Dataclass das so verlangt - und mit Vorgabe, damit Aufrufer, die
-    # keine Preise kennen, unverändert weiterlaufen.
+    # What this charge costs. After the fields without a default value,
+    # because a dataclass requires that - and with a default, so that
+    # callers that know no prices keep working unchanged.
     cost_eur: float = 0.0
-    # Der Standort, an den man ohne Nachladen noch käme, wenn hier alles
-    # belegt ist. None = es gibt keinen.
+    # The site one could still reach without recharging if everything here is
+    # occupied. None = there is none.
     detour_alt: dict | None = None
 
     def as_dict(self) -> dict:
@@ -245,11 +244,11 @@ class ChargePlan:
     drive_time_minutes: float = 0.0
     charge_time_minutes: float = 0.0
     detour_time_minutes: float = 0.0
-    # Einparken, Kabel, Freischalten - je Halt einmal. Eigener Posten, damit
-    # in der Bilanz sichtbar bleibt, was die blosse *Anzahl* der Stopps kostet.
+    # Parking, cable, unlocking - once per stop. A separate item, so that the
+    # balance keeps showing what the mere *number* of stops costs.
     holding_cost_minutes: float = 0.0
-    # Was die Ladungen kosten. Kein Zeitposten - er steht neben der Zeit,
-    # weil er die zweite Grösse ist, nach der man einen Plan beurteilt.
+    # What the charges cost. Not a time item - it stands beside the time,
+    # because it is the second quantity by which a plan is judged.
     cost_eur: float = 0.0
     total_minutes: float = 0.0
     soc_at_target: float = 0.0
@@ -270,16 +269,16 @@ class ChargePlan:
 
 
 # ---------------------------------------------------------------------------
-# Ladezeit als Tabelle
+# Charge time as a table
 # ---------------------------------------------------------------------------
 
 class _ChargeTimeTable:
-    """Kumulierte Ladezeit von 0 % bis x %, für eine feste Säulenleistung.
+    """Cumulative charge time from 0 % to x %, for a fixed charger power.
 
-    Der Trick, der die Suche bezahlbar macht: Die Ladezeit von a nach b ist
-    `T(b) - T(a)`, weil das Integral über die Ladekurve additiv ist. Statt in
-    jeder der zehntausenden Kantenauswertungen erneut zu integrieren, wird
-    einmal je vorkommender Säulenleistung eine Tabelle gebaut.
+    The trick that makes the search affordable: the charge time from a to b
+    is `T(b) - T(a)`, because the integral over the charge curve is additive.
+    Instead of integrating again in each of the tens of thousands of edge
+    evaluations, a table is built once per occurring charger power.
     """
 
     def __init__(self, curve, battery_net_kwh: float, max_charger_kw: float,
@@ -293,8 +292,8 @@ class _ChargeTimeTable:
             kw = power_at(curve, soc + step / 2.0, max_charger_kw,
                               max_vehicle_kw, temperature_factor)
             if kw <= 0.1:
-                # Ab hier nimmt das Auto nichts mehr an - alles darüber ist
-                # unerreichbar, nicht "dauert lange".
+                # From here on the car accepts nothing more - everything above
+                # is unreachable, not "takes long".
                 amount_sum = math.inf
             elif amount_sum != math.inf:
                 amount_sum += (battery_net_kwh * step / 100.0) / kw * 60.0
@@ -326,7 +325,7 @@ class _ChargeTimeTable:
 
 # ---------------------------------------------------------------------------
 # Die Planung
-# ---------------------------------------------------------------------------
+# The planning
 
 def schedule(profile: RouteProfile, options: list[ChargeOption], fz,
            curve: list[tuple[float, float]], start_soc: float,
@@ -339,13 +338,13 @@ def schedule(profile: RouteProfile, options: list[ChargeOption], fz,
            price_for=None,
            time_value_eur_h: float = TIME_VALUE_EUR_H,
            km_offset: float = 0.0) -> ChargePlan:
-    """Die zeitoptimale Folge von Ladestopps.
+    """The time-optimal sequence of charge stops.
 
-    `fz` sind die Fahrzeugwerte aus dem Verbrauchsmodell (`akku_netto_kwh` und
-    `reserve_soc` werden gebraucht). `kurve` sind die Stützstellen der
-    Ladekurve als `(SoC, kW)`. `bevorzugte_betreiber` begünstigt passende
-    Standorte bei der Stoppwahl, schliesst andere aber nicht aus - siehe
-    verfuegbarkeit.betreiber_bonus().
+    `fz` are the vehicle values from the consumption model (`battery_net_kwh`
+    and `reserve_soc` are needed). `curve` are the support points of the
+    charge curve as `(SoC, kW)`. `preferred_operators` favors matching sites
+    when choosing stops, but does not exclude others - see
+    availability.operator_bonus().
     """
     plan = ChargePlan()
     if not profile.km or len(profile.km) < 2 or fz.battery_net_kwh <= 0:
@@ -364,7 +363,7 @@ def schedule(profile: RouteProfile, options: list[ChargeOption], fz,
                    stop_fixed_cost_min, charge_park_bonus_min,
                    price_for, time_value_eur_h)
 
-    # Schritt 3: Pareto-Dijkstra.
+    # Step 3: Pareto-Dijkstra.
     path = graph.seek(start_soc, target_soc)
     if path is None:
         plan.reason = graph.describe_gap(start_soc, filtered,
@@ -372,12 +371,12 @@ def schedule(profile: RouteProfile, options: list[ChargeOption], fz,
         return plan
     stops, departures_coarse = path
 
-    # Schritt 4: Nachoptimierung auf feinem Raster bei fester Stoppfolge. Sie
-    # kann nur besser werden als die Suche - findet sie nichts, gilt deren
-    # Ergebnis unverändert weiter.
+    # Step 4: post-optimization on a fine grid with a fixed stop sequence. It
+    # can only improve on the search - if it finds nothing, the search result
+    # continues to apply unchanged.
     departures = graph.reoptimize(stops, start_soc, target_soc) or departures_coarse
 
-    # Schritt 5 und Zusammenbau.
+    # Step 5 and assembly.
     return graph.plan_build(plan, stops, departures, start_soc)
 
 
@@ -385,11 +384,11 @@ def _thin_out_candidates(options: list[ChargeOption], total_km: float,
                            detour_limit_min: float,
                            preferred_operators: list[str] | None = None
                            ) -> list[ChargeOption]:
-    """Schritt 1: filtern und je Streckenabschnitt die besten behalten.
+    """Step 1: filter and keep the best per route section.
 
-    Gefiltert wird über die Umwegzeit, nicht über die Luftlinie: Acht Kilometer
-    neben der Autobahn sind belanglos, wenn die Abfahrt gleich kommt, und
-    fatal, wenn nicht.
+    Filtering is done by detour time, not by straight-line distance: eight
+    kilometers beside the motorway are irrelevant if the exit is right there,
+    and fatal if not.
     """
     usable = [o for o in options
                  if not o.locked
@@ -400,24 +399,24 @@ def _thin_out_candidates(options: list[ChargeOption], total_km: float,
 
     usable.sort(key=lambda o: o.km_on_route)
 
-    # Abschnittsbreite so wählen, dass die Obergrenze eingehalten wird - auf
-    # einer Fahrt über 900 km reichen 15-km-Abschnitte sonst nicht aus.
+    # Choose the section width so that the upper limit is kept - on a trip of
+    # 900 km, 15 km sections would otherwise not suffice.
     sections_max = max(1.0, AT_MOST_CANDIDATES / CANDIDATES_PER_SECTION)
     extent = max(SECTION_KM, total_km / sections_max)
 
     keep: list[ChargeOption] = []
     for _, group in _group(usable, extent):
-        # Sortierschlüssel in der Reihenfolge, in der es unterwegs zählt:
-        # Leistung zuerst (sie bestimmt die Standzeit), dann Redundanz (das
-        # Risiko, vor einer belegten Säule zu stehen), dann der Umweg.
+        # Sort key in the order in which it counts on the road: power first
+        # (it determines the standing time), then redundancy (the risk of
+        # facing an occupied charger), then the detour.
         group.sort(key=lambda o: (-o.max_kw, -(o.point_count or 1),
                                    o.detour_minutes))
         selection = group[:CANDIDATES_PER_SECTION]
-        # Ein bevorzugter Anbieter darf nicht allein an dieser Sortierung
-        # scheitern - sonst bekommt der Betreiber-Bonus aus _nachfolger() ihn
-        # in einem dicht besetzten Abschnitt nie zu Gesicht, egal wie klar die
-        # Vorgabe war. Ersetzt wird der schwächste Platz, nicht angehängt: die
-        # Obergrenze je Abschnitt bleibt bestehen.
+        # A preferred provider must not fail merely because of this sorting -
+        # otherwise the operator bonus from _successor() never gets to see it
+        # in a densely occupied section, however clear the preference was.
+        # The weakest slot is replaced, not appended to: the upper limit per
+        # section stays in place.
         if preferred_operators and not any(
                 operator_bonus(o.operator, preferred_operators) > 0
                 for o in selection):
@@ -449,10 +448,10 @@ def _group(options: list[ChargeOption], width_km: float):
 
 
 class _Graph:
-    """Knoten, Kanten und die Suche darauf.
+    """Nodes, edges and the search on them.
 
-    Knoten 0 ist der Start, 1..n die Kandidaten in Streckenreihenfolge, n+1
-    das Ziel.
+    Node 0 is the start, 1..n are the candidates in route order, n+1 is the
+    destination.
     """
 
     def __init__(self, profile: RouteProfile, options: list[ChargeOption], fz,
@@ -464,8 +463,8 @@ class _Graph:
         self.stop_fixed_cost_min = stop_fixed_cost_min
         self.charge_park_bonus_min = charge_park_bonus_min
         self.price_for = price_for or (lambda option: 0.0)
-        # Umrechnungsfaktor Euro -> Minuten. Null bei zeitwert 0: Dann sind
-        # Kosten gleichgültig und es wird rein auf Zeit optimiert.
+        # Conversion factor euro -> minutes. Zero at time value 0: then costs
+        # are irrelevant and optimization is purely on time.
         self.cost_weight = (60.0 / time_value_eur_h) if time_value_eur_h > 0 else 0.0
         self.profile = profile
         self.options = options
@@ -475,9 +474,9 @@ class _Graph:
         self.temperature_factor = temperature_factor
         self.preferred_operators = preferred_operators or []
         self.reserve = fz.reserve_soc
-        # Umrechnung kWh -> Prozentpunkte. Ab hier rechnet der Optimierer
-        # ausschliesslich in SoC; das spart in der inneren Schleife eine
-        # Multiplikation je Auswertung und macht die Schranken lesbar.
+        # Conversion kWh -> percentage points. From here on the optimizer
+        # calculates exclusively in SoC; that saves a multiplication per
+        # evaluation in the inner loop and makes the bounds readable.
         self.soc_per_kwh = 100.0 / fz.battery_net_kwh
 
         self.km = [0.0] + [o.km_on_route for o in options] + [profile.total_km]
@@ -490,17 +489,16 @@ class _Graph:
         self._peak = self._compute_peaks()
         self._tables: dict[float, _ChargeTimeTable] = {}
 
-    # ---------- Etappen ----------
+    # ---------- Legs ----------
 
     def _compute_peaks(self) -> list[list[float]]:
-        """Der grösste kumulierte Bedarf zwischen zwei Knoten, nicht nur der
-        Bedarf am Ende.
+        """The largest cumulative demand between two nodes, not just the
+        demand at the end.
 
-        Über einen Pass ist das der Unterschied zwischen "geht" und "bleibt
-        oben liegen": Auf der Passhöhe ist der Verbrauch am höchsten, auf der
-        Abfahrt holt die Rekuperation einen Teil zurück. Wer nur die Bilanz am
-        Etappenende prüft, plant eine Etappe, die in der Mitte nicht machbar
-        ist.
+        Over a pass this is the difference between "works" and "gets stuck at
+        the top": at the summit the consumption is highest, on the descent
+        regeneration recovers part of it. Anyone who only checks the balance
+        at the end of the leg plans a leg that is not feasible in the middle.
         """
         peak = [[0.0] * self.n for _ in range(self.n)]
         for i in range(self.n):
@@ -534,47 +532,48 @@ class _Graph:
         return self._tables[kw]
 
     def min_charge(self, i: int, j: int, target_soc: float) -> float:
-        """Mit wie viel Prozent muss man an Knoten i losfahren, um j zu schaffen?
+        """With what percentage must one set off at node i to make it to j?
 
-        Zwei Bedingungen, und die schärfere gilt: Unterwegs nie unter die
-        Reserve (das ist die Spitze), und am Etappenende der geforderte
-        Ladestand (Reserve bei einem Zwischenstopp, der Ziel-SoC am Ziel).
+        Two conditions, and the stricter one applies: never below the reserve
+        on the way (that is the peak), and the required state of charge at the
+        end of the leg (reserve for an intermediate stop, the target SoC at
+        the destination).
         """
         demand_at_end = target_soc if j == self.target_index else self.reserve
         return max(self.reserve + self.peak_soc(i, j),
                    demand_at_end + self.net_soc(i, j))
 
     def reachable_at_all(self, i: int, j: int) -> bool:
-        """Ist die Etappe mit voller Batterie fahrbar? Monoton in j."""
+        """Is the leg drivable on a full battery? Monotonic in j."""
         return self.reserve + self.peak_soc(i, j) <= 100.0 + _EPS
 
-    # ---------- Schritt 3: Pareto-Dijkstra ----------
+    # ---------- Step 3: Pareto-Dijkstra ----------
 
     def seek(self, start_soc: float, target_soc: float):
-        """Kostenoptimale Stoppfolge, oder None.
+        """Cost-optimal stop sequence, or None.
 
-        Optimiert wird nicht auf reine Zeit, sondern auf Zeit **minus
-        Redundanzbonus**: Ein Standort mit acht Ladepunkten bekommt gut vier
-        Minuten gutgeschrieben, weil das Risiko, vor einer belegten Säule zu
-        stehen, dort kleiner ist. Solange niemand echte Verfügbarkeitsdaten
-        hat, ist die Anzahl der Ladepunkte die beste verfügbare Näherung.
-        Ausgewiesen wird am Ende die echte Zeit, nicht die Kosten.
+        The optimization is not on pure time but on time **minus redundancy
+        bonus**: a site with eight charge points gets a good four minutes
+        credited, because the risk of facing an occupied charger is smaller
+        there. As long as nobody has real availability data, the number of
+        charge points is the best available approximation. What is reported
+        in the end is the real time, not the cost.
         """
-        # labels[i] = (knoten, soc, kosten, vorgaenger, abfahrt_soc_am_vorgaenger)
+        # labels[i] = (node, soc, cost, predecessor, departure_soc_at_predecessor)
         labels: list[tuple] = [(0, start_soc, 0.0, -1, start_soc)]
         haufen: list[tuple[float, int]] = [(0.0, 0)]
 
-        # Dominanz durch bereits abgearbeitete Labels. Weil Dijkstra in
-        # aufsteigenden Kosten arbeitet, ist jedes später erzeugte Label
-        # mindestens so teuer wie jedes bereits entnommene. Ein neues Label mit
-        # nicht mehr Ladung als ein entnommenes ist damit dominiert - und diese
-        # Prüfung kostet einen Vergleich statt eines Durchlaufs durch die
-        # ganze Front. `erledigt[k]` ist das Maximum der Ladestände, mit denen
-        # Knoten k schon abgearbeitet wurde.
+        # Dominance by already processed labels. Because Dijkstra works in
+        # ascending cost, every label generated later is at least as expensive
+        # as every one already taken out. A new label with no more charge than
+        # a taken-out one is therefore dominated - and this check costs one
+        # comparison instead of a pass through the whole front. `done[k]` is
+        # the maximum of the charge levels with which node k has already been
+        # processed.
         done = [-1.0] * self.n
-        # Zusätzlich je Knoten und Ladestand die bisher billigsten Kosten.
-        # Zusammen ersetzen beide die lineare Pareto-Front, ohne eines ihrer
-        # Labels zu Unrecht zu verwerfen.
+        # In addition, per node and charge level the cheapest cost so far.
+        # Together the two replace the linear Pareto front without wrongly
+        # discarding any of its labels.
         top: list[dict[float, float]] = [{} for _ in range(self.n)]
 
         while haufen:
@@ -584,8 +583,8 @@ class _Graph:
                 continue
             done[node] = soc
             if node == self.target_index:
-                # Dijkstra mit nichtnegativen Kanten: das erste Label am Ziel
-                # ist das billigste.
+                # Dijkstra with non-negative edges: the first label at the
+                # destination is the cheapest.
                 return self._path_trace_back(labels, lid)
 
             for fresh in self._successor(node, soc, cost, target_soc, done):
@@ -602,19 +601,19 @@ class _Graph:
 
     def _successor(self, node: int, soc: float, cost: float,
                     target_soc: float, done: list[float]):
-        """Alle Labels, die aus diesem einen Label entstehen.
+        """All labels that arise from this one label.
 
-        Erst die Etappen, dann die Ladeziele, dann das Kreuzprodukt - und
-        genau in dieser Reihenfolge, weil die Ladezeit nur vom Ladeziel abhängt
-        und nicht davon, wohin man anschliessend fährt. Sie einmal je Ladeziel
-        zu integrieren statt einmal je Ladeziel *und* Etappe ist der
-        Unterschied zwischen Sekunden und Sekundenbruchteilen.
+        First the legs, then the charge targets, then the cross product - and
+        exactly in this order, because the charge time depends only on the
+        charge target and not on where one drives afterwards. Integrating it
+        once per charge target instead of once per charge target *and* leg is
+        the difference between seconds and fractions of a second.
         """
         legs = []
         for j in range(node + 1, self.n):
             if not self.reachable_at_all(node, j):
-                # Die Spitze wächst monoton mit j - was hier zu weit ist,
-                # bleibt es auch für alle folgenden Knoten.
+                # The peak grows monotonically with j - what is too far here
+                # stays too far for all following nodes.
                 break
             min_target = self.min_charge(node, j, target_soc)
             if min_target > 100.0 + _EPS:
@@ -625,7 +624,7 @@ class _Graph:
             return
 
         if node == 0:
-            # Am Start wird nicht geladen - man fährt mit dem los, was da ist.
+            # No charging at the start - one sets off with what is there.
             departures = [(soc, 0.0)]
         else:
             option = self.options[node - 1]
@@ -637,9 +636,9 @@ class _Graph:
                                           self.preferred_operators))
 
             lower_limit = soc + MIN_CHARGE_SWING
-            # Das Raster **und** die exakt nötigen Ladestände der Etappen: Der
-            # gerade noch tragende Ladehub ist der schnellste Halt überhaupt
-            # und liegt fast nie auf dem Raster.
+            # The grid **and** the exactly required charge levels of the legs:
+            # the charge swing that just barely suffices is the fastest stop of
+            # all and almost never lies on the grid.
             targets = set(_grid(lower_limit, SOC_GRID))
             targets.update(z for _, z, _, _ in legs if z >= lower_limit)
             departures = []
@@ -649,33 +648,32 @@ class _Graph:
                 charge_time = table.timestamp(soc, charge_target)
                 if charge_time == math.inf:
                     break
-                # Die Gutschrift darf Umweg **und** Fixkosten des Halts
-                # aufwiegen, aber nie die Ladezeit. Damit bleibt jede Kante
-                # positiv - Dijkstra braucht das - und ein Halt kostet
-                # mindestens so viel, wie das Laden dauert.
+                # The credit may offset the detour **and** the fixed costs of
+                # the stop, but never the charging time. That keeps every edge
+                # positive - Dijkstra needs that - and a stop costs at least as
+                # much as the charging takes.
                 #
-                # Vorher stand hier `min(bonus_roh, umweg)`, und das war der
-                # Fehler: Ein Ladepark **direkt an der Route** hat keinen
-                # Umweg, also bekam er auch keine Gutschrift. Ausgerechnet
-                # dort, wo die grossen Parks stehen - an der Autobahn -,
-                # wirkte die Bevorzugung damit gar nicht. Auf einer
-                # Frankreich-Route wurde sie bei sechs von sieben
-                # Ionity-Standorten vollständig weggeschnitten.
+                # Before, this said `min(bonus_raw, detour)`, and that was the
+                # bug: a charging park **directly on the route** has no
+                # detour, so it got no credit either. Exactly where the large
+                # parks are - on the motorway - the preference therefore had
+                # no effect at all. On a France route it was cut away
+                # completely at six of seven Ionity sites.
                 #
-                # Die Fixkosten mit hereinzunehmen ist dabei kein
-                # Zugeständnis, sondern die richtige Bezugsgrösse: Die
-                # Gutschrift sagt "dieser Halt ist weniger lästig als ein
-                # anderer" - und lästig ist am Halt das Anhalten, nicht das
-                # Laden.
+                # Including the fixed costs is not a concession but the right
+                # reference: the credit says "this stop is less annoying than
+                # another" - and what is annoying about a stop is the stopping,
+                # not the charging.
                 bonus = min(bonus_raw, detour + self.stop_fixed_cost_min)
-                # Die Fixkosten des Halts stehen hier und nicht bei der
-                # Ladezeit: Sie fallen einmal je Stopp an, unabhängig davon,
-                # wie viel geladen wird. Genau das ist der Unterschied, der
-                # wenige lange Halte gegen viele kurze gewinnen lässt.
-                # Was diese Ladung kostet, in gleichwertigen Minuten. Der
-                # Energiebedarf einer Etappe hängt nicht vom Ladestand ab,
-                # die *Kosten* eines Halts aber sehr wohl von der Lademenge -
-                # deshalb steht das hier je Ladeziel und nicht je Stopp.
+                # The fixed costs of the stop go here and not with the charge
+                # time: they occur once per stop, regardless of how much is
+                # charged. That is exactly the difference that lets a few long
+                # stops win against many short ones.
+                # What this charge costs, in equivalent minutes. The energy
+                # demand of a leg does not depend on the state of charge, but
+                # the *cost* of a stop very much depends on the amount charged
+                # - that is why this is here per charge target and not per
+                # stop.
                 kwh = (charge_target - soc) / 100.0 * self.fz.battery_net_kwh
                 cost_min = (kwh * self.price_for(option)
                               * self.cost_weight)
@@ -686,9 +684,9 @@ class _Graph:
 
         vals = [a for a, _ in departures]
         for j, min_target, net, drive in legs:
-            # Zwei Schranken: genug Ladung für die Etappe, und mehr Ladung, als
-            # der Zielknoten schon abgearbeitet hat. Die zweite ist nur ein
-            # schneller Vorfilter - verworfen wird in `suchen` exakt.
+            # Two bounds: enough charge for the leg, and more charge than the
+            # target node has already processed. The second is only a quick
+            # pre-filter - exact discarding happens in `seek`.
             barrier = max(min_target, done[j] + net + LABEL_GRID)
             for idx in range(bisect_left(vals, barrier - _EPS), len(vals)):
                 departure, surcharge = departures[idx]
@@ -697,11 +695,11 @@ class _Graph:
 
     @staticmethod
     def _path_trace_back(labels, lid) -> tuple[list[int], list[float]]:
-        """Stoppfolge und die dort gewählten Abfahrts-SoC.
+        """Stop sequence and the departure SoCs chosen there.
 
-        Jedes Label merkt sich, mit welchem Ladestand es den *Vorgänger*
-        verlassen hat. Rückwärts gelesen ergibt das genau die Lademengen des
-        gefundenen Weges - ohne sie ein zweites Mal rechnen zu müssen.
+        Each label remembers with what state of charge it left the
+        *predecessor*. Read backwards, that gives exactly the charge amounts
+        of the path found - without having to compute them a second time.
         """
         node: list[int] = []
         departures: list[float] = []
@@ -713,23 +711,23 @@ class _Graph:
             latest = predecessor
         node.reverse()
         departures.reverse()
-        # knoten = [Start, Stopp .., Ziel]; abfahrten[i] gehört zu knoten[i-1],
-        # die ersten beiden Einträge betreffen also den Start.
+        # node = [start, stop .., destination]; departures[i] belongs to
+        # node[i-1], so the first two entries concern the start.
         return node[1:-1], departures[2:]
 
-    # ---------- Schritt 4: Nachoptimierung ----------
+    # ---------- Step 4: Post-optimization ----------
 
     def reoptimize(self, stops: list[int], start_soc: float,
                        target_soc: float) -> list[float]:
-        """Bei fester Stoppfolge die Lademengen neu verteilen.
+        """Redistribute the charge amounts for a fixed stop sequence.
 
-        Die Suche in Schritt 3 arbeitet auf einem 5-Prozent-Raster, damit der
-        Graph klein bleibt. Steht die Stoppfolge fest, ist das Problem nur noch
-        eindimensional - dann lohnt das feine Raster. Der Effekt ist der aus
-        Abschnitt 2.4: Ladehübe wandern in den steilen Teil der Kurve, weil
-        dort dieselbe Kilowattstunde weniger Zeit kostet.
+        The search in step 3 works on a 5-percent grid so that the graph stays
+        small. Once the stop sequence is fixed, the problem is only
+        one-dimensional - then the fine grid pays off. The effect is the one
+        from section 2.4: charge swings move into the steep part of the curve,
+        because there the same kilowatt hour costs less time.
 
-        Rückgabe: die Abfahrts-SoC je Stopp.
+        Returns: the departure SoCs per stop.
         """
         if not stops:
             return []
@@ -737,9 +735,9 @@ class _Graph:
         node_sequence = [0] + stops + [self.target_index]
         cells = _fine_grid()
 
-        # stufen[t] bildet den Abfahrts-SoC am Stopp t auf (Ladezeit bis
-        # hierher, Abfahrts-SoC am Stopp davor) ab. Der Rückverweis macht das
-        # Auflösen am Ende eindeutig.
+        # levels[t] maps the departure SoC at stop t to (charge time up to
+        # here, departure SoC at the previous stop). The back-reference makes
+        # the resolution at the end unambiguous.
         levels: list[dict[float, tuple[float, float | None]]] = []
 
         arrival = start_soc - self.net_soc(0, node_sequence[1])
@@ -766,8 +764,9 @@ class _Graph:
                 return []
             levels.append(level)
 
-        # Die Bedingung "am Ziel mindestens der Ziel-SoC" steckt bereits in
-        # `mindestladung` für die letzte Etappe - hier bleibt nur das Minimum.
+        # The condition "at least the target SoC at the destination" is
+        # already contained in `min_charge` for the last leg - only the
+        # minimum remains here.
         tail = levels[-1]
         d = min(tail, key=lambda val: tail[val][0])
 
@@ -780,10 +779,10 @@ class _Graph:
     def _fill_level(self, node: int, upcoming: int, target_soc: float,
                        cells: list[float],
                        inputs: list[tuple[float, float, float | None]]):
-        """Eine DP-Stufe: alle sinnvollen Abfahrts-SoC an diesem Stopp.
+        """One DP level: all sensible departure SoCs at this stop.
 
-        `eingaenge` sind Tripel (Ankunfts-SoC, Ladezeit bis hierher,
-        Abfahrts-SoC am Stopp davor).
+        `inputs` are triples (arrival SoC, charge time up to here, departure
+        SoC at the previous stop).
         """
         tab = self.table(node)
         min_target = self.min_charge(node, upcoming, target_soc)
@@ -791,12 +790,12 @@ class _Graph:
         for arrival, time_prior, origin in inputs:
             if arrival + _EPS < self.reserve:
                 continue
-            # Der Mindestladehub gilt auch hier. Ohne ihn schleift die
-            # Nachoptimierung die Ladehübe auf das gerade noch Nötige herunter
-            # und erzeugt Stopps von einer Minute - der Dijkstra hatte sie
-            # verboten, das DP führte sie wieder ein. Zulässig bleibt es: Der
-            # Weg aus Schritt 3 erfüllt die Schranke bereits, es gibt hier
-            # also immer eine Lösung.
+            # The minimum charge swing applies here too. Without it the
+            # post-optimization grinds the charge swings down to the bare
+            # minimum and produces stops of one minute - Dijkstra had
+            # forbidden them, the DP reintroduced them. It stays feasible: the
+            # path from step 3 already meets the bound, so there is always a
+            # solution here.
             lower_limit = max(arrival + MIN_CHARGE_SWING, min_target)
             for d in cells:
                 if d + _EPS < lower_limit:
@@ -804,13 +803,12 @@ class _Graph:
                 timestamp = tab.timestamp(arrival, d)
                 if timestamp == math.inf:
                     break
-                # Die Kosten müssen hier genauso zählen wie in der Suche.
-                # Ohne sie minimierte die Nachoptimierung reine Zeit - und
-                # weil sie *nach* dem Dijkstra läuft und dessen Lademengen
-                # überschreibt, verschob sie Energie von der billigen Säule
-                # zur teuren, sobald das ein paar Sekunden sparte. Sie machte
-                # damit still zunichte, was Schritt 3 an Kostenoptimierung
-                # gerade geleistet hatte.
+                # The costs must count here exactly as in the search. Without
+                # them the post-optimization minimized pure time - and because
+                # it runs *after* Dijkstra and overwrites its charge amounts,
+                # it shifted energy from the cheap charger to the expensive
+                # one as soon as that saved a few seconds. That silently undid
+                # what step 3 had just achieved in cost optimization.
                 cost_min = ((d - arrival) / 100.0 * self.fz.battery_net_kwh
                               * self.price_for(self.options[node - 1])
                               * self.cost_weight)
@@ -820,7 +818,7 @@ class _Graph:
                     level[d] = (total, origin)
         return level
 
-    # ---------- Schritt 5 und Zusammenbau ----------
+    # ---------- Step 5 and assembly ----------
 
     def plan_build(self, plan: ChargePlan, stops: list[int],
                    departures: list[float], start_soc: float) -> ChargePlan:
@@ -843,9 +841,9 @@ class _Graph:
                 charge_time = 0.0
                 departure = arrival
 
-            # Ankunft ist, wann man da ist - die Fixkosten laufen danach,
-            # sonst behauptete der Plan eine Ankunft, die schon das Einparken
-            # enthält.
+            # Arrival is when one is there - the fixed costs run afterwards,
+            # otherwise the plan would claim an arrival that already includes
+            # the parking.
             arrival_minute = clock
             clock += self.stop_fixed_cost_min + charge_time
 
@@ -872,22 +870,23 @@ class _Graph:
         return plan
 
     def _alternative(self, node: int, arrival_soc: float) -> dict | None:
-        """Schritt 5: Wohin käme man noch, wenn hier alles belegt ist?
+        """Step 5: where could one still get to if everything here is occupied?
 
-        Bedingung ist "ohne Nachladen erreichbar" - also mit genau dem
-        Ladestand, mit dem man hier ankommt. Wer vor einer belegten Säule
-        steht, hat keine Reserve für eine Suche; er braucht einen Namen und
-        eine Entfernung, sofort.
+        The condition is "reachable without recharging" - that is, with
+        exactly the state of charge with which one arrives here. Whoever
+        stands in front of an occupied charger has no reserve for a search;
+        they need a name and a distance, immediately.
 
-        Dabei darf der Ausweichweg in die Reserve hineingehen, aber nicht durch
-        sie hindurch: Genau für diesen Fall ist sie da. Der Plan selbst rührt
-        sie nie an - er kommt überall mit mindestens `reserve_soc` an -, und
-        deshalb wäre ein Ausweichstandort, der die volle Reserve stehen lassen
-        muss, fast nie erreichbar. Als harte Grenze bleibt die halbe Reserve.
+        The alternative route may dip into the reserve, but not go through
+        it: that is exactly what it is there for. The plan itself never
+        touches it - it arrives everywhere with at least `reserve_soc` - and
+        therefore an alternative site that has to leave the full reserve
+        untouched would almost never be reachable. Half the reserve remains
+        as the hard limit.
 
-        Gibt es keinen, ist `None` die richtige Antwort und keine Lücke im
-        Plan: Sie heisst "wenn hier alles belegt ist, wird es eng" - und das
-        ist genau die Information, die man vorher haben will.
+        If there is none, `None` is the right answer and not a gap in the
+        plan: it means "if everything is occupied here, it gets tight" - and
+        that is exactly the information one wants beforehand.
         """
         lower_limit = max(2.0, self.reserve / 2.0)
         best = None
@@ -897,8 +896,8 @@ class _Graph:
                 continue
             rest = arrival_soc - self.peak_soc(node, j)
             if rest + _EPS < lower_limit:
-                # Die Spitze wächst monoton mit j - was von hier aus nicht mehr
-                # reicht, reicht auch für alles Weitere nicht.
+                # The peak grows monotonically with j - what is no longer
+                # enough from here will not be enough for anything further.
                 break
             cost = (self.drive_time(node, j) + option.detour_minutes
                       - redundancy_bonus(option.point_count or 1))
@@ -910,33 +909,34 @@ class _Graph:
         _, option, rest_soc = best
         return {**option.as_dict(), "arrival_soc": round(rest_soc, 1)}
 
-    # ---------- Diagnose ----------
+    # ---------- Diagnosis ----------
 
     def describe_gap(self, start_soc: float,
                            candidates: list[ChargeOption],
                            km_offset: float = 0.0) -> str:
-        """Warum ging es nicht? Die Antwort ist fast immer eine Lücke.
+        """Why did it not work? The answer is almost always a gap.
 
-        Ein blosses "nicht machbar" hilft niemandem. Wer weiss, dass zwischen
-        km 210 und km 480 kein erreichbarer Schnelllader im Korridor liegt,
-        kann den Radius aufziehen, die Mindestleistung senken oder langsamer
-        fahren - und sieht sofort, dass nicht die Software das Problem ist,
-        sondern womöglich die noch leere Ladepunkt-Tabelle.
+        A bare "not feasible" helps nobody. Anyone who knows that between
+        km 210 and km 480 no reachable fast charger lies in the corridor can
+        widen the radius, lower the minimum power or drive slower - and sees
+        immediately that the software is not the problem, but possibly the
+        still empty charge point table.
 
-        `km_versatz` rechnet die Kilometer auf die **ganze** Fahrt um. Bei
-        einer Umplanung unterwegs rechnet der Optimierer auf der Reststrecke,
-        die bei null beginnt; die Stopps werden hinterher zurueckgerechnet,
-        dieser Satz aber nicht. Er nannte deshalb Kilometer, die es auf der
-        Strecke gar nicht gibt - in einem Probelauf stand bei km 137 die
-        Meldung "zwischen km 0 und km 44". Wer am Steuer eine Kilometerangabe
-        liest, sucht sie auf seiner Route, nicht auf einer gedachten.
+        `km_offset` converts the kilometers to the **whole** trip. When
+        replanning on the way, the optimizer calculates on the remaining
+        route, which starts at zero; the stops are converted back afterwards,
+        but this sentence was not. It therefore named kilometers that do not
+        exist on the route - in a test run, at km 137 the message read
+        "zwischen km 0 und km 44" (between km 0 and km 44). Anyone who reads
+        a kilometer figure at the wheel looks for it on their route, not on
+        an imaginary one.
         """
         if not candidates:
             return ("Ohne Ladestopp nicht machbar, und im Korridor liegt kein "
                     "passender Ladepunkt. Sind die Ladesäulen importiert?")
 
-        # Erreichbarkeit ohne Rücksicht auf Zeit: von jedem erreichten Knoten
-        # aus mit voller Batterie weiter.
+        # Reachability regardless of time: from every reached node onward
+        # with a full battery.
         reached = {0}
         farthest = 0
         opened = [0]
@@ -969,25 +969,25 @@ class _Graph:
 
 
 # ---------------------------------------------------------------------------
-# Kleinkram
+# Odds and ends
 # ---------------------------------------------------------------------------
 
 def _round_down(soc: float) -> float:
-    """Ankunfts-SoC auf das Labelraster **abrunden**.
+    """**Round down** the arrival SoC to the label grid.
 
-    Abrunden statt Runden ist Absicht: Es hält die Pareto-Front endlich, ohne
-    je mehr Ladung zu behaupten, als tatsächlich da ist. Ein Plan, der sich um
-    ein halbes Prozent zu optimistisch verrechnet, ist schlechter als einer,
-    der ein halbes Prozent verschenkt.
+    Rounding down instead of rounding is intentional: it keeps the Pareto
+    front finite without ever claiming more charge than is actually there. A
+    plan that miscalculates by half a percent too optimistically is worse
+    than one that gives away half a percent.
     """
     return math.floor(max(0.0, soc) / LABEL_GRID) * LABEL_GRID
 
 
 def _grid(lower_limit: float, step: float):
-    """Die Ladeziele ab `untergrenze`: erst der exakt nötige Wert, dann das Raster.
+    """The charge targets from `lower_limit`: first the exactly required value, then the grid.
 
-    Der exakte Wert muss dabei sein - er ist der schnellste Halt, der die
-    nächste Etappe gerade noch trägt, und liegt fast nie auf dem Raster.
+    The exact value has to be included - it is the fastest stop that just
+    barely supports the next leg, and almost never lies on the grid.
     """
     lower_limit = max(0.0, min(100.0, lower_limit))
     yield lower_limit

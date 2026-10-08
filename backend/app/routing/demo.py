@@ -1,29 +1,29 @@
-"""Ein Routing-Adapter ohne Netz und ohne Schlüssel - nur für die Entwicklung.
+"""A routing adapter without network and without a key - development only.
 
-Er erfindet eine Route: Luftlinie zwischen Start und Ziel, dazu ein
-synthetisches Höhenprofil und ein Tempoverlauf, der langsam beginnt, auf
-Autobahntempo geht und am Ziel wieder abfällt.
+It invents a route: a straight line between start and destination, plus a
+synthetic elevation profile and a speed profile that starts slowly, rises to
+motorway speed and drops again at the destination.
 
-Wozu das gut ist: Das Verbrauchsmodell, die Korridor-Suche, das Live-Gerüst
-und die Oberfläche lassen sich damit vollständig durchspielen, ohne dass ein
-ORS-Schlüssel vorliegt oder das Tageskontingent belastet wird. Genau das
-braucht man beim Entwickeln am häufigsten.
+What it is good for: the consumption model, the corridor search, the live
+scaffolding and the UI can be exercised completely with it, without an ORS
+key being available or the daily quota being used. That is what one needs
+most often during development.
 
-Er springt **nur** ein, wenn kein ORS_API_KEY gesetzt ist, und sagt in jeder
-Antwort, dass er es war - eine erfundene Route darf nie unbemerkt für eine
-echte gehalten werden.
+It steps in **only** if no ORS_API_KEY is set, and states in every response
+that it was the one - an invented route must never be mistaken for a real
+one unnoticed.
 
-Wichtige Einschränkung: Die Strecke ist die Luftlinie und damit rund ein
-Fünftel kürzer als jede echte Strasse. Zum Prüfen der Rechenkette reicht das;
-als Aussage über eine reale Fahrt taugt sie nicht.
+Important limitation: the distance is the straight line and thus about a
+fifth shorter than any real road. That is enough for checking the
+calculation chain; it is not suitable as a statement about a real trip.
 """
 import math
 
 from ..geo import haversine_m
 from .provider import City, Route
 
-# Grobe Koordinaten einiger Städte, damit die Ortssuche offline etwas
-# zurückgeben kann. Keine Geokodierung, nur eine Handvoll Stützpunkte.
+# Rough coordinates of a few cities so that the place search can return
+# something offline. Not geocoding, just a handful of reference points.
 PLACES = {
     "hamburg": (53.5511, 9.9937), "münchen": (48.1351, 11.5820),
     "munich": (48.1351, 11.5820), "berlin": (52.5200, 13.4050),
@@ -44,12 +44,12 @@ class DemoRouting:
     def route(self, start, destination, intermediate_stops=None,
              preference: str = "recommended",
              toll_free: bool = False) -> Route:
-        # Es gibt kein echtes Strassennetz, aus dem sich schnellste und
-        # empfohlene Route unterscheiden liessen, und eine erfundene
-        # Luftlinie hat auch keine Mautstrassen. `praeferenz` und `mautfrei`
-        # werden deshalb entgegengenommen und ignoriert; /api/route erkennt
-        # die identischen Ergebnisse selbst und legt sie zu einer Variante
-        # mit mehreren Etiketten zusammen.
+        # There is no real road network from which the fastest and
+        # recommended routes could be told apart, and an invented straight
+        # line has no toll roads either. `praeferenz` and `mautfrei` are
+        # therefore accepted and ignored; /api/route detects the identical
+        # results itself and merges them into one variant with several
+        # labels.
         stations = [start] + list(intermediate_stops or []) + [destination]
         points: list[list[float]] = []
         velocity: list[float] = []
@@ -71,10 +71,10 @@ class DemoRouting:
                      drive_time_s=drive_time)
 
     def elevations(self, points: list) -> list | None:
-        """Das Demo-Routing erfindet Routen, aber keine Höhen.
+        """Demo routing invents routes, but not elevations.
 
-        Eine erfundene Höhe wäre hier schädlicher als gar keine: Sie sähe
-        aus wie eine Messung und ginge in den Korrekturfaktor ein.
+        An invented elevation would be more harmful here than none at all: it
+        would look like a measurement and feed into the correction factor.
         """
         return None
 
@@ -85,7 +85,7 @@ class DemoRouting:
                 return [City(name=f"{name.capitalize()} (Demo)", lat=lat, lon=lon)]
         return []
 
-    # ---------- intern ----------
+    # ---------- internal ----------
 
     @staticmethod
     def _spacing_m(lat1, lon1, lat2, lon2) -> float:
@@ -100,15 +100,15 @@ class DemoRouting:
             t = i / count
             lat = a[0] + (b[0] - a[0]) * t
             lon = a[1] + (b[1] - a[1]) * t
-            # Zwei überlagerte Wellen: ein langes Mittelgebirge und kleinere
-            # Kuppen. Damit hat das Höhenprofil Steigung und Gefälle, und die
-            # Rekuperation wird tatsächlich durchlaufen.
+            # Two superimposed waves: a long low mountain range and smaller
+            # hilltops. That gives the elevation profile climbs and
+            # descents, and regeneration is actually exercised.
             elevation = (120.0 + 220.0 * math.sin(math.pi * t)
                      + 45.0 * math.sin(t * 14.0))
             if i > 0 or first:
                 points.append([round(lon, 6), round(lat, 6), round(elevation, 1)])
             if i < count:
-                # Auffahrt und Abfahrt langsamer, dazwischen Autobahn.
+                # Slower on the on-ramp and off-ramp, motorway in between.
                 edge = min(t, 1.0 - t)
                 v = 16.0 + 20.0 * min(1.0, edge / 0.04)
                 velocity.append(round(v, 2))

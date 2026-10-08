@@ -16,15 +16,15 @@ router = APIRouter(prefix="/api/fahrzeuge", tags=["fahrzeuge"],
 
 
 class ElectricityPrice(BaseModel):
-    """Ein Preis für Säulen, deren Name das Muster enthält."""
+    """A price for chargers whose name contains the pattern."""
     pattern: str = Field(max_length=80)
     eur_kwh: float = Field(ge=0, le=5, allow_inf_nan=False)
 
 
 class VehicleInput(BaseModel):
-    """Grenzen mit Luft nach oben: Sie fangen Tippfehler und kaputte Clients,
-    nicht ungewöhnliche Fahrzeuge. Null oder Negatives im Fahrwiderstand ergab
-    sonst Division durch null oder NaN im Verbrauchsmodell."""
+    """Limits with plenty of headroom: they catch typos and broken clients,
+    not unusual vehicles. Zero or negative values in the driving resistance
+    otherwise caused division by zero or NaN in the consumption model."""
     name: str = Field(min_length=1, max_length=120)
     battery_gross_kwh: float = Field(gt=0, le=1000, allow_inf_nan=False)
     battery_net_kwh: float = Field(gt=0, le=1000, allow_inf_nan=False)
@@ -33,7 +33,7 @@ class VehicleInput(BaseModel):
     c_w: float = Field(default=0.28, gt=0, le=2, allow_inf_nan=False)
     frontal_area_m2: float = Field(default=2.30, gt=0, le=20, allow_inf_nan=False)
     c_rr: float = Field(default=0.010, ge=0, le=0.1, allow_inf_nan=False)
-    # Höchstgeschwindigkeit in km/h; None = keine Grenze im Modell.
+    # Top speed in km/h; None = no limit in the model.
     max_speed_kmh: float | None = Field(default=None, ge=30, le=300)
     eta_drive: float = Field(default=0.88, gt=0, le=1)
     eta_regen: float = Field(default=0.70, ge=0, le=1)
@@ -44,15 +44,15 @@ class VehicleInput(BaseModel):
     max_charge_power_kw: float = Field(default=150.0, gt=0, le=1500,
                                        allow_inf_nan=False)
     connector_type: str = Field(default="CCS", max_length=40)
-    # Namen oder Namensteile, die der Ladeplan bevorzugt - kein harter Filter.
+    # Names or name fragments the charging plan prefers - not a hard filter.
     preferred_operators: list[Annotated[str, Field(max_length=80)]] = Field(
         default=[], max_length=50)
-    # Was eine Kilowattstunde kostet. Am Fahrzeug, weil der Preis am Vertrag
-    # hängt und nicht an der Säule - siehe laden/prices.py.
+    # What one kilowatt hour costs. Stored on the vehicle because the price
+    # depends on the contract, not on the charger - see laden/prices.py.
     electricity_price_eur_kwh: float = Field(default=0.59, ge=0, le=5)
-    # [{"muster": "Ionity", "eur_kwh": 0.39}, ...]
+    # [{"muster": "Ionity", "eur_kwh": 0.39}, ...]  ("muster" = pattern)
     electricity_prices: list[ElectricityPrice] = Field(default=[], max_length=50)
-    # [[soc, kw], ...] - leer heisst "Kurve unverändert lassen"
+    # [[soc, kw], ...] - empty means "leave the curve unchanged"
     charge_curve: list[list[float]] = Field(default=[], max_length=100)
 
     @field_validator("charge_curve")
@@ -89,23 +89,23 @@ def _as_dict(vehicle: models.Vehicle) -> dict:
             "electricity_price_eur_kwh": vehicle.electricity_price_eur_kwh,
             "electricity_prices": vehicle.electricity_prices or [],
             "correction_factor": vehicle.correction_factor,
-            # Was das Fahrzeug selbst ueber seinen Akku sagt, und wann.
-            # Beides null, solange nie gemessen wurde.
+            # What the vehicle itself reports about its battery, and when.
+            # Both null as long as it has never been measured.
             "measured_capacity_kwh": vehicle.measured_capacity_kwh,
             "capacity_measured_at": utc_iso(vehicle.capacity_measured_at),
-            # Womit tatsaechlich gerechnet wird - gemessen, sonst Profil.
+            # What is actually used for calculation - measured, otherwise profile.
             "capacity_kwh": vehicle.capacity_kwh,
-            # Nur ob eines eingerichtet ist, nicht welches. Das Token steht
-            # genau einmal in einer Antwort - der, mit der es entsteht.
+            # Only whether one is set up, not which one. The token appears
+            # in exactly one response - the one that creates it.
             "logger_active": bool(vehicle.logger_token),
             "charge_curve": [[p.soc_percent, p.kw] for p in vehicle.charge_curve]}
 
 
 def _examine_curve(pairs: list[list[float]]) -> None:
-    """Jeder Ladestand darf nur einmal vorkommen - die Tabelle hat dafür eine
-    Unique-Constraint (fahrzeug_id, soc_prozent). Ohne diese Prüfung landet ein
-    doppelter Ladestand nicht als verständliche Fehlermeldung beim Nutzer,
-    sondern als nackter Datenbankfehler und HTTP 500.
+    """Each state of charge may occur only once - the table has a unique
+    constraint for that (vehicle_id, soc_percent). Without this check a
+    duplicate state of charge does not reach the user as an understandable
+    error message but as a bare database error and HTTP 500.
     """
     seen: set[float] = set()
     for entry in pairs:
@@ -124,12 +124,12 @@ def _set_curve(db: Session, vehicle: models.Vehicle,
     for old in list(vehicle.charge_curve):
         db.delete(old)
     vehicle.charge_curve.clear()
-    # Ohne dieses Flush schreibt SQLAlchemy im selben Flush zuerst die neuen
-    # Zeilen und erst danach die DELETEs der alten - beim Bearbeiten eines
-    # Fahrzeugs, das dieselben Ladestände behält (der Normalfall: nur die
-    # kW-Werte ändern sich), verletzt das dann dieselbe Unique-Constraint wie
-    # ein echtes Duplikat, nur unsichtbar für _kurve_pruefen(). Das Flush
-    # zwingt die Löschungen zuerst in die Datenbank.
+    # Without this flush SQLAlchemy writes the new rows first and only then
+    # the DELETEs of the old ones in the same flush - when editing a vehicle
+    # that keeps the same states of charge (the normal case: only the kW
+    # values change), that violates the same unique constraint as a real
+    # duplicate, just invisible to _examine_curve(). The flush forces the
+    # deletions into the database first.
     db.flush()
     for entry in pairs:
         if len(entry) < 2:
@@ -140,10 +140,11 @@ def _set_curve(db: Session, vehicle: models.Vehicle,
 
 @router.get("/vorlagen")
 def templates():
-    """Startwerte, damit niemand c_w-Wert und Ladekurve von Hand raten muss.
+    """Starting values so nobody has to guess the c_w value and charging
+    curve by hand.
 
-    Ausdrücklich Näherungen und keine Herstellerangaben - sie werden über den
-    Korrekturfaktor an das eigene Auto herangeführt.
+    Explicitly approximations and not manufacturer data - they are adapted to
+    the actual car via the correction factor.
     """
     return [{**v, "charge_curve": [list(p) for p in v["charge_curve"]]}
             for v in curves.TEMPLATES]
@@ -190,14 +191,14 @@ def change(vehicle_id: int, user_input: VehicleInput,
 
 @router.post("/{vehicle_id}/logger-token")
 def renew_logger_token(vehicle_id: int, db: Session = Depends(get_db)):
-    """Ein neues Logger-Token erzeugen - und damit das alte entwerten.
+    """Create a new logger token - and thereby invalidate the old one.
 
-    Das Token ist der Schlüssel, mit dem ein Gerät im Auto Messpunkte melden
-    darf (`POST /api/live/melden`). Es steht **nur in dieser einen Antwort**;
-    danach ist es aus der Oberfläche nicht mehr abzurufen. Wer es verliert,
-    erzeugt ein neues - das kostet nichts ausser dem Neueintragen im Logger,
-    und es hält die Gewohnheit aufrecht, ein Geheimnis nicht in jeder
-    Listenantwort mitzuschleppen.
+    The token is the key that lets a device in the car report measurement
+    points (`POST /api/live/melden`). It appears **only in this one
+    response**; afterwards it cannot be retrieved from the UI. Whoever loses
+    it creates a new one - that costs nothing except re-entering it in the
+    logger, and it keeps up the habit of not dragging a secret along in
+    every list response.
     """
     vehicle = db.get(models.Vehicle, vehicle_id)
     if not vehicle:
@@ -210,7 +211,7 @@ def renew_logger_token(vehicle_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/{vehicle_id}/logger-token")
 def delete_logger_token(vehicle_id: int, db: Session = Depends(get_db)):
-    """Den Logger abmelden. Danach wird von ihm nichts mehr angenommen."""
+    """Deregister the logger. Nothing is accepted from it afterwards."""
     vehicle = db.get(models.Vehicle, vehicle_id)
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")

@@ -1,28 +1,30 @@
-"""Route rechnen: Strecke, Höhenprofil, Wetter, Energiebedarf, Ladestopps.
+"""Compute a route: distance, elevation profile, weather, energy demand, charging stops.
 
-Der Endpunkt, der alles zusammenführt: die Strecke aus dem Routing, den
-Energiebedarf aus dem Verbrauchsmodell und - über `/ladeplan` - die zeitoptimale
-Folge von Ladestopps aus dem Optimierer.
+The endpoint that brings everything together: the route from the routing
+service, the energy demand from the consumption model and - via `/ladeplan`
+(charge plan) - the time-optimal sequence of charging stops from the
+optimizer.
 
-`/route` rechnet dabei nicht eine, sondern mehrere Varianten: die schnellste
-Strasse, auf Wunsch eine mautfreie, und bis zu vier Ausweichrouten über
-Zwischenpunkte neben der Strecke (`routing/variants.py`).
+`/route` does not compute one variant but several: the fastest road, a
+toll-free one on request, and up to four detour routes via waypoints next to
+the route (`routing/variants.py`).
 
-Die Zwischenpunkte sind kein Selbstzweck. openrouteservice kennt Energie
-nicht als Kantengewicht - "verbrauchsoptimal" kann man dort nicht bestellen,
-das könnte nur ein eigener Routing-Layer (siehe konzept-routenplaner.md).
-Und sein eingebautes `alternative_routes` lehnt jede Route über 100 km ab,
-also genau die, bei denen eine Alternative etwas ändern würde. Bleibt: selbst
-Kandidaten erzeugen und sie mit jolts eigenem Verbrauchsmodell bewerten.
+The waypoints are not an end in themselves. openrouteservice does not know
+energy as an edge weight - "consumption-optimal" cannot be ordered there,
+only a routing layer of our own could do that (see konzept-routenplaner.md).
+And its built-in `alternative_routes` rejects every route over 100 km, i.e.
+exactly those where an alternative would change something. What remains:
+generate candidates ourselves and evaluate them with jolt's own consumption
+model.
 
-Bewertet wird am **fertigen Ladeplan** und nicht an der Fahrzeit - siehe
-`_varianten_bewerten`. Eine Route, die länger *und* langsamer ist als die
-schnellste, wird schon vorher verworfen: Sie kann keinen Ladeplan haben, der
-sie rettet, und das Rechnen kostet mehr als das Aussortieren.
+Evaluation is based on the **finished charging plan** and not on the travel
+time - see `_variants_rate` (rate variants). A route that is longer
+*and* slower than the fastest is discarded beforehand: it cannot have a
+charging plan that saves it, and computing costs more than weeding out.
 
-Der Ladeplan hängt bewusst an einer bereits gerechneten Fahrt und nicht an der
-Routenanfrage: Radius, Mindestleistung und Steckertyp will man durchprobieren,
-ohne jedes Mal das Routing-Kontingent zu belasten.
+The charging plan is deliberately attached to an already computed trip and
+not to the route request: radius, minimum power and connector type are
+meant to be tried out without burdening the routing quota every time.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -39,22 +41,22 @@ from ..database import get_db
 from ..energy import model, weather
 from ..geo import haversine_m
 from ..timestamp import utc_iso
-# Nur noch für die Vorgabewerte der Regler - gerechnet wird über
-# `umplanung.planen`, das den Optimierer selbst aufruft.
+# Only for the default values of the sliders - calculation goes through
+# `umplanung.planen` (replanning.schedule), which calls the optimizer itself.
 from ..charging import optimizer
 from ..live import replanning
 from ..routing import own, tomtom, variants
 from ..routing.provider import RoutingError
 
-# Von der ORS-"preference" auf die Bezeichnung, die der Mensch am Steuer
-# liest. "empfohlen" statt "recommended", weil das Wort sonst niemand
-# verwendet, der nicht selbst openrouteservice-Kunde ist.
+# From the ORS "preference" to the label that the human at the wheel reads.
+# "empfohlen" (recommended) instead of "recommended", because nobody uses
+# that word who is not an openrouteservice customer themselves.
 LABEL = {"fastest": "schnellste", "shortest": "kürzeste",
           "recommended": "empfohlene"}
-# Wie nah zwei Varianten in Strecke und Fahrzeit beieinanderliegen müssen, um
-# als "dieselbe Route" zu gelten. Ein Kilometer und eine Minute Toleranz
-# fangen Rundungsunterschiede zwischen den ORS-Antworten ab, ohne zwei
-# tatsächlich verschiedene Strecken fälschlich zusammenzulegen.
+# How close two variants must be in distance and travel time to count as "the
+# same route". A tolerance of one kilometer and one minute absorbs rounding
+# differences between the ORS responses without wrongly merging two
+# genuinely different routes.
 SAME_KM = 1.0
 SAME_MIN = 1.0
 
@@ -75,61 +77,60 @@ class Routenanfrage(BaseModel):
     start: Point
     destination: Point
     start_soc: float = Field(default=80.0, ge=0, le=100)
-    # 1.1 heisst "zehn Prozent schneller als das Routing annimmt". Der Regler
-    # wirkt über v² überproportional - genau der Hebel, mit dem sich unterwegs
-    # ein Ladestopp einsparen lässt.
+    # 1.1 means "ten percent faster than the routing assumes". The slider
+    # acts disproportionately via v² - exactly the lever with which a
+    # charging stop can be saved on the road.
     speed_factor: float = Field(default=1.0, ge=0.6, le=1.5)
-    # Zuschlag auf den Luftwiderstand für Fahrradträger oder Dachbox.
-    # 1.0 = nichts dran. Siehe models.Fahrt.luftwiderstand_faktor.
+    # Surcharge on air drag for a bike rack or roof box.
+    # 1.0 = nothing attached. See models.Fahrt.air_drag_factor.
     air_drag_factor: float = Field(default=1.0, ge=1.0, le=2.0)
     consider_weather: bool = True
-    # Eine zweite Route mitrechnen. Aus: Es bleibt bei der schnellsten.
+    # Also compute a second route. Off: it stays with the fastest.
     #
-    # "shortest" fehlt hier bewusst und ganz. Auf der Strecke Le Gurp -
-    # Montchanin liefert sie 554 km in 11,8 Stunden gegen 654 km in 6,3 -
-    # hundert Kilometer weniger, gekauft mit fünfeinhalb Stunden. Das
-    # entscheidet niemand so, und eine Auswahl, in der eine Möglichkeit
-    # nie gewählt wird, macht die Auswahl nur unübersichtlich. Sie kostet
-    # ausserdem ein Drittel des ORS-Tageskontingents.
+    # "shortest" is deliberately and completely absent here. On the route
+    # Le Gurp - Montchanin it delivers 554 km in 11.8 hours versus 654 km in
+    # 6.3 - a hundred kilometers less, bought with five and a half hours.
+    # Nobody decides that way, and a choice in which one option is never
+    # picked only makes the choice confusing. It also costs a third of the
+    # ORS daily quota.
     alternative: bool = False
-    # Ausweichrouten über Zwischenpunkte mitrechnen (routing/variants.py).
+    # Also compute detour routes via waypoints (routing/variants.py).
     #
-    # Vorgabe aus, und das ist ein Messergebnis und keine Vorsicht: Auf der
-    # Teststrecke verlor jeder der zwölf durchgerechneten geometrischen
-    # Kandidaten gegen die schnellste Route. Vier zusätzliche
-    # Routing-Anfragen je Planung für einen Vorschlag, der zuverlässig
-    # schlechter ist, wäre ein schlechtes Geschäft.
+    # Off by default, and that is a measurement result and not caution: on
+    # the test route each of the twelve geometric candidates computed lost
+    # against the fastest route. Four additional routing requests per plan
+    # for a suggestion that is reliably worse would be a bad deal.
     #
-    # An: für Versuche mit anderen Abgriffstellen und Versatzweiten. Die
-    # Mechanik dahinter stimmt - sie wartet nur auf einen
-    # Kandidatenlieferanten, der etwas taugt.
+    # On: for experiments with other pick-off points and offset widths. The
+    # mechanism behind it is sound - it is only waiting for a candidate
+    # supplier that is any good.
     examine_detours: bool = False
-    # Gefahrene Strecken als zusätzliche Kandidaten (routing/own.py): Wer
-    # eine Strecke schon gefahren ist, kennt einen Weg, den kein Kantengewicht
-    # kennt. Es werden höchstens zwei Anfragen mehr gestellt, und nur, wenn zu
-    # Start und Ziel überhaupt eine frühere Fahrt passt.
+    # Driven routes as additional candidates (routing/own.py): whoever has
+    # driven a route before knows a way that no edge weight knows. At most
+    # two more requests are made, and only if an earlier trip fits the start
+    # and destination at all.
     own_trips: bool = True
-    # TomTom als Berater (routing/tomtom.py): Vorschläge, die OpenRouteService
-    # nicht liefert, und die Verkehrsverzögerung je Route. Ohne
-    # TOMTOM_API_KEY geschieht nichts. Gespeichert wird davon nichts.
+    # TomTom as an advisor (routing/tomtom.py): suggestions that
+    # OpenRouteService does not deliver, and the traffic delay per route.
+    # Without TOMTOM_API_KEY nothing happens. None of it is stored.
     tomtom: bool = True
-    # Wann losgefahren wird. Leer heisst jetzt. Der Verkehr (TomTom, zeitabhängig
-    # prognostiziert) und das Wetter (stündliche Vorhersage, je Stützpunkt für
-    # die Stunde der Ankunft dort) gelten dann für diese Zeit. Mit Zeitzone; der
-    # Browser schickt UTC.
+    # When to depart. Empty means now. Traffic (TomTom, forecast
+    # time-dependently) and weather (hourly forecast, per vertex for the hour
+    # of arrival there) then apply to that time. With time zone; the browser
+    # sends UTC.
     departure: datetime | None = None
-    # Zuladung dieser einen Fahrt. None heisst "wie im Fahrzeugprofil" - der
-    # Normalfall. Gesetzt wird sie, wenn dieselbe Fahrt einmal zu zweit und
-    # einmal voll beladen geplant wird: Masse geht linear in Roll- und
-    # Steigungswiderstand ein, auf einer Bergstrecke sind 600 kg Unterschied
-    # deutlich mehr als Kosmetik.
+    # Payload of this one trip. None means "as in the vehicle profile" - the
+    # normal case. It is set when the same trip is planned once with two
+    # people and once fully loaded: mass enters linearly into rolling and
+    # gradient resistance, on a mountain route a 600 kg difference is much
+    # more than cosmetics.
     payload_kg: float | None = Field(default=None, ge=0, le=2000)
-    # Anhänger dieser Fahrt: Masse und zusätzliche Luftwiderstandsfläche
-    # (c_w mal A, in m²). Siehe models.Fahrt.anhaenger_kg.
+    # Trailer of this trip: mass and additional drag area (c_w times A, in
+    # m²). See models.Fahrt.trailer_kg.
     trailer_kg: float | None = Field(default=None, ge=0, le=3500)
     trailer_cwa_m2: float | None = Field(default=None, ge=0, le=5)
-    # Harte Höchstgeschwindigkeit dieser Fahrt in km/h, etwa 100 für ein
-    # Gespann. Wirkt zusätzlich zu der des Fahrzeugs; es gilt die kleinere.
+    # Hard top speed of this trip in km/h, e.g. 100 for a car-and-trailer
+    # combination. Applies in addition to the vehicle's; the smaller one wins.
     speed_max_kmh: float | None = Field(default=None, ge=30, le=250)
 
 
@@ -144,21 +145,21 @@ def search_places(text: str = Query(min_length=2), country: str = ""):
                         for o in hit]}
 
 
-# Eine Abfahrt, die höchstens so weit zurückliegt, ist "jetzt": Wer die Uhrzeit
-# im Formular eintippt, braucht eine Weile.
+# A departure that lies back at most this far is "now": typing the time into
+# the form takes a while.
 DEPARTURE_TOLERANCE = timedelta(minutes=10)
-# So weit im Voraus kennt TomTom Strassensperrungen und Baustellen; darüber
-# hinaus gäbe es nur noch den üblichen Verkehr, und das Wetter reicht ohnehin
-# nur 15 Tage.
+# This far ahead TomTom knows road closures and construction sites; beyond
+# that there would only be the usual traffic, and the weather only reaches
+# 15 days anyway.
 DEPARTURE_MAX = timedelta(days=60)
 
 
 def _examine_departure(request: Routenanfrage) -> datetime | None:
-    """Die Abfahrt als Zeitpunkt mit Zeitzone - oder None für "jetzt".
+    """The departure as a point in time with time zone - or None for "now".
 
-    Vergangenheit und fernes Datum sind ein Tippfehler und werden abgelehnt,
-    statt stillschweigend mit "jetzt" zu rechnen: Wer für Freitag plant und
-    den Montag erwischt, soll es merken, bevor er auf die Zahlen vertraut.
+    Past and distant dates are a typo and are rejected instead of silently
+    calculating with "now": whoever plans for Friday and hits Monday should
+    notice before trusting the numbers.
     """
     departure = request.departure
     if departure is None:
@@ -182,10 +183,11 @@ def compute_route(request: Routenanfrage, db: Session = Depends(get_db)):
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
 
-    # Nur für diese Rechnung, nicht am Fahrzeug gespeichert: Zuladung und
-    # Luftwiderstandszuschlag sind Eigenschaften der Fahrt, nicht des Autos.
-    # `aus_fahrt` erwartet ein Fahrt-artiges Objekt; die Fahrt entsteht erst
-    # in `_fahrten_speichern`, deshalb ein leichtgewichtiger Platzhalter.
+    # Only for this calculation, not stored on the vehicle: payload and air
+    # drag surcharge are properties of the trip, not of the car.
+    # `from_trip` (from_trip) expects a trip-like object; the trip only comes
+    # into being in `_save_trips` (save trips), hence a lightweight
+    # placeholder.
     vals = model.VehicleValues.from_trip(SimpleNamespace(
         vehicle=vehicle, payload_kg=request.payload_kg,
         air_drag_factor=request.air_drag_factor,
@@ -198,35 +200,34 @@ def compute_route(request: Routenanfrage, db: Session = Depends(get_db)):
     candidates = _compute_candidates(request, vals, groups, departure)
     results = _save_trips(db, request, vehicle, candidates)
 
-    # Vor der Bewertung: Der Verkehr gehört in die Rangfolge.
+    # Before the rating: traffic belongs in the ranking.
     _fetch_traffic(db, request, results, departure)
     _variants_rate(db, results, vehicle)
     return {"variants": results,
             "departure": departure.isoformat() if departure else None}
 
 
-# So viele gefahrene Strecken werden höchstens als Kandidaten nachgefahren.
-# Jede kostet eine Routing-Anfrage vom Tageskontingent, und mehr als die
-# letzten zwei bringen selten etwas Neues.
+# At most this many driven routes are followed up as candidates. Each costs
+# one routing request from the daily quota, and more than the last two rarely
+# bring anything new.
 MAX_OWN = 2
 
 
 def _own_routes(db: Session, start: tuple, destination: tuple) -> list[dict]:
-    """Wege nach früheren Fahrten, die zu Start und Ziel passen.
+    """Routes based on earlier trips that fit the start and destination.
 
-    Zuerst eine billige Abfrage nach dem Umschliessenden Rechteck je Sitzung
-    (eine Zeile je Sitzung, nicht je Messpunkt); nur Sitzungen, deren
-    Rechteck Start **und** Ziel einschliesst, werden überhaupt geladen. Die
-    neuesten zuerst: Die Strasse, die man zuletzt gefahren ist, ist die, die
-    es noch gibt.
+    First a cheap query for the bounding rectangle per session (one row per
+    session, not per measurement point); only sessions whose rectangle
+    encloses start **and** destination are loaded at all. Newest first: the
+    road one drove most recently is the one that still exists.
     """
     straight_line_km = haversine_m(start[0], start[1], destination[0], destination[1]) / 1000.0
     if straight_line_km < own.RADIUS_MIN_KM:
         return []
     edge = own.radius_km(straight_line_km) + 5.0
-    # Ein Grad Länge ist nördlich von 60° weniger als 55 km; mit 55 zu
-    # rechnen macht das Rechteck eher zu gross als zu klein - und zu gross
-    # kostet nur ein paar Zeilen mehr.
+    # One degree of longitude is less than 55 km north of 60°; calculating
+    # with 55 makes the rectangle too large rather than too small - and too
+    # large only costs a few more rows.
     edge_degree = edge / 55.0
 
     box = (db.query(models.LivePoint.session_id,
@@ -264,8 +265,8 @@ def _own_routes(db: Session, start: tuple, destination: tuple) -> list[dict]:
         label = f"meine Strecke vom {date}"
         if section.opposite:
             label += " (Gegenrichtung)"
-        log.info("Eigene Strecke aus Sitzung %s: %d Zwischenpunkte, %.0f km "
-                 "Pfad (Abstand Start %.1f km, Ziel %.1f km).", session_id,
+        log.info("Own route from session %s: %d waypoints, %.0f km "
+                 "path (distance start %.1f km, destination %.1f km).", session_id,
                  len(between), section.length_km,
                  section.spacing_start_km, section.spacing_target_km)
         routes.append({"between": between, "toll_free": False,
@@ -275,24 +276,23 @@ def _own_routes(db: Session, start: tuple, destination: tuple) -> list[dict]:
 
 def _tomtom_routes(start: tuple, destination: tuple,
                  departure: datetime | None = None) -> list[dict]:
-    """Wege nach den Vorschlägen von TomTom, die nicht überholt sind.
+    """Routes based on TomTom's suggestions that are not overtaken.
 
-    TomTom liefert nur die Vorlage: Aus dem Vorschlag werden Zwischenpunkte
-    gewählt, und das Routing von OpenRouteService fährt sie ab. Gespeichert
-    wird dessen Strasse mit Höhe und Tempo, nicht die von TomTom - schon
-    deshalb, weil das Verbrauchsmodell beides braucht, und weil TomToms
-    Bedingungen das Speichern ihrer Ergebnisse nicht erlauben.
+    TomTom only supplies the template: waypoints are chosen from the
+    suggestion, and the OpenRouteService routing drives through them. What is
+    stored is its road with elevation and speed, not TomTom's - if only
+    because the consumption model needs both, and because TomTom's terms do
+    not allow storing their results.
 
-    Scheitert TomTom (Schlüssel, Kontingent, Netz), läuft die Planung ohne
-    weiter. Ein Berater, der die Planung zum Absturz bringt, wäre schlechter
-    als keiner.
+    If TomTom fails (key, quota, network), planning continues without it. An
+    advisor that crashes the planning would be worse than none.
     """
     if not tomtom.obtainable():
         return []
     try:
         suggestions = tomtom.alternativen(start, destination, departure=departure)
     except tomtom.TomTomError as failure:
-        log.warning("TomTom: %s Die Planung läuft ohne.", failure)
+        log.warning("TomTom: %s Planning continues without it.", failure)
         return []
 
     routes: list[dict] = []
@@ -304,9 +304,9 @@ def _tomtom_routes(start: tuple, destination: tuple,
         between = own.waypoints(section)
         if not between:
             continue
-        # Keine Koordinaten ins Log: Es sind TomTom-Ergebnisse.
-        log.info("TomTom-Vorschlag %d: %d Zwischenpunkte (%.0f km, %.0f min "
-                 "bei TomTom).", nr, len(between), v.distance_m / 1000,
+        # No coordinates in the log: they are TomTom results.
+        log.info("TomTom suggestion %d: %d waypoints (%.0f km, %.0f min "
+                 "at TomTom).", nr, len(between), v.distance_m / 1000,
                  v.time_s / 60)
         routes.append({"between": between, "toll_free": False,
                      "label": f"TomTom-Vorschlag {nr}"})
@@ -315,12 +315,12 @@ def _tomtom_routes(start: tuple, destination: tuple,
 
 def _fetch_traffic(db: Session, request: Routenanfrage, results: list,
                    departure: datetime | None = None) -> None:
-    """Die Verkehrsverzögerung je Route - als Zahl in der Antwort, sonst nirgends.
+    """The traffic delay per route - as a number in the response, nowhere else.
 
-    Gefragt wird TomTom für den Weg, den jolt fährt, nicht für seinen eigenen:
-    Aus der gespeicherten Geometrie werden Zwischenpunkte gewählt, die TomTom
-    auf dieselbe Strasse zwingen. Die Verzögerung steht danach an der Variante
-    und fliesst in `_varianten_bewerten` ein; in die Datenbank geht sie nicht.
+    TomTom is asked about the route jolt drives, not about its own:
+    waypoints are chosen from the stored geometry that force TomTom onto the
+    same road. The delay is then attached to the variant and flows into
+    `_variants_rate` (rate variants); it does not go into the database.
     """
     if not (request.tomtom and tomtom.obtainable()):
         return
@@ -338,28 +338,28 @@ def _fetch_traffic(db: Session, request: Routenanfrage, results: list,
         try:
             result = tomtom.traffic(start, destination, between, departure=departure)
         except tomtom.TomTomError as failure:
-            # Derselbe Fehler träfe die übrigen Anfragen auch.
-            log.warning("TomTom-Verkehr: %s Die Rangfolge gilt ohne.", failure)
+            # The same error would hit the remaining requests too.
+            log.warning("TomTom traffic: %s The ranking applies without it.", failure)
             return
         if result is not None:
             variant["traffic_min"] = round(result.delay_s / 60.0, 1)
             variant["traffic_source"] = "TomTom"
-            # Live oder zeitabhängig prognostiziert - die Oberfläche sagt es.
+            # Live or forecast time-dependently - the UI says which.
             variant["traffic_basis"] = "prognose" if departure else "live"
 
 
 def _routes_plan(request: Routenanfrage, start: tuple, destination: tuple,
                  db: Session | None = None,
                  departure: datetime | None = None) -> list[dict]:
-    """Welche Routing-Anfragen gestellt werden - jede kostet vom Tageskontingent.
+    """Which routing requests are made - each costs from the daily quota.
 
-    Die erste ist die schnellste Strasse und zugleich der Massstab; alles
-    Weitere muss sich an ihr messen lassen.
+    The first is the fastest road and at the same time the yardstick;
+    everything else has to measure up against it.
 
-    `recommended` und `shortest` stehen bewusst nicht dabei: Ersteres liefert
-    auf Autobahnstrecken dieselbe Strasse wie `fastest`, letzteres eine, die
-    niemand fährt (477 km in 10,7 Stunden gegen 598 km in 5,6). Beides
-    gemessen, siehe routing/variants.py.
+    `recommended` and `shortest` are deliberately not included: the former
+    delivers the same road as `fastest` on motorway stretches, the latter one
+    that nobody drives (477 km in 10.7 hours versus 598 km in 5.6). Both
+    measured, see routing/variants.py.
     """
     routes = [{"between": [], "toll_free": False, "label": LABEL["fastest"]}]
     if request.alternative:
@@ -377,14 +377,15 @@ def _routes_plan(request: Routenanfrage, start: tuple, destination: tuple,
 
 def _distances_collect(request: Routenanfrage, db: Session | None = None,
                       departure: datetime | None = None) -> list[dict]:
-    """Schritt 1: die Wege abfragen und zusammenlegen, was dieselbe Strasse ist.
+    """Step 1: query the routes and merge what is the same road.
 
-    Bewusst vor Wetter und Verbrauchsmodell - die sind der teure Teil, und im
-    Demo-Modus wie oft auch in echt (kürzere Strecken haben meist nur einen
-    sinnvollen Weg) landen mehrere Vorgaben ohnehin auf derselben Route.
+    Deliberately before weather and consumption model - those are the
+    expensive part, and in demo mode as often in reality (shorter routes
+    usually have only one sensible way) several presets end up on the same
+    route anyway.
 
-    Rückgabe: je tatsächlich verschiedener Route ein Eintrag mit den
-    Etiketten aller Wege, die auf sie führten, und der Strecke selbst.
+    Returns: one entry per genuinely different route, with the labels of all
+    paths that led to it, and the route itself.
     """
     vendor = routing.provider()
     start = (request.start.lat, request.start.lon)
@@ -400,10 +401,10 @@ def _distances_collect(request: Routenanfrage, db: Session | None = None,
                                      preference="fastest",
                                      toll_free=path["toll_free"])
         except RoutingError as failure:
-            # Ein Weg, der scheitert, darf die anderen nicht mitreissen - nur
-            # wenn am Ende keiner übrig ist, ist die Anfrage gescheitert. Ein
-            # Zwischenpunkt kann durchaus im Wasser oder im Sperrgebiet
-            # landen; das ist kein Grund, die Route nicht zu liefern.
+            # A route that fails must not drag the others down - only if none
+            # is left in the end has the request failed. A waypoint can well
+            # end up in water or in a restricted area; that is no reason not
+            # to deliver the route.
             last_error = failure
             continue
         if len(distance.points) < 2:
@@ -412,11 +413,11 @@ def _distances_collect(request: Routenanfrage, db: Session | None = None,
         if basis is None:
             basis = distance
 
-        # Zusammenlegen vor Aussortieren: `ist_dominiert` zählt eine gleich
-        # lange und gleich schnelle Route mit, und die würde sonst verworfen,
-        # bevor ihr Etikett an der schon vorhandenen Route landet - die
-        # mautfreie Route verschwände dann ohne Spur, obwohl sie genau
-        # dieselbe Strasse ist.
+        # Merge before weeding out: `actual_dominated` (is_dominated) also counts
+        # a route of equal length and speed, and that one would otherwise be
+        # discarded before its label lands on the route that already exists -
+        # the toll-free route would then vanish without a trace although it
+        # is exactly the same road.
         fitting = next((g for g in groups
                         if abs(g["distance"].distance_m - distance.distance_m)
                         <= SAME_KM * 1000
@@ -430,12 +431,13 @@ def _distances_collect(request: Routenanfrage, db: Session | None = None,
         if distance is not basis and variants.actual_dominated(
                 distance.distance_m, distance.drive_time_s,
                 basis.distance_m, basis.drive_time_s):
-            # Länger *und* langsamer als die schnellste Route: Der Kandidat
-            # kann keinen Ladeplan haben, der ihn rettet. Hier auszusortieren
-            # spart Wetterabfrage, Verbrauchsprofil und Ladeplanung - den
-            # teuren Teil. Die Routing-Anfrage ist da schon bezahlt.
-            log.info("Ausweichroute '%s' verworfen: %.0f km/%.0f min gegen "
-                     "%.0f km/%.0f min der schnellsten.", path["label"],
+            # Longer *and* slower than the fastest route: the candidate cannot
+            # have a charging plan that saves it. Weeding it out here saves
+            # the weather query, consumption profile and charge planning -
+            # the expensive part. The routing request has already been paid
+            # for by then.
+            log.info("Detour route '%s' discarded: %.0f km/%.0f min versus "
+                     "%.0f km/%.0f min of the fastest.", path["label"],
                      distance.distance_m / 1000, distance.drive_time_s / 60,
                      basis.distance_m / 1000, basis.drive_time_s / 60)
             continue
@@ -450,7 +452,7 @@ def _distances_collect(request: Routenanfrage, db: Session | None = None,
 
 
 def _cap_factor(profile) -> float:
-    """Um wieviel die Tempo-Obergrenze die Fahrzeit streckt, mindestens 1."""
+    """By how much the speed cap stretches the travel time, at least 1."""
     if profile.minutes_without_cap > 0 and profile.mins > 0:
         return max(1.0, profile.mins / profile.minutes_without_cap)
     return 1.0
@@ -458,20 +460,20 @@ def _cap_factor(profile) -> float:
 
 def _compute_candidates(request: Routenanfrage, vals, groups: list[dict],
                         departure: datetime | None = None) -> list[dict]:
-    """Schritt 2: für jede tatsächlich unterschiedliche Route - und nur für
-    die - Wetter und Verbrauchsmodell rechnen."""
+    """Step 2: for each genuinely different route - and only for those -
+    compute weather and consumption model."""
     candidates: list[dict] = []
     for group in groups:
         distance = group["distance"]
-        # Auf rund einen Punkt je 250 m ausdünnen. Auf einer Langstrecke
-        # liefert das Routing fünfstellig viele Stützpunkte - für Karte und
-        # Prognose ist das Rechenzeit ohne Erkenntnis. Höhensprünge bleiben
-        # dabei erhalten.
+        # Thin out to roughly one point per 250 m. On a long-distance route
+        # the routing delivers five-digit numbers of vertices - for map and
+        # forecast that is computing time without insight. Elevation jumps
+        # are preserved in the process.
         points, velocity = model.thin_out(distance.points, distance.speed_ms)
 
         if request.consider_weather:
-            # Für die Abfahrtszeit, nicht für jetzt: Eine Fahrt morgen früh
-            # soll nicht mit dem Wetter von heute Nachmittag gerechnet werden.
+            # For the departure time, not for now: a trip tomorrow morning
+            # should not be calculated with this afternoon's weather.
             environment_for = weather.along_route(
                 points, departure=departure, duration_s=distance.drive_time_s)
             avg = weather.mean(points, departure=departure,
@@ -486,21 +488,21 @@ def _compute_candidates(request: Routenanfrage, vals, groups: list[dict],
             "labels": group["labels"],
             "distance_km": distance.distance_m / 1000.0 if distance.distance_m
                 else profile.distance_km,
-            # Fahrzeit: die Zahl von openrouteservice ist die realistische
-            # Grundlage - sie kennt Kreuzungen, Kreisel und Ortsdurchfahrten,
-            # die das Verbrauchsmodell nicht kennt. Nur kennt **sie** den
-            # Tempo-Regler nicht, und der verschiebt sie linear: Wer zehn
-            # Prozent schneller faehrt, braucht ein Elftel weniger Zeit.
+            # Travel time: the openrouteservice figure is the realistic basis
+            # - it knows intersections, roundabouts and town crossings that
+            # the consumption model does not. Only **it** does not know the
+            # speed slider, and the slider shifts it linearly: whoever drives
+            # ten percent faster needs one eleventh less time.
             #
-            # Ohne diese Teilung stand die Fahrzeit unveraendert da, egal wo
-            # der Regler stand - waehrend Verbrauch und Ladeplan darunter
-            # sich sehr wohl aenderten. Zwei verschiedene Zeiten fuer
-            # dieselbe Fahrt auf demselben Schirm.
+            # Without this division the travel time stood unchanged no matter
+            # where the slider was - while consumption and charging plan below
+            # did change. Two different times for the same trip on the same
+            # screen.
             #
-            # Mit Tempo-Obergrenze kommt ein dritter Posten dazu: Was die
-            # Grenze abschneidet, kostet Zeit. `profil` kennt beide Zeiten,
-            # mit und ohne Grenze; ihr Verhältnis streckt die Zeit des
-            # Routings (1.0, solange keine Grenze greift).
+            # With a speed cap a third item comes in: what the cap cuts off
+            # costs time. `profil` (profile) knows both times, with and
+            # without the cap; their ratio stretches the routing's time (1.0
+            # as long as no cap applies).
             "drive_time_min": (distance.drive_time_s / 60.0 / request.speed_factor
                              * _cap_factor(profile))
                 if distance.drive_time_s else profile.mins,
@@ -510,7 +512,7 @@ def _compute_candidates(request: Routenanfrage, vals, groups: list[dict],
 
 def _save_trips(db: Session, request: Routenanfrage, vehicle,
                        candidates: list[dict]) -> list[dict]:
-    """Schritt 3: je Kandidat eine Fahrt anlegen und die Antwort bauen."""
+    """Step 3: create a trip per candidate and build the response."""
     results = []
     for candidate in candidates:
         trip = models.Trip(
@@ -530,7 +532,7 @@ def _save_trips(db: Session, request: Routenanfrage, vehicle,
             geometry=candidate["points"],
             energy_profile=[p.as_dict() for p in candidate["profile"].points])
         db.add(trip)
-        db.flush()      # braucht fahrt.id, ohne schon endgültig zu committen
+        db.flush()      # needs fahrt.id (trip id) without committing for good yet
         results.append({"trip_id": trip.id,
                            "labels": candidate["labels"],
                            **_response(trip, candidate["profile"],
@@ -540,24 +542,25 @@ def _save_trips(db: Session, request: Routenanfrage, vehicle,
 
 
 def _variants_rate(db, results: list, vehicle) -> None:
-    """Die Varianten am **fertigen Ladeplan** messen, nicht an der Fahrzeit.
+    """Measure the variants against the **finished charging plan**, not the
+    travel time.
 
-    Das ist die Frage, die für ein Elektroauto zählt und die sonst niemand
-    beantwortet: Nicht "welche Strasse ist kürzer", sondern "wo bin ich
-    früher, wenn das Laden mitzählt". Eine Route mit hundert Kilometern
-    Umweg kann gewinnen, wenn an ihr die stärkeren Säulen stehen - und eine
-    sparsame Landstrasse verliert, obwohl sie weniger Energie braucht.
+    This is the question that matters for an electric car and that nobody
+    else answers: not "which road is shorter", but "where am I sooner when
+    charging counts". A route with a hundred kilometers of detour can win if
+    the stronger chargers are on it - and a frugal country road loses
+    although it needs less energy.
 
-    Vorher trug die energieärmste Variante das Etikett "sparsamste". Das war
-    irreführend: Auf Le Gurp - Montchanin zeichnete es die Strecke aus, die
-    mit 47 km/h Schnitt zwar 17 statt 27 kWh/100 km braucht, dafür aber
-    fünfeinhalb Stunden länger unterwegs ist. Sparsam war sie, sinnvoll
-    nicht.
+    Previously the lowest-energy variant carried the label "sparsamste"
+    (most economical). That was misleading: on Le Gurp - Montchanin it
+    singled out the route that, at 47 km/h average, needs 17 instead of 27
+    kWh/100 km, but takes five and a half hours longer. Economical it was,
+    sensible it was not.
 
-    Gerechnet wird mit den Vorgabewerten für Radius und Mindestleistung -
-    die Regler der Oberfläche gelten für den Ladeplan darunter. Das ist
-    unschädlich, weil **alle** Varianten dieselbe Behandlung bekommen: Für
-    einen Vergleich zählt der Massstab, nicht sein Nullpunkt.
+    The calculation uses the default values for radius and minimum power -
+    the UI sliders apply to the charging plan below. That is harmless
+    because **all** variants get the same treatment: for a comparison the
+    yardstick counts, not its zero point.
     """
     if len(results) < 2:
         return
@@ -567,10 +570,10 @@ def _variants_rate(db, results: list, vehicle) -> None:
         try:
             plan = replanning.schedule(db, trip, 0.0, trip.start_soc, parameter)
         except Exception as failure:      # noqa: BLE001
-            # Ohne Plan bleibt die Variante wählbar - sie trägt dann nur
-            # keine Bewertung. Eine Route zu verwerfen, weil ihr Ladeplan
-            # nicht rechnet, wäre die falsche Reaktion.
-            log.warning("Variante %s nicht planbar: %s", variant["trip_id"],
+            # Without a plan the variant remains selectable - it just carries
+            # no rating. Discarding a route because its charging plan cannot
+            # be computed would be the wrong reaction.
+            log.warning("Variant %s cannot be planned: %s", variant["trip_id"],
                         failure)
             continue
         if not plan.get("feasible"):
@@ -583,8 +586,8 @@ def _variants_rate(db, results: list, vehicle) -> None:
             "plan_cost_eur": plan.get("cost_eur")})
 
     rated = [v for v in results if v.get("plan_feasible")]
-    # Der Verkehr gehört zur Zeit: Eine Route, die auf dem Papier zwei
-    # Minuten schneller ist, aber zwölf im Stau steht, ist nicht die schnellste.
+    # Traffic is part of time: a route that is two minutes faster on paper
+    # but sits twelve in a jam is not the fastest.
     def total(v: dict) -> float:
         return v["plan_total_minutes"] + (v.get("traffic_min") or 0.0)
 
@@ -597,20 +600,20 @@ def _variants_rate(db, results: list, vehicle) -> None:
         if "insgesamt schnellste" not in cheapest["labels"]:
             cheapest["labels"].append("günstigste")
 
-    # Reihenfolge fürs Auge: die insgesamt schnellste zuerst - sie ist die
-    # Antwort auf die Frage, die jolt beantworten soll.
+    # Order for the eye: the overall fastest first - it is the answer to the
+    # question jolt is meant to answer.
     results.sort(key=lambda v: "insgesamt schnellste" not in v["labels"])
 
 
 @router.get("/fahrten/{trip_id}")
 def read_trip(trip_id: int, db: Session = Depends(get_db)):
-    """Eine gespeicherte Fahrt - in derselben Form wie eine frische Variante.
+    """A stored trip - in the same shape as a fresh variant.
 
-    Die abgeleiteten Werte (Verbrauch, Reserve-Punkt, "reicht es?") werden aus
-    dem gespeicherten Energieprofil neu bestimmt statt mitgespeichert: Sie
-    sind Funktionen des Profils, und zwei Quellen für dieselbe Zahl laufen
-    auseinander. Die Form entspricht bewusst der von `/api/route`, damit die
-    Oberfläche eine alte Fahrt mit demselben Code zeichnet wie eine neue.
+    The derived values (consumption, reserve point, "is it enough?") are
+    recomputed from the stored energy profile instead of being stored along:
+    they are functions of the profile, and two sources for the same number
+    drift apart. The shape deliberately matches that of `/api/route`, so the
+    UI draws an old trip with the same code as a new one.
     """
     trip = db.get(models.Trip, trip_id)
     if not trip:
@@ -649,9 +652,9 @@ def read_trip(trip_id: int, db: Session = Depends(get_db)):
             "reserve_at_km": reserve_at_km,
             "reserve_point": reserve_point,
             "suffices": reserve_at_km is None,
-            # Der Wind der damaligen Fahrt ist nicht gespeichert - nur die
-            # Temperatur, mit der gerechnet wurde. Sie ist die Zahl, die in
-            # der Oberfläche steht ("gerechnet bei 4 °C").
+            # The wind of the trip back then is not stored - only the
+            # temperature that was used for the calculation. It is the number
+            # shown in the UI ("gerechnet bei 4 °C", i.e. calculated at 4 °C).
             "weather": {"temp_c": trip.outside_temp_c},
             "geometry": trip.geometry or [],
             "profile": _thin_out_profile(profile),
@@ -664,40 +667,41 @@ def compute_charge_plan(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50)
                      connector_type: str = "",
                      detour_limit_min: float = Query(
                          optimizer.DETOUR_LIMIT_MIN, gt=0, le=60),
-                     # Null ist erlaubt, aber die Folge steht im Text der
-                     # Oberfläche: Ohne Fixkosten je Halt zersplittert der
-                     # Plan in viele Kurzstopps. Wer das sehen will, soll es
-                     # sehen können.
+                     # Zero is allowed, but the consequence is stated in the
+                     # UI text: without fixed costs per stop the plan
+                     # fragments into many short stops. Whoever wants to see
+                     # that should be able to see it.
                      stop_fixed_cost_min: float = Query(
                          optimizer.STOP_FIXED_COST_MIN, ge=0, le=30),
-                     # Was ein grosser Ladepark wert ist, in Minuten.
-                     # Null heisst "nur die Zeit zählt".
+                     # What a large charging park is worth, in minutes.
+                     # Zero means "only time counts".
                      charge_park_bonus_min: float = Query(
                          optimizer.CHARGE_PARK_BONUS_MIN, ge=0, le=15),
-                     # Was eine Stunde wert ist. Null heisst "Kosten sind
-                     # mir gleich" - dann wird rein auf Zeit optimiert.
+                     # What an hour is worth. Zero means "I don't care about
+                     # costs" - then it optimizes purely for time.
                      time_value_eur_h: float = Query(
                          optimizer.TIME_VALUE_EUR_H, ge=0, le=200),
                      db: Session = Depends(get_db)):
-    """Die zeitoptimale Folge von Ladestopps für eine gerechnete Fahrt.
+    """The time-optimal sequence of charging stops for a computed trip.
 
-    Gerechnet wird auf dem gespeicherten Energieprofil - der Bedarf einer
-    Etappe hängt nicht vom Ladestand ab, deshalb genügt der eine Durchlauf des
-    Verbrauchsmodells aus `/route`. Ein zweiter Aufruf mit anderem Radius
-    kostet damit weder Routing- noch Wetterabfragen.
+    Calculation is done on the stored energy profile - the demand of a leg
+    does not depend on the state of charge, so one pass of the consumption
+    model from `/route` is enough. A second call with a different radius thus
+    costs neither routing nor weather requests.
 
-    **Über `umplanung.planen` und nicht am Optimierer vorbei.** Hier stand
-    dieselbe Kette noch einmal ausgeschrieben: Kandidaten im Korridor suchen,
-    sie in Ladeoptionen übersetzen, den Optimierer mit dreizehn Argumenten
-    aufrufen. Der Block, der Kandidaten übersetzt, war byteweise derselbe wie
-    in `live/replanning.py`, und der Aufruf musste zweimal gepflegt werden -
-    beim zuletzt ergänzten `km_versatz` ist das prompt schiefgegangen, er
-    stand nur in einer der beiden Fassungen.
+    **Via `umplanung.planen` (replanning.schedule) and not past the
+    optimizer.** The same chain used to be spelled out here once more:
+    search candidates in the corridor, translate them into charging options,
+    call the optimizer with thirteen arguments. The block that translates
+    candidates was byte-for-byte the same as in `live/replanning.py`, and the
+    call had to be maintained twice - with the most recently added
+    `km_offset` (km offset) that promptly went wrong, it was only in one of
+    the two versions.
 
-    Dass es eine Doppelung war und keine Absicht, zeigte dieser Router selbst:
-    Für die Bewertung der Routenvarianten rief er `umplanung.planen` schon
-    vorher auf. Eine Planung ab km 0 mit dem Start-Ladestand ist derselbe
-    Vorgang wie eine Umplanung unterwegs, nur ohne zurückgelegte Strecke.
+    That it was duplication and not intent was shown by this router itself:
+    for rating the route variants it already called `umplanung.planen`. A
+    plan from km 0 with the starting state of charge is the same process as a
+    re-plan on the road, just without a distance already covered.
     """
     trip = db.get(models.Trip, trip_id)
     if not trip:
@@ -711,21 +715,21 @@ def compute_charge_plan(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50)
         "stop_fixed_cost_min": stop_fixed_cost_min,
         "charge_park_bonus_min": charge_park_bonus_min,
         "time_value_eur_h": time_value_eur_h})
-    # `steckertyp` aufgelöst zurückgeben: Leer heisst "der des Fahrzeugs",
-    # und die Oberfläche soll anzeigen können, wonach gesucht wurde.
+    # Return `steckertyp` (connector type) resolved: empty means "the
+    # vehicle's", and the UI should be able to show what was searched for.
     return {**plan, "trip_id": trip.id, "demo": routing.is_demo(),
             "connector_type": connector_type or trip.vehicle.connector_type}
 
 
 @router.get("/fahrten")
 def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=200)):
-    """Die zuletzt geplanten Fahrten.
+    """The most recently planned trips.
 
-    Bewusst mehr als Start und Ziel: Ohne Verbrauch, Aussentemperatur und
-    Zuladung ist eine Liste vergangener Fahrten eine Liste von Namen. Erst
-    mit diesen Zahlen wird sie zu dem, wofür man sie aufschlägt - dem
-    Vergleich, warum dieselbe Strecke im Januar zwei Ladestopps brauchte und
-    im Juni einen.
+    Deliberately more than start and destination: without consumption,
+    outside temperature and payload, a list of past trips is a list of names.
+    Only with these numbers does it become what one opens it for - the
+    comparison of why the same route needed two charging stops in January and
+    one in June.
     """
     trips = (db.query(models.Trip).order_by(models.Trip.id.desc())
                .limit(bound).all())
@@ -749,27 +753,27 @@ def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=20
             "outside_temp_c": f.outside_temp_c,
             "speed_factor": f.speed_factor,
             "payload_kg": f.payload_kg,
-            # Für den Vergleich in der Historie: Eine Fahrt mit Träger ist
-            # nicht mit einer ohne vergleichbar, und eine Aufzeichnung nicht
-            # mit einem Entwurf. Beides muss man sehen können, sonst
-            # vergleicht man Äpfel mit Birnen und wundert sich.
+            # For comparison in the history: a trip with a carrier is not
+            # comparable to one without, and a recording not to a draft. One
+            # must be able to see both, otherwise one compares apples with
+            # oranges and wonders.
             "air_drag_factor": f.air_drag_factor,
             "trailer_kg": f.trailer_kg,
             "speed_max_kmh": f.speed_max_kmh,
             "recording": bool(f.recording),
-            # Ob zu dieser Fahrt tatsächlich gefahren wurde - eine geplante
-            # Fahrt ohne Live-Sitzung ist ein Entwurf, keine Erinnerung.
+            # Whether this trip was actually driven - a planned trip without
+            # a live session is a draft, not a memory.
             "driven": bool(f.live_sessions)})
     return result
 
 
 @router.delete("/fahrten/{trip_id}")
 def delete_trip(trip_id: int, db: Session = Depends(get_db)):
-    """Eine Fahrt aus der Historie entfernen.
+    """Remove a trip from the history.
 
-    Jede Routenberechnung legt bis zu drei Fahrten an (eine je Variante) -
-    ohne diesen Endpunkt wächst die Liste mit jedem Versuch, und die eine
-    Fahrt, die man wiederfinden will, verschwindet zwischen Entwürfen.
+    Every route calculation creates up to three trips (one per variant) -
+    without this endpoint the list grows with every attempt, and the one trip
+    one wants to find again disappears among drafts.
     """
     trip = db.get(models.Trip, trip_id)
     if not trip:
@@ -779,13 +783,13 @@ def delete_trip(trip_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-# ---------- intern ----------
+# ---------- internal ----------
 
 def _thin_out_profile(profile: list, at_most: int = 400) -> list:
-    """Für die Anzeige reicht ein Bruchteil der Punkte.
+    """A fraction of the points is enough for display.
 
-    Die Diagramme in der Oberfläche sind ein paar hundert Pixel breit - mehr
-    Punkte als Pixel zu übertragen bringt nichts ausser Ladezeit.
+    The charts in the UI are a few hundred pixels wide - transferring more
+    points than pixels brings nothing except loading time.
     """
     if len(profile) <= at_most:
         return profile

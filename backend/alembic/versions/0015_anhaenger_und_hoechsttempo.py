@@ -1,14 +1,13 @@
-"""Anhänger und Höchstgeschwindigkeit.
+"""Trailer and top speed.
 
-Der Tempo-Regler der Planung hat keine absolute Obergrenze: Bei 130 % rechnet
-das Modell mit 165 km/h, die kein Serienfahrzeug mit diesem Luftwiderstand
-fährt. Für ein Gespann ist 100 km/h ausserdem keine Vorliebe, sondern eine
-harte Grenze.
+The planning speed slider has no absolute upper limit: at 130 % the model
+calculates with 165 km/h, which no production vehicle with this drag
+drives. For a towing combination, 100 km/h is also not a preference but a
+hard limit.
 
-Am **Fahrzeug** die Höchstgeschwindigkeit, an der **Fahrt** der Anhänger
-(Masse, zusätzliche Luftwiderstandsfläche) und eine fahrtbezogene Grenze.
-Alles NULL, solange nichts gesetzt ist - bestehende Fahrten und Fahrzeuge
-rechnen genau wie vorher.
+On the **vehicle** the top speed, on the **trip** the trailer (mass,
+additional drag area) and a trip-specific limit. All NULL as long as
+nothing is set - existing trips and vehicles calculate exactly as before.
 
 Revision ID: 0015
 Revises: 0014

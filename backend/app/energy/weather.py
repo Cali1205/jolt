@@ -1,9 +1,9 @@
-"""Wetter entlang der Route über Open-Meteo (ohne Schlüssel, ohne Anmeldung).
+"""Weather along the route via Open-Meteo (no key, no registration).
 
-Nicht ein Wert für die ganze Fahrt: Hamburg-München sind 800 km, da liegen
-zwischen Start und Ziel im Winter regelmässig zehn Grad und ein anderer Wind.
-Abgefragt werden deshalb mehrere Stützpunkte in einer einzigen Anfrage -
-Open-Meteo nimmt kommagetrennte Koordinatenlisten entgegen.
+Not one value for the whole trip: Hamburg-Munich is 800 km, and in winter
+there are regularly ten degrees and a different wind between start and
+destination. Therefore several support points are queried in a single
+request - Open-Meteo accepts comma-separated coordinate lists.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -17,19 +17,19 @@ API = "https://api.open-meteo.com/v1/forecast"
 SUPPORT_POINTS = 6
 TIMEOUT = 8
 
-# Open-Meteo liefert stündliche Werte für 16 Tage. Eine Reserve von einem Tag,
-# damit die letzte Stunde nicht gerade am Rand liegt.
+# Open-Meteo delivers hourly values for 16 days. A reserve of one day, so that
+# the last hour does not lie right at the edge.
 FORECAST_DAYS = 15
-# Eine Abfahrt in den nächsten Minuten ist "jetzt": Der Unterschied zwischen
-# der aktuellen und der stündlichen Vorhersage ist dort kleiner als die
-# Messunsicherheit, und die aktuelle Abfrage ist die genauere.
+# A departure in the next few minutes is "now": the difference between the
+# current and the hourly forecast is smaller there than the measurement
+# uncertainty, and the current query is the more accurate one.
 NOW_TOLERANCE = timedelta(minutes=30)
 
 log = logging.getLogger("uvicorn.error")
 
 
 def _select(points: list, count: int) -> list:
-    """Gleichmässig verteilte Stützpunkte, Start und Ziel immer dabei."""
+    """Evenly spaced support points; start and destination always included."""
     if len(points) <= count:
         return list(points)
     step = (len(points) - 1) / (count - 1)
@@ -37,12 +37,12 @@ def _select(points: list, count: int) -> list:
 
 
 def _forecast_for(departure: datetime | None) -> bool:
-    """Soll die stündliche Vorhersage gelten statt der aktuellen Messung?
+    """Should the hourly forecast apply instead of the current measurement?
 
-    Ja, wenn die Abfahrt später als in einer halben Stunde liegt - und noch
-    innerhalb dessen, was Open-Meteo kennt. Darüber hinaus wird mit dem
-    aktuellen Wetter gerechnet und das im Log gesagt: Besser ein falsches
-    Wetter, das man als solches erkennt, als gar keine Route.
+    Yes, if the departure is more than half an hour away - and still within
+    what Open-Meteo knows. Beyond that the calculation uses the current
+    weather and says so in the log: better wrong weather that is recognisable
+    as such than no route at all.
     """
     if departure is None:
         return False
@@ -52,19 +52,19 @@ def _forecast_for(departure: datetime | None) -> bool:
     if departure <= now_ts + NOW_TOLERANCE:
         return False
     if departure > now_ts + timedelta(days=FORECAST_DAYS):
-        log.warning("Abfahrt in mehr als %d Tagen - dafür gibt es keine "
-                    "Wettervorhersage, es gilt das aktuelle Wetter.", FORECAST_DAYS)
+        log.warning("Departure in more than %d days - there is no weather "
+                    "forecast for that, the current weather applies.", FORECAST_DAYS)
         return False
     return True
 
 
 def _hour(times: list, moment: datetime) -> int:
-    """Index der Stunde in `zeiten`, die dem Zeitpunkt am nächsten liegt.
+    """Index of the hour in `times` that is closest to the point in time.
 
-    Open-Meteo liefert die Zeiten bei `timezone=UTC` als "2026-10-06T08:00"
-    ohne Zone, aufsteigend und stündlich. Aus dem ersten Eintrag und dem
-    Abstand ergibt sich der Index, ohne die Liste zu durchsuchen; er wird auf
-    die vorhandenen Werte begrenzt.
+    With `timezone=UTC` Open-Meteo delivers the times as "2026-10-06T08:00"
+    without a zone, ascending and hourly. The index follows from the first
+    entry and the spacing, without searching the list; it is clamped to the
+    available values.
     """
     if moment.tzinfo is not None:
         moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
@@ -76,27 +76,25 @@ def _hour(times: list, moment: datetime) -> int:
 def along_route(points: list, count: int = SUPPORT_POINTS,
                   preset: Environment | None = None,
                   departure: datetime | None = None, duration_s: float = 0.0):
-    """Gibt eine Funktion (lat, lon) -> Umgebung zurück.
+    """Returns a function (lat, lon) -> environment.
 
-    `abfahrt` und `dauer_s`: Liegt die Abfahrt später als in einer halben
-    Stunde, gilt die stündliche Vorhersage - und zwar an jedem Stützpunkt für
-    die Stunde, in der man dort ankommt: Abfahrt plus Anteil der Fahrzeit,
-    gleichmässig auf die Strecke verteilt. Eine Fahrt morgen früh um sechs
-    soll nicht mit dem Nachmittagswetter von heute gerechnet werden; die
-    Heizung ist der grösste Einzelposten der Kälte.
+    `departure` and `duration_s`: if the departure is more than half an hour
+    away, the hourly forecast applies - at each support point for the hour in
+    which one arrives there: departure plus a share of the driving time,
+    spread evenly over the distance. A trip tomorrow morning at six should not
+    be calculated with this afternoon's weather; the heating is the largest
+    single item of the cold.
 
-    Fällt die Abfrage aus, wird nicht abgebrochen, sondern mit `vorgabe`
-    weitergerechnet: Eine Route ohne Wetter ist deutlich besser als gar keine
-    Route, und die Live-Nachführung korrigiert den Fehler ohnehin innerhalb
-    der ersten Kilometer.
+    If the query fails, it does not abort but continues with `preset`: a
+    route without weather is much better than no route at all, and the live
+    tracking corrects the error within the first few kilometres anyway.
 
-    `vorgabe` ist beim Planen sinnvollerweise leer - dann gelten 15 °C und
-    Windstille. **Unterwegs** ist genau das die falsche Annahme: Wer eine im
-    Winter bei -5 °C gerechnete Fahrt neu plant und dabei auf 15 °C
-    zurückfällt, verliert die Heizlast - den grössten Einzelposten der Kälte -
-    und rechnet die Reststrecke zu optimistisch. Deshalb reicht die Umplanung
-    dort die Temperatur der Fahrt herein statt sich auf die Vorgabe zu
-    verlassen.
+    `preset` is sensibly empty when planning - then 15 °C and no wind apply.
+    **En route** that is exactly the wrong assumption: someone who re-plans a
+    trip calculated at -5 °C in winter and falls back to 15 °C loses the
+    heating load - the largest single item of the cold - and calculates the
+    remaining distance too optimistically. That is why the re-planning there
+    passes in the temperature of the trip instead of relying on the preset.
     """
     fallback = preset or Environment()
     probes = _select(points, count)
@@ -117,12 +115,12 @@ def along_route(points: list, count: int = SUPPORT_POINTS,
         response.raise_for_status()
         raw = response.json()
     except (requests.RequestException, ValueError) as failure:
-        log.warning("Wetterabfrage fehlgeschlagen (%s) - rechne mit %.0f °C.",
+        log.warning("Weather query failed (%s) - calculating with %.0f °C.",
                     failure, fallback.temp_c)
         return lambda lat, lon: fallback
 
-    # Bei einer einzelnen Koordinate liefert Open-Meteo ein Objekt, bei
-    # mehreren eine Liste. Beides auf dieselbe Form bringen.
+    # For a single coordinate Open-Meteo returns an object, for several a
+    # list. Bring both into the same shape.
     entries = raw if isinstance(raw, list) else [raw]
 
     measurements: list[tuple[float, float, Environment]] = []
@@ -131,10 +129,10 @@ def along_route(points: list, count: int = SUPPORT_POINTS,
             try:
                 vals = _hourly_values(entry, departure, duration_s, nr, len(probes))
             except (KeyError, IndexError, ValueError, TypeError) as failure:
-                # Eine Antwort, die nicht so aussieht wie erwartet, ist kein
-                # Grund, die Route zu verwerfen.
-                log.warning("Wettervorhersage nicht lesbar (%s) - rechne mit "
-                            "%.0f °C.", type(failure).__name__, fallback.temp_c)
+                # A response that does not look as expected is no reason to
+                # discard the route.
+                log.warning("Weather forecast not readable (%s) - calculating "
+                            "with %.0f °C.", type(failure).__name__, fallback.temp_c)
                 return lambda lat, lon: fallback
         else:
             vals = entry.get("current") or {}
@@ -155,12 +153,12 @@ def along_route(points: list, count: int = SUPPORT_POINTS,
 
 def _hourly_values(entry: dict, departure: datetime, duration_s: float,
                   nr: int, count: int) -> dict:
-    """Die Werte der Stunde, in der man am Stützpunkt `nr` ankommt.
+    """The values of the hour in which one arrives at support point `nr`.
 
-    Die Stützpunkte liegen gleichmässig auf der Strecke; angenommen wird
-    gleichmässige Fahrt. Das ist grob - eine Pause oder ein Ladestopp
-    verschiebt die Ankunft -, aber eine Stunde Abweichung ändert die
-    Temperatur um ein, zwei Grad und nicht um zehn.
+    The support points lie evenly on the route; uniform driving is assumed.
+    That is rough - a break or a charging stop shifts the arrival -, but an
+    hour of deviation changes the temperature by a degree or two and not by
+    ten.
     """
     share = nr / (count - 1) if count > 1 else 0.0
     moment = departure + timedelta(seconds=share * max(0.0, duration_s))
@@ -173,7 +171,7 @@ def _hourly_values(entry: dict, departure: datetime, duration_s: float,
 
 def mean(points: list, departure: datetime | None = None,
                duration_s: float = 0.0) -> Environment:
-    """Ein einzelner Wert für die Anzeige ("bei 4 °C gerechnet")."""
+    """A single value for the display ("calculated at 4 °C")."""
     fetch = along_route(points, departure=departure, duration_s=duration_s)
     probes = _select(points, SUPPORT_POINTS)
     vals = [fetch(p[1], p[0]) for p in probes] or [Environment()]

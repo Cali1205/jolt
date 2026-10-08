@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Prüft, wie aus gefahrenen Strecken Routenkandidaten werden - `routing/own.py`.
+"""Checks how driven tracks become route candidates - `routing/own.py`.
 
-Das Modul kennt weder Datenbank noch Netz: Es bekommt Punktlisten und gibt
-Punktlisten zurück. Deshalb lässt sich hier vollständig prüfen, was sonst nur
-auf einer echten Strecke auffiele - etwa dass ein Ladeplatz neben der
-Autobahn nicht als Zwischenpunkt in der Route landet und die Route in einen
-Abstecher zwingt.
+The module knows neither database nor network: it gets lists of points and
+returns lists of points. That is why everything can be checked completely
+here that would otherwise only show up on a real route - for example that
+a charging spot next to the motorway does not end up as a waypoint in the
+route and force the route into a detour.
 
-Ohne Netz, ohne Postgres, ohne API-Schlüssel:
+Without network, without Postgres, without API key:
 
     ./tools/check_own.py
 """
@@ -24,16 +24,16 @@ from app.routing import own                       # noqa: E402
 
 verify = Check()
 
-# Eine gerade Strecke nach Norden: 6 Grad Breite sind rund 667 km.
+# A straight route to the north: 6 degrees of latitude are about 667 km.
 LON = 9.0
 BREITE0 = 48.0
 
 
 def distance(width_from=BREITE0, width_until=BREITE0 + 6.0, step=0.01,
             velocity=100.0, charge_stop_at=None):
-    """Pfad mit einem Punkt je ~1,1 km. `charge_stop_at`: Breite, bei der die
-    Fahrt abbiegt, steht (Tempo 0) und wieder zurückkehrt - der Ladeplatz liegt
-    drei Kilometer abseits der Strasse."""
+    """Path with one point per ~1.1 km. `charge_stop_at`: latitude at which the
+    trip turns off, stands still (speed 0) and returns again - the charging
+    spot is three kilometres off the road."""
     fs_path = []
     b = width_from
     while b <= width_until + 1e-9:
@@ -122,9 +122,9 @@ def main() -> int:
            "auf 111 km nur wenige - bei 25 km Abstand also drei", str(len(zk)))
 
     verify.section("Ladeplätze und Pausen")
-    # Der Ladeplatz liegt so, dass seine Stelle entlang des Pfads genau auf
-    # einen Zwischenpunkt faellt: Abzweig bei 22 km, drei Kilometer abseits,
-    # Pfadstrecke dort 25 km - und der Abstand der Zwischenpunkte ist 25 km.
+    # The charging spot is located such that its position along the path falls
+    # exactly on a waypoint: junction at 22 km, three kilometres off, path
+    # distance there 25 km - and the spacing of the waypoints is 25 km.
     with_stop = distance(charge_stop_at=BREITE0 + 0.198)
     at = own.fitting_section(with_stop, start, destination)
     zs = own.waypoints(at, spacing_km=25.0, maximal=40)
@@ -133,8 +133,8 @@ def main() -> int:
     verify(not off_route,
            "kein Zwischenpunkt auf dem Ladeplatz - er laege 3 km neben der "
            "Strasse und zwaenge die Route zu einem Abstecher", str(off_route))
-    # Gegenprobe: Ohne die Tempo-Filterung wuerde genau dieser Punkt gewaehlt.
-    # Sonst prueft der Test oben nichts.
+    # Control test: without the speed filtering exactly this point would be
+    # chosen. Otherwise the test above checks nothing.
     saved = own.MIN_SPEED_KMH
     own.MIN_SPEED_KMH = -1.0
     try:

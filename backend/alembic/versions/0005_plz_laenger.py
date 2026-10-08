@@ -1,8 +1,8 @@
-"""Ladepunkte: plz-Spalte auf 40 Zeichen erweitern.
+"""Charge points: extend the plz column to 40 characters.
 
-OCM liefert bei Standorten mit mehreren Postleitzahlen eine Semikolon-Liste
-statt einer einzelnen PLZ - das sprengte die bisherigen 20 Zeichen und liess
-den Streckenimport an einem realen Datensatz abbrechen.
+For sites with several postal codes, OCM returns a semicolon-separated list
+instead of a single postal code - that exceeded the previous 20 characters
+and made the route import abort on a real dataset.
 
 Revision ID: 0005
 Revises: 0004

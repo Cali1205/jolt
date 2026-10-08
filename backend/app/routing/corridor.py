@@ -1,13 +1,13 @@
-"""Ladepunkte im Korridor um eine Route finden.
+"""Find charge points in the corridor around a route.
 
-Das ist der einzige Geo-Query, den jolt braucht - und der Grund, warum es hier
-kein PostGIS gibt. Gesucht wird nicht "alles im Umkreis von X", sondern "alles
-nahe an dieser Polyline". Dafür genügt: die Route in Ankerpunkte zerlegen, je
-Anker ein Rechteck abfragen (der Index auf (lat, lon) trägt das), und danach
-mit Haversine genau nachmessen.
+This is the only geo query jolt needs - and the reason there is no PostGIS
+here. What is searched for is not "everything within X of a point" but
+"everything close to this polyline". It is enough to split the route into
+anchor points, query one rectangle per anchor (the index on (lat, lon)
+supports that), and then measure precisely with haversine.
 
-Bei rund 150.000 deutschen Ladepunkten kostet das Millisekunden - und der
-SQLite-Fallback für die lokale Entwicklung bleibt erhalten.
+With around 150,000 German charge points this takes milliseconds - and the
+SQLite fallback for local development is preserved.
 """
 import math
 from dataclasses import dataclass
@@ -18,12 +18,13 @@ from .. import models
 from ..geo import haversine_m
 
 KM_PER_DEGREE_LAT = 111.32
-# Zufahrt und Rückweg laufen nicht über die Autobahn. 45 km/h ist grosszügig
-# gerechnet, aber die Zahl soll den Umweg eher über- als unterschätzen:
-# Ein zu optimistisch geplanter Abstecher kostet unterwegs echte Minuten.
+# Access and return do not run over the motorway. 45 km/h is a generous
+# figure, but the number should overestimate rather than underestimate the
+# detour: an overly optimistically planned side trip costs real minutes on
+# the road.
 ACCESS_ROAD_KMH = 45.0
-# Fixkosten jedes Stopps unabhängig von der Entfernung: abfahren, suchen,
-# einparken, Kabel holen, am Ende wieder auffädeln.
+# Fixed cost of every stop regardless of distance: leaving the road,
+# searching, parking, fetching the cable, merging back at the end.
 FIXED_MINUTES = 4.0
 
 
@@ -46,7 +47,7 @@ class Candidate:
 
 
 def _chainage(points: list) -> list[float]:
-    """Kumulierte Kilometer je Stützpunkt der Route."""
+    """Cumulative kilometers per vertex of the route."""
     km = [0.0]
     for i in range(len(points) - 1):
         km.append(km[-1] + haversine_m(points[i][1], points[i][0],
@@ -56,11 +57,11 @@ def _chainage(points: list) -> list[float]:
 
 def _anchor(points: list, km_list: list[float],
            spacing_km: float) -> list[tuple[float, float, float, int]]:
-    """Route auf Ankerpunkte ausdünnen: (lat, lon, km_auf_route, index).
+    """Thin the route out to anchor points: (lat, lon, km_on_route, index).
 
-    Die Anker dienen nur der Vorauswahl - dem Rechteck für die Datenbank und
-    der Frage, *wo ungefähr* ein Ladepunkt an der Route liegt. Gemessen wird
-    anschliessend an den echten Stützpunkten; siehe `suchen`.
+    The anchors only serve preselection - the rectangle for the database and
+    the question of *roughly where* a charge point lies along the route.
+    Measuring is done afterwards at the real vertices; see `suchen`.
     """
     if not points:
         return []
@@ -79,11 +80,12 @@ def _anchor(points: list, km_list: list[float],
 
 def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
            connector_type: str = "CCS", at_most: int = 400) -> list[Candidate]:
-    """Alle passenden Ladepunkte entlang der Route, geordnet nach Fortschritt.
+    """All matching charge points along the route, ordered by progress.
 
-    `radius_km` ist Luftlinie zur Route. Acht Kilometer klingen viel, sind an
-    einer Autobahn aber schnell erreicht, wenn die nächste Abfahrt spät kommt -
-    entschieden wird ohnehin über `umweg_minuten`, nicht über die Luftlinie.
+    `radius_km` is straight-line distance to the route. Eight kilometers
+    sounds like a lot, but on a motorway it is reached quickly when the next
+    exit comes late - the decision is made via `detour_minutes` (detour
+    minutes) anyway, not via the straight-line distance.
     """
     if not points:
         return []
@@ -103,22 +105,22 @@ def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
         lookup = lookup.filter(models.ChargePoint.max_kw >= min_kw)
     if connector_type:
         lookup = lookup.filter(models.ChargePoint.connector_types.contains(connector_type))
-    # Was die Quelle ausdrücklich als ausser Betrieb meldet, gehört nicht in
-    # einen Plan. `isnot(False)` und nicht `is_(True)`: NULL heisst
-    # **unbekannt**, und das ist für den grössten Teil der Datenbank der
-    # Fall. Wer Unbekanntes wie Ausgeschlossenes behandelt, verliert fast
-    # alle Kandidaten und plant dann gar nicht mehr.
+    # What the source explicitly reports as out of service does not belong
+    # in a plan. `isnot(False)` and not `is_(True)`: NULL means **unknown**,
+    # and that is the case for most of the database. Treating unknown like
+    # excluded loses almost all candidates and then no planning happens at
+    # all.
     lookup = lookup.filter(models.ChargePoint.operational.isnot(False))
 
     candidates: list[Candidate] = []
     for lp in lookup.limit(at_most * 5).all():
-        # Genau nachmessen, und zwar an den echten Stützpunkten - nicht am
-        # nächsten Anker. Die Anker stehen bei 25 km Radius rund 19 km
-        # auseinander; eine Säule unmittelbar an der Strasse wäre von einem
-        # Anker aus bis zu 9 km entfernt und bekäme daraus 25 Minuten Umweg
-        # angerechnet. Damit fiele sie aus jeder Planung, obwohl sie direkt am
-        # Weg liegt. Der Anker sagt also nur, *welches Stück* der Route zu
-        # prüfen ist; gemessen wird im Fenster bis zu den Nachbarankern.
+        # Measure precisely, and at the real vertices - not at the nearest
+        # anchor. With a 25 km radius the anchors are about 19 km apart; a
+        # charger right next to the road could be up to 9 km from an anchor
+        # and would be charged 25 minutes of detour as a result. It would
+        # then drop out of every plan although it lies directly on the way.
+        # So the anchor only says *which stretch* of the route to check;
+        # measuring happens in the window up to the neighboring anchors.
         upcoming = min(range(len(anchor)),
                         key=lambda i: haversine_m(lp.lat, lp.lon,
                                                   anchor[i][0], anchor[i][1]))
@@ -143,11 +145,11 @@ def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
 
 
 def point_on_route(points: list, lat: float, lon: float) -> tuple[float, float]:
-    """Wie weit ist eine Position auf der Route fortgeschritten?
+    """How far along the route is a position?
 
-    Rückgabe: (km_auf_route, abstand_m). Wird von der Live-Nachführung
-    gebraucht, um Ist- und Soll-SoC an derselben Stelle zu vergleichen -
-    und um zu erkennen, dass jemand die Route verlassen hat.
+    Returns: (km_on_route, distance_m). Needed by the live tracking to
+    compare actual and planned SoC at the same spot - and to detect that
+    someone has left the route.
     """
     if not points:
         return 0.0, 0.0

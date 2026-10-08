@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Prueft, wann jolt den Dongle fragen darf: nur bei Fahrt, nie am verriegelten
-// Auto - und dass es danach von selbst wieder verbindet.
+// Checks when jolt may query the dongle: only while driving, never on a locked
+// car - and that it reconnects by itself afterwards.
 //
-// Ob ein Auto verriegelt ist, laesst sich ohne Fragen nicht erfahren. jolt
-// schliesst deshalb aus der Bewegung des Telefons: Fahrtgeschwindigkeit heisst
-// "sitzt im Auto", Stillstand und Weggehen heissen "nicht fragen". Geprueft
-// wird die Logik gegen einen nachgebauten Dongle; ob eine bestimmte
-// Alarmanlage ruhig bleibt, zeigt nur das Auto.
+// Whether a car is locked cannot be found out without asking. jolt
+// therefore infers it from the phone's movement: driving speed means
+// "sitting in the car", standstill and walking away mean "do not ask". The
+// logic is checked against a simulated dongle; whether a particular
+// alarm system stays quiet, only the car shows.
 //
 //     node tools/check_driving_state.js
 const fs = require("fs");
@@ -35,9 +35,9 @@ const empty = () => new Proxy(function () { return ""; }, {
   apply: () => empty(), set: () => true });
 const K = new Proxy(K0, { get: (z, n) => (n in z ? z[n] : empty()) });
 
-/* Ein nachgebauter Dongle. `trennen()` loest wie in echt den Verbindungsabriss
- * aus - daran haengt der automatische Wiederaufbau, und genau der darf am
- * geparkten Auto nicht anspringen. */
+/* A simulated dongle. `trennen()` triggers the connection drop as in real
+ * life - the automatic reconnect depends on it, and that exactly must not
+ * kick in on the parked car. */
 const obd = {
   connectedFlag: true, read: 0, separate: 0, bodywork: 0,
   atDropout: null, loops: [],
@@ -87,7 +87,7 @@ Date.now = () => now_ts;
 const LAT = 48.4770, LON = 9.1444;
 const M_PER_DEGREE_LAT = 111320;
 
-/* Ein Fix `kmh` schnell, `nordM` Meter noerdlich vom Ausgangspunkt. */
+/* A fix `kmh` fast, `nordM` metres north of the starting point. */
 async function fix(kmh, nordM = 0, withoutSpeed = false) {
   geoCallback({ coords: {
     latitude: LAT + nordM / M_PER_DEGREE_LAT, longitude: LON,
@@ -97,8 +97,8 @@ async function fix(kmh, nordM = 0, withoutSpeed = false) {
 }
 const passes = (s) => { now_ts += s * 1000; };
 
-/* Eine Messrunde: Der Takt der Meldungen ist 12 s - danach faellt ein Fix durch
- * die Drosselung und loest, wenn erlaubt, eine Leserunde aus. */
+/* One measuring round: the report interval is 12 s - after that a fix falls through
+ * the throttling and, if allowed, triggers a read round. */
 async function lap(kmh, nordM = 0) {
   passes(13);
   const prior = obd.read;
@@ -109,7 +109,7 @@ async function lap(kmh, nordM = 0) {
 
 (async () => {
   live.positionTrace();
-  live.dongleUse();                 // Dongle gilt als in Benutzung, verbunden
+  live.dongleUse();                 // dongle counts as in use, connected
 
   console.log("\nStart: Telefon weiss noch nichts");
   verify(live.driving_state() === "steht" && !live.readAllowed(),
@@ -261,8 +261,8 @@ async function lap(kmh, nordM = 0) {
          "gerechnet", live.driving_state());
 
   console.log("\n12-V-Spannung: Das Auto geht aus");
-  /* ATRV misst der ELM-Chip selbst, ohne den CAN-Bus zu beruehren. Faellt die
-   * Spannung im Stand ab, ist das Auto aus - noch bevor jemand abschliesst. */
+  /* ATRV is measured by the ELM chip itself, without touching the CAN bus. If the
+   * voltage drops at standstill, the car is off - even before anyone locks it. */
   const ticks = async (n, kmh, nordM = 330) => {
     for (let i = 0; i < n; i++) { passes(2); await fix(kmh, nordM); await live.examineVoltage(); }
   };
@@ -314,7 +314,7 @@ async function lap(kmh, nordM = 0) {
   obd.connectedFlag = true;
   verify(live.driving_state() === "faehrt", "wieder losgefahren");
   obd.volt = 14.0;
-  await ticks(2, 50, 500);                       // zu wenige Werte
+  await ticks(2, 50, 500);                       // too few values
   for (let i = 0; i < 3; i++) { passes(1); await fix(0, 500); }
   obd.volt = 12.5;
   await ticks(3, 0, 500);
@@ -371,10 +371,10 @@ async function lap(kmh, nordM = 0) {
          "und nur sie: Ein Punkt ohne Fahrzeugabfrage behauptet keine Zähler");
 
   console.log("\nUngueltige Werte aus dem Auto");
-  // Das Tempo-Byte steht bei "ungueltig" auf 255 (in den gespeicherten Fahrten
-  // kommt das vor), die Aussentemperatur b0/2-50 ergibt bei 0xFF 77,5 Grad. Der
-  // Server lehnt beides mit 422 ab - und frueher haette das den ganzen Stapel
-  // gekostet. Hier gehen sie gar nicht erst hinaus.
+  // The speed byte is 255 for "invalid" (this occurs in the stored trips),
+  // the outside temperature b0/2-50 gives 77.5 degrees at 0xFF. The
+  // server rejects both with 422 - and it used to cost the whole batch.
+  // Here they do not even go out.
   obd.connectedFlag = true; obd.volt = 14.0;
   const gone_out = () => K0.lastBody.points[K0.lastBody.points.length - 1];
   obd.rawResponse = { soc_raw: 180, speed_kmh: 255, outside_temp_c: 77.5 };

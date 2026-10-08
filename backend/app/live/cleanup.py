@@ -1,38 +1,40 @@
-"""Vergessene Fahrten selbst beenden.
+"""End forgotten trips on their own.
 
-Eine Live-Sitzung endet, wenn jemand auf "Fahrt beenden" tippt. Das ist der
-Handgriff, den man am Ziel am ehesten vergisst - man kommt an, steigt aus,
-und das Telefon ist das Letzte, woran man denkt.
+A live session ends when someone taps "Fahrt beenden" (end trip). That is the
+action one is most likely to forget at the destination - you arrive, get out,
+and the phone is the last thing you think of.
 
-Fuer eine geplante Fahrt ist das halb so schlimm: Die Messpunkte liegen in
-der Datenbank, der Plan war ohnehin gerechnet. Fuer eine **Aufzeichnung**
-ist es der Totalverlust. Strecke, Hoehenprofil und Energieprofil entstehen
-erst beim Beenden aus den Messpunkten; bis dahin ist die Fahrt eine Huelle
-mit leerer Geometrie. Wer das Beenden vergisst, hat umsonst aufgezeichnet -
-und merkt es erst, wenn er nachsehen will.
+For a planned trip that is only half as bad: the samples are in the
+database, the plan had been calculated anyway. For a **recording** it is a
+total loss. Route, elevation profile and energy profile are only built from
+the samples when the trip ends; until then the trip is a shell with empty
+geometry. Whoever forgets to end it has recorded in vain - and only notices
+when they want to look it up.
 
-Deshalb beendet jolt von selbst, was seit einer Weile schweigt. Die Fristen
-sind bewusst grosszuegig, weil die beiden Fehler ungleich teuer sind:
+That is why jolt ends by itself whatever has been silent for a while. The
+deadlines are deliberately generous, because the two errors are not equally
+expensive:
 
-* **Zu frueh beendet** heisst, dass die Fahrt mitten entzwei geht. Der Rest
-  der Strecke faellt weg, und wiederholen laesst er sich nicht.
-* **Zu spaet beendet** heisst, dass die Fahrt eine Stunde zu lang gebucht
-  ist. Die Strecke stimmt, das Energieprofil stimmt, nur der Zeitstempel am
-  Ende ist grosszuegig - und das faellt beim Lernen kaum ins Gewicht, weil
-  in dieser Stunde weder Strecke noch Verbrauch dazukommt.
+* **Ended too early** means the trip is cut in half. The rest of the route is
+  lost, and it cannot be repeated.
+* **Ended too late** means the trip is booked an hour too long. The route is
+  right, the energy profile is right, only the timestamp at the end is
+  generous - and that hardly matters for learning, because neither distance
+  nor consumption is added during that hour.
 
-Zu spaet ist also deutlich billiger als zu frueh, und die Fristen sind
-entsprechend gesetzt.
+So too late is clearly cheaper than too early, and the deadlines are set
+accordingly.
 
-Der gefaehrlichste Fall ist die **Ladepause**. Sie kann eine Stunde dauern,
-das Telefon liegt derweil im Auto oder ist gesperrt, und danach geht die
-Fahrt weiter. Wird waehrenddessen abgeraeumt, ist die zweite Haelfte der
-Fahrt verloren. Deshalb sieht `_laedt_gerade` nach, ob der Ladestand am Ende
-der Messpunkte *gestiegen* ist - dann war das Letzte, was jolt gesehen hat,
-ein Ladevorgang, und die Frist wird noch einmal deutlich verlaengert.
+The most dangerous case is the **charging pause**. It can last an hour, the
+phone lies in the car meanwhile or is locked, and afterwards the trip
+continues. If it is cleaned up in the meantime, the second half of the trip
+is lost. That is why `charge_phases.charges_at_end` checks whether the state
+of charge has *risen* at the end of the samples - then the last thing jolt
+saw was a charging process, and the deadline is extended significantly once
+more.
 
-Gerechnet wird gegen den **letzten Messpunkt**, nicht gegen den Beginn: Eine
-lange Fahrt ist kein Grund, sie zu beenden, eine lange Stille schon.
+The measure is the **last sample**, not the start: a long trip is no reason
+to end it, a long silence is.
 """
 import asyncio
 import logging
@@ -45,57 +47,58 @@ from . import recording
 
 log = logging.getLogger("uvicorn.error")
 
-# Wie lange eine Sitzung schweigen darf, bevor sie als beendet gilt.
-# Drei Stunden decken Ladestopp, Mittagessen und Funkloch zusammen ab.
+# How long a session may stay silent before it counts as ended.
+# Three hours cover a charging stop, lunch and a dead zone together.
 QUIET_MINUTES = 180
 
-# Und wenn zuletzt geladen wurde, noch einmal doppelt so lange. Eine
-# Ladepause mit Essen kann gut zwei Stunden dauern, und danach geht es
-# weiter - genau die Fahrt, die man nicht zerschneiden darf.
+# And if charging was the last thing seen, twice as long again. A charging
+# pause with a meal can easily take two hours, and then the trip continues -
+# exactly the trip that must not be cut up.
 CHARGE_PAUSE_MINUTES = 360
 
-# Wie weit zurueck nach steigendem Ladestand gesucht wird, und um wie viel er
-# gestiegen sein muss. Hoeher als die Schwelle in `energie.ladephasen`, weil
-# hier eine andere Frage gestellt wird: nicht "laedt dieser Abschnitt", sondern
-# "war am Ende genug, um von einer Ladepause auszugehen". Ein Prozentpunkt ist
-# mehr als das Rauschen der SoC-Messung und weniger als jeder Ladevorgang.
+# How far back to look for a rising state of charge, and by how much it must
+# have risen. Higher than the threshold in `energy.charge_phases`, because a
+# different question is asked here: not "is this section charging", but "was
+# there enough at the end to assume a charging pause". One percentage point is
+# more than the noise of the SoC measurement and less than any charging
+# process.
 CHARGE_WINDOW_MINUTES = 25
 CHARGE_SWING_PERCENT = 1.0
 
-# Eine Sitzung ohne jeden Messpunkt ist ein Fehlstart: Jemand hat auf
-# "aufzeichnen" getippt und es sich anders ueberlegt, oder die Verbindung kam
-# nie zustande. Die braucht keine 90 Minuten Nachsicht.
+# A session without a single sample is a false start: someone tapped
+# "record" and changed their mind, or the connection never came about. It does
+# not need 90 minutes of leniency.
 FALSE_START_MINUTES = 20
 
-# Wie oft nachgesehen wird. Haeufiger brauchte niemand - es geht um Fristen
-# von Stunden.
+# How often to check. More often would not be needed - the deadlines are
+# hours.
 TICK_SECONDS = 5 * 60
 
 
-# Steht das Auto am Ende laenger als das, war es vergessen worden: Man steigt
-# aus, geht weg und beendet die Fahrt erst spaeter. Alles ab dem letzten
-# Fahren wird verworfen. Zehn Minuten sind mehr als jede Ampel, jeder
-# Bahnuebergang und jeder Stau, der sich noch bewegt.
+# If the car stands at the end for longer than this, it had been forgotten:
+# you get out, walk away and only end the trip later. Everything after the
+# last drive is discarded. Ten minutes is more than any traffic light, any
+# level crossing and any traffic jam that is still moving.
 AS_OF_DISCARD_MINUTES = 10
 
-# Ab dieser mittleren Geschwindigkeit zwischen zwei Messpunkten gilt das Auto
-# als fahrend. Zu Fuss kommt man auf 5 km/h, und GPS-Rauschen im Stand liegt
-# darunter; wer mit dem Telefon in der Hand weggeht, faehrt nicht.
+# From this mean speed between two samples on, the car counts as driving.
+# Walking gets you to 5 km/h, and GPS noise while stationary is below that;
+# whoever walks away with the phone in hand is not driving.
 DRIVE_KMH = 12.0
 
 
 def as_of_at_end_cut_off(db, session) -> dict | None:
-    """Die Zeit nach dem letzten Fahren verwerfen, wenn sie lang genug war.
+    """Discard the time after the last drive if it was long enough.
 
-    Der Anwendungsfall: Aussteigen und vergessen, die Fahrt zu beenden. Das
-    Telefon liegt dann Stunden in der Tasche, die Messpunkte vom Parkplatz
-    und vom Weg zur Wohnung hängen an der Strecke, und beim Lernen zaehlt
-    jede dieser Minuten als Standverbrauch mit.
+    The use case: getting out and forgetting to end the trip. The phone then
+    lies in a pocket for hours, the samples from the car park and the walk
+    home are attached to the route, and when learning, each of those minutes
+    counts as standing consumption.
 
-    Gefahren wird nach dem Weg zwischen zwei Messpunkten (Strecke durch Zeit),
-    nicht nach `tempo_kmh`: Das fehlt auf iOS regelmaessig. Nur das **Ende**
-    wird gekuerzt. Eine Ladepause mitten in der Fahrt bleibt, wie sie ist -
-    danach geht es ja weiter.
+    Driving is judged by the distance between two samples (distance over
+    time), not by `speed_kmh`: that is regularly missing on iOS. Only the
+    **end** is shortened. A charging pause in the middle of the trip stays as
+    it is - after all, the trip continues afterwards.
     """
     points = list(session.points)
     if len(points) < 3:
@@ -109,7 +112,7 @@ def as_of_at_end_cut_off(db, session) -> dict | None:
         kmh = haversine_m(ahead_of.lat, ahead_of.lon, afterwards.lat, afterwards.lon) / dt * 3.6
         if kmh >= DRIVE_KMH or (afterwards.speed_kmh or 0) >= DRIVE_KMH:
             latest_trip = afterwards
-    # Nie gefahren: Das ist eine andere Geschichte (Fehlstart), kein Rest.
+    # Never drove: that is a different story (false start), not a remainder.
     if latest_trip is None:
         return None
 
@@ -125,30 +128,31 @@ def as_of_at_end_cut_off(db, session) -> dict | None:
     db.flush()
     result = {"discarded_points": len(path),
                 "discarded_minutes": round(as_of.total_seconds() / 60)}
-    log.info("Sitzung %s: %s min Stand am Ende verworfen (%s Messpunkte).",
+    log.info("Session %s: discarded %s min of standing time at the end (%s samples).",
              session.id, result["discarded_minutes"], len(path))
     return result
 
 
 def end_and_learn(db, session) -> dict:
-    """Eine Sitzung ordentlich zu Ende bringen: Strecke bauen, dann lernen.
+    """Bring a session to a proper end: build the route, then learn.
 
-    Die Reihenfolge ist keine Geschmacksfrage. Die Kalibrierung vergleicht
-    `soll_soc` mit `soc` an den Messpunkten, und der Sollwert entsteht erst
-    beim Bauen der Strecke - andersherum lernt sie gegen lauter Nullen.
+    The order is not a matter of taste. The calibration compares `plan_soc`
+    with `soc` at the samples, and the target value only comes into being
+    when the route is built - the other way round it learns against nothing
+    but zeros.
 
-    Diese Funktion steht hier und nicht im Router, weil es **drei** Wege
-    gibt, auf denen eine Sitzung endet: der Knopf am Telefon, das Aufraeumen
-    weiter unten, und das Starten einer neuen Aufzeichnung, die die alte
-     abloest. Drei Abschriften desselben Ablaufs laufen unweigerlich
-    auseinander, und auf dem dritten Weg fehlte er zuletzt ganz.
+    This function lives here and not in the router, because there are
+    **three** ways in which a session ends: the button on the phone, the
+    cleanup further down, and starting a new recording that replaces the old
+    one. Three copies of the same procedure inevitably drift apart, and on the
+    third path it was last missing altogether.
     """
     result: dict = {"recording": None, "learned": None,
                       "not_learned": None}
     trip = session.trip
 
-    # Zuerst kuerzen: Strecke und Lernen sollen das Ende der Fahrt nie sehen,
-    # nur die Fahrt selbst.
+    # Shorten first: route and learning should never see the end of the trip,
+    # only the trip itself.
     result["as_of_discarded"] = as_of_at_end_cut_off(db, session)
 
     if trip is not None and trip.recording and not trip.geometry:
@@ -156,20 +160,20 @@ def end_and_learn(db, session) -> dict:
             result["recording"] = recording.complete(
                 db, trip, session)
         except Exception as failure:      # noqa: BLE001
-            # Die Messpunkte bleiben; eine gescheiterte Rekonstruktion darf
-            # sie nicht mitnehmen.
-            log.warning("Aufzeichnung %s nicht abzuschliessen: %s",
+            # The samples stay; a failed reconstruction must not take them
+            # along.
+            log.warning("Recording %s could not be completed: %s",
                         trip.id, failure)
             result["recording"] = {"ok": False, "reason": str(failure)}
 
     vehicle = trip.vehicle if trip else None
 
-    # Eine Fahrt mit Fahrradtraeger oder Dachbox lehrt nichts ueber das
-    # *Fahrzeug*: Der gemessene Mehrverbrauch enthaelt dann zwei Unbekannte,
-    # und aus einer Messung lassen sich nicht zwei Zahlen bestimmen.
+    # A trip with a bike rack or roof box teaches nothing about the
+    # *vehicle*: the measured extra consumption then contains two unknowns,
+    # and two numbers cannot be determined from one measurement.
     surcharge = (trip.air_drag_factor or 1.0) if trip else 1.0
-    # Mit Anhänger gilt dasselbe: Masse und Luftwiderstand des Gespanns
-    # stecken im gemessenen Verbrauch und gehören nicht ins Fahrzeug.
+    # The same applies with a trailer: mass and air resistance of the combination
+    # are contained in the measured consumption and do not belong in the vehicle.
     if vehicle and trip.trailer_kg:
         result["not_learned"] = (
             f"Fahrt mit Anhänger ({trip.trailer_kg:g} kg) - daraus "
@@ -182,9 +186,9 @@ def end_and_learn(db, session) -> dict:
         vehicle = None
 
     if vehicle:
-        # Auch hier die gemessene Kapazitaet: Der gelernte Faktor ist der
-        # Quotient aus gemessener und vorhergesagter Energie, und die
-        # gemessene entsteht aus Prozent mal Kapazitaet.
+        # The measured capacity here, too: the learned factor is the quotient
+        # of measured and predicted energy, and the measured one comes from
+        # percent times capacity.
         raw = calibration.from_live_session(session, vehicle.capacity_kwh)
         if raw is not None:
             earlier = vehicle.correction_factor
@@ -192,16 +196,16 @@ def end_and_learn(db, session) -> dict:
             result["learned"] = {"raw_factor": round(raw, 3),
                                    "earlier": round(earlier, 3),
                                    "after": vehicle.correction_factor}
-            log.info("Kalibrierung %s: %.3f -> %.3f (roh %.3f)",
+            log.info("Calibration %s: %.3f -> %.3f (raw %.3f)",
                      vehicle.name, earlier, vehicle.correction_factor, raw)
     return result
 
 
 def end_orphaned(db) -> list[dict]:
-    """Alle Sitzungen beenden, die zu lange schweigen.
+    """End all sessions that have been silent for too long.
 
-    Gibt zurueck, was beendet wurde - fuers Log und damit ein Prueflauf
-    etwas nachsehen kann.
+    Returns what was ended - for the log, and so that a check run can look
+    something up.
     """
     now_ts = datetime.utcnow()
     ended_at = []
@@ -224,21 +228,21 @@ def end_orphaned(db) -> list[dict]:
                     "deadline_minutes": mins,
                     "quiet_minutes": round((now_ts - tail).total_seconds() / 60)}
 
-        # Gelernt wird auch hier - eine vergessene Fahrt ist keine schlechtere
-        # Messung als eine ordentlich beendete.
-        # Eine Sitzung, an der das Lernen scheitert, darf die uebrigen nicht
-        # aufhalten - sonst probiert jede Runde dieselbe zuerst und kommt nie
-        # weiter. Sie ist beendet; was fehlschlug, steht im Log.
+        # Learning happens here, too - a forgotten trip is no worse a
+        # measurement than a properly ended one.
+        # A session on which learning fails must not hold up the others -
+        # otherwise every round tries the same one first and never gets any
+        # further. It is ended; what failed is in the log.
         try:
             with db.begin_nested():
                 result.update(end_and_learn(db, session))
         except Exception as failure:      # noqa: BLE001
-            log.warning("Verwaiste Sitzung %s nicht abzuschliessen: %s",
+            log.warning("Orphaned session %s could not be completed: %s",
                         session.id, failure)
             result["failure"] = str(failure)
 
         ended_at.append(result)
-        log.info("Verwaiste Sitzung %s nach %s min Stille beendet: %s",
+        log.info("Orphaned session %s ended after %s min of silence: %s",
                  session.id, result["quiet_minutes"], result)
 
     if ended_at:
@@ -247,11 +251,11 @@ def end_orphaned(db) -> list[dict]:
 
 
 async def loop(db_factory) -> None:
-    """Die Hintergrundaufgabe. Wird beim Start der Anwendung angeworfen.
+    """The background task. Fired up when the application starts.
 
-    Jeder Durchlauf bekommt eine eigene Datenbanksitzung: Die Aufgabe laeuft
-    ueber die ganze Laufzeit des Prozesses, und eine dauerhaft offen
-    gehaltene Verbindung ist genau die, die beim ersten Netzhaenger stirbt.
+    Each pass gets its own database session: the task runs for the whole
+    lifetime of the process, and a permanently open connection is exactly the
+    one that dies at the first network hiccup.
     """
     while True:
         await asyncio.sleep(TICK_SECONDS)
@@ -259,9 +263,8 @@ async def loop(db_factory) -> None:
         try:
             end_orphaned(db)
         except Exception as failure:      # noqa: BLE001
-            # Eine gescheiterte Runde darf die Aufgabe nicht beenden - sonst
-            # faellt das Aufraeumen beim ersten Fehler dauerhaft aus, und
-            # niemand merkt es.
-            log.warning("Aufräumen fehlgeschlagen: %s", failure)
+            # A failed round must not end the task - otherwise cleanup stops
+            # for good at the first error, and nobody notices.
+            log.warning("Cleanup failed: %s", failure)
         finally:
             db.close()

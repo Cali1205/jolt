@@ -1,8 +1,8 @@
-"""Baseline: das vollstaendige Schema von jolt.
+"""Baseline: the complete jolt schema.
 
-Alle spaeteren Aenderungen kommen als eigene Revision dazu. Ein create_all
-gibt es bewusst nicht - zwei Quellen fuer dasselbe Schema laufen unweigerlich
-auseinander, und der Unterschied faellt erst in der Produktion auf.
+All later changes are added as their own revisions. There is deliberately no
+create_all - two sources for the same schema inevitably drift apart, and the
+difference only shows up in production.
 
 Revision ID: 0001
 Revises:

@@ -16,11 +16,11 @@ class SignIn(BaseModel):
 
 @router.get("/status")
 def status():
-    """Was der Client vor der Anmeldung wissen muss.
+    """What the client needs to know before logging in.
 
-    Auch die Frage, ob echt geroutet wird: Eine Demo-Route sieht auf der
-    Karte aus wie eine echte, und der Unterschied muss in der Oberfläche
-    ankommen - nicht nur im Log.
+    This includes whether real routing is in use: a demo route looks just
+    like a real one on the map, and the difference has to reach the UI -
+    not just the log.
     """
     return {"password_required": deps.password_set(),
             "demo_routing": routing.is_demo()}

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Prüft die iOS-Auslieferung, soweit sie sich ohne Mac prüfen lässt.
+"""Checks the iOS delivery as far as it can be checked without a Mac.
 
-Der signierte Bau läuft nur auf einem macOS-Läufer und mit Apple-Konto. Was
-vorher auffallen kann, soll aber vorher auffallen - der erste iOS-Lauf auf
-`main` ist an einer App-ID mit Bindestrich gescheitert, die Capacitor
-ablehnt, und das hätte ein Blick in diese Datei gesehen. Es kostet nichts,
-und ein macOS-Lauf kostet das Zehnfache an Minuten.
+The signed build only runs on a macOS runner and with an Apple account. But
+whatever can be noticed beforehand should be noticed beforehand - the first
+iOS run on `main` failed because of an app ID with a hyphen, which Capacitor
+rejects, and a look at this file would have caught it. It costs nothing,
+and a macOS run costs ten times as many minutes.
 
-Ohne Netz, ohne Datenbank, ohne Apple:
+Without network, without database, without Apple:
 
     ./tools/check_ios.py
 """
@@ -34,9 +34,9 @@ def part_app_id() -> None:
     verify.section("App-ID")
     config = json.loads(load("capacitor.config.json"))
     app_id = config.get("appId", "")
-    # Die Regel aus @capacitor/cli (validateAppId): Java-Paketform, kein
-    # Bindestrich, jedes Segment beginnt mit einem Buchstaben. Nachgebaut,
-    # weil `cap add ios` das erst auf dem Mac-Läufer prüft.
+    # The rule from @capacitor/cli (validateAppId): Java package form, no
+    # hyphen, every segment starts with a letter. Re-implemented because
+    # `cap add ios` only checks this on the Mac runner.
     segmente = app_id.split(".")
     valid = (len(segmente) >= 2
                and all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", s)
@@ -63,8 +63,8 @@ def part_symbol() -> None:
     verify((extent, elevation) == (1024, 1024),
            "und genau 1024 × 1024 Pixel gross - mehr verlangt App Store "
            "Connect, weniger lehnt es ab", f"{extent}×{elevation}")
-    # Farbtyp 2 = RGB, 3 = Palette; 4 und 6 haben einen Alphakanal. Apple
-    # weist solche Symbole beim Upload ab ("Invalid large app icon").
+    # Colour type 2 = RGB, 3 = palette; 4 and 6 have an alpha channel. Apple
+    # rejects such icons on upload ("Invalid large app icon").
     verify(color_type in (0, 2, 3) and depth == 8,
            "ohne Alphakanal - Transparenz im großen Symbol lehnt Apple ab",
            f"Farbtyp {color_type}")
@@ -92,11 +92,11 @@ def part_scripts() -> None:
 
 
 def part_signature() -> None:
-    """ios_signatur.sh gegen eine Attrappe der Capacitor-Vorlage laufen lassen.
+    """Run ios_signatur.sh against a dummy of the Capacitor template.
 
-    Die Skripte sind portabel geschrieben (sed mit Sicherungsdatei), also
-    läuft das auch hier. Geprüft wird vor allem das Verweigern: Ein Skript,
-    das bei veränderter Vorlage still weitermacht, signiert falsch.
+    The scripts are written portably (sed with a backup file), so this
+    also runs here. Mainly the refusal is checked: a script that carries
+    on silently when the template has changed signs wrongly.
     """
     verify.section("Signatur-Skript")
     import tempfile
@@ -136,8 +136,8 @@ def part_workflows() -> None:
     ios = load(".github", "workflows", "ios.yml")
     fliegen = load(".github", "workflows", "ios-testflight.yml")
 
-    # Capacitor 8 nimmt den Swift Package Manager: Es gibt keine
-    # .xcworkspace, und ein `-workspace` ist ein Bau, der nie anläuft.
+    # Capacitor 8 uses the Swift Package Manager: there is no
+    # .xcworkspace, and a `-workspace` is a build that never starts.
     for name, text in (("ios.yml", ios), ("ios-testflight.yml", fliegen)):
         without_comments = "\n".join(
             z for z in text.splitlines() if not z.lstrip().startswith("#"))
@@ -149,23 +149,23 @@ def part_workflows() -> None:
            and "-project ios/App/App.xcodeproj" in fliegen,
            "beide Abläufe bauen das Projekt, das `cap add ios` anlegt")
 
-    # Der Simulatorbau darf nicht signieren, der Archivbau muss.
+    # The simulator build must not sign, the archive build must.
     verify("CODE_SIGNING_ALLOWED=NO" in ios,
            "der Simulatorbau läuft unsigniert - er braucht kein Konto")
     verify("archive" in fliegen and "-exportArchive" in fliegen
            and "destination</key><string>upload" in fliegen,
            "der TestFlight-Ablauf archiviert, exportiert und lädt hoch")
 
-    # Beide Abläufe müssen dasselbe Projekt erzeugen, sonst baut der eine
-    # etwas anderes, als der andere ausliefert.
+    # Both flows must produce the same project, otherwise one builds
+    # something other than what the other delivers.
     for step in ("cap add ios", "tools/ios_info_plist.sh",
                     "tools/ios_symbol.sh", "tools/ios_widget.sh",
                     "cap sync ios"):
         verify(step in ios and step in fliegen,
                f"beide Abläufe führen `{step}` aus")
 
-    # Jedes referenzierte Geheimnis muss in der Anleitung stehen - sonst
-    # steht in der Fehlermeldung ein Name, den niemand erklärt.
+    # Every referenced secret must be in the instructions - otherwise the
+    # error message contains a name that nobody explains.
     docs = load("ios-einrichten.md")
     secrets = sorted(set(re.findall(r"secrets\.([A-Z0-9_]+)", fliegen)))
     verify(len(secrets) == 7,
@@ -199,10 +199,10 @@ def part_workflows() -> None:
 
 
 def swift_fields(text: str) -> dict:
-    """Die Felder jeder `struct` in einer Swift-Datei: Name -> {Feld: optional?}.
+    """The fields of each `struct` in a Swift file: name -> {field: optional?}.
 
-    Reicht für die schlichten Wertetypen dieser Datei; ein Parser für
-    Swift ist es nicht."""
+    Sufficient for the plain value types of this file; it is not a parser
+    for Swift."""
     result = {}
     for hit in re.finditer(r"struct (\w+)[^{]*\{", text):
         depth, i = 1, hit.end()
@@ -210,7 +210,7 @@ def swift_fields(text: str) -> dict:
             depth += {"{": 1, "}": -1}.get(text[i], 0)
             i += 1
         body = text[hit.end():i]
-        # Geschachtelte Strukturen gehören nicht zu den Feldern der äusseren.
+        # Nested structures do not belong to the fields of the outer one.
         flat = re.sub(r"struct \w+[^{]*\{[^{}]*\}", "", body)
         result[hit.group(1)] = {
             m.group(1): m.group(2).endswith("?")
@@ -219,12 +219,13 @@ def swift_fields(text: str) -> dict:
 
 
 def part_live_activity() -> None:
-    """Plugin, Widget und Anzeigemodell müssen zusammenpassen.
+    """Plugin, widget and display model must fit together.
 
-    Ob die Live Activity in CarPlay erscheint, zeigt nur ein Gerät. Was sich
-    ohne Mac prüfen lässt: dass die Swift-Seite jedes Pflichtfeld, das sie
-    liest, von der JavaScript-Seite auch bekommt - fehlt eines, scheitert das
-    Lesen des Modells, und die Anzeige bleibt leer, ohne dass etwas abstürzt.
+    Whether the Live Activity appears in CarPlay is shown only by a device.
+    What can be checked without a Mac: that the Swift side gets from the
+    JavaScript side every required field that it reads - if one is missing,
+    reading the model fails and the display stays empty without anything
+    crashing.
     """
     verify.section("Live Activity")
     bundle_ = json.loads(load("plugins", "jolt-anzeige", "package.json"))
@@ -269,12 +270,13 @@ def part_live_activity() -> None:
            "die gemeinsame Attribute-Datei kommt aus dem Plugin ins Widget - "
            "eine Quelle, zwei Ziele")
 
-    # JS-Modell gegen Swift-Felder.
+    # JS model against Swift fields.
     fixture = ("{km_on_route:100,actual_soc:72.1,soc_reported:true,soc_quelle:'gemessen',"
               "plan_soc:73,remaining_km:87.4,reserve_at_km:160,arrival_shift_min:12,"
               "next_stop:{name:'X',km_on_route:141,planned_soc:19,expected_soc:17.6}}")
-    # Eine Trip begin siebzig Minuten, damit History, Balken und Regeneration
-    # every Felder tragen, und Messwerte für the AuxLoads.
+    # A trip that began seventy minutes ago, so that history, bars and
+    # regeneration all carry fields, plus measured values for the auxiliary
+    # loads.
     extras = ("{plan:{stops:[{name:'Ionity',km_on_route:141,arrival_soc:19,"
               "departure_soc:80,charge_time_minutes:25,operator:'Ionity',max_kw:350}]},"
               "track:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
@@ -283,8 +285,8 @@ def part_live_activity() -> None:
               "vals:{aux_load_kw:{val:1.8,timestamp:1e12},ptc_current_a:{val:5,timestamp:1e12},"
               "voltage_v:{val:380,timestamp:1e12},compressor_w:{val:450,timestamp:1e12},"
               "batterie_c:{val:27,timestamp:1e12}}}")
-    # Gesendet becomes negated das reine Modell, sondern `withImages`: dazu kommen
-    # `look` und `tileImages`. Mit Stil "a" und einer Attrappe der Leinwand.
+    # What is sent is not the pure model but `withImages`: `look` and
+    # `tileImages` are added to it. With style "a" and a dummy of the canvas.
     script = ("const vm=require('vm'),fs=require('fs'),p=require('path');"
               "const w={localStorage:{getItem:()=>'a',setItem(){}}};w.window=w;"
               "w.document={createElement:()=>({getContext:()=>new Proxy({},{get:(z,n)=>"
@@ -313,10 +315,10 @@ def part_live_activity() -> None:
                  "Rekup": model["verlauf"]["rekup"], "Neben": model["neben"],
                  "Listenstopp": (model["stoppListe"] or [{}])[0]}
     for structure, present in assignment.items():
-        # Die Vorlage ist voll besetzt, also muss jedes Feld, das Swift
-        # kennt, im Modell stehen - ein Tippfehler im Namen (kwh100 gegen
-        # kwh_100) macht sonst aus einem Pflichtfeld ein Lesefehler und aus
-        # einem optionalen eine Anzeige, die nie etwas zeigt.
+        # The template is fully populated, so every field that Swift knows must
+        # be in the model - a typo in the name (kwh100 versus kwh_100) otherwise
+        # turns a required field into a read error and an optional one into a
+        # display that never shows anything.
         every = list(fields.get(structure, {}))
         missing = [f for f in every if f not in present]
         verify(structure in fields and every and not missing,
@@ -325,9 +327,9 @@ def part_live_activity() -> None:
     for name in ("ankunft", "rest"):
         verify("text" in model[name], f"{name} trägt den Text, den Swift liest")
 
-    # Die Kachelbilder: sieben Plätze, und die Swift-Seite benutzt dieselben
-    # Namen. Ein Tippfehler hier hiesse: Die Bilder kämen an und würden nie
-    # angezeigt, ohne Fehlermeldung.
+    # The tile images: seven slots, and the Swift side uses the same names.
+    # A typo here would mean: the images arrive and are never displayed, without
+    # any error message.
     place = ["soc", "ankunft", "reserve", "verbrauch", "neben", "rekup", "stopps"]
     verify(sorted(sent.get("kachelBilder", {})) == sorted(place),
            "die Oberfläche liefert Bilder für genau die sieben Kachelplätze")
@@ -345,14 +347,15 @@ def part_live_activity() -> None:
 
 
 def part_carplay() -> None:
-    """Die CarPlay-Szene: Namen, Vorlagen, Schalter.
+    """The CarPlay scene: names, templates, switches.
 
-    Ob CarPlay sie anzeigt, entscheidet erst ein Auto (oder der CarPlay
-    Simulator auf dem Mac). Hier steht, was vorher falsch sein koennte: ein
-    Klassenname in der Info.plist, der in Swift anders heisst - iOS fände
-    dann keine Szene und meldete nichts -, eine Vorlage, die die Kategorie
-    nicht erlaubt (Apple lehnt die App dann bei der Pruefung ab), und ein
-    Entitlement, der den signierten Bau bricht, solange er im Portal fehlt.
+    Whether CarPlay shows it is only decided by a car (or the CarPlay
+    Simulator on the Mac). Here is what could be wrong beforehand: a class
+    name in the Info.plist that is called differently in Swift - iOS would
+    then find no scene and report nothing -, a template that the category
+    does not allow (Apple then rejects the app during review), and an
+    entitlement that breaks the signed build as long as it is missing in
+    the portal.
     """
     verify.section("CarPlay-Szene")
     delegate = load("plugins", "jolt-anzeige", "ios", "Sources",
@@ -407,8 +410,8 @@ def part_carplay() -> None:
            "Repository-Variable - bis er im Portal eingeschaltet ist, bleibt er aus")
     verify(re.search(r"carplay:\s*\n\s+description:.*?default: false", fliegen, re.S) is not None,
            "und das Häkchen steht auf aus")
-    # Start und Beenden aus CarPlay: Plugin, Szene und Oberflaeche muessen
-    # dieselben Namen sprechen, sonst tut ein Knopf im Auto nichts.
+    # Start and stop from CarPlay: plugin, scene and UI must speak the same
+    # names, otherwise a button in the car does nothing.
     trips = load("frontend", "trips.js")
     for method in ("bereit", "aktionErgebnis"):
         verify(f'CAPPluginMethod(name: "{method}"' in plugin

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Prueft den Start einer Aufzeichnung (frontend/trips.js) gegen einen
-// Dongle, der nicht antwortet.
+// Checks the start of a recording (frontend/trips.js) against a
+// dongle that does not answer.
 //
-// Der Fall, um den es geht: Das Auto schlaeft noch, der Dongle ist verbunden,
-// die erste Abfrage (Startladestand) laeuft in den Zeitablauf. Frueher galt
-// der Dongle dann fuer die ganze Aufzeichnung als nicht vorhanden - am
-// 5.10. lieferte eine Fahrt drei Minuten lang nur GPS, bis jemand von Hand
-// neu gestartet hat.
+// The case at hand: the car is still asleep, the dongle is connected,
+// the first query (start state of charge) runs into the timeout. It used to be that
+// the dongle then counted as absent for the whole recording - on
+// 5.10. a trip delivered only GPS for three minutes until someone restarted
+// by hand.
 //
 //     node tools/check_recording.js
 const fs = require("fs");
@@ -22,7 +22,7 @@ function verify(ok, text, detail) {
   if (!ok) failure++;
 }
 
-/* Ein Durchlauf mit einem Dongle, der sich so verhaelt, wie `szenario` sagt. */
+/* A run with a dongle that behaves as `szenario` says. */
 async function cycle(scenario) {
   const reports = [];
   const calls = { dongleUse: 0, link: 0, positionTrace: 0,

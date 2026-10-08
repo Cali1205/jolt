@@ -1,9 +1,9 @@
-"""Auswahl des Routing-Adapters.
+"""Selection of the routing adapter.
 
-Regel: Liegt ein ORS-Schlüssel vor, wird echt geroutet. Fehlt er, springt das
-Demo-Routing ein, damit die App überhaupt startet und sich durchklicken lässt.
-Der Fallback ist an jeder Antwort erkennbar (`demo: true`) - eine erfundene
-Route darf nie unbemerkt für eine echte gehalten werden.
+Rule: if an ORS key is present, real routing is used. If it is missing, demo
+routing steps in so that the app starts at all and can be clicked through.
+The fallback is recognizable in every response (`demo: true`) - an invented
+route must never be mistaken for a real one unnoticed.
 """
 import logging
 import os
@@ -21,8 +21,8 @@ def provider():
     if os.environ.get("ORS_API_KEY"):
         return ORS()
     if not _warned:
-        log.warning("Kein ORS_API_KEY gesetzt - jolt rechnet mit erfundenen "
-                    "Demo-Routen. Kostenloser Schlüssel: openrouteservice.org/dev")
+        log.warning("No ORS_API_KEY set - jolt is using invented "
+                    "demo routes. Free key: openrouteservice.org/dev")
         _warned = True
     return DemoRouting()
 

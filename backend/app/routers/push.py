@@ -1,8 +1,8 @@
-"""Endpunkte für die Benachrichtigungen aufs Telefon.
+"""Endpoints for notifications to the phone.
 
-Der öffentliche Schlüssel darf jeder lesen - er ist dafür da, verteilt zu
-werden. Das An- und Abmelden eines Geräts verlangt dagegen Zugang: Wer ein Abo
-anlegen darf, bekommt die Ladepläne dieses Haushalts aufs Gerät.
+Anyone may read the public key - it exists to be distributed. Subscribing and
+unsubscribing a device, however, requires access: whoever may create a
+subscription gets this household's charging plans on their device.
 """
 import logging
 
@@ -31,11 +31,10 @@ class SignOut(BaseModel):
 
 @router.get("/schluessel")
 def keyname():
-    """Was der Browser braucht, um ein Abo anzulegen.
+    """What the browser needs to create a subscription.
 
-    Ohne Anmeldung erreichbar: Der öffentliche Schlüssel ist kein Geheimnis,
-    und die Oberfläche muss vor dem Anmelden wissen, ob sie den Knopf
-    überhaupt anbieten kann.
+    Reachable without login: the public key is no secret, and before login
+    the UI has to know whether it can offer the button at all.
     """
     return {"configured": push.actual_configured(),
             "keyname": push.pub_key()}
@@ -60,11 +59,11 @@ def sign_out_subscription(sign_out: SignOut, db: Session = Depends(get_db)):
 
 @router.post("/probe", dependencies=[Depends(deps.current_session)])
 def probe(db: Session = Depends(get_db)):
-    """Eine Testnachricht an alle angemeldeten Geräte.
+    """A test message to all subscribed devices.
 
-    Der einzige Weg, das Zusammenspiel aus Schlüssel, Abo, Push-Dienst und
-    Service Worker zu prüfen, ohne eine Fahrt zu machen - und der Weg, auf dem
-    man merkt, dass der Schlüssel nicht zum Abo passt.
+    The only way to check the interplay of key, subscription, push service
+    and service worker without making a trip - and the way to notice that
+    the key does not match the subscription.
     """
     if not push.actual_configured():
         raise HTTPException(409, "Es ist kein VAPID-Schlüssel gesetzt.")

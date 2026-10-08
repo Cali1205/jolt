@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/* Prueft das passive Mithoeren (obd-core.js: lauschen).
+/* Checks passive listening (obd-core.js: lauschen).
  *
- * Es soll an einem ladenden, verriegelten Auto beobachten, ohne die
- * Alarmanlage zu wecken. Was sich ohne Auto pruefen laesst, ist das, woran
- * der Alarm haengt - **was gesendet wird**:
- *   - bis ATMA nur AT-Befehle (bleiben im Dongle), danach nur noch ein
- *     Stopp-Zeichen und der Handshake (wieder nur AT-Befehle),
- *   - keine Abfrage wie 22028C oder 0100, auch nicht von einer Leserunde,
- *     die zufaellig dazwischenkommt,
- *   - ATCSM1 (stilles Mitlesen) und ATCRA (Filter weg) vor ATMA.
- * Dazu die Auswertung: Kennungen, Haeufigkeit, Veraenderlichkeit.
+ * It is meant to observe a charging, locked car without waking the
+ * alarm system. What can be checked without a car is what the alarm
+ * depends on - **what is sent**:
+ *   - up to ATMA only AT commands (stay in the dongle), afterwards only a
+ *     stop character and the handshake (again only AT commands),
+ *   - no query like 22028C or 0100, not even from a read round
+ *     that happens to come in between,
+ *   - ATCSM1 (silent monitoring) and ATCRA (filter off) before ATMA.
+ * Plus the evaluation: IDs, frequency, variability.
  *
  *     node tools/check_listen.js
  */
@@ -27,14 +27,14 @@ function verify(ok, text, extra) {
   if (!ok) failure += 1;
 }
 
-/* Ein ELM327, der nach ATMA Frames schickt, bis irgendein Zeichen kommt, dann
- * "STOPPED" und die Eingabeaufforderung. */
+/* An ELM327 that sends frames after ATMA until any character arrives, then
+ * "STOPPED" and the prompt. */
 function dongle(sent, options) {
   const o = options || {};
   const listener = [];
   let monitor = null;
   const output = (text) => {
-    // In Haeppchen von je sieben Zeichen: BLE liefert so, mitten durch Zeilen.
+    // In chunks of seven characters each: BLE delivers like that, right through lines.
     for (let i = 0; i < text.length; i += 7) {
       const val = new DataView(new TextEncoder().encode(text.slice(i, i + 7)).buffer);
       for (const f of listener) f({ target: { value: val } });
@@ -50,7 +50,7 @@ function dongle(sent, options) {
       const raw = new TextDecoder().decode(d);
       const t = raw.trim();
       sent.push(raw === "\r" ? "<STOPP>" : t);
-      if (monitor) {                     // jedes Zeichen beendet das Mithoeren
+      if (monitor) {                     // any character ends the listening
         clearInterval(monitor); monitor = null;
         setTimeout(() => output("STOPPED\r\r>"), 1);
         return;
@@ -114,7 +114,7 @@ async function main() {
   await O.handshake();
   sent.length = 0;
 
-  // Waehrend des Mithoerens versucht jemand zu lesen: Es darf nichts hinausgehen.
+  // Someone tries to read while listening: nothing may go out.
   let during = null;
   const cycle = O.listen({ trace_log: "6", duration_ms: 600 });
   await new Promise((w) => setTimeout(w, 250));

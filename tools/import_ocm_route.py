@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Ladepunkte von Open Charge Map entlang einer bereits gerechneten Fahrt holen.
+"""Fetch charging points from Open Charge Map along an already computed trip.
 
-Der Länder-Import (`import_ocm.py`) blättert bei sehr grossen Ländern nicht
-zuverlässig durch OCMs Ergebnisseiten - für Frankreich etwa blieb ein
-grosser Teil der Ladepunkte unerreichbar, egal wie hoch das Limit stand.
-Dieses Skript fragt stattdessen mehrere kleinere Umkreise entlang der
-tatsächlichen Streckengeometrie ab - dieselbe Art Anfrage, die OCM in der
-Praxis zuverlässig beantwortet.
+The country import (`import_ocm.py`) does not reliably page through OCM's
+result pages for very large countries - for France, for example, a large
+part of the charging points remained unreachable no matter how high the
+limit was set. This script instead queries several smaller radii along the
+actual route geometry - the same kind of request that OCM answers reliably
+in practice.
 
-Voraussetzung: die Fahrt muss vorher in der App berechnet worden sein (unter
-"Planen" auf "Route rechnen"). Die ID steht in der Antwort von GET /api/fahrten
-oder in der URL, wenn man die Fahrt in der Oberfläche öffnet.
+Prerequisite: the trip must have been computed in the app beforehand (under
+"Planen" on "Route rechnen"). The ID is in the response of GET /api/fahrten
+or in the URL when you open the trip in the UI.
 
-    ./tools/import_ocm_route.py 42            # Fahrt 42, 30 km Umkreis, alle Leistungen
-    ./tools/import_ocm_route.py 42 25 50      # Umkreis 25 km, ab 50 kW
+    ./tools/import_ocm_route.py 42            # trip 42, 30 km radius, all power levels
+    ./tools/import_ocm_route.py 42 25 50      # radius 25 km, from 50 kW
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
-# per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
-# Layouts müssen funktionieren.
+# Locally the package lives under backend/app; in the Docker image (where
+# this script runs via `docker exec`) it sits directly next to tools/ as app/ -
+# both layouts must work.
 for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
     if os.path.isdir(os.path.join(_candidate, "app")):
         sys.path.insert(0, _candidate)

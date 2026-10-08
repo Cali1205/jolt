@@ -1,10 +1,10 @@
-/* Die Fahrten-Ansicht: was bisher geplant und gefahren wurde.
+/* The trips view: what has been planned and driven so far.
  *
- * Der Zweck ist nicht Buchhaltung, sondern Vergleich: Dieselbe Strecke im
- * Januar und im Juni, einmal leer und einmal beladen - erst nebeneinander
- * wird sichtbar, woran die zwei Ladestopps Unterschied lagen. Deshalb steht
- * in jeder Zeile der Verbrauch neben Temperatur, Tempo und Zuladung, und
- * nicht nur Start und Ziel.
+ * The purpose is not bookkeeping but comparison: the same route in January
+ * and in June, once empty and once loaded - only side by side does it become
+ * visible what caused the difference of two charging stops. That is why each
+ * row shows the consumption next to temperature, speed and payload, and not
+ * just start and destination.
  */
 window.joltTrips = (function () {
   "use strict";
@@ -13,8 +13,8 @@ window.joltTrips = (function () {
   let charged = false;
 
   function date(iso) {
-    // Über K.zeit: Der Server liefert UTC, und `new Date` auf einem Text ohne
-    // Zone läse es als Ortszeit - zwei Stunden daneben.
+    // Via K.zeit: the server delivers UTC, and `new Date` on a text without
+    // a zone would read it as local time - two hours off.
     const d = K.timestamp(iso);
     if (!d) return "–";
     return d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
@@ -25,12 +25,11 @@ window.joltTrips = (function () {
   const num = (val, put) =>
     (val === null || val === undefined) ? "" : K.num(val, put);
 
-  /* Was eine Fahrt mit einer anderen unvergleichbar macht.
+  /* What makes one trip incomparable with another.
    *
-   * Eine Fahrt mit Fahrradträger ist keine Vergleichsgrösse für eine ohne,
-   * und ein blosser Entwurf keine für eine gefahrene Strecke. Ohne diese
-   * Marken vergleicht man Äpfel mit Birnen und wundert sich über den
-   * Verbrauch. */
+   * A trip with a bike rack is no benchmark for one without, and a mere
+   * draft none for a driven route. Without these marks one compares apples
+   * with oranges and wonders about the consumption. */
   function brands(trip) {
     const m = [];
     if (trip.recording) m.push('<span class="marke auf">aufgez.</span>');
@@ -48,24 +47,24 @@ window.joltTrips = (function () {
     return m.join(" ");
   }
 
-  /* Eine Tabelle statt einer Liste aus punktgetrennten Sätzen.
+  /* A table instead of a list of dot-separated sentences.
    *
-   * Der Zweck dieser Ansicht ist Vergleich - dieselbe Strecke im Januar und
-   * im Juni, einmal leer und einmal beladen. Vergleichen heisst Zahlen
-   * untereinander lesen, und dafür ist eine Tabelle das richtige Mittel:
-   * gleiche Spalte, gleiche Stelle, rechtsbündig und in gleichbreiten
-   * Ziffern. In einer Textzeile steht der Verbrauch mal an dritter, mal an
-   * fünfter Stelle - je nachdem, was sonst noch bekannt ist.
+   * The purpose of this view is comparison - the same route in January and
+   * in June, once empty and once loaded. Comparing means reading numbers
+   * one below the other, and a table is the right tool for that: same
+   * column, same place, right-aligned and in equal-width digits. In a text
+   * line the consumption sometimes sits in third, sometimes in fifth place -
+   * depending on what else is known.
    *
-   * Auf schmalen Schirmen fallen die hinteren Spalten weg (siehe CSS), und
-   * zwar in der Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist
-   * Datum, Strecke, Kilometer und Verbrauch. */
-  /* Start und Ziel, oder nur das, was bekannt ist.
+   * On narrow screens the rear columns drop out (see CSS), in the order of
+   * their value for comparing. What remains is date, route, kilometres and
+   * consumption. */
+  /* Start and destination, or only what is known.
    *
-   * Bei einer Aufzeichnung hat das Ziel keinen Namen - jolt kann Orte
-   * suchen, aber nicht umgekehrt aus einer Koordinate einen Ortsnamen
-   * machen. Ein Pfeil ins Leere ("Dienstag 14:32 → ?") sieht aus wie ein
-   * Fehler; der Name der Aufzeichnung allein ist die ehrlichere Zeile. */
+   * For a recording the destination has no name - jolt can search for
+   * places, but cannot turn a coordinate into a place name the other way
+   * round. An arrow into nothing ("Dienstag 14:32 → ?") looks like an
+   * error; the name of the recording alone is the more honest line. */
   function distance(trip) {
     const begin = (trip.start || "").trim();
     const past = (trip.destination || "").trim();
@@ -134,11 +133,11 @@ window.joltTrips = (function () {
     }
   }
 
-  /* Eine alte Fahrt wieder auf die Karte holen.
+  /* Bring an old trip back onto the map.
    *
-   * Bewusst über joltRoute und nicht mit eigener Zeichenlogik: Es ist
-   * dieselbe Ansicht wie nach einer frischen Berechnung, und zwei Wege,
-   * dasselbe zu zeichnen, laufen unweigerlich auseinander. */
+   * Deliberately via joltRoute and not with its own drawing logic: it is
+   * the same view as after a fresh calculation, and two ways of drawing the
+   * same thing inevitably drift apart. */
   async function open_it(id) {
     try {
       await window.joltRoute.tripCharging(Number(id));
@@ -148,12 +147,12 @@ window.joltTrips = (function () {
     }
   }
 
-  /* Nachfragen, bevor gelöscht wird.
+  /* Ask before deleting.
    *
-   * Das Kreuz sitzt in einer Tabellenzeile, auf dem Telefon eine Daumenbreite
-   * neben "öffnen". Und eine aufgezeichnete Fahrt ist nicht wiederherstellbar:
-   * Sie ist eine Messung, die genau einmal stattgefunden hat - anders als eine
-   * geplante Route, die man neu rechnen kann. */
+   * The cross sits in a table row, on the phone a thumb's width next to
+   * "öffnen" (open). And a recorded trip cannot be restored: it is a
+   * measurement that took place exactly once - unlike a planned route,
+   * which can be recalculated. */
   async function remove(id, label) {
     if (!window.confirm(`„${label}" löschen?\n\nEine aufgezeichnete `
                         + "Fahrt lässt sich nicht wiederherstellen.")) {
@@ -167,25 +166,24 @@ window.joltTrips = (function () {
     }
   }
 
-  /* Eine Aufzeichnung starten: Position holen, Fahrt anlegen, in die
-   * Live-Ansicht wechseln. Von da an ist es eine Live-Fahrt wie jede
-   * andere - nur ohne Plan, gegen den sie sich hält. Strecke und
-   * Energieprofil entstehen beim Beenden aus den Messpunkten. */
-  /* Eine Aufzeichnung starten - mit Dongle, wenn er zu haben ist.
+  /* Start a recording: fetch position, create the trip, switch to the
+   * live view. From then on it is a live trip like any other - only without
+   * a plan to hold itself against. Route and energy profile are created
+   * from the measurement points when it ends. */
+  /* Start a recording - with dongle, if one is available.
    *
-   * Die Reihenfolge ist nicht beliebig: `requestDevice` darf nur in
-   * unmittelbarer Folge einer Nutzergeste laufen. Wer vorher auf GPS oder
-   * eine API-Antwort wartet, hat die Geste verbraucht und bekommt ein
-   * `SecurityError` - deshalb steht der Dongle **zuerst**, noch vor allem
-   * anderen.
+   * The order is not arbitrary: `requestDevice` may only run immediately
+   * following a user gesture. Anyone who waits for GPS or an API response
+   * beforehand has used up the gesture and gets a `SecurityError` - that is
+   * why the dongle comes **first**, before everything else.
    *
-   * Scheitert er, geht es ohne weiter. Das ist der ganze Sinn: In Safari
-   * gibt es Web Bluetooth nicht, im Auto steckt der Dongle vielleicht
-   * nicht, und in beiden Fällen ist eine Aufzeichnung mit von Hand
-   * gemeldetem Ladestand besser als keine.
+   * If it fails, it carries on without. That is the whole point: Safari has
+   * no Web Bluetooth, the dongle may not be plugged in in the car, and in
+   * both cases a recording with a charge level reported by hand is better
+   * than none.
    */
-  // Warum der letzte Start nicht klappte - fuer CarPlay, das keine Meldung
-  // der Oberflaeche sieht und den Grund selbst anzeigen muss.
+  // Why the last start did not work - for CarPlay, which sees no message
+  // from the UI and has to display the reason itself.
   let lastStartError = "";
 
   async function startRecording() {
@@ -198,17 +196,17 @@ window.joltTrips = (function () {
     btn.disabled = true;
     try {
       let withDongle = false;
-      let dongleLater = false;   // nicht verbunden, aber Bluetooth da
+      let dongleLater = false;   // not connected, but Bluetooth is there
       if (window.joltObd && window.joltObd.obtainable()) {
         as_of("Verbinde mit dem OBD2-Dongle …");
         try {
           window.joltObd.set_up((t) => console.log("[obd]", t));
-          // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt
-          // worden, verbindet er ohne Berührung.
+          // First without a dialog: if the dongle has been allowed once
+          // before, it connects without a touch.
           await window.joltObd.attach();
           if (await window.joltLive.handshakeSafe()) withDongle = true;
         } catch (failure) {
-          // Kein Grund abzubrechen - nur einer, ohne Dongle weiterzumachen.
+          // No reason to abort - only one to carry on without the dongle.
           console.log("[obd] Verbindung nicht zustande gekommen:", failure);
         }
         if (!withDongle) {
@@ -217,11 +215,12 @@ window.joltTrips = (function () {
         }
       }
 
-      // Die Wahl aus diesem Abschnitt, nicht die aus der Planen-Ansicht -
-      // und **kein** Rückfall auf das erste Fahrzeug der Liste. Der war der
-      // Fehler: Er schrieb die Fahrt stillschweigend dem "Allgemeinen
-      // E-Auto" zu, und mit ihm rechnete danach alles - Akkugrösse, Masse,
-      // Luftwiderstand. Lieber gar nicht aufzeichnen als dem falschen Auto.
+      // The choice from this section, not the one from the planning view -
+      // and **no** fallback to the first vehicle in the list. That was the
+      // bug: it silently assigned the trip to the "Allgemeines E-Auto"
+      // (generic EV), and everything was calculated with it afterwards -
+      // battery size, mass, drag. Better not to record at all than for the
+      // wrong car.
       const choice = document.getElementById("aufz-fahrzeug");
       const id = choice && choice.value ? Number(choice.value) : null;
       if (!id) {
@@ -239,13 +238,13 @@ window.joltTrips = (function () {
         }
         navigator.geolocation.getCurrentPosition(
           (p) => fulfil(p.coords),
-          // Ohne Startposition gäbe es keinen ersten Punkt der Strecke.
+          // Without a start position there would be no first point of the route.
           (f) => reject(new Error("Standort: " + f.message)),
           { enableHighAccuracy: true, timeout: 10000 });
       });
 
-      // Mit Dongle gleich den echten Startladestand mitgeben - besser als
-      // die 100 %, die der Server sonst annimmt.
+      // With a dongle, pass the real start charge level right away - better than
+      // the 100 % the server otherwise assumes.
       let soc = null;
       if (withDongle) {
         try {
@@ -253,15 +252,15 @@ window.joltTrips = (function () {
             await window.joltObd.command("22028C"));
           if (val) soc = Math.round(val.hmi * 10) / 10;
         } catch (failure) {
-          /* Keine Antwort auf die erste Abfrage heisst **nicht** "kein
-           * Dongle". Ein Auto, das noch schläft, antwortet nicht - der
-           * Dongle ist trotzdem da, und sobald es fährt, kommen die Werte.
+          /* No answer to the first query does **not** mean "no
+           * dongle". A car that is still asleep does not answer - the
+           * dongle is there anyway, and as soon as it drives, the values come.
            *
-           * Hier stand `mitDongle = false`. Damit lief die ganze
-           * Aufzeichnung ohne Fahrzeugwerte, obwohl der Dongle verbunden
-           * war: Am 5.10. hat eine Fahrt (Sitzung 6) drei Minuten lang nur
-           * GPS geliefert, bis jemand von Hand neu gestartet hat. Nur wenn
-           * die Verbindung selbst weg ist, gilt der Dongle als nicht da. */
+           * Here `withDongle = false` used to stand. With that the whole
+           * recording ran without vehicle values although the dongle was
+           * connected: on 5 Oct a trip (session 6) delivered only GPS for
+           * three minutes until someone restarted by hand. Only if the
+           * connection itself is gone does the dongle count as absent. */
           if (!window.joltObd.linked()) {
             withDongle = false;
             dongleLater = true;
@@ -282,16 +281,17 @@ window.joltTrips = (function () {
       K.sessionRemember(response.session_id);
       K.state.recVehicle =
         (K.state.vehicles || []).find((f) => f.id === id) || null;
-      // Die neue Aufzeichnung gehört in die Liste.
+      // The new recording belongs in the list.
       K.state.tripsStale = true;
       window.joltApp.showView("live");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       window.joltLive.link(response.session_id);
-      // Wer die Aufzeichnung startet, sitzt im Auto: Es darf gelesen werden,
-      // bis das Telefon sagt, dass das Auto steht. Ohne das begann sie im
-      // Zustand "steht" und las erst ab 15 km/h - im Stand also nie. Die
-      // Live-Anzeige blieb leer, und wer nicht losfuhr, sah nichts.
+      // Whoever starts the recording is sitting in the car: reading is allowed
+      // until the phone says the car is stationary. Without that it began in the
+      // state "steht" (standing) and only read from 15 km/h - i.e. never at a
+      // standstill. The live display stayed empty, and anyone who did not drive
+      // off saw nothing.
       window.joltLive.drivingStateStart("faehrt");
       window.joltLive.positionTrace();
       if (withDongle) {
@@ -302,18 +302,18 @@ window.joltTrips = (function () {
             + "den Ladestand, sobald du fährst.", "hinweis");
       } else {
         if (dongleLater) {
-          // Der Dongle kann noch kommen: Das Auto wird oft erst jetzt
-          // eingeschaltet. jolt klopft von selbst an, statt auf den Knopf
-          // zu warten - und gibt nach einigen Versuchen auf.
+          // The dongle may still come: the car is often only switched on now.
+          // jolt knocks on its own instead of waiting for the button - and
+          // gives up after a few attempts.
           window.joltLive.dongleUse();
           window.joltLive.reconnectDongle();
         }
         K.report("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
           + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
       }
-      // Das zuletzt aufgezeichnete Fahrzeug gilt beim naechsten Mal wieder -
-      // auch fuer den Start aus CarPlay, wo man keines waehlen kann.
-      try { localStorage.setItem("jolt-aufz-fahrzeug", String(id)); } catch (e) { /* ohne Gedaechtnis */ }
+      // The last recorded vehicle applies again next time -
+      // also for the start from CarPlay, where one cannot choose any.
+      try { localStorage.setItem("jolt-aufz-fahrzeug", String(id)); } catch (e) { /* without memory */ }
       reportVehicle();
       as_of("");
     } catch (failure) {
@@ -328,13 +328,13 @@ window.joltTrips = (function () {
 
   /* ---------- CarPlay ----------
    *
-   * Die CarPlay-Liste (plugins/jolt-anzeige) kann die Aufzeichnung starten und
-   * beenden. Sie ruft hierher ueber ein Ereignis des Plugins und bekommt das
-   * Ergebnis zurueck - schiefgegangenes zeigt CarPlay selbst an, denn die
-   * Meldungen dieser Oberflaeche sieht im Auto niemand.
+   * The CarPlay list (plugins/jolt-anzeige) can start and stop the recording.
+   * It calls in here via an event of the plugin and gets the result back -
+   * CarPlay displays anything that went wrong itself, because nobody in the
+   * car sees this UI's messages.
    *
-   * Gestartet wird mit dem **zuletzt benutzten Fahrzeug**: Im Auto laesst sich
-   * keines waehlen, und dieselbe Erinnerung nutzt der Start auf dem Telefon. */
+   * It starts with the **last used vehicle**: in the car none can be chosen,
+   * and the start on the phone uses the same memory. */
   function carplayPlugin() {
     const shell = window.joltBlePlugin;
     if (!shell || !shell.JoltAnzeige || !shell.Capacitor
@@ -357,7 +357,7 @@ window.joltTrips = (function () {
     try {
       const response = p.ready({ vehicle: name });
       if (response && response.catch) response.catch(() => {});
-    } catch (e) { /* kein Plugin, kein CarPlay */ }
+    } catch (e) { /* no plugin, no CarPlay */ }
   }
 
   async function carplayAktion(action) {
@@ -393,7 +393,7 @@ window.joltTrips = (function () {
       try {
         const response = p.aktionErgebnis({ action, ok, text });
         if (response && response.catch) response.catch(() => {});
-      } catch (e) { /* CarPlay zeigt dann eben nichts */ }
+      } catch (e) { /* CarPlay then simply shows nothing */ }
     }
     return ok;
   }
@@ -404,12 +404,12 @@ window.joltTrips = (function () {
     try {
       const h = p.addListener("carplayAktion", (e) => carplayAktion(e && e.action));
       if (h && h.catch) h.catch(() => {});
-    } catch (e) { /* ohne Plugin kein CarPlay */ }
+    } catch (e) { /* no plugin, no CarPlay */ }
     reportVehicle();
   }
 
-  /* Beim Öffnen sagen, was dieser Browser kann - bevor jemand tippt und
-   * sich wundert, dass kein Geräte-Dialog kommt. */
+  /* On opening, say what this browser can do - before someone taps and
+   * wonders why no device dialog appears. */
   function dongleHint() {
     const el = document.getElementById("aufz-dongle-hinweis");
     if (!el) return;
@@ -428,8 +428,8 @@ window.joltTrips = (function () {
     dongleHint();
     const holder = document.getElementById("fahrten-liste");
     if (!holder) return;
-    // Ein Zuhörer am Halter statt einer je Zeile: Die Liste wird nach jedem
-    // Löschen neu gebaut, einzeln gebundene Zuhörer wären dann tot.
+    // One listener on the holder instead of one per row: the list is rebuilt
+    // after every deletion, individually bound listeners would then be dead.
     holder.addEventListener("click", (event) => {
       const uphill = event.target.closest("[data-oeffnen]");
       if (uphill) { open_it(uphill.dataset.oeffnen); return; }
@@ -443,15 +443,15 @@ window.joltTrips = (function () {
     });
   }
 
-  // Beim Wechsel in die Ansicht laden, nicht beim Start: Wer nie auf den
-  // Reiter tippt, soll die Liste auch nicht bezahlen.
+  // Load on switching to the view, not at startup: whoever never taps the
+  // tab should not pay for the list either.
   //
-  // Zwischengespeichert wird nur so lange, wie sich nichts geändert hat.
-  // `geladen` wurde ursprünglich nirgends zurückgesetzt - die Liste war nach
-  // dem ersten Öffnen eingefroren, und eine frisch geplante oder gerade
-  // beendete Fahrt tauchte erst nach einem Neuladen der Seite auf. Wer eine
-  // Fahrt anlegt, setzt jetzt `K.zustand.fahrtenVeraltet`; hier wird die
-  // Marke gelesen und wieder gelöscht.
+  // It is only cached as long as nothing has changed. `geladen` (loaded) was
+  // originally never reset anywhere - the list was frozen after the first
+  // opening, and a freshly planned or just ended trip only appeared after
+  // reloading the page. Whoever creates a trip now sets
+  // `K.zustand.tripsStale` (trips stale); here the mark is read and
+  // cleared again.
   function show() {
     if (!charged || K.state.tripsStale) {
       K.state.tripsStale = false;

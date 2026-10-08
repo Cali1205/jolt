@@ -1,20 +1,20 @@
 #!/usr/bin/env node
-/* Die Tabelle muss dieselben Zahlen liefern wie die Funktionen davor.
+/* The table must deliver the same numbers as the functions before it.
  *
- * Bis zu diesem Umbau stand jede Umrechnung als eigene Funktion in
- * obd-core.js. Jetzt steht sie als Zeile in readings.js, und ein
- * Interpreter setzt sie um. Genau bei so einer Umstellung gehen Vorzeichen,
- * Skalierung und Bytereihenfolge still daneben - `soc_roh` ist ein Byte
- * geteilt durch 2,5, der Batteriestrom `(Rohwert - 150000)/100` ueber vier
- * Bytes, und beide saehen auch falsch noch plausibel aus.
+ * Until this refactoring, every conversion was a function of its own in
+ * obd-core.js. Now it is a row in readings.js, and an
+ * interpreter applies it. Precisely at such a changeover, signs,
+ * scaling and byte order silently go wrong - `soc_raw` is one byte
+ * divided by 2.5, the battery current `(Rohwert - 150000)/100` over four
+ * bytes, and both would still have looked plausible when wrong.
  *
- * Deshalb stehen die **alten Funktionen unveraendert hier drin** und
- * dienen als Vorgabe. Verglichen wird ueber zufaellige und gezielt
- * gewaehlte Bytefolgen, darunter die am Fahrzeug gemessenen. Weicht eine
- * Zeile ab, nennt die Ausgabe den Namen, die Bytes und beide Zahlen.
+ * That is why the **old functions are kept here unchanged** and
+ * serve as the reference. Comparison is over random and deliberately
+ * chosen byte sequences, including those measured on the vehicle. If a
+ * row deviates, the output names the name, the bytes and both numbers.
  *
- * Diese Datei ist bewusst redundant. Sie darf erst verschwinden, wenn die
- * Tabelle einmal am Auto bestaetigt ist.
+ * This file is deliberately redundant. It may only disappear once the
+ * table has been confirmed in the car once.
  */
 "use strict";
 
@@ -24,7 +24,7 @@ const vm = require("vm");
 
 const FRONTEND = path.join(__dirname, "..", "frontend");
 
-/* ---------- Die Vorgabe: der Stand vor dem Umbau ---------- */
+/* ---------- The reference: the state before the refactoring ---------- */
 
 const OLD = {
   soc_raw: (b) => b[0],
@@ -71,9 +71,9 @@ const OLD = {
   inside_temp_c: (b) => (b.length >= 2 ? ((b[0] * 256 + b[1]) / 5) - 40 : null),
 };
 
-/* Die Zieladresse und die Datenkennung gehoeren zur Umrechnung: Eine Zeile
- * mit richtiger Formel und falscher Adresse liefert gar nichts, und eine
- * mit falscher Datenkennung die Zahl eines anderen Parameters. */
+/* The target address and the data identifier are part of the conversion: a row
+ * with the right formula and wrong address delivers nothing at all, and one
+ * with the wrong data identifier the number of a different parameter. */
 const OLD_ADDRESSES = {
   soc_raw: ["22028C", "FC007B", true, 0],
   voltage_v: ["221E3B", "FC007B", false, 0],
@@ -94,7 +94,7 @@ const OLD_ADDRESSES = {
   inside_temp_c: ["222613", "746", false, 20],
 };
 
-/* ---------- Das Neue laden ---------- */
+/* ---------- Load the new one ---------- */
 
 function newCharging() {
   const timeframe = {
@@ -112,32 +112,32 @@ function newCharging() {
   return timeframe;
 }
 
-/* ---------- Bytefolgen zum Vergleichen ---------- */
+/* ---------- Byte sequences to compare ---------- */
 
-/* Erst die Grenzfaelle, dann Zufall. Die Grenzfaelle sind die wichtigeren:
- * Dort entscheidet sich, ob eine zu kurze Antwort null ergibt statt einer
- * aus `undefined` gerechneten Zahl. */
+/* First the edge cases, then chance. The edge cases are the more important ones:
+ * that is where it is decided whether a too-short response yields null instead of a
+ * number computed from `undefined`. */
 function probe_sequences() {
   const follow = [];
   for (let n = 0; n <= 20; n += 1) {
-    follow.push(new Array(n).fill(0));                    // alles null
-    follow.push(new Array(n).fill(255));                  // alles gesetzt
-    follow.push(Array.from({ length: n }, (_, i) => i));   // aufsteigend
+    follow.push(new Array(n).fill(0));                    // all zero
+    follow.push(new Array(n).fill(255));                  // all set
+    follow.push(Array.from({ length: n }, (_, i) => i));   // ascending
   }
-  // Der am Fahrzeug gemessene Entladezaehler: 0xF7141E0D auf b12..b15.
+  // The discharge counter measured on the vehicle: 0xF7141E0D on b12..b15.
   const measured = new Array(16).fill(0);
   measured[12] = 0xF7; measured[13] = 0x14;
   measured[14] = 0x1E; measured[15] = 0x0D;
   follow.push(measured);
-  // Der bestaetigte Ladestand: Rohwert 0xB4.
+  // The confirmed state of charge: raw value 0xB4.
   follow.push([0xB4]);
-  // Die Kompressor-Messung "an" aus dem Kommentar in readings.js.
+  // The compressor measurement "on" from the comment in readings.js.
   follow.push([0x51, 0x24, 0xC0, 0x24, 0xC0, 0x0A, 0x3A, 0x0E, 0, 0, 0]);
 
   let seed = 20260912;
   const cube = () => {
-    // Ein fester, einfacher Generator: Der Lauf muss wiederholbar sein,
-    // sonst ist ein roter Lauf morgen wieder gruen.
+    // A fixed, simple generator: the run must be repeatable,
+    // otherwise a red run turns green again tomorrow.
     seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
     return seed % 256;
   };
@@ -148,20 +148,20 @@ function probe_sequences() {
   return follow;
 }
 
-/* `auswerten` im Kern schiebt jeden Wert durch `sauber()`, das undefined
- * und NaN auf null abbildet. Die alten Funktionen gaben fuer eine leere
- * Antwort teils `undefined` zurueck (`b[0]`), die neue Formel gibt null -
- * hinter `sauber` ist das derselbe Wert. Verglichen wird deshalb danach. */
+/* `auswerten` in the core pushes every value through `sauber()`, which maps undefined
+ * and NaN to null. The old functions sometimes returned `undefined` for an empty
+ * response (`b[0]`), the new formula gives null -
+ * behind `sauber` that is the same value. So the comparison is made afterwards. */
 function clean(val) {
   return (val === null || val === undefined || Number.isNaN(val))
     ? null : val;
 }
 
-/* Fliesskomma: `roh / 1310.77 / 1000` und `roh / 1310770` sind mathematisch
- * dasselbe, in doppelter Genauigkeit aber nicht bitgleich. Der Unterschied
- * liegt bei rund 1e-16 relativ - fuer eine Kilowattstunde mit einer
- * Nachkommastelle bedeutungslos. Eine echte Verwechslung von Vorzeichen,
- * Teiler oder Bytelage liegt dagegen um Groessenordnungen daneben. */
+/* Floating point: `roh / 1310.77 / 1000` and `roh / 1310770` are mathematically
+ * the same, but not bit-identical in double precision. The difference
+ * is around 1e-16 relative - meaningless for a kilowatt hour with one
+ * decimal place. A real mix-up of sign,
+ * divisor or byte position, on the other hand, is off by orders of magnitude. */
 function same(a, b) {
   if (a === null || b === null) return a === b;
   if (a === b) return true;
@@ -169,7 +169,7 @@ function same(a, b) {
   return Math.abs(a - b) / denominator < 1e-9;
 }
 
-/* ---------- Lauf ---------- */
+/* ---------- Run ---------- */
 
 function main() {
   const f = newCharging();
@@ -181,13 +181,13 @@ function main() {
     failure += f.joltObd.TABLE_ERROR.length;
   }
 
-  // Die Lesefunktionen stecken im Modul; erreichbar sind sie ueber den
-  // Umweg, den auch die Aufzeichnung geht. Deshalb wird hier direkt auf die
-  // aufgeloeste Tabelle zugegriffen.
+  // The read functions live inside the module; they are reachable via the
+  // detour the recording also takes. That is why the resolved table
+  // is accessed directly here.
   const table = f.window.joltReadings;
   const fields = f.joltObd.FIELDS;
 
-  // 1. Vollstaendigkeit: Kein Wert darf beim Umbau verlorengegangen sein.
+  // 1. Completeness: no value may have been lost in the refactoring.
   const oldNames = Object.keys(OLD).sort();
   const newNames = fields.map((x) => x.name).sort();
   const missing = oldNames.filter((n) => !newNames.includes(n));
@@ -201,7 +201,7 @@ function main() {
     console.log("  NEU (nicht in der Vorgabe): " + surplus.join(", "));
   }
 
-  // 2. Datenkennung, Zieladresse und Takt.
+  // 2. Data identifier, target address and interval.
   console.log("\nDatenkennung, Adresse und Takt:");
   let headerError = 0;
   for (const row of table.vals) {
@@ -225,7 +225,7 @@ function main() {
   console.log(headerError ? `  ${headerError} Abweichung(en)` : "  alle gleich");
   failure += headerError;
 
-  // 3. Die Umrechnungen selbst.
+  // 3. The conversions themselves.
   console.log("\nUmrechnungen gegen die Vorgabe:");
   const follow = probe_sequences();
   const readNew = {};

@@ -15,8 +15,8 @@ router = APIRouter(prefix="/api/saeulen", tags=["ladesäulen"],
 
 @router.get("/bestand")
 def stock(db: Session = Depends(get_db)):
-    """Was ist überhaupt importiert? Die erste Frage, wenn ein Korridor leer
-    bleibt - meist ist es nicht die Suche, sondern die leere Tabelle."""
+    """What has been imported at all? The first question when a corridor
+    stays empty - usually it is not the search but the empty table."""
     per_source = (db.query(models.ChargePoint.source, func.count(models.ChargePoint.id))
                  .group_by(models.ChargePoint.source).all())
     return {"total": sum(count for _, count in per_source),
@@ -27,11 +27,11 @@ def stock(db: Session = Depends(get_db)):
 def along_trip(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
                   min_kw: float = Query(50.0, ge=0),
                   connector_type: str = "", db: Session = Depends(get_db)):
-    """Ladepunkte im Korridor um eine geplante Fahrt.
+    """Charge points in the corridor around a planned trip.
 
-    Sortiert nach Fortschritt entlang der Route, nicht nach Entfernung zum
-    Nutzer - unterwegs ist "wie weit noch bis dahin" die einzige Ordnung,
-    die zählt.
+    Sorted by progress along the route, not by distance from the user - on
+    the road, "how far until I get there" is the only ordering that
+    matters.
     """
     trip = db.get(models.Trip, trip_id)
     if not trip:
@@ -48,15 +48,16 @@ def along_trip(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
             **candidate.as_dict(),
             "occupied_reported": state.source == "meldung",
             "availability": state.source,
-            # Solange niemand weiss, was frei ist, ist die Anzahl der
-            # Ladepunkte die einzige belastbare Aussage über das Risiko,
-            # vor einer belegten Säule zu stehen.
+            # As long as nobody knows what is free, the number of charge
+            # points is the only reliable indication of the risk of
+            # arriving at an occupied charger.
             "redundancy_bonus_min": availability.redundancy_bonus(
                 candidate.charge_point.point_count or 1),
-            # Zugangsbeschränkungen und Freitext der Quelle. Sie stehen hier
-            # roh, weil sie noch nicht ausgewertet werden - aber ein Hinweis
-            # wie "nur für Hotelgäste" ändert die Wahl, und ihn zu haben und
-            # nicht zu zeigen wäre die schlechteste aller Möglichkeiten.
+            # Access restrictions and free text from the source. They are
+            # passed through raw because they are not evaluated yet - but a
+            # hint like "nur für Hotelgäste" (hotel guests only) changes the
+            # choice, and having it without showing it would be the worst
+            # of all options.
             "access": candidate.charge_point.access,
             "membership_required": candidate.charge_point.membership_required,
             "hints": candidate.charge_point.hints or {}})
@@ -67,8 +68,8 @@ def along_trip(trip_id: int, radius_km: float = Query(8.0, gt=0, le=50),
 
 @router.post("/{charge_point_id}/belegt")
 def report_occupied(charge_point_id: int, db: Session = Depends(get_db)):
-    """"Hier ist alles voll" - die einzige Verfügbarkeitsinformation, die
-    wirklich stimmt. Gilt eine halbe Stunde, danach verfällt sie."""
+    """"Everything is full here" - the only availability information that
+    is really reliable. Valid for half an hour, then it expires."""
     if not db.get(models.ChargePoint, charge_point_id):
         raise HTTPException(404, "Ladepunkt nicht gefunden.")
     availability.REPORTS.report(charge_point_id)
@@ -84,11 +85,11 @@ def occupied_revert(charge_point_id: int):
 @router.post("/import/ocm")
 def import_ocm(countries: str = "DE", max_results: int = Query(2000, le=20000),
                min_kw: float = 0.0, db: Session = Depends(get_db)):
-    """Open-Charge-Map-Import anstossen.
+    """Trigger the Open Charge Map import.
 
-    Die Bundesnetzagentur-Datei wird bewusst nicht hier heruntergeladen: Sie
-    ist über 50 MB gross und würde die Anfrage minutenlang blockieren. Dafür
-    gibt es tools/import_bnetza.py.
+    The Bundesnetzagentur file is deliberately not downloaded here: it is
+    over 50 MB and would block the request for minutes. That is what
+    tools/import_bnetza.py is for.
     """
     keyname = os.environ.get("OCM_API_KEY", "")
     if not keyname:

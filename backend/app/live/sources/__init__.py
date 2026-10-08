@@ -1,31 +1,30 @@
-"""Die Grenze zwischen jolt und dem, was im Auto misst.
+"""The boundary between jolt and whatever measures in the car.
 
-Warum eine eigene Schicht, bevor überhaupt eine Quelle angeschlossen ist:
-Ein ELM327-Dongle liest den Ladestand eines MEB-Fahrzeugs nicht über die
-genormten OBD2-PIDs - die sind auf Verbrennungsmotoren gemünzt -, sondern
-über herstellerspezifische UDS-Abfragen. Diese Kenntnis kauft man sich über
-bestehende Software ein, statt sie nachzubauen. Damit steht aber fest, dass
-die Messpunkte in *deren* Format ankommen und nicht in jolts. Welches Format
-das sein wird, hängt an Telefon, App und Dongle und kann sich ändern; dass
-übersetzt werden muss, steht fest.
+Why a layer of its own before any source is even connected: an ELM327 dongle
+does not read the state of charge of an MEB vehicle through the standardised
+OBD2 PIDs - those are tailored to combustion engines - but through
+manufacturer-specific UDS queries. That knowledge is bought in via existing
+software instead of being rebuilt. It does mean, however, that the samples
+arrive in *its* format and not in jolt's. Which format that will be depends on
+phone, app and dongle and may change; that translation is needed is certain.
 
-Deshalb dieselbe Trennung wie bei `routing/provider.py`: Die Übersetzung ist
-eine Datei je Format, und die Nachführung dahinter sieht nur `Rohpunkt`.
+Hence the same separation as with `routing/provider.py`: translation is one
+file per format, and the tracking behind it only sees `RawPoint`.
 
-**Die Übersetzung kennt kein Netz.** Ein Normalisierer bekommt ein fertig
-geparstes Objekt und gibt einen `Rohpunkt` zurück - mehr nicht. Ob dieses
-Objekt aus einem POST an jolt kam, aus einer Antwort auf eine Abfrage bei
-einem fremden Dienst oder aus einer Datei, ist eine Frage des Transports und
-gehört nicht hierher. Das ist der Grund, warum `check_sources.py` ohne Netz,
-ohne Datenbank und ohne Zugangsdaten läuft - und warum sich ein neues Format
-anhand einer aufgezeichneten Antwort einbauen lässt, ohne im Auto zu sitzen.
+**Translation knows no network.** A normalizer gets an already parsed object
+and returns a `RawPoint` - nothing more. Whether that object came from a POST
+to jolt, from the response to a query at a foreign service, or from a file is
+a question of transport and does not belong here. That is why
+`check_sources.py` runs without network, without database and without
+credentials - and why a new format can be built in from a recorded response
+without sitting in the car.
 
-Fremde Daten sind bis zum Beweis des Gegenteils kaputt: fehlende Felder,
-Prozent als Anteil statt als Prozentpunkte, Zeitstempel in Sekunden statt
-Millisekunden, `null` mitten im Datensatz. Ein Normalisierer, der das nicht
-abfängt, verlagert den Fehler nur - er landet dann als 500er im Log oder,
-schlimmer, als stiller Unsinn im Energieprofil. Deshalb wirft jeder von ihnen
-`QuellenFehler` mit einem Satz, der sagt, was fehlte.
+Foreign data is broken until proven otherwise: missing fields, percent as a
+fraction instead of percentage points, timestamps in seconds instead of
+milliseconds, `null` in the middle of a record. A normalizer that does not
+catch this merely relocates the error - it then ends up as a 500 in the log
+or, worse, as silent nonsense in the energy profile. That is why each of them
+raises `SourcesError` with a sentence saying what was missing.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,36 +32,36 @@ from typing import Protocol
 
 
 class SourcesError(ValueError):
-    """Die Meldung war nicht zu verwerten - mit einem Grund im Klartext."""
+    """The message could not be used - with a reason in plain language."""
 
 
 @dataclass
 class RawPoint:
-    """Ein Messpunkt, nachdem er aus einem fremden Format übersetzt wurde.
+    """A sample after it has been translated from a foreign format.
 
-    Bewusst dieselben Felder wie `LivePunkt` - plus zwei, die manche Quellen
-    mitliefern und jolt selbst nicht erheben kann:
+    Deliberately the same fields as `LivePoint` - plus two that some sources
+    deliver and jolt cannot collect itself:
 
-    `zeit` ist der Zeitpunkt der **Messung**, nicht des Eintreffens. Ein
-    Logger, der einen Funkloch-Puffer nachreicht, schickt fünf Punkte auf
-    einmal; ohne diese Angabe lägen sie alle auf derselben Sekunde, und der
-    Zeitfaktor wäre Unsinn.
+    `timestamp` is the time of the **measurement**, not of arrival. A logger
+    that delivers a dead-zone buffer after the fact sends five points at
+    once; without this information they would all land on the same second,
+    and the time factor would be nonsense.
 
-    `laedt` ist die Aussage der Quelle, dass gerade geladen wird.
-    `live/session.py` erkennt Ladepausen heute am steigenden Ladestand, weil
-    ihm nichts Besseres zur Verfügung steht - eine Quelle, die es direkt
-    weiss, ist die bessere Auskunft. Das Feld wird hier mitgeführt, obwohl es
-    noch niemand liest: Ein Übersetzer, der ein Feld des Formats wegwirft,
-    ist ohne Not verlustbehaftet, und die Stelle, an der es gebraucht wird,
-    steht schon fest.
+    `charges` is the source's statement that charging is happening right now.
+    `live/session.py` currently detects charging pauses from a rising state
+    of charge, because it has nothing better available - a source that knows
+    directly is the better authority. The field is carried along here even
+    though nobody reads it yet: a translator that discards a field of the
+    format is lossy without need, and the place where it will be needed is
+    already settled.
 
-    `soc` darf fehlen - dann ist es eine reine Positionsmeldung, und
-    `live/session.py` rechnet den Ladestand aus dem Energieprofil hoch. Für
-    eine *fremde* Quelle ist er trotzdem Pflicht: Ein Logger im Auto, der den
-    Ladestand nicht liefert, hat seinen einzigen Zweck verfehlt, und ihn
-    stillschweigend als Positionsmelder durchzuwinken würde eine kaputte
-    Einrichtung wie eine funktionierende aussehen lassen. Erzwungen wird das
-    deshalb in den Übersetzern, nicht hier.
+    `soc` may be missing - then it is a pure position report, and
+    `live/session.py` extrapolates the state of charge from the energy
+    profile. For a *foreign* source it is mandatory nevertheless: a logger in
+    the car that does not deliver the state of charge has missed its only
+    purpose, and silently waving it through as a position reporter would make
+    a broken setup look like a working one. That is therefore enforced in the
+    translators, not here.
     """
     lat: float
     lon: float
@@ -71,37 +70,38 @@ class RawPoint:
     outside_temp_c: float | None = None
     timestamp: datetime | None = None
     charges: bool | None = None
-    #: Was die Quelle sonst noch lieferte, unverändert. Siehe LivePunkt.
+    #: Whatever else the source delivered, unchanged. See LivePoint.
     raw_values: dict | None = None
 
 
 class Source(Protocol):
-    #: Kurzname, unter dem das Format angesprochen wird ("jolt", "abrp", ...).
+    #: Short name under which the format is addressed ("jolt", "abrp", ...).
     name: str
 
     def normalize(self, records: dict) -> RawPoint:
-        """Eine Meldung dieses Formats in einen `Rohpunkt` übersetzen.
+        """Translate a message of this format into a `RawPoint`.
 
-        Wirft `QuellenFehler`, wenn die Meldung nicht zu verwerten ist. Ein
-        halb ausgefüllter Rohpunkt ist keine Option: Position und Ladestand
-        sind das Minimum, mit dem sich ein Punkt auf die Route legen und
-        gegen das Profil halten lässt.
+        Raises `SourcesError` if the message cannot be used. A half-filled
+        `RawPoint` is not an option: position and state of charge are the
+        minimum with which a point can be placed on the route and held
+        against the profile.
         """
         ...
 
 
 # ---------------------------------------------------------------------------
-# Prüfungen, die jeder Übersetzer braucht
+# Checks every translator needs
 # ---------------------------------------------------------------------------
 
 def num(records: dict, *names: str) -> float | None:
-    """Den ersten vorhandenen Zahlenwert unter mehreren Feldnamen holen.
+    """Get the first available numeric value under several field names.
 
-    Mehrere Namen, weil dasselbe Format je nach Version und Absender anders
-    heisst - `ext_temp` und `extTemp` etwa. Ein `None` oder ein leerer String
-    gilt als "nicht geliefert" und nicht als Null: Aussentemperatur 0 °C und
-    "keine Aussentemperatur" sind zwei verschiedene Aussagen, und sie zu
-    verwechseln heisst im Winter, die Heizung nicht zu rechnen.
+    Several names, because the same format is called differently depending on
+    version and sender - `ext_temp` and `extTemp`, for instance. A `None` or
+    an empty string counts as "not delivered" and not as zero: an outside
+    temperature of 0 °C and "no outside temperature" are two different
+    statements, and confusing them means in winter not accounting for the
+    heating.
     """
     for name in names:
         if name not in records:
@@ -113,9 +113,9 @@ def num(records: dict, *names: str) -> float | None:
             read = float(val)
         except (TypeError, ValueError):
             raise SourcesError(f"Feld {name!r} ist keine Zahl: {val!r}")
-        # NaN kommt aus JSON zwar nicht, aus float("nan") aber sehr wohl - und
-        # es vergiftet jede Rechnung dahinter lautlos, weil jeder Vergleich
-        # damit False ergibt und keine Schranke greift.
+        # NaN does not come out of JSON, but it does come out of
+        # float("nan") - and it silently poisons every calculation behind it,
+        # because every comparison with it yields False and no limit kicks in.
         if read != read:
             raise SourcesError(f"Feld {name!r} ist keine Zahl: {val!r}")
         return read
@@ -138,12 +138,12 @@ def limits(val: float, bottom: float, upper: float, name: str) -> float:
 
 
 def formate() -> dict:
-    """Alle bekannten Formate, nach ihrem Kurznamen.
+    """All known formats, by their short name.
 
-    Die Einfuhr steht in der Funktion und nicht am Kopf der Datei, weil die
-    Übersetzer ihrerseits aus diesem Modul importieren - am Kopf wäre das ein
-    Ringschluss. Ein Aufruf je Meldung ist das nicht wert: Python hält die
-    Module nach der ersten Einfuhr im Speicher.
+    The import is inside the function and not at the top of the file, because
+    the translators in turn import from this module - at the top that would be
+    a circular import. One call per message is not worth worrying about:
+    Python keeps the modules in memory after the first import.
     """
     from .abrp import AbrpFormat
     from .jolt import JoltFormat
@@ -151,11 +151,11 @@ def formate() -> dict:
 
 
 def find(name: str) -> Source:
-    """Den Übersetzer zu einem Formatnamen holen.
+    """Get the translator for a format name.
 
-    Ein unbekannter Name ist ein Einrichtungsfehler und keine kaputte
-    Meldung - deshalb nennt der Text die Formate, die es gibt, statt nur zu
-    sagen, dass dieses es nicht ist.
+    An unknown name is a setup error and not a broken message - that is why
+    the text lists the formats that exist instead of merely saying that this
+    one is not among them.
     """
     known = formate()
     source = known.get((name or "").strip().lower())
@@ -167,11 +167,11 @@ def find(name: str) -> Source:
 
 
 def truth(records: dict, *names: str) -> bool | None:
-    """Ein Ja/Nein-Feld lesen, das als bool, Zahl oder Text ankommen kann.
+    """Read a yes/no field that may arrive as bool, number or text.
 
-    Quellen sind sich hier bemerkenswert uneinig: `true`, `1`, `"1"`, `"true"`
-    und `"yes"` sind alle schon vorgekommen. Was nicht zu deuten ist, gilt als
-    "keine Aussage" - eine geratene Ladeerkennung wäre schlechter als keine.
+    Sources are remarkably inconsistent here: `true`, `1`, `"1"`, `"true"`
+    and `"yes"` have all occurred. Whatever cannot be interpreted counts as
+    "no statement" - a guessed charging detection would be worse than none.
     """
     for name in names:
         if name not in records or records[name] is None:

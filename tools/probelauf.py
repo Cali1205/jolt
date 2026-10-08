@@ -1,37 +1,37 @@
-"""Eine Planung und eine Fahrt durchspielen - so nah am Ernstfall wie möglich.
+"""Play through a planning and a trip - as close to the real thing as possible.
 
-Kein Prüfskript, sondern ein **Probelauf**: Er behauptet nichts, er fährt und
-zeigt, was dabei herauskommt. Der Unterschied ist der Zweck. Ein Prüffall
-sichert, was man schon weiss; dieser Lauf soll finden, woran noch niemand
-gedacht hat - und dafür muss er nah genug am Ernstfall sein, dass die Zahlen
-sprechen: echte Route über ORS, Ladepunkte entlang der Strecke, der ID.Buzz
-mit seinen wirklichen Werten, und Messpunkte, die so hereinkommen wie der
-Dongle sie schickt - samt Ladepause, Funkloch und Werten, die einzeln
-ausfallen.
+Not a check script but a **trial run**: it asserts nothing, it drives and
+shows what comes out. The difference is the purpose. A check case secures
+what is already known; this run is meant to find what nobody has thought of
+yet - and for that it must be close enough to the real thing for the numbers
+to speak: a real route via ORS, charging points along the route, the ID.Buzz
+with its actual values, and measurement points that arrive the way the
+dongle sends them - including charging pause, dead zone and values that
+drop out individually.
 
-Er hat sich gelohnt. Vier Fehler kamen dabei heraus, die keiner der sechs
-Prüfläufe gesehen hatte, weil sie alle mit kurzen Fahrten ohne Ladestopp
-arbeiten: der verfälschte Lernfaktor, die dreistellige Abweichung, die
-Lückenmeldung mit Kilometern der Reststrecke und das Ziel "unterwegs".
+It has paid off. Four errors turned up that none of the six check runs had
+seen, because they all work with short trips without a charging stop: the
+distorted learning factor, the three-digit deviation, the gap message with
+kilometres of the remaining route and the destination "unterwegs".
 
     ORS_API_KEY=... python tools/probelauf.py
 
-Ohne Schlüssel läuft er auch, dann aber gegen eine Luftlinie - und eine
-Luftlinie hat keine Tunnel, keine Ausfahrten und keine Höhen. Der Lauf sagt
-das oben selbst.
+Without a key it also runs, but then against a straight line - and a
+straight line has no tunnels, no exits and no elevation. The run says so
+itself at the top.
 
-**Wegwerf-Datenbank.** Die echte bleibt unangetastet; das Skript legt sich
-eine eigene SQLite-Datei an.
+**Throwaway database.** The real one stays untouched; the script creates
+its own SQLite file.
 
-Zu lesen ist die Ausgabe von unten nach oben: Was unter "Befunde" steht, ist
-das, was nicht stimmt. Alles darüber ist Beleg.
+The output is to be read from bottom to top: what is under "Befunde"
+(findings) is what is wrong. Everything above it is evidence.
 """
 import os
 import sys
 import tempfile
 
-# Lokal liegt das Paket unter backend/app, im Docker-Image direkt neben
-# tools/ als app/ - dasselbe Muster wie in den Import-Werkzeugen daneben.
+# Locally the package lives under backend/app, in the Docker image directly
+# next to tools/ as app/ - the same pattern as in the import tools beside it.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _candidate in (os.path.join(_HERE, "..", "backend"),
                   os.path.join(_HERE, "..")):
@@ -41,8 +41,8 @@ for _candidate in (os.path.join(_HERE, "..", "backend"),
 _db = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_db.name}"
 os.environ.pop("APP_PASSWORT", None)
-# ORS_API_KEY bleibt bewusst stehen: Eine Luftlinie hat keine Tunnel, keine
-# Ausfahrten und keine Höhen - genau das, woran sich Fehler zeigen.
+# ORS_API_KEY deliberately stays: a straight line has no tunnels, no exits
+# and no elevation - exactly what errors show up against.
 
 from datetime import UTC, datetime, timedelta     # noqa: E402
 
@@ -69,7 +69,7 @@ client = TestClient(app)
 
 
 def create_buzz():
-    """Der ID.Buzz mit den korrigierten Werten."""
+    """The ID.Buzz with the corrected values."""
     response = client.post("/api/fahrzeuge", json={
         "name": "ID.Buzz Pro (Sim)", "curb_mass_kg": 2400.0,
         "payload_kg": 150.0, "c_w": 0.29,
@@ -87,7 +87,7 @@ def create_buzz():
 
 
 def charge_points_scatter(geo, spacing_km=45.0):
-    """Ladepunkte entlang der echten Route, mit unterschiedlichen Parks."""
+    """Charging points along the real route, with different parks."""
     db = SessionLocal()
     try:
         km, upcoming, i = 0.0, spacing_km, 0
@@ -113,7 +113,7 @@ def charge_points_scatter(geo, spacing_km=45.0):
 
 
 # ---------------------------------------------------------------------------
-# 1. Planung
+# 1. Planning
 # ---------------------------------------------------------------------------
 
 say("1. Planung: Hamburg → München mit dem ID.Buzz")
@@ -174,7 +174,7 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# 2. Die geplante Fahrt abfahren
+# 2. Drive the planned trip
 # ---------------------------------------------------------------------------
 
 say("2. Live-Fahrt: die geplante Strecke abfahren")
@@ -203,15 +203,15 @@ def point_at_km(target_km):
 
 total_km = profile[-1]["km"]
 states = []
-extra_consumption = 1.18          # 18 % mehr als gerechnet - Winter, beladen
+extra_consumption = 1.18          # 18 % more than calculated - winter, loaded
 last_km = 0.0
 report_error_at = 0
 
-# **Dem Plan folgen, also auch laden.** Ohne das faellt der Ladestand
-# ungebremst bis zum Anschlag, und was dann herauskommt, sagt etwas ueber die
-# Simulation und nichts ueber jolt. Gefahren wird zwischen den Stopps mit dem
-# Mehrverbrauch; an jedem Stopp steigt der Ladestand auf den geplanten
-# Abfahrtswert.
+# **Follow the plan, which includes charging.** Without it the state of
+# charge falls unchecked to the stop, and what then comes out says something
+# about the simulation and nothing about jolt. Between the stops the trip is
+# driven with the excess consumption; at each stop the state of charge rises
+# to the planned departure value.
 stops = sorted(start_plan.get("stops") or [],
                 key=lambda x: x["km_on_route"])
 next_stop = 0
@@ -221,10 +221,10 @@ previous_plan = profile[0]["soc"]
 for step in range(1, 41):
     target_km = total_km * step / 40.0
     p = point_at_km(target_km)
-    # Verbrauch seit dem letzten Messpunkt, um den Mehrverbrauch gestreckt.
+    # Consumption since the last measurement point, stretched by the excess consumption.
     soc -= (previous_plan - p["soc"]) * extra_consumption
     previous_plan = p["soc"]
-    # Ladestopps, die auf diesem Stueck lagen.
+    # Charging stops that lay on this stretch.
     while (next_stop < len(stops)
            and stops[next_stop]["km_on_route"] <= target_km):
         soc = stops[next_stop]["departure_soc"]
@@ -280,7 +280,7 @@ if states:
 
 
 # ---------------------------------------------------------------------------
-# 3. Aufzeichnung, so wie der Dongle sie schickt
+# 3. Recording, the way the dongle sends it
 # ---------------------------------------------------------------------------
 
 say("3. Aufzeichnung: wie obd.js sie fährt - mit Ladepause und Funkloch")
@@ -299,13 +299,14 @@ try:
 finally:
     db.close()
 
-# 90 Minuten fahren, dann 45 Minuten laden, dann weiter - im 30-Sekunden-Takt
-# wären das tausende Punkte; hier alle zwei Minuten, das reicht fürs Verhalten.
+# Driving 90 minutes, then charging 45 minutes, then on - at a 30-second
+# interval that would be thousands of points; here every two minutes, which
+# is enough for the behaviour.
 lat, lon = 48.10, 11.50
 soc = 82.0
-# Der Kilometerstand des Fahrzeugs. Er zaehlt die **gefahrene** Strecke, also
-# 0,0135 Grad Breite je Schritt (rund 1,5 km) plus einen Zuschlag fuer die
-# Kurven, die zwischen zwei Messpunkten liegen und die kein Punkt sieht.
+# The vehicle odometer. It counts the **driven** distance, so
+# 0.0135 degrees of latitude per step (about 1.5 km) plus a surcharge for the
+# curves that lie between two measurement points and that no point sees.
 odometer_km = 12800.0
 CURVE_SURCHARGE = 1.25
 now_ts = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=200)
@@ -314,25 +315,25 @@ phase_log = []
 
 for minute in range(0, 200, 2):
     timestamp = now_ts + timedelta(minutes=minute)
-    if minute < 90:                    # fahren
+    if minute < 90:                    # driving
         lat += 0.0135
         odometer_km += 1.5 * CURVE_SURCHARGE
         soc -= 0.55
         phase = "fahrt"
         velocity = 115.0
-    elif minute < 135:                 # laden, das Auto steht
+    elif minute < 135:                 # charging, the car stands still
         soc = min(80.0, soc + 1.5)
         phase = "laden"
         velocity = 0.0
-    elif minute < 150:                 # Funkloch - es kommt nichts herein
-        # Gefahren wird trotzdem: Das Auto bewegt sich, der Zaehler laeuft,
-        # nur die Meldung geht nicht raus. Genau die Luecke, die der
-        # Kilometerstand hinterher wieder schliesst.
+    elif minute < 150:                 # dead zone - nothing comes in
+        # Driving continues regardless: the car moves, the counter runs, only the
+        # message does not go out. Exactly the gap that the odometer closes
+        # afterwards.
         lat += 0.0135
         odometer_km += 1.5 * CURVE_SURCHARGE
         soc -= 0.55
         continue
-    else:                              # weiterfahren
+    else:                              # keep driving
         lat += 0.0135
         odometer_km += 1.5 * CURVE_SURCHARGE
         soc -= 0.55
@@ -342,7 +343,7 @@ for minute in range(0, 200, 2):
     raw = {"soc_raw": int(soc * 2.5), "voltage_v": 392.0,
            "current_a": -120.0 if phase == "laden" else 48.0,
            "speed_kmh": velocity, "outside_temp_c": 4.0, "inside_temp_c": 21.0}
-    if minute % 10 == 0:               # nicht jede Runde antwortet alles
+    if minute % 10 == 0:               # not every round answers everything
         raw["aux_load_kw"] = 2.1
         raw["odometer_km"] = round(odometer_km)
     else:
@@ -360,8 +361,8 @@ for minute in range(0, 200, 2):
         points_ok += 1
         phase_log.append((phase, response.json()))
 
-    # Der Zeitstempel wird vom Server gesetzt; für die Ladepausen-Erkennung
-    # muss er stimmen, also nachziehen.
+    # The timestamp is set by the server; for the charging-pause detection it
+    # must be right, so adjust it afterwards.
     db = SessionLocal()
     try:
         s = db.get(models.LiveSession, on_id)
@@ -373,7 +374,7 @@ for minute in range(0, 200, 2):
 
 print(f"  {points_ok} Punkte angenommen, {points_error} abgelehnt")
 
-# Erkennt das Aufräumen die Ladepause? Der letzte Punkt ist 200 min alt.
+# Does the clean-up recognise the charging pause? The last point is 200 min old.
 from app.energy import charge_phases                 # noqa: E402
 from app.live import cleanup                    # noqa: E402
 
@@ -403,7 +404,7 @@ else:
         finding(f"Die Aufzeichnung liess sich nicht abschliessen: "
                f"{built.get('reason')}", "FEHLER")
     else:
-        # Gefahren wurden rund 2 x 45 Minuten a 115 km/h ~ 170 km Luftlinie.
+        # Driven were about 2 x 45 minutes at 115 km/h ~ 170 km as the crow flies.
         if not (80.0 < built["distance_km"] < 400.0):
             finding(f"Rekonstruierte Strecke {built['distance_km']} km passt "
                    f"nicht zum Gefahrenen", "FEHLER")
@@ -413,8 +414,8 @@ else:
             finding(f"Gemessene Aussentemperatur ging verloren: "
                    f"{built.get('outside_temp_c')} statt 4.0", "FEHLER")
 
-    # Die Ladepause darf den gelernten Faktor nicht verderben: 45 Minuten
-    # Stillstand mit steigendem Ladestand sind kein Verbrauch.
+    # The charging pause must not spoil the learned factor: 45 minutes of
+    # standstill with a rising state of charge are not consumption.
     if e.get("learned"):
         raw_factor = e["learned"]["raw_factor"]
         print(f"  Rohfaktor der Fahrt: {raw_factor}")
@@ -423,10 +424,10 @@ else:
                    f"Ladepause wird vermutlich als Verbrauch gerechnet",
                    "FEHLER")
 
-# Die zusammengefuehrte Ladeerkennung an der echten Messreihe nachrechnen.
-# **Nach** dem Abschliessen: Bei einer Aufzeichnung tragen die Messpunkte
-# erst dann einen Kilometerstand - vorher gibt es keine Strecke, auf die
-# man sie legen koennte.
+# Re-calculate the merged charge detection on the real measurement series.
+# **After** closing: in a recording the measurement points only then carry an
+# odometer reading - before that there is no distance on which they could be
+# placed.
 db = SessionLocal()
 try:
     s = db.get(models.LiveSession, on_id)
@@ -445,7 +446,7 @@ try:
 finally:
     db.close()
 
-# Die Fahrt in der Historie
+# The trip in the history
 db = SessionLocal()
 try:
     trip = db.get(models.Trip, uphill["trip_id"])

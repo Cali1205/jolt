@@ -1,15 +1,15 @@
-/* Eine kleine Schiebekarte auf einem Canvas.
+/* A small pannable map on a canvas.
  *
- * Warum selbst gebaut statt einer Kartenbibliothek: Gebraucht werden
- * Kacheln, eine Linie, ein paar Marker und Zoomen mit Ziehen. Dafür eine
- * Bibliothek einzubinden hiesse, sie mit ins Repo zu legen (kein CDN, das
- * verbietet die Content-Security-Policy) und dauerhaft zu pflegen - für
- * einen Bruchteil ihres Funktionsumfangs. Das hier sind zweihundert Zeilen,
- * die man versteht.
+ * Why built in-house instead of a map library: what is needed is
+ * tiles, a line, a few markers and zooming by dragging. Including a
+ * library for that would mean putting it into the repo (no CDN, the
+ * Content-Security-Policy forbids it) and maintaining it for good - for
+ * a fraction of its feature set. This is two hundred lines
+ * that you understand.
  *
- * Kacheln kommen vom OSM-Tileserver. Das ist für eine selbstgehostete
- * Instanz mit einer Handvoll Aufrufe in Ordnung; die Namensnennung steht
- * unter der Karte, weil sie verlangt ist.
+ * Tiles come from the OSM tile server. That is fine for a self-hosted
+ * instance with a handful of requests; the attribution is shown
+ * below the map because it is required.
  */
 window.joltMap = (function () {
   "use strict";
@@ -22,11 +22,11 @@ window.joltMap = (function () {
     route: "#ffc93c", routeEdge: "#00000066",
     start: "#57c98a", destination: "#7c9cc4", reserve: "#e2596a",
     charger: "#e6ebf0", chargerOccupied: "#e2596a", auto: "#ffffff",
-    // Geplante Stopps heben sich von den übrigen Ladepunkten ab: Auf der
-    // Karte ist die Frage nicht "wo gibt es Säulen", sondern "wo halte ich".
-    // Eigener Farbton, nicht das Grün des Starts - sonst ist auf einer
-    // herausgezoomten Strecke nicht zu sehen, wo die Fahrt beginnt und wo
-    // der erste Halt liegt.
+    // Planned stops stand out from the other charge points: on the
+    // map the question is not "where are chargers" but "where do I stop".
+    // Own hue, not the green of the start - otherwise on a zoomed-out
+    // route you cannot see where the trip begins and where the first
+    // stop is.
     stop: "#b48ef0",
   };
 
@@ -35,13 +35,13 @@ window.joltMap = (function () {
   let route = [], marker = [];
   const tiles = new Map();       // "z/x/y" -> Image
   let drawPlanned = false;
-  // Folgt die Ansicht dem Inhalt (Strecke, Auto, Stopps)? Gilt, bis jemand die
-  // Karte anfasst: Wer verschiebt, will sie nicht von der naechsten Meldung
-  // zurueckgeholt bekommen.
+  // Does the view follow the content (route, car, stops)? Holds until someone
+  // touches the map: anyone who pans does not want it pulled back by the
+  // next update.
   let follow = true;
   let fitButton = null;
 
-  /* ---------- Projektion (Web Mercator) ---------- */
+  /* ---------- Projection (Web Mercator) ---------- */
 
   function pastWorld(lat, lon, z) {
     const n = TILE * Math.pow(2, z);
@@ -66,7 +66,7 @@ window.joltMap = (function () {
     return { x: p.x - m.x + extent / 2, y: p.y - m.y + elevation / 2 };
   }
 
-  /* ---------- Kacheln ---------- */
+  /* ---------- Tiles ---------- */
 
   function fetchTile(z, x, y) {
     const keyname = `${z}/${x}/${y}`;
@@ -75,12 +75,12 @@ window.joltMap = (function () {
     const picture = new Image();
     picture.decoding = "async";
     picture.onload = () => drawLater();
-    // Ein Fehlschlag darf nicht dazu führen, dass ewig nachgeladen wird.
+    // A failure must not lead to endless reloading.
     picture.onerror = () => { picture.failed = true; };
     picture.src = TILE_URL(z, x, y);
     tiles.set(keyname, picture);
 
-    // Der Cache wächst sonst über eine lange Sitzung unbegrenzt.
+    // Otherwise the cache grows without limit over a long session.
     if (tiles.size > 400) {
       const oldest = tiles.keys().next().value;
       tiles.delete(oldest);
@@ -88,11 +88,11 @@ window.joltMap = (function () {
     return picture;
   }
 
-  /* Solange eine Kachel lädt, steht an ihrer Stelle ein Ausschnitt der
-   * gröberen Kachel darüber - unscharf, aber da. Ohne das bleibt beim Zoomen
-   * und Ziehen die Fläche leer, bis das Netz geantwortet hat, und die Karte
-   * "springt" von weiss zu Inhalt. Nur was schon im Speicher liegt wird
-   * genommen; geladen wird dafür nichts. */
+  /* While a tile is loading, a section of the coarser tile above it takes its
+   * place - blurry, but there. Without it the area stays empty while zooming
+   * and dragging until the network has answered, and the map
+   * "jumps" from white to content. Only what is already in memory is
+   * used; nothing is loaded for this. */
   function drawFallback(z, x, y, sx, sy, dimension) {
     for (let dz = 1; dz <= 3 && z - dz >= 0; dz++) {
       const px = Math.floor(x / Math.pow(2, dz));
@@ -124,7 +124,7 @@ window.joltMap = (function () {
     for (let x = fromX; x <= untilX; x++) {
       for (let y = fromY; y <= untilY; y++) {
         if (y < 0 || y >= count) continue;
-        const xCirculation = ((x % count) + count) % count;   // Datumsgrenze
+        const xCirculation = ((x % count) + count) % count;   // date line
         const picture = fetchTile(z, xCirculation, y);
         const sx = (x * TILE - leftTop.x) * zoom_scale;
         const sy = (y * TILE - leftTop.y) * zoom_scale;
@@ -132,14 +132,14 @@ window.joltMap = (function () {
           drawFallback(z, xCirculation, y, sx, sy, dimension);
           continue;
         }
-        // Ein halber Pixel Überlappung: sonst blitzen zwischen den Kacheln
-        // haarfeine Linien durch, wenn der Massstab nicht ganzzahlig ist.
+        // Half a pixel of overlap: otherwise hairline gaps flash between the
+        // tiles when the scale is not an integer.
         pen.drawImage(picture, sx, sy, dimension + 0.5, dimension + 0.5);
       }
     }
   }
 
-  /* ---------- Inhalte ---------- */
+  /* ---------- Content ---------- */
 
   function drawRoute() {
     if (route.length < 2) return;
@@ -185,7 +185,7 @@ window.joltMap = (function () {
     }
   }
 
-  /* ---------- Zeichnen ---------- */
+  /* ---------- Drawing ---------- */
 
   function adjustSize() {
     const ratio = window.devicePixelRatio || 1;
@@ -213,27 +213,27 @@ window.joltMap = (function () {
     requestAnimationFrame(() => { drawPlanned = false; draw(); });
   }
 
-  /* ---------- Bedienung ---------- */
+  /* ---------- Interaction ---------- */
 
-  /* Eine Geste, egal ob ein, zwei oder drei Finger: Schwerpunkt und Abstand
-   * der Finger werden von Schritt zu Schritt verglichen.
+  /* One gesture, whether one, two or three fingers: centroid and distance
+   * of the fingers are compared from step to step.
    *
-   *  - Der Schwerpunkt wandert: die Karte wandert mit (Ziehen, und Ziehen mit
-   *    zwei Fingern).
-   *  - Der Abstand ändert sich: gezoomt wird **um den Schwerpunkt**, so dass
-   *    der Punkt unter den Fingern unter den Fingern bleibt.
+   *  - The centroid moves: the map moves with it (dragging, and dragging with
+   *    two fingers).
+   *  - The distance changes: zoom happens **around the centroid**, so that
+   *    the point under the fingers stays under the fingers.
    *
-   * Frueher stand hier ein Zweig fuer einen Finger und einer fuer zwei. Beim
-   * Wechsel dazwischen - ein Finger hebt sich nach dem Kneifen - galt noch die
-   * Fingerposition von vor dem Kneifen, und der naechste Schritt schob die
-   * Karte um die ganze Strecke dazwischen: der Sprung. Gezoomt wurde ausserdem
-   * um die Kartenmitte, nicht um die Finger, so dass der Inhalt unter ihnen
-   * wegwanderte. Hier gibt es keinen Zweig: Jedes Hinzukommen und Wegfallen
-   * eines Fingers beginnt die Geste neu (`bezug`), und ein Schritt rechnet nur
-   * gegen den Schritt davor. */
+   * Earlier there was a branch here for one finger and one for two. When
+   * switching between them - one finger lifts after pinching - the finger
+   * position from before the pinch still applied, and the next step shoved
+   * the map by the whole distance in between: the jump. Zooming was also
+   * around the map centre, not around the fingers, so the content under
+   * them drifted away. Here there is no branch: every finger added or
+   * removed restarts the gesture (`reference`), and a step computes only
+   * against the step before. */
   function controlsSetUp() {
     const pointer = new Map();
-    let reference = null;          // {x, y, abstand} beim letzten Schritt
+    let reference = null;          // {x, y, spacing} at the last step
 
     function local(e) {
       const r = canvas.getBoundingClientRect();
@@ -251,7 +251,7 @@ window.joltMap = (function () {
 
     canvas.addEventListener("pointerdown", (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      try { canvas.setPointerCapture(e.pointerId); } catch (f) { /* schon weg */ }
+      try { canvas.setPointerCapture(e.pointerId); } catch (f) { /* already gone */ }
       pointer.set(e.pointerId, local(e));
       reference = placement();
       setFollow(false);
@@ -269,9 +269,9 @@ window.joltMap = (function () {
       reference = now_ts;
     });
 
-    // Ein Zeiger, der verloren geht, ohne dass `pointerup` kommt (eine
-    // Systemgeste von iOS, ein Anruf), bliebe sonst fuer immer in der Liste:
-    // Die Karte hielte einen Finger fuer gedrueckt und bliebe im Zoommodus.
+    // A pointer that is lost without `pointerup` arriving (a system gesture of
+    // iOS, a phone call) would otherwise stay in the list forever: the map would
+    // consider a finger pressed and stay in zoom mode.
     const release = (e) => {
       if (!pointer.delete(e.pointerId)) return;
       reference = placement();
@@ -283,8 +283,8 @@ window.joltMap = (function () {
 
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
-      // Proportional zum Rad: Eine Maus rastet in 100er-Schritten (0,4 Stufen),
-      // ein Trackpad liefert viele kleine, und Kneifen darauf kommt mit ctrlKey.
+      // Proportional to the wheel: a mouse clicks in steps of 100 (0.4 levels),
+      // a trackpad delivers many small ones, and pinching on it comes with ctrlKey.
       const factor = e.deltaMode === 1 ? 0.05 : (e.ctrlKey ? 0.01 : 0.004);
       const delta = Math.max(-1, Math.min(1, -e.deltaY * factor));
       setFollow(false);
@@ -297,15 +297,15 @@ window.joltMap = (function () {
     if (!dx && !dy) return;
     const n = TILE * Math.pow(2, zoom);
     const m = pastWorld(middle.lat, middle.lon, zoom);
-    // Nicht ueber den Rand der Welt hinaus: Dort gibt es keine Kacheln, und
-    // die Projektion liefert fuer y ausserhalb von [0, n] unsinnige Breiten.
+    // Not beyond the edge of the world: there are no tiles there, and
+    // the projection gives nonsensical latitudes for y outside [0, n].
     const y = Math.max(0, Math.min(n, m.y + dy));
     middle = pastGeo(m.x + dx, y, zoom);
     drawLater();
   }
 
-  /* Zoomen um einen Punkt auf der Leinwand (Pixel): Der Ort unter diesem
-   * Punkt liegt danach wieder darunter. */
+  /* Zoom around a point on the canvas (pixels): the place under this
+   * point lies under it again afterwards. */
   function zoomAround(delta, sx, sy) {
     const fresh = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + delta));
     if (fresh === zoom) return;
@@ -320,14 +320,14 @@ window.joltMap = (function () {
     drawLater();
   }
 
-  /* ---------- Auf den Inhalt passen ---------- */
+  /* ---------- Fit to content ---------- */
 
-  // Was die Ansicht zeigen soll: die Strecke, und von den Markern alles, was
-  // zur Fahrt gehoert. Ladesaeulen am Rand nicht - sie wuerden die Karte auf
-  // Land und Leute herauszoomen.
+  // What the view should show: the route, and of the markers everything that
+  // belongs to the trip. Charging stations at the edge do not - they would zoom
+  // the map out to the whole countryside.
   const MARKER_FOR_VIEW = ["auto", "start", "ziel", "stopp", "reserve"];
   const EDGE_PX = 36;
-  // Unter diesem Anteil der Ansicht ist der Inhalt zu klein, um ihn dort zu lassen.
+  // Below this share of the view the content is too small to leave it there.
   const MIN_SHARE = 0.35;
 
   function contentPoints() {
@@ -338,20 +338,20 @@ window.joltMap = (function () {
     return points.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
   }
 
-  /* Die Ansicht so waehlen, dass der Inhalt hineinpasst.
+  /* Choose the view so that the content fits.
    *
-   * `erzwingen`: immer neu waehlen. Sonst nur, wenn es noetig ist - der
-   * Inhalt ragt aus der Ansicht, oder er fuellt weniger als ein Drittel davon.
-   * Dazwischen bleibt die Ansicht stehen: Waechst die Spur einer Aufzeichnung,
-   * soll die Karte nicht bei jeder Meldung ein wenig zoomen und wandern. */
+   * `force`: always choose anew. Otherwise only when needed - the
+   * content sticks out of the view, or fills less than a third of it.
+   * In between the view stays put: when the trace of a recording grows,
+   * the map should not zoom and drift a little with every update. */
   function contentFit(force) {
     if (!canvas || !follow) return;
     const extent = canvas.clientWidth, elevation = canvas.clientHeight;
-    if (extent < 50 || elevation < 50) return;      // versteckt: spaeter noch einmal
+    if (extent < 50 || elevation < 50) return;      // hidden: try again later
     const points = contentPoints();
     if (!points.length) return;
 
-    // Umrandung in Weltkoordinaten der Stufe 0: dort ist Mercator linear.
+    // Bounding box in world coordinates of level 0: Mercator is linear there.
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const [lat, lon] of points) {
       const w = pastWorld(lat, lon, 0);
@@ -369,19 +369,19 @@ window.joltMap = (function () {
       const inside = left_side >= EDGE_PX / 2 && right <= extent - EDGE_PX / 2
         && upper >= EDGE_PX / 2 && bottom <= elevation - EDGE_PX / 2;
       const share = Math.max(w0 * f / visibleB, h0 * f / visibleH);
-      // Ein einzelner Punkt (Beginn einer Aufzeichnung) hat keine Ausdehnung:
-      // da genuegt es, wenn er im Bild ist.
+      // A single point (start of a recording) has no extent:
+      // it suffices for it to be in the picture.
       if (inside && (share >= MIN_SHARE || (w0 === 0 && h0 === 0))) return;
     }
 
     let fresh;
     if (w0 < 1e-9 && h0 < 1e-9) {
-      fresh = 15;                                  // ein Punkt: Strassenebene
+      fresh = 15;                                  // one point: street level
     } else {
       const factor = Math.min((extent - 2 * EDGE_PX) / Math.max(w0, 1e-9),
                               (elevation - 2 * EDGE_PX) / Math.max(h0, 1e-9));
-      // In Viertelstufen abrunden: stabil gegen das Hin und Her bei jeder
-      // Kleinigkeit, und die Strecke passt sicher hinein.
+      // Round down to quarter levels: stable against the back and forth on every
+      // little thing, and the route surely fits in.
       fresh = Math.floor(Math.log2(factor) * 4) / 4;
     }
     zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fresh));
@@ -392,7 +392,7 @@ window.joltMap = (function () {
 
   function showButton() {
     if (!fitButton) return;
-    // Nur anbieten, wenn es etwas zu zeigen gibt und die Ansicht nicht schon folgt.
+    // Only offer it if there is something to show and the view is not already following.
     fitButton.hidden = follow || contentPoints().length === 0;
   }
 
@@ -420,7 +420,7 @@ window.joltMap = (function () {
     holder.appendChild(fitButton);
   }
 
-  /* ---------- Öffentlich ---------- */
+  /* ---------- Public ---------- */
 
   function create(id) {
     canvas = document.getElementById(id);
@@ -428,8 +428,8 @@ window.joltMap = (function () {
     pen = canvas.getContext("2d");
     controlsSetUp();
     buttonSetUp();
-    // Eine andere Breite (Drehen, Umhaengen in eine andere Ansicht) ist ein
-    // anderer Ausschnitt: Folgt die Karte dem Inhalt, passt sie neu.
+    // A different width (rotating, moving to another view) is a different
+    // section: if the map follows the content, it fits anew.
     window.addEventListener("resize", drawNew);
     drawLater();
     return true;
@@ -442,14 +442,14 @@ window.joltMap = (function () {
 
   function setRoute(geometry) {
     const fresh = geometry || [];
-    // Eine kuerzere Strecke als zuvor ist eine neue (andere Fahrt, andere
-    // Planung): Dort beginnt das Folgen von vorn, auch wenn die vorige
-    // Ansicht von Hand verschoben wurde. Eine wachsende Spur bleibt, wie sie ist.
+    // A shorter route than before is a new one (different trip, different
+    // planning): following begins afresh there, even if the previous view
+    // was panned by hand. A growing trace stays as it is.
     const newTrip = fresh.length < route.length || route.length === 0;
     if (newTrip) setFollow(true);
     route = fresh;
-    // Eine neue Strecke wird immer neu eingepasst; sonst bliebe ihr erster
-    // Punkt in der weiten Ansicht der vorigen stehen.
+    // A new route is always fitted anew; otherwise its first point would
+    // stay put in the wide view of the previous one.
     contentFit(newTrip);
     showButton();
     drawLater();
@@ -462,8 +462,8 @@ window.joltMap = (function () {
     drawLater();
   }
 
-  /** Zoom und Mitte so waehlen, dass die ganze Route hineinpasst - und die
-   *  Ansicht folgt dem Inhalt wieder. */
+  /** Choose zoom and centre so that the whole route fits - and the
+   *  view follows the content again. */
   function onRouteFit() {
     if (!canvas || route.length < 2) return;
     setFollow(true);
@@ -479,8 +479,8 @@ window.joltMap = (function () {
 
   return { create, setRoute, setMarker, onRouteFit, onPoint,
            drawNew,
-           // Fuer die Pruefung (tools/check_map.js): Ansicht lesen und einen
-           // Punkt in Pixel umrechnen.
+           // For the check (tools/check_map.js): read the view and convert a
+           // point to pixels.
            view: () => ({ middle: { ...middle }, zoom }),
            pastScreen };
 })();

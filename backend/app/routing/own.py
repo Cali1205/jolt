@@ -1,67 +1,67 @@
-"""Gefahrene Strecken als Routenkandidaten.
+"""Driven routes as route candidates.
 
-**Warum.** Für ein Elektroauto ist die schnellste Strasse nicht automatisch die
-beste, und die Alternativen, die sich rechnen lassen, taugen nichts: Auf der
-Messstrecke Mâcon - Reutlingen verlor jeder der zwölf geometrisch erzeugten
-Umwege gegen die schnellste Route (siehe `variants.py`). Die Route, die
-tatsächlich gewann - 59 km kürzer, 13 Minuten länger, unterm Strich 2 bis 5 €
-billiger -, kam aus **zwei Punkten der wirklich gefahrenen Strecke**.
-Erfahrung schlägt Geometrie: Wer eine Strecke schon gefahren ist, kennt einen
-Weg, den kein Kantengewicht kennt.
+**Why.** For an electric car the fastest road is not automatically the best,
+and the alternatives that can be computed are no good: on the measured route
+Mâcon - Reutlingen, each of the twelve geometrically generated detours lost
+against the fastest route (see `variants.py`). The route that actually won -
+59 km shorter, 13 minutes longer, 2 to 5 EUR cheaper overall - came from
+**two points of the route actually driven**. Experience beats geometry:
+whoever has driven a route before knows a way that no edge weight knows.
 
-**Was hier passiert.** Aus den Messpunkten einer früheren Fahrt (egal ob
-aufgezeichnet oder geplant und gefahren) wird ein Pfad. Passt er zu Start und
-Ziel der neuen Anfrage - vorwärts oder rückwärts, ganz oder als Teilstück -,
-werden Zwischenpunkte entlang des Pfads gewählt. Das Routing fährt sie ab; was
-dabei herauskommt, ist eine Strasse und keine Luftlinie.
+**What happens here.** A path is built from the measurement points of an
+earlier trip (whether recorded or planned and driven). If it fits the start
+and destination of the new request - forward or backward, in full or as a
+partial section - waypoints are chosen along the path. The routing drives
+through them; what comes out is a road and not a straight line.
 
-Dieses Modul kennt weder Datenbank noch Netz. Es nimmt Punktlisten und gibt
-Punktlisten zurück - deshalb lässt es sich ohne beides prüfen.
+This module knows neither database nor network. It takes lists of points and
+returns lists of points - so it can be tested without either.
 """
 from dataclasses import dataclass
 
 from ..geo import haversine_m
 
-# Wie nah Start und Ziel der Anfrage am Pfad liegen müssen. Als Anteil der
-# Luftlinie, mit Ober- und Untergrenze: Auf 600 km sind 24 km "dasselbe
-# Ziel", auf 30 km wären es zwei Stadtteile zu viel.
+# How close the start and destination of the request must be to the path.
+# As a share of the straight-line distance, with upper and lower limits: on
+# 600 km, 24 km is "the same destination"; on 30 km it would be two city
+# districts too many.
 #
-# Die Obergrenze ist an einer echten Fahrt gemessen: Die Aufzeichnung der
-# Fahrt Gueugnon - Reutlingen beginnt 15,7 km nach dem geplanten Start, weil
-# erst nach der Abfahrt losgedrückt wurde. Das ist der Normalfall, nicht die
-# Ausnahme - und mit 15 km Obergrenze wäre genau diese Fahrt durchgefallen.
-# Das Stück bis zum Pfad legt das Routing selbst zurück.
+# The upper limit was measured on a real trip: the recording of the trip
+# Gueugnon - Reutlingen starts 15.7 km after the planned start because
+# recording was only started after departure. That is the normal case, not
+# the exception - and with a 15 km upper limit exactly this trip would have
+# failed. The routing itself covers the stretch up to the path.
 RADIUS_SHARE = 0.04
 RADIUS_MIN_KM = 3.0
 RADIUS_MAX_KM = 30.0
 
-# Der Abschnitt des Pfads muss die Anfrage überhaupt abdecken. Ein Pfad, der
-# nur ein Zehntel der Strecke deckt, ist kein Kandidat, sondern ein Zufall.
+# The path section has to cover the request at all. A path that covers only
+# a tenth of the route is not a candidate but a coincidence.
 MIN_COVERAGE = 0.7
 
-# Abstand der Zwischenpunkte entlang des Pfads. Dichter heisst, dass das
-# Routing der gefahrenen Strasse genauer folgt, aber jede Zwischenstation ist
-# eine Stelle, an der es hängenbleiben kann; weiter auseinander lässt ihm
-# Raum, den Weg selbst zu wählen. 25 km sind ein Stück Autobahn.
+# Spacing of the waypoints along the path. Denser means the routing follows
+# the driven road more closely, but every waypoint is a place where it can
+# get stuck; further apart leaves it room to choose the way itself. 25 km is
+# a stretch of motorway.
 SPACING_KM = 25.0
 
-# Ein Routing-Aufruf nimmt nur eine begrenzte Zahl von Zwischenpunkten an.
+# A routing call accepts only a limited number of waypoints.
 MAX_WAYPOINTS = 20
 
-# Punkte unter diesem Tempo sind Pausen, Ladeplätze und Parkplätze. Als
-# Zwischenpunkt zwängen sie die Route zu einem Abstecher von der Strasse
-# weg - genau der Fehler, den eine echte Fahrt mit Ladestopp sonst einbaute.
+# Points below this speed are breaks, charging spots and parking lots. As a
+# waypoint they would force the route into a detour off the road - exactly
+# the error a real trip with a charging stop would otherwise build in.
 MIN_SPEED_KMH = 25.0
 
 
 @dataclass
 class Section:
-    """Das Stück eines früheren Pfads, das zur Anfrage passt."""
-    points: list                # [(lat, lon, tempo_kmh | None), ...] in Fahrtrichtung der Anfrage
-    opposite: bool         # Der Pfad wurde andersherum gefahren
-    spacing_start_km: float     # wie weit Start der Anfrage vom Pfad entfernt liegt
+    """The part of an earlier path that fits the request."""
+    points: list                # [(lat, lon, speed_kmh | None), ...] in the request's direction of travel
+    opposite: bool         # The path was driven in the opposite direction
+    spacing_start_km: float     # how far the request's start is from the path
     spacing_target_km: float
-    length_km: float            # entlang des Pfads
+    length_km: float            # along the path
 
 
 def radius_km(straight_line_km: float) -> float:
@@ -69,7 +69,7 @@ def radius_km(straight_line_km: float) -> float:
 
 
 def _next(fs_path: list, lat: float, lon: float) -> tuple[int, float]:
-    """Index des nächsten Punkts und sein Abstand in m."""
+    """Index of the nearest point and its distance in m."""
     best, spacing = 0, float("inf")
     for i, p in enumerate(fs_path):
         d = haversine_m(lat, lon, p[0], p[1])
@@ -85,15 +85,15 @@ def _length_m(points: list) -> float:
 
 def fitting_section(fs_path: list, start: tuple[float, float],
                         destination: tuple[float, float]) -> Section | None:
-    """Das Stück des Pfads zwischen Start und Ziel - oder None.
+    """The part of the path between start and destination - or None.
 
-    `pfad`: [(lat, lon, tempo_kmh), ...] in Fahrtreihenfolge.
+    `pfad` (path): [(lat, lon, speed_kmh), ...] in driving order.
 
-    Gefunden wird der Punkt des Pfads, der Start am nächsten liegt, und der,
-    der dem Ziel am nächsten liegt. Stehen sie in der Reihenfolge des Pfads,
-    ist es ein Teilstück vorwärts; stehen sie umgekehrt, wurde die Strecke
-    andersherum gefahren und der Abschnitt wird gedreht. Beides gilt: Wer
-    Gueugnon - Reutlingen gefahren ist, kennt auch Reutlingen - Gueugnon.
+    The path point closest to the start and the one closest to the
+    destination are found. If they are in path order, it is a partial
+    section forward; if reversed, the route was driven the other way round
+    and the section is flipped. Both count: whoever has driven
+    Gueugnon - Reutlingen also knows Reutlingen - Gueugnon.
     """
     if len(fs_path) < 2:
         return None
@@ -110,9 +110,9 @@ def fitting_section(fs_path: list, start: tuple[float, float],
     against = j < i
     section = fs_path[j:i + 1][::-1] if against else fs_path[i:j + 1]
     length_km = _length_m(section) / 1000.0
-    # Der Pfad ist mindestens so lang wie die Luftlinie; deutlich weniger
-    # heisst, dass Messpunkte fehlen - eine Lücke, über die man nichts sagen
-    # kann.
+    # The path is at least as long as the straight line; significantly less
+    # means measurement points are missing - a gap about which nothing can
+    # be said.
     if length_km < straight_line_km * MIN_COVERAGE:
         return None
     return Section(points=section, opposite=against,
@@ -122,16 +122,16 @@ def fitting_section(fs_path: list, start: tuple[float, float],
 
 def waypoints(section: Section, spacing_km: float = SPACING_KM,
                    maximal: int = MAX_WAYPOINTS) -> list[tuple[float, float]]:
-    """Zwischenpunkte entlang des Abschnitts, ohne Start und Ziel selbst.
+    """Waypoints along the section, excluding start and destination.
 
-    Gewählt wird alle `abstand_km` entlang des Pfads der nächste Punkt, der
-    **gefahren** wurde, also über `MINDEST_TEMPO_KMH` lag. Ein Punkt ohne
-    Tempoangabe gilt als gefahren: Manche Quellen liefern keines, und ein
-    Pfad ohne jede Angabe soll nicht an dieser Stelle scheitern.
+    Every `spacing_km` (spacing) along the path, the nearest point that was
+    **driven**, i.e. above `MIN_SPEED_KMH` (minimum speed), is chosen. A
+    point without a speed value counts as driven: some sources provide none,
+    and a path without any such data should not fail at this point.
 
-    Reicht die Zahl nicht für den gewünschten Abstand, wird der Abstand
-    vergrössert statt Punkte wegzulassen - eine gleichmässige Verteilung ist
-    besser als eine, die hinten abbricht.
+    If the count is not enough for the desired spacing, the spacing is
+    increased instead of dropping points - an even distribution is better
+    than one that breaks off at the end.
     """
     points = section.points
     if len(points) < 3:
@@ -139,7 +139,7 @@ def waypoints(section: Section, spacing_km: float = SPACING_KM,
     total_m = section.length_km * 1000.0
     step_m = max(spacing_km * 1000.0, total_m / (maximal + 1))
 
-    # Strecke entlang des Pfads bis zu jedem Punkt.
+    # Distance along the path up to each point.
     cumulative = [0.0]
     for a, b in zip(points, points[1:]):
         cumulative.append(cumulative[-1] + haversine_m(a[0], a[1], b[0], b[1]))
@@ -149,8 +149,9 @@ def waypoints(section: Section, spacing_km: float = SPACING_KM,
 
     origin_of: list[tuple[float, float]] = []
     target_m = step_m
-    # Nicht bis ganz ans Ende: Ein Punkt kurz vor dem Ziel bringt nichts und
-    # zwingt die Route, dort anzuklopfen, wo sie ohnehin hinfährt.
+    # Not all the way to the end: a point shortly before the destination
+    # achieves nothing and forces the route to knock where it is heading
+    # anyway.
     while target_m < total_m - step_m * 0.5:
         candidate = min(
             (i for i in range(1, len(points) - 1) if driven(points[i])),
@@ -164,7 +165,7 @@ def waypoints(section: Section, spacing_km: float = SPACING_KM,
 
 
 def path_from_samples(rows: list) -> list[tuple[float, float, float | None]]:
-    """[(lat, lon, tempo_kmh), ...] aus Zeilen einer Abfrage; Zeilen ohne
-    Koordinate fallen heraus."""
+    """[(lat, lon, speed_kmh), ...] from the rows of a query; rows without
+    coordinates are dropped."""
     return [(lat, lon, velocity) for lat, lon, velocity in rows
             if lat is not None and lon is not None]

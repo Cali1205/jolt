@@ -4,14 +4,14 @@ import os
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Im Container kommt DATABASE_URL aus docker-compose (PostgreSQL). Lokal ohne
-# Postgres fällt die App auf SQLite zurück - das macht Entwicklung und die
-# Prüfläufe unter tools/ ohne laufende Datenbank möglich.
+# In the container DATABASE_URL comes from docker-compose (PostgreSQL). Locally
+# without Postgres the app falls back to SQLite - that makes development and
+# the check runs under tools/ possible without a running database.
 #
-# Genau deshalb gibt es hier auch kein PostGIS: Der einzige Geo-Query, den jolt
-# braucht ("alle Ladepunkte im Korridor um eine Route"), läuft über einen Index
-# auf (lat, lon) plus Haversine in Python. Das kostet bei 150.000 Ladepunkten
-# Millisekunden und erhält diesen Fallback.
+# Precisely for this reason there is no PostGIS here either: the only geo
+# query jolt needs ("all charging points in the corridor around a route")
+# runs via an index on (lat, lon) plus haversine in Python. With 150,000
+# charging points that costs milliseconds and keeps this fallback.
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./jolt_dev.db")
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
@@ -29,11 +29,11 @@ def get_db():
 
 
 def migrate() -> None:
-    """Schema auf den aktuellen Stand bringen - ausschliesslich über Alembic.
+    """Bring the schema to the current state - exclusively via Alembic.
 
-    Kein `create_all` daneben: Zwei Quellen für dasselbe Schema laufen
-    unweigerlich auseinander, und der Unterschied fällt erst in der Produktion
-    auf. Das Schema kommt aus den Revisionen, sonst nirgendwoher.
+    No `create_all` alongside: two sources for the same schema inevitably
+    drift apart, and the difference only shows up in production. The schema
+    comes from the revisions, from nowhere else.
     """
     from alembic import command
     from alembic.config import Config
@@ -45,12 +45,12 @@ def migrate() -> None:
 
 
 def seed_templates() -> None:
-    """Fahrzeug-Vorlagen bereitstellen, falls noch kein Fahrzeug angelegt ist.
+    """Provide vehicle templates if no vehicle has been created yet.
 
-    Ohne Vorlage müsste man beim ersten Start c_w-Wert, Stirnfläche und eine
-    Ladekurve von Hand eintragen - das ist die Stelle, an der man die App
-    wieder zumacht. Angelegt wird nur, wenn die Tabelle leer ist; ein einmal
-    angepasstes Fahrzeug wird nie wieder überschrieben.
+    Without a template one would have to enter the c_w value, frontal area and
+    a charging curve by hand on first start - that is the point where one
+    closes the app again. Templates are only created if the table is empty; a
+    vehicle that has been adjusted once is never overwritten.
     """
     from . import models
     from .charging.curves import TEMPLATES
@@ -69,7 +69,7 @@ def seed_templates() -> None:
                                           soc_percent=soc, kw=kw))
         db.commit()
         logging.getLogger("uvicorn.error").info(
-            "Erstes Fahrzeug aus Vorlage angelegt: %s", template["name"])
+            "First vehicle created from template: %s", template["name"])
     finally:
         db.close()
 

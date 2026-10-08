@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Prueft die Bedienung der Karte (frontend/map.js): Ziehen, Kneifen, Mausrad.
+// Checks the map controls (frontend/map.js): drag, pinch, mouse wheel.
 //
-// Die Karte sprang beim Zoomen und Ziehen unvorhersagbar hin und her. Gesucht
-// war also nicht "es zoomt", sondern was ein Mensch sofort merkt:
-//   - bleibt der Punkt unter den Fingern unter den Fingern, wenn man kneift?
-//   - springt die Karte, wenn nach dem Kneifen ein Finger bleibt?
-//   - kommt sie aus dem Zoommodus wieder heraus, wenn ein Zeiger verloren geht?
+// The map jumped back and forth unpredictably when zooming and dragging. So what was
+// sought was not "it zooms" but what a person notices immediately:
+//   - does the point under the fingers stay under the fingers when pinching?
+//   - does the map jump if one finger stays after pinching?
+//   - does it leave zoom mode again when a pointer is lost?
 //
-// Ohne Browser: eine Attrappe der Leinwand faengt die Ereignisse ab, und die
-// Pruefung spielt sie in der Reihenfolge ein, in der ein Finger sie liefert.
+// Without a browser: a stand-in for the canvas intercepts the events, and the
+// check plays them in the order in which a finger delivers them.
 //
 //     node tools/check_map.js
 const fs = require("fs");
@@ -34,7 +34,7 @@ function newMap() {
     clientWidth: 400, clientHeight: 300, width: 400, height: 300,
     addEventListener: (name, f) => { events[name] = f; },
     setPointerCapture() {},
-    getBoundingClientRect: () => ({ left: 10, top: 20 }),   // nicht bei (0, 0)
+    getBoundingClientRect: () => ({ left: 10, top: 20 }),   // not at (0, 0)
     getContext: () => new Proxy({}, {
       get: (z, n) => (n === "drawImage" ? (...a) => pictures.push(a)
         : n === "measureText" ? () => ({ width: 40 }) : () => {}),
@@ -60,18 +60,18 @@ function newMap() {
   k.create("karte");
   const finger = (kind, id, x, y) => events[kind]({
     pointerId: id, pointerType: "touch", button: 0,
-    clientX: x + 10, clientY: y + 20,        // Bildschirm = Leinwand + Versatz
+    clientX: x + 10, clientY: y + 20,        // screen = canvas + offset
     preventDefault() {}, deltaY: 0 });
   return { k, events, finger, pictures, canvas, btn: () => buttons[0],
            timeframe };
 }
 
-// Wie weit liegt der Ort (lat, lon) gerade von der Stelle (x, y) entfernt?
+// How far is the place (lat, lon) from the point (x, y)?
 const spacingPx = (k, city, x, y) => {
   const p = k.pastScreen(city.lat, city.lon);
   return Math.hypot(p.x - x, p.y - y);
 };
-// Welcher Ort liegt unter dem Pixel (x, y)? Ueber die Umkehrung der Projektion.
+// Which place is under the pixel (x, y)? Via the inverse of the projection.
 function cityUnder(k, x, y) {
   const a = k.view();
   const n = 256 * Math.pow(2, a.zoom);
@@ -103,7 +103,7 @@ t.k.onPoint(48.0, 9.0, 10);
 t.finger("pointerdown", 1, 150, 150);
 t.finger("pointerdown", 2, 250, 150);
 const middleCity = cityUnder(t.k, 200, 150);
-for (let i = 1; i <= 10; i++) {            // auseinander: 100 -> 200 px
+for (let i = 1; i <= 10; i++) {            // apart: 100 -> 200 px
   t.finger("pointermove", 1, 150 - i * 5, 150);
   t.finger("pointermove", 2, 250 + i * 5, 150);
 }
@@ -138,9 +138,9 @@ for (let i = 1; i <= 5; i++) {
   t.finger("pointermove", 1, 100 + i * 10, 150);
   t.finger("pointermove", 2, 300 - i * 10, 150);
 }
-t.finger("pointerup", 2, 250, 150);        // der zweite Finger hebt ab
+t.finger("pointerup", 2, 250, 150);        // the second finger lifts off
 const earlier = t.k.view();
-t.finger("pointermove", 1, 151, 150);      // der erste bewegt sich einen Pixel
+t.finger("pointermove", 1, 151, 150);      // the first moves one pixel
 const after = t.k.view();
 const jump = Math.hypot(
   (after.middle.lon - earlier.middle.lon) * 256 * Math.pow(2, after.zoom) / 360,
@@ -160,7 +160,7 @@ t = newMap();
 t.k.onPoint(48.0, 9.0, 10);
 t.finger("pointerdown", 1, 100, 150);
 t.finger("pointerdown", 2, 300, 150);
-t.events["pointercancel"]({ pointerId: 2 });     // das System nimmt ihn weg
+t.events["pointercancel"]({ pointerId: 2 });     // the system takes it away
 t.events["pointercancel"]({ pointerId: 1 });
 const z0 = t.k.view().zoom;
 t.finger("pointerdown", 3, 200, 150);
@@ -197,13 +197,13 @@ t.events["wheel"]({ deltaY: -100, deltaMode: 0, ctrlKey: false,
 verify(t.k.view().zoom === 17, "nicht ueber die groesste Stufe hinaus");
 t.k.onPoint(84.9, 9.0, 4);
 t.finger("pointerdown", 1, 200, 150);
-t.finger("pointermove", 1, 200, 5000);        // weit nach unten ziehen
+t.finger("pointermove", 1, 200, 5000);        // drag far down
 const lat = t.k.view().middle.lat;
 verify(Number.isFinite(lat) && lat <= 85.06,
        "ueber den Rand der Welt hinaus gibt es keine unsinnigen Breiten", String(lat));
 
 console.log("\nAuto-Zoom auf die Strecke");
-// [lon, lat], wie die Geometrien der App.
+// [lon, lat], like the app's geometries.
 const stuttgartBerlin = [];
 for (let i = 0; i <= 50; i++) {
   stuttgartBerlin.push([9.18 + (13.4 - 9.18) * i / 50, 48.78 + (52.52 - 48.78) * i / 50]);
@@ -226,7 +226,7 @@ const xs = large.map((q) => q.x), ys = large.map((q) => q.y);
 verify(Math.max(Math.max(...xs) - Math.min(...xs), (Math.max(...ys) - Math.min(...ys)) * 400 / 300) > 400 * 0.7,
        "und fuellt das Bild gut aus (mindestens 70 % der Breite oder Hoehe)");
 
-// Ladesaeulen am Rand duerfen die Ansicht nicht aufweiten.
+// Charging stations at the edge must not widen the view.
 const earlierZoom = t.k.view().zoom;
 t.k.setMarker([{ lat: 40.0, lon: 0.0, kind: "saeule" },
                   { lat: stuttgartBerlin[0][1], lon: stuttgartBerlin[0][0], kind: "start" }]);
@@ -237,7 +237,7 @@ console.log("\nAufzeichnung: die Spur waechst");
 t = newMap();
 const track = [];
 let change = 0, lastZoom = null, outside = 0;
-// Eine Fahrt von Stuttgart nach Norden, 120 Meldungen, ca. 400 km.
+// A trip from Stuttgart to the north, 120 reports, approx. 400 km.
 for (let i = 0; i < 120; i++) {
   const lat = 48.78 + i * 0.03, lon = 9.18 + Math.sin(i / 20) * 0.3;
   track.push([lon, lat]);
@@ -264,7 +264,7 @@ t.finger("pointermove", 1, 150, 120);
 t.finger("pointerup", 1, 150, 120);
 const shifted = t.k.view();
 const long = stuttgartBerlin.slice();
-t.k.setRoute(long);                      // die Spur waechst weit ueber das Bild
+t.k.setRoute(long);                      // the trace grows far beyond the frame
 t.k.setMarker([{ lat: 52.5, lon: 13.4, kind: "auto" }]);
 const afterwards = t.k.view();
 verify(afterwards.zoom === shifted.zoom
@@ -288,7 +288,7 @@ t = newMap();
 t.k.setRoute(stuttgartBerlin);
 t.finger("pointerdown", 1, 200, 150);
 t.finger("pointerup", 1, 200, 150);
-t.k.setRoute([[9.18, 48.78]]);           // kuerzere Strecke = andere Fahrt
+t.k.setRoute([[9.18, 48.78]]);           // shorter route = different trip
 t.k.setMarker([{ lat: 48.78, lon: 9.18, kind: "auto" }]);
 verify(t.btn().hidden === true && t.k.view().zoom === 15,
        "nach einer von Hand verschobenen Karte folgt die naechste Aufzeichnung wieder: "
@@ -298,11 +298,11 @@ console.log("\nGroesse aendert sich");
 t = newMap();
 t.k.setRoute(stuttgartBerlin);
 const zWide = t.k.view().zoom;
-t.canvas.clientWidth = 200; t.canvas.clientHeight = 150;   // Umhaengen / Drehen
+t.canvas.clientWidth = 200; t.canvas.clientHeight = 150;   // re-parenting / rotating
 t.k.drawNew();
 verify(t.k.view().zoom < zWide,
        "in einem kleineren Ausschnitt zoomt die Karte heraus, damit die Strecke passt");
-t.canvas.clientWidth = 0;                                      // versteckter Abschnitt
+t.canvas.clientWidth = 0;                                      // hidden section
 const priorHidden = t.k.view().zoom;
 t.k.drawNew();
 verify(t.k.view().zoom === priorHidden,

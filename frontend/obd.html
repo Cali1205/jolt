@@ -1,17 +1,17 @@
 <!doctype html>
 <html lang="de">
-<!-- Die Aufzeichnungsseite. Bewusst eine eigene Seite und nicht ein Reiter
-     in jolt: Sie funktioniert nur in einem Browser mit Web Bluetooth (auf
-     iOS heisst der Bluefy), und ein Bedienelement, das in Safari stumm
-     bleibt, hat in der Hauptoberfläche nichts verloren.
+<!-- The recording page. Deliberately a page of its own and not a tab
+     in jolt: it only works in a browser with Web Bluetooth (on iOS that is
+     Bluefy), and a control that stays silent in Safari does not belong in
+     the main UI.
 
-     Angefangen hat sie als Diagnoseseite für eine einzige Frage - antwortet
-     der ID.Buzz auf die UDS-Abfrage, mit der man seinen Ladestand liest?
-     Die ist beantwortet, und daraus ist der eigentliche Zweck geworden:
-     einsteigen, einmal tippen, losfahren. Mit dem Manifest unten liegt sie
-     als eigenes Symbol auf dem Home-Bildschirm; alles, was danach noch ein
-     Handgriff wäre, macht sie selbst (Name aus Datum und Uhrzeit, Start bei
-     der ersten Bewegung, Ende durch das Aufräumen im Server). -->
+     It started as a diagnostics page for a single question - does the
+     ID.Buzz answer the UDS query with which one reads its charge level?
+     That is answered, and the actual purpose has grown out of it:
+     get in, tap once, drive off. With the manifest below it sits as its own
+     icon on the home screen; everything that would still be a manual step
+     afterwards it does itself (name from date and time, start at the first
+     movement, end through the clean-up in the server). -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>jolt – Fahrt aufzeichnen</title>
@@ -22,10 +22,10 @@
 <link rel="stylesheet" href="/static/obd.css">
 
 <h1>Fahrt aufzeichnen</h1>
-<!-- Sichtbare Fassungskennung. Bei einer Seite, die per Bluetooth im Auto
-     bedient wird und deren Cache sich zweimal als Fehlerquelle erwiesen
-     hat, ist "welche Fassung habe ich eigentlich offen" keine
-     Nebensächlichkeit - sie war beide Male die eigentliche Antwort. -->
+<!-- Visible version marker. On a page that is operated via Bluetooth in the
+     car and whose cache has twice proven to be a source of errors, "which
+     version do I actually have open" is no minor matter - both times it
+     was the actual answer. -->
 <p class="hinweis" style="margin-top:-6px">Fassung <code>STAND</code></p>
 <p class="hinweis">Braucht einen Browser mit Web Bluetooth. Auf iOS gibt es
   den nicht von Apple – dort funktioniert <strong>Bluefy</strong> aus dem App
@@ -166,8 +166,8 @@
 <button id="log-kopieren" class="tat neben">Protokoll kopieren</button>
 <button id="log-leeren" class="tat neben">Protokoll leeren</button>
 
-<!-- Reihenfolge wie in index.html: erst die Plugin-Huelle, dann die
-     Nachbildung, dann der Kern. -->
+<!-- Order as in index.html: first the plugin shell, then the
+     emulation, then the core. -->
 <script src="/static/ble-plugin.js"></script>
 <script src="/static/obd-ble-native.js"></script>
 <script src="/static/readings.js"></script>

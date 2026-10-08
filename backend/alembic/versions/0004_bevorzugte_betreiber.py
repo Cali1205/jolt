@@ -1,4 +1,4 @@
-"""Fahrzeuge: bevorzugte Ladeanbieter fuer den Optimierer.
+"""Vehicles: preferred charging providers for the optimizer.
 
 Revision ID: 0004
 Revises: 0003

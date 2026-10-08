@@ -1,21 +1,19 @@
-"""Die Live-Nachführung: Ist gegen Soll, während gefahren wird.
+"""Live tracking: actual versus plan, while driving.
 
-Der Grund für das ganze Projekt. Ein Plan, der bei Abfahrt gerechnet wurde,
-ist nach achtzig Kilometern falsch - Tempo, Temperatur, Wind und Stau
-addieren sich in dieselbe Richtung. Wer das merkt, braucht keinen Puffer von
-zwanzig Prozent; wer es nicht merkt, steht mit vier Prozent an einer belegten
-Säule.
+The reason for the whole project. A plan calculated at departure is wrong
+after eighty kilometres - speed, temperature, wind and traffic jams add up in
+the same direction. Whoever notices needs no buffer of twenty percent;
+whoever does not notice ends up at an occupied charger with four percent.
 
-Was hier passiert: Zu jedem Messpunkt wird bestimmt, wo auf der Route er
-liegt, was der Plan an dieser Stelle vorhergesagt hatte, und wie weit die
-Wirklichkeit davon abweicht. Daraus entstehen zwei laufende Faktoren - einer
-für den Verbrauch, einer für die Zeit - und aus ihnen die Frage, ob der
-Ladeplan noch stimmt. Tut er das nicht, wird er neu gerechnet
-(`live/replanning.py`).
+What happens here: for every sample it is determined where on the route it
+lies, what the plan had predicted at that spot, and how far reality deviates
+from that. From this come two running factors - one for consumption, one for
+time - and from them the question whether the charging plan is still valid.
+If it is not, it is recalculated (`live/replanning.py`).
 
-Neu geplant wird bewusst nicht bei jeder Messung, sondern nur, wenn einer der
-Auslöser aus Abschnitt 2.3 des Konzepts greift. Ein Plan, der sich alle
-dreissig Sekunden ändert, ist kein Plan.
+Replanning deliberately does not happen at every measurement, but only when
+one of the triggers from section 2.3 of the concept applies. A plan that
+changes every thirty seconds is no plan.
 """
 import logging
 from dataclasses import asdict, dataclass, field
@@ -31,26 +29,27 @@ from . import replanning
 
 log = logging.getLogger("uvicorn.error")
 
-# Schwellen für die Neuplanung, eins zu eins aus Abschnitt 2.3 des Konzepts.
-# Bewusst Schwellen und keine Neuberechnung bei jeder Messung: Wer gerade
-# beschlossen hat, in 40 km Pause zu machen, soll das nicht dreimal umwerfen
-# müssen. Eine Änderung muss etwas bedeuten.
-THRESHOLD_SOC_PP = 5.0            # Prozentpunkte Abweichung
-THRESHOLD_DETOUR_M = 500.0         # Abstand zur Route
-THRESHOLD_DETOUR_S = 60.0          # ... und wie lange er anhalten muss
-THRESHOLD_ARRIVAL_MIN = 10.0      # Verschiebung der Ankunftszeit
+# Thresholds for replanning, taken one to one from section 2.3 of the
+# concept. Deliberately thresholds and not a recalculation at every
+# measurement: whoever has just decided to take a break in 40 km should not
+# have to overturn that three times. A change must mean something.
+THRESHOLD_SOC_PP = 5.0            # percentage points of deviation
+THRESHOLD_DETOUR_M = 500.0         # distance from the route
+THRESHOLD_DETOUR_S = 60.0          # ... and how long it has to last
+THRESHOLD_ARRIVAL_MIN = 10.0      # shift of the arrival time
 
-# Wie weit gefahren sein muss, bevor derselbe nicht-dringende Auslöser erneut
-# eine Neuplanung anstösst. Ohne diese Sperre rechnete jede Messung neu,
-# solange die Abweichung besteht - und das ist der Normalfall, nicht die
-# Ausnahme.
+# How far one must have driven before the same non-urgent trigger sets off
+# another replan. Without this lock every measurement would recalculate for
+# as long as the deviation persists - and that is the normal case, not the
+# exception.
 REPLANNING_SPACING_KM = 10.0
 
-# Über wie viele Kilometer die Faktoren gemittelt werden. Zu kurz, und eine
-# einzelne Ampelphase verbiegt sie; zu lang, und der Wetterumschwung hinter
-# dem Pass kommt zu spät an.
+# Over how many kilometres the factors are averaged. Too short, and a single
+# traffic-light phase bends them; too long, and the change of weather behind
+# the pass arrives too late.
 TIMEFRAME_KM = 25.0
-# Vorher ist die SoC-Anzeige (meist 1 % Auflösung) zu grob für eine Aussage.
+# Before that, the SoC display (usually 1 % resolution) is too coarse for a
+# statement.
 MIN_DISTANCE_KM = 5.0
 
 
@@ -58,24 +57,23 @@ MIN_DISTANCE_KM = 5.0
 class State:
     km_on_route: float
     spacing_to_route_m: float
-    # Wo der Messpunkt lag.
+    # Where the sample was located.
     #
-    # Ohne diese beiden musste die Oberflaeche die Position aus dem
-    # *geplanten* Profil zurueckrechnen ("welcher Stuetzpunkt liegt bei
-    # km X"). Bei einer **Aufzeichnung** gibt es dieses Profil nicht - es
-    # entsteht erst beim Abschliessen -, und die Rueckrechnung lieferte
-    # stumm (0, 0). Die Karte zeigte den Golf von Guinea, die gefahrene
-    # Spur bestand aus einem einzigen Punkt, und die Verlaufskurve, die
-    # ihre x-Achse entlang dieser Spur misst, fiel zu einem senkrechten
-    # Strich zusammen - ausgerechnet bei der Betriebsart, in der die Kurve
-    # das Einzige ist, was es zu sehen gibt.
+    # Without these two, the UI had to back-calculate the position from the
+    # *planned* profile ("which support point is at km X"). For a
+    # **recording** that profile does not exist - it only comes into being on
+    # completion -, and the back-calculation silently returned (0, 0). The
+    # map showed the Gulf of Guinea, the driven track consisted of a single
+    # point, and the progress curve, which measures its x-axis along that
+    # track, collapsed to a vertical line - in precisely the mode in which the
+    # curve is the only thing there is to see.
     #
-    # Der Server weiss die Koordinate; er hat sie gerade entgegengenommen.
+    # The server knows the coordinate; it has just received it.
     lat: float
     lon: float
-    # Der Ladestand, mit dem gerechnet wird - gemeldet oder hochgerechnet.
-    # `soc_gemeldet` sagt, welches von beidem: Wer am Steuer eine Zahl sieht,
-    # soll wissen, ob sie gemessen oder aus dem Profil gerechnet ist.
+    # The state of charge used for calculations - reported or extrapolated.
+    # `soc_reported` says which of the two: whoever sees a number at the wheel
+    # should know whether it was measured or calculated from the profile.
     actual_soc: float | None
     soc_reported: bool
     plan_soc: float | None
@@ -89,24 +87,24 @@ class State:
     next_stop: dict | None
     replanning_required: bool
     reason: str
-    # Wird nur gesetzt, wenn tatsächlich neu geplant wurde.
+    # Only set if a replan actually took place.
     plan: dict | None = None
     plan_changed: bool = False
     change: str = ""
     urgent: bool = field(default=False, repr=False)
-    # Woher `ist_soc` kommt: "gemessen" (dieser Punkt), "gerechnet" (aus dem
-    # Profil) oder "zuletzt" (die letzte Messung dieser Fahrt, weil dieser Punkt
-    # keine hat und es kein Profil gibt - der Fall einer Aufzeichnung, solange
-    # das Auto nicht antwortet).
+    # Where `actual_soc` comes from: "gemessen" (measured; this point),
+    # "gerechnet" (calculated; from the profile) or "zuletzt" (last; the last
+    # measurement of this trip, because this point has none and there is no
+    # profile - the case of a recording while the car does not respond).
     soc_source: str = "gemessen"
 
 
 # ---------------------------------------------------------------------------
-# Die beiden laufenden Faktoren
+# The two running factors
 # ---------------------------------------------------------------------------
 
 def _timeframe(points: list) -> list:
-    """Die Messpunkte der letzten `FENSTER_KM`, mindestens aber zwei."""
+    """The samples of the last `TIMEFRAME_KM`, but at least two."""
     usable = [p for p in points
                  if p.km_on_route is not None and p.plan_soc is not None]
     if len(usable) < 2:
@@ -118,27 +116,27 @@ def _timeframe(points: list) -> list:
 
 
 def _charge_pauses_minutes(points: list, energy_profile: list) -> float:
-    """Wie viel der verstrichenen Zeit auf Ladepausen entfiel.
+    """How much of the elapsed time was spent on charging pauses.
 
-    Nötig, weil das Energieprofil ausschliesslich **Fahrzeit** führt: Die
-    Ladezeit steht im Plan, nie im Profil. Wer die Wanduhr ungefiltert gegen
-    das Profil hält, sieht deshalb nach dem ersten Ladestopp eine Verspätung
-    in Höhe der Ladedauer - und zwar dauerhaft, denn sie wird nie wieder
-    aufgeholt. Damit stünde der Auslöser "Ankunft verschiebt sich" für den
-    Rest der Fahrt über seiner Schwelle und meldete alle zehn Kilometer
-    dieselbe Verspätung. Eine Meldung, die immer kommt, schaltet man ab.
+    Necessary because the energy profile carries exclusively **driving time**:
+    charging time is in the plan, never in the profile. Whoever holds the wall
+    clock unfiltered against the profile therefore sees, after the first
+    charging stop, a delay equal to the charging duration - and permanently,
+    because it is never made up. The trigger "arrival shifts" would then stand
+    above its threshold for the rest of the trip and report the same delay
+    every ten kilometres. A message that always comes gets switched off.
 
-    Erkannt wird die Pause am steigenden Ladestand: Beim Fahren fällt er,
-    beim Laden steigt er. Gezählt wird aber nicht die ganze Zeitspanne,
-    sondern nur der Teil, der über der Fahrzeit für die dabei zurückgelegte
-    Strecke liegt. Das erledigt zwei Fälle auf einmal - Rekuperation auf
-    langer Talfahrt hebt den Ladestand zwar auch, kostet aber keine
-    zusätzliche Zeit; und es ist gleichgültig, ob der Logger während des
-    Ladens weitergesendet hat oder erst hinterher wieder aufgewacht ist.
+    The pause is recognised by the rising state of charge: while driving it
+    falls, while charging it rises. But not the whole time span is counted,
+    only the part that exceeds the driving time for the distance covered in
+    the process. That handles two cases at once - regeneration on a long
+    descent raises the state of charge too, but costs no additional time; and
+    it makes no difference whether the logger kept transmitting during
+    charging or only woke up again afterwards.
 
-    Nicht abgezogen wird eine Pause ohne Ladung - Mittagessen, Stau, Stau vor
-    der Baustelle. Die verschiebt die Ankunft wirklich, und genau das soll
-    der Auslöser sehen.
+    A pause without charging is not deducted - lunch, traffic jam, a jam in
+    front of the roadworks. That really does shift the arrival, and that is
+    exactly what the trigger should see.
     """
     def driven(from_km: float, until_km: float) -> float:
         begin = plan_minutes_at(energy_profile, from_km)
@@ -149,23 +147,24 @@ def _charge_pauses_minutes(points: list, energy_profile: list) -> float:
 
 
 def _consumption_factor(points: list) -> float | None:
-    """Ist-Verbrauch geteilt durch Soll-Verbrauch über das gleitende Fenster.
+    """Actual consumption divided by planned consumption over the sliding window.
 
-    Gerechnet wird über SoC-Differenzen und nicht über absolute Werte: Ein
-    Tacho, der grundsätzlich zwei Prozent zu hoch anzeigt, verfälscht die
-    Differenz nicht - den absoluten Vergleich aber schon.
+    This is calculated from SoC differences and not from absolute values: a
+    speedometer that consistently reads two percent too high does not distort
+    the difference - but it does distort the absolute comparison.
 
-    Nur gemeldete Ladestände zählen. Ein geschätzter Wert hier hiesse, das
-    Modell gegen sich selbst zu messen: Der Faktor käme immer auf 1,0 heraus
-    und behauptete damit, die Prognose stimme - und zwar umso überzeugter, je
-    länger niemand mehr nachgesehen hat.
+    Only reported states of charge count. An estimated value here would mean
+    measuring the model against itself: the factor would always come out at
+    1.0 and thereby claim the forecast is right - and the more confidently,
+    the longer nobody has checked.
     """
-    # Erst filtern, dann fenstern - nicht umgekehrt. Wer den Ladestand nur an
-    # Ladestopps eintippt, hat zwei Meldungen im Abstand von zweihundert
-    # Kilometern; ein Fenster von 25 km über *alle* Punkte enthielte davon
-    # keine zwei und der Faktor käme nie zustande. Über den gemeldeten
-    # Ladeständen greift stattdessen die Rückfallregel in `_fenster` und nimmt
-    # die letzten beiden - eine lange Messbasis ist hier sogar die bessere.
+    # Filter first, then window - not the other way round. Whoever only types
+    # in the state of charge at charging stops has two reports two hundred
+    # kilometres apart; a window of 25 km over *all* points would contain
+    # neither two of them and the factor would never come about. Over the
+    # reported states of charge, the fallback rule in `_timeframe` takes over
+    # instead and takes the last two - a long measurement basis is even the
+    # better one here.
     timeframe = _timeframe([p for p in points if p.soc is not None])
     if not timeframe:
         return None
@@ -174,12 +173,12 @@ def _consumption_factor(points: list) -> float | None:
     if last.km_on_route - first.km_on_route < MIN_DISTANCE_KM:
         return None
 
-    # Ladeabschnitte fallen heraus, statt den Faktor unbrauchbar zu machen.
-    # Vorher stand hier `erster.soc - letzter.soc`, und ein Ladestopp im
-    # Fenster ergab einen negativen "Verbrauch" - abgefangen nur durch die
-    # Ausreisserschranke darunter, die den Faktor dann verwarf. Die Folge:
-    # Nach jedem Ladestopp galt für die Dauer des Fensters weiter der alte
-    # Wert, obwohl frisch gemessen wurde.
+    # Charging sections drop out instead of making the factor unusable.
+    # Previously this said `first.soc - last.soc`, and a charging stop in the
+    # window yielded a negative "consumption" - caught only by the outlier
+    # limit below, which then discarded the factor. The consequence: after
+    # every charging stop the old value kept applying for the duration of the
+    # window, although fresh measurements had been taken.
     actual_consumption = 0.0
     plan_consumption = 0.0
     for section in charge_phases.sections(timeframe):
@@ -192,30 +191,31 @@ def _consumption_factor(points: list) -> float | None:
         return None
 
     factor = actual_consumption / plan_consumption
-    # Die Schranke bleibt als Netz: Sie fängt jetzt nur noch echte
-    # Ausreisser ab - einen umgesteckten Logger, einen SoC-Sprung nach einem
-    # Neustart -, nicht mehr den Normalfall Ladestopp.
+    # The limit stays as a safety net: it now only catches real outliers - a
+    # re-plugged logger, an SoC jump after a restart -, no longer the normal
+    # case of a charging stop.
     if not 0.4 <= factor <= 2.5:
         return None
     return round(factor, 3)
 
 
 def soc_estimate(points: list, point, consumption_factor: float) -> float | None:
-    """Der Ladestand an dieser Stelle, wenn keiner gemeldet wurde.
+    """The state of charge at this spot, if none was reported.
 
-    Das ist der Kern des Betriebs ohne Fahrzeugdaten: Position liefert das
-    Telefon dauernd, den Ladestand tippt jemand gelegentlich ein, und
-    dazwischen trägt das Energieprofil. Das kennt Steigung, Tempo und Wetter
-    der Strecke - es ist genau das Modell, auf dem auch der Ladeplan steht -,
-    und der gemessene Verbrauchsfaktor sagt, wie weit das Auto davon abweicht.
+    This is the core of operation without vehicle data: the phone delivers
+    position constantly, someone types in the state of charge now and then,
+    and in between the energy profile carries. It knows gradient, speed and
+    weather of the route - it is exactly the model on which the charging plan
+    is built -, and the measured consumption factor says how far the car
+    deviates from it.
 
-    Keine Vorhersage also, sondern dieselbe Fortschreibung, mit der die
-    Umplanung ohnehin rechnet. Und sie wird an jedem eingetippten Ladestand
-    wieder auf die Wirklichkeit zurückgeholt.
+    So not a forecast, but the same extrapolation that replanning calculates
+    with anyway. And it is pulled back to reality at every state of charge
+    that is typed in.
 
-    Gerechnet wird ab der **letzten Meldung** und nicht ab dem Start: Wer
-    unterwegs geladen hat, hat einen Sprung im Ladestand, den kein Profil
-    kennt. Die letzte Meldung liegt hinter diesem Sprung.
+    Calculation starts from the **last report** and not from the start:
+    whoever has charged on the way has a jump in the state of charge that no
+    profile knows. The last report lies behind that jump.
     """
     if point.plan_soc is None:
         return None
@@ -223,11 +223,11 @@ def soc_estimate(points: list, point, consumption_factor: float) -> float | None
                  if p.soc is not None and p.plan_soc is not None
                  and p is not point]
     if not previous:
-        # Noch nie einen Ladestand gemeldet - dann gilt der geplante. Das
-        # Profil beginnt beim Startladestand der Fahrt, also ist genau das
-        # die einzige Aussage, die überhaupt vorliegt. Ohne diesen Rückfall
-        # bliebe die ganze Anzeige leer, bis jemand von sich aus etwas
-        # eintippt, und die Nachführung wäre für den ahnungslosen Fall aus.
+        # No state of charge ever reported - then the planned one applies. The
+        # profile begins at the start state of charge of the trip, so that is
+        # the only statement available at all. Without this fallback the whole
+        # display would stay empty until someone types something in of their
+        # own accord, and the tracking would be off for the unsuspecting case.
         return point.plan_soc
     tail = previous[-1]
     consumed_plan = (tail.plan_soc or 0.0) - point.plan_soc
@@ -235,13 +235,13 @@ def soc_estimate(points: list, point, consumption_factor: float) -> float | None
 
 
 def _time_factor(points: list, energy_profile: list) -> float | None:
-    """Ist-Fahrzeit geteilt durch Soll-Fahrzeit über dasselbe Fenster.
+    """Actual driving time divided by planned driving time over the same window.
 
-    Der eigene Faktor ist nötig, weil der Verbrauch einen Stau nicht sieht:
-    Wer steht, verbraucht je Kilometer sogar etwas mehr, aber die Ankunftszeit
-    verschiebt sich um ein Vielfaches davon. Ohne diese Zahl wäre der Auslöser
-    "Ankunftszeit verschiebt sich" nicht zu haben - und jede Ankunftszeit im
-    umgeplanten Ladeplan wäre die aus dem alten Plan.
+    A factor of its own is needed because consumption does not see a traffic
+    jam: whoever stands still even uses slightly more per kilometre, but the
+    arrival time shifts by a multiple of that. Without this number the trigger
+    "arrival time shifts" would not be available - and every arrival time in
+    the replanned charging plan would be the one from the old plan.
     """
     timeframe = _timeframe(points)
     if not timeframe:
@@ -253,11 +253,11 @@ def _time_factor(points: list, energy_profile: list) -> float | None:
     if not first.timestamp or not last.timestamp:
         return None
 
-    # Die Ladezeit gehört nicht in den Zeitfaktor: Wer eine halbe Stunde an
-    # der Säule stand, hat keinen Stau. Ohne den Abzug wäre der Faktor nach
-    # jedem Ladestopp so gross, dass ihn die Schranke unten verwirft - und
-    # damit für die nächsten FENSTER_KM eingefroren, also genau auf der
-    # Strecke blind, auf der er wieder gebraucht wird.
+    # Charging time does not belong in the time factor: whoever stood half an
+    # hour at the charger is not in a traffic jam. Without the deduction the
+    # factor would be so large after every charging stop that the limit below
+    # discards it - and it would be frozen for the next TIMEFRAME_KM, i.e.
+    # blind precisely on the stretch where it is needed again.
     actual_minutes = ((last.timestamp - first.timestamp).total_seconds() / 60.0
                    - _charge_pauses_minutes(timeframe, energy_profile))
     plan_end = plan_minutes_at(energy_profile, last.km_on_route)
@@ -269,15 +269,15 @@ def _time_factor(points: list, energy_profile: list) -> float | None:
         return None
 
     factor = actual_minutes / plan_minutes
-    # Dieselbe Ausreisserschranke wie beim Verbrauch - jetzt nur noch gegen
-    # das, was der Ladepausen-Abzug nicht erklärt.
+    # The same outlier limit as for consumption - now only against what the
+    # charging-pause deduction does not explain.
     if not 0.4 <= factor <= 3.0:
         return None
     return round(factor, 3)
 
 
 # ---------------------------------------------------------------------------
-# Messpunkt herein
+# Sample comes in
 # ---------------------------------------------------------------------------
 
 def record_sample(db, session: models.LiveSession, lat: float, lon: float,
@@ -286,23 +286,24 @@ def record_sample(db, session: models.LiveSession, lat: float, lon: float,
                         timestamp: datetime | None = None,
                         raw_values: dict | None = None,
                         new_plan: bool = True) -> State:
-    """Einen Messpunkt einsortieren und den neuen Zustand zurückgeben.
+    """File a sample and return the new state.
 
-    `soc` darf fehlen. Dann ist es eine reine Positionsmeldung, wie sie das
-    Telefon im Sekundentakt liefern kann - der Ladestand wird für diesen
-    Punkt aus dem Energieprofil hochgerechnet (`soc_schaetzen`). Nur so
-    kommen Zeitfaktor und Ankunftsprognose überhaupt zustande, solange das
-    Auto seinen Ladestand nicht selbst meldet.
+    `soc` may be missing. Then it is a pure position report, as the phone can
+    deliver it every second - the state of charge for this point is
+    extrapolated from the energy profile (`soc_estimate`). Only that way do
+    time factor and arrival forecast come about at all, as long as the car
+    does not report its state of charge itself.
 
-    `zeit` überschreibt den Zeitstempel. Gebraucht wird das vom Simulator: Er
-    spielt Stunden in Sekunden ab, und mit echten Uhrzeiten wäre der
-    Zeitfaktor dort sinnlos - also genau die Grösse, die den Stau abbildet.
+    `timestamp` overrides the timestamp. The simulator needs this: it plays
+    hours back in seconds, and with real times the time factor would be
+    meaningless there - that is, precisely the quantity that represents the
+    traffic jam.
 
-    `neu_planen=False` nimmt den Punkt auf, ohne die Reststrecke neu zu
-    rechnen. Gebraucht für nachgereichte Punkte aus einem Funkloch: Ein Plan,
-    der ab einer Position von vor zehn Minuten gerechnet wird, ist schon beim
-    Erscheinen veraltet - und meldete dazu eine Änderung aufs Telefon. Erst
-    der letzte Punkt des Stapels, der die Gegenwart ist, darf umplanen.
+    `new_plan=False` records the point without recalculating the remaining
+    route. Needed for points delivered after the fact from a dead zone: a
+    plan calculated from a position ten minutes ago is outdated as soon as it
+    appears - and would send a change to the phone on top of that. Only the
+    last point of the batch, which is the present, may replan.
     """
     trip = session.trip
     geometry = trip.geometry or []
@@ -315,9 +316,9 @@ def record_sample(db, session: models.LiveSession, lat: float, lon: float,
                              outside_temp_c=outside_temp_c, km_on_route=km,
                              plan_soc=plan_value, raw_values=raw_values,
                              timestamp=timestamp or datetime.utcnow())
-    # Über die Beziehung anhängen und nicht über db.add(): Sonst steht der
-    # Punkt zweimal in der geladenen Sammlung - einmal durch das Anhängen,
-    # einmal durch die Kaskade - und die Faktoren rechnen mit einem Duplikat.
+    # Append via the relationship and not via db.add(): otherwise the point
+    # appears twice in the loaded collection - once through the append, once
+    # through the cascade - and the factors calculate with a duplicate.
     session.points.append(point)
     capacity_remember(trip.vehicle, raw_values, point.timestamp)
     db.flush()
@@ -329,8 +330,8 @@ def record_sample(db, session: models.LiveSession, lat: float, lon: float,
     if zfaktor is not None:
         session.time_factor = zfaktor
 
-    # Abweg braucht Dauer, nicht nur Abstand: Eine ungenaue Messung unter
-    # einer Brücke ist kein Verlassen der Route.
+    # A detour needs duration, not just distance: an inaccurate measurement
+    # under a bridge is not leaving the route.
     if spacing > THRESHOLD_DETOUR_M:
         if session.detour_since is None:
             session.detour_since = point.timestamp
@@ -339,8 +340,9 @@ def record_sample(db, session: models.LiveSession, lat: float, lon: float,
 
     state = _build_state(session, point, spacing)
 
-    # Umgeplant wird mit dem Ladestand, der gilt - gemeldet oder hochgerechnet.
-    # Sonst käme ein reiner Positionspunkt mit `None` beim Optimierer an.
+    # Replanning uses the state of charge that applies - reported or
+    # extrapolated. Otherwise a pure position point would reach the optimizer
+    # with `None`.
     if (new_plan and state.replanning_required
             and _may_new_plan(session, km, state)):
         _replan(db, session, state, km, state.actual_soc)
@@ -350,28 +352,26 @@ def record_sample(db, session: models.LiveSession, lat: float, lon: float,
     return state
 
 
-# Ab welcher Abweichung ein neuer Kapazitaetswert ueberhaupt geschrieben
-# wird. Der Zaehler springt zwischen zwei Messungen um wenige Wattstunden;
-# jedes Mal zu schreiben hiesse, bei jedem Messpunkt eine Zeile zu aendern,
-# ohne dass sich etwas aendert.
+# From what deviation a new capacity value is written at all. The counter
+# jumps by a few watt hours between two measurements; writing every time
+# would mean changing a row at every sample without anything changing.
 CAPACITY_STEP_KWH = 0.2
 
 
 def capacity_remember(vehicle, raw_values: dict | None, timestamp) -> None:
-    """Die vom Fahrzeug gemeldete Akkukapazitaet am Fahrzeug festhalten.
+    """Record the battery capacity reported by the vehicle on the vehicle.
 
-    Sie kommt als `akku_kwh` in den Rohwerten mit - der Dongle liest sie
-    alle vierzig Runden. Aufgehoben wird sie, weil daran **jede**
-    Umrechnung zwischen Ladestand und Kilowattstunden haengt: der gemessene
-    Verbrauch, der daraus gelernte Korrekturfaktor, die Ladehuebe im
-    Ladeplan, die Restreichweite. Im Profil steht eine Prospektangabe fuer
-    ein neues Fahrzeug; hier steht, was dieser Akku heute kann.
+    It comes along as `battery_kwh` in the raw values - the dongle reads it
+    every forty rounds. It is kept because **every** conversion between state
+    of charge and kilowatt hours depends on it: the measured consumption, the
+    correction factor learned from it, the charge swings in the charging plan,
+    the remaining range. The profile holds a brochure figure for a new
+    vehicle; here is what this battery can do today.
 
-    Geprueft wird gegen den Profilwert: Mehr als der Prospekt oder weniger
-    als die Haelfte ist keine Alterung, sondern ein Lesefehler. Die
-    Plausibilitaetsschranke steht bewusst hier und nicht nur im Dongle -
-    Messwerte koennen auch von einem Logger kommen, den niemand geprueft
-    hat.
+    It is checked against the profile value: more than the brochure or less
+    than half is not ageing but a reading error. The plausibility limit is
+    deliberately here and not only in the dongle - measured values can also
+    come from a logger that nobody has checked.
     """
     if not vehicle or not raw_values:
         return
@@ -380,30 +380,30 @@ def capacity_remember(vehicle, raw_values: dict | None, timestamp) -> None:
         return
     if not (0.5 * vehicle.battery_net_kwh <= val
             <= vehicle.battery_net_kwh * 1.05):
-        log.info("Kapazitaet %s kWh verworfen - passt nicht zu %s kWh im "
-                 "Profil.", val, vehicle.battery_net_kwh)
+        log.info("Capacity %s kWh discarded - does not match %s kWh in the "
+                 "profile.", val, vehicle.battery_net_kwh)
         return
     so_far = vehicle.measured_capacity_kwh
     if so_far is not None and abs(so_far - val) < CAPACITY_STEP_KWH:
         return
     if so_far is None:
-        log.info("Kapazitaet von %s erstmals gemessen: %.1f kWh (Profil %.1f).",
+        log.info("Capacity of %s measured for the first time: %.1f kWh (profile %.1f).",
                  vehicle.name, val, vehicle.battery_net_kwh)
     vehicle.measured_capacity_kwh = round(val, 2)
     vehicle.capacity_measured_at = timestamp or datetime.utcnow()
 
 
 def speed_factor_measured(points: list, energy_profile: list) -> float | None:
-    """Wie viel schneller als geplant tatsächlich gefahren wird.
+    """How much faster than planned the trip is actually being driven.
 
-    Das ist der Kehrwert des Zeitfaktors: Wer eine Strecke in 90 % der
-    veranschlagten Zeit zurücklegt, fährt elf Prozent schneller. Eine eigene
-    Messung braucht es dafür nicht - der Zeitfaktor liegt schon vor, ist um
-    Ladepausen bereinigt und gegen Ausreisser abgesichert.
+    This is the reciprocal of the time factor: whoever covers a stretch in
+    90 % of the allotted time is driving eleven percent faster. No separate
+    measurement is needed for it - the time factor is already available, is
+    adjusted for charging pauses and protected against outliers.
 
-    Gebraucht wird die Zahl, weil das Tempo bisher **geraten** wurde: Der
-    Regler in der Planen-Ansicht steht auf 120 %, und niemand weiss, ob das
-    stimmt. Über v² ist das der grösste Einzelposten der Prognose.
+    The number is needed because the speed has so far been **guessed**: the
+    slider in the planning view is at 120 %, and nobody knows whether that is
+    right. Via v², that is the largest single item of the forecast.
     """
     factor = _time_factor(points, energy_profile)
     if factor is None or factor <= 0.1:
@@ -415,11 +415,11 @@ def _replan(db, session: models.LiveSession, state: State, km: float,
               soc: float) -> None:
     profile = session.trip.energy_profile or []
 
-    # Entweder-oder, kein Sowohl-als-auch: Ein aus echten Ladeständen
-    # gemessener Verbrauch enthält die Wirkung des Tempos bereits - und noch
-    # Beladung, Wetterfehler und Batteriealter dazu. Er ist die bessere
-    # Auskunft, sobald es ihn gibt. Solange nicht, ist das gemessene Tempo
-    # immer noch weit besser als der Reglerwert von vor der Abfahrt.
+    # Either-or, not both-and: a consumption measured from real states of
+    # charge already contains the effect of speed - and load, weather error
+    # and battery age as well. It is the better source as soon as it exists.
+    # As long as it does not, the measured speed is still far better than the
+    # slider value from before departure.
     anchor = sum(1 for p in session.points if p.soc is not None)
     velocity = None if anchor >= 2 else speed_factor_measured(session.points, profile)
 
@@ -429,10 +429,9 @@ def _replan(db, session: models.LiveSession, state: State, km: float,
             replanning.read_parameter(session.plan),
             session.consumption_factor, session.time_factor, speed_factor=velocity)
     except Exception as failure:      # noqa: BLE001
-        # Eine gescheiterte Umplanung darf die Fahrt nicht beenden: Die
-        # Messung läuft weiter, und der alte Plan ist immer noch besser als
-        # gar keiner.
-        log.warning("Umplanung fehlgeschlagen: %s", failure)
+        # A failed replan must not end the trip: the measurement keeps
+        # running, and the old plan is still better than none at all.
+        log.warning("Replanning failed: %s", failure)
         return
 
     if not replanning.stops_same(session.plan, fresh):
@@ -444,12 +443,13 @@ def _replan(db, session: models.LiveSession, state: State, km: float,
 
 def _may_new_plan(session: models.LiveSession, km: float,
                      state: State) -> bool:
-    """Sperre gegen einen Plan, der sich im Minutentakt ändert.
+    """Lock against a plan that changes every minute.
 
-    Dringende Gründe - die Säule ist belegt, die Reserve reicht nicht - gehen
-    immer durch. Alles andere erst wieder nach `NEUPLANUNG_ABSTAND_KM`: Die
-    Abweichung besteht ja weiter, sonst hätte der Auslöser nicht gegriffen.
-    Ohne die Sperre rechnete jede einzelne Messung neu.
+    Urgent reasons - the charger is occupied, the reserve is not enough -
+    always go through. Everything else only again after
+    `REPLANNING_SPACING_KM`: the deviation persists, after all, otherwise the
+    trigger would not have applied. Without the lock every single measurement
+    would recalculate.
     """
     if session.plan is None or state.urgent:
         return True
@@ -460,7 +460,7 @@ def _may_new_plan(session: models.LiveSession, km: float,
 
 
 # ---------------------------------------------------------------------------
-# Zustand und Auslöser
+# State and triggers
 # ---------------------------------------------------------------------------
 
 def _build_state(session: models.LiveSession, point: models.LivePoint,
@@ -472,19 +472,19 @@ def _build_state(session: models.LiveSession, point: models.LivePoint,
     km = point.km_on_route or 0.0
     remaining_km = max(0.0, total_km - km)
 
-    # Der Ladestand, mit dem hier gerechnet wird: der gemeldete, sonst der
-    # hochgerechnete. Welcher von beiden es war, steht als eigenes Feld im
-    # Zustand - wer am Steuer eine Zahl sieht, soll wissen, ob sie gemessen
-    # oder gerechnet ist.
+    # The state of charge used for calculations here: the reported one,
+    # otherwise the extrapolated one. Which of the two it was is a field of
+    # its own in the state - whoever sees a number at the wheel should know
+    # whether it was measured or calculated.
     reported = point.soc is not None
     actual_soc = point.soc if reported else soc_estimate(
         session.points, point, session.consumption_factor)
     soc_source = "gemessen" if reported else "gerechnet"
     if actual_soc is None:
-        # Eine Aufzeichnung hat kein Profil, aus dem sich ein Ladestand
-        # schätzen liesse. Dann zeigt die Anzeige die letzte Messung dieser
-        # Fahrt - als solche gekennzeichnet -, statt leer zu bleiben. Gerechnet
-        # wird damit nichts: Ohne Profil gibt es weder Abweichung noch Prognose.
+        # A recording has no profile from which a state of charge could be
+        # estimated. The display then shows the last measurement of this trip
+        # - marked as such - instead of staying empty. Nothing is calculated
+        # with it: without a profile there is neither deviation nor forecast.
         tail = next((p.soc for p in reversed(session.points)
                        if p.soc is not None), None)
         if tail is not None:
@@ -524,29 +524,32 @@ def _build_state(session: models.LiveSession, point: models.LivePoint,
 
 
 def _charged_pp(points: list, until_point) -> float:
-    """Wie viele Prozentpunkte bis hierher nachgeladen wurden.
+    """How many percentage points have been recharged up to here.
 
-    Gebraucht fuer die **Abweichung**, und nur dafuer. Das Energieprofil
-    kennt keine Ladestopps: Es rechnet den Ladestand vom Start an
-    ununterbrochen herunter und geht auf einer Langstrecke tief ins
-    Negative - auf 774 km Hamburg-Muenchen bis auf -257 %. Die Abweichung
-    verglich den gemessenen Ladestand direkt damit und meldete nach dem
-    ersten Ladestopp dreistellige Prozentpunkte. In einem Probelauf standen
-    dort 262 pp; die Kachel "Abweichung" ist damit fuer jede Fahrt mit
-    Ladestopp unbrauchbar - also fuer jede lange.
+    Needed for the **deviation**, and only for that. The energy profile knows
+    no charging stops: it counts the state of charge down from the start
+    without interruption and on a long-distance trip goes deep into the
+    negative - on the 774 km Hamburg-Munich down to -257 %. The deviation
+    compared the measured state of charge directly with that and, after the
+    first charging stop, reported triple-digit percentage points. In a test
+    run it showed 262 pp there; the "Abweichung" (deviation) tile is thus
+    unusable for every trip with a charging stop - that is, for every long
+    one.
 
-    Wer 40 Punkte nachgeladen hat, soll 40 Punkte ueber dem Profil liegen.
-    Genau das rechnet diese Funktion heraus, und uebrig bleibt die Frage,
-    um die es geht: Bin ich sparsamer oder durstiger unterwegs als geplant?
+    Whoever has recharged 40 points should be 40 points above the profile.
+    This function calculates exactly that out, and what remains is the
+    question that matters: am I more economical or thirstier on the road than
+    planned?
 
-    Prognose und Reserve-Marke brauchen das nicht - die rechnen ohnehin mit
-    Differenzen ab dem aktuellen Punkt und sind deshalb schon richtig.
+    Forecast and reserve mark do not need this - they calculate with
+    differences from the current point anyway and are therefore already
+    correct.
     """
     return charge_phases.charged_pp(points, until_point)
 
 
 def _forecast_at_target(profile: list, point, actual_soc, consumption_factor: float):
-    """Der Rest der Strecke mit dem gemessenen Faktor hochgerechnet."""
+    """The rest of the route extrapolated with the measured factor."""
     if not profile or actual_soc is None:
         return None
     rest_plan = (point.plan_soc or actual_soc) - (profile[-1].get("soc") or 0.0)
@@ -555,7 +558,7 @@ def _forecast_at_target(profile: list, point, actual_soc, consumption_factor: fl
 
 def _reserve_at(profile: list, point, actual_soc, consumption_factor: float,
                  reserve_soc: float):
-    """Wo die Reserve erreicht wird, wenn es so weitergeht wie bisher."""
+    """Where the reserve is reached if things continue as they have so far."""
     if actual_soc is None:
         return None
     for entry in profile:
@@ -568,14 +571,14 @@ def _reserve_at(profile: list, point, actual_soc, consumption_factor: float,
 
 
 def _arrival_shift(session, profile: list, point, total_km: float):
-    """Um wie viele Minuten sich die Ankunft verschiebt - Stau inbegriffen.
+    """By how many minutes the arrival shifts - traffic jam included.
 
-    Zwei Anteile: was bereits verloren ist, und was der Zeitfaktor auf der
-    Reststrecke noch kosten wird. Nur zusammen ergeben sie die Zahl, die
-    interessiert.
+    Two parts: what is already lost, and what the time factor will still cost
+    on the remaining route. Only together do they give the number that is of
+    interest.
 
-    Die bereits verbrachte Ladezeit zählt nicht als Verspätung - sie stand so
-    im Plan. Siehe `_ladepausen_minuten`.
+    The charging time already spent does not count as delay - it was in the
+    plan. See `_charge_pauses_minutes`.
     """
     points = [p for p in session.points if p.km_on_route is not None]
     if len(points) < 2 or not profile:
@@ -598,12 +601,12 @@ def _arrival_shift(session, profile: list, point, total_km: float):
 
 
 def _next_stop(session, profile: list, point, actual_soc):
-    """Der nächste geplante Ladestopp und der dort erwartete Ladestand.
+    """The next planned charging stop and the state of charge expected there.
 
-    Der erwartete Wert wird mit dem gemessenen Verbrauchsfaktor hochgerechnet
-    und gegen den Plan gehalten. Genau das ist der Auslöser aus dem Konzept:
-    nicht die Abweichung hier, sondern die am nächsten Stopp - dort wird sie
-    zum Problem.
+    The expected value is extrapolated with the measured consumption factor
+    and held against the plan. That is exactly the trigger from the concept:
+    not the deviation here, but the one at the next stop - that is where it
+    becomes a problem.
     """
     stops = ((session.plan or {}).get("stops") or [])
     km = point.km_on_route or 0.0
@@ -629,20 +632,21 @@ def _next_stop(session, profile: list, point, actual_soc):
 def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
                         forecast, reserve_at, total_km, shift,
                         upcoming, arrival_soc) -> tuple[bool, str, bool]:
-    """Muss der Plan angefasst werden, warum - und eilt es?
+    """Does the plan need touching, why - and is it urgent?
 
-    Die Reihenfolge ist die der Dringlichkeit: Was die Fahrt unmöglich macht,
-    steht vor dem, was sie nur unbequem macht. `dringend` entscheidet, ob die
-    Sperre gegen zu häufiges Umplanen übergangen wird.
+    The order is that of urgency: what makes the trip impossible comes before
+    what merely makes it inconvenient. `urgent` decides whether the lock
+    against too-frequent replanning is bypassed.
     """
-    # 1. Der nächste Ladepunkt ist belegt. Die einzige Verfügbarkeitsangabe,
-    #    die wirklich stimmt - und sie macht den Plan sofort wertlos.
+    # 1. The next charging point is occupied. The only availability
+    #    information that is really true - and it makes the plan worthless at
+    #    once.
     if upcoming and upcoming.get("id") is not None:
         if availability.REPORTS.actual_reported(upcoming["id"]):
             name = upcoming.get("name") or "Der nächste Ladepunkt"
             return True, f"{name} ist als belegt gemeldet - Ausweichen.", True
 
-    # 2. Es reicht nicht bis zum Ziel.
+    # 2. It will not last until the destination.
     if reserve_at is not None and reserve_at < total_km:
         return True, (f"Reserve wird bei km {reserve_at:.0f} erreicht - "
                       f"vorher laden."), True
@@ -650,14 +654,14 @@ def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
         return True, (f"Ankunft mit {forecast:.0f} % prognostiziert, "
                       f"unter der Reserve von {vehicle.reserve_soc:.0f} %."), True
 
-    # 3. Abseits der Route - aber erst, wenn es anhält.
+    # 3. Off the route - but only once it persists.
     if detour_since is not None and now_ts is not None:
         duration = (now_ts - detour_since).total_seconds()
         if duration >= THRESHOLD_DETOUR_S:
             return True, (f"Seit {duration / 60:.0f} min mehr als "
                           f"{spacing_m:.0f} m neben der Route."), True
 
-    # 4. Am nächsten Stopp kommt etwas anderes an als geplant.
+    # 4. Something other than planned arrives at the next stop.
     if upcoming and arrival_soc is not None:
         planned = upcoming.get("planned_soc")
         if planned is not None and abs(arrival_soc - planned) >= THRESHOLD_SOC_PP:
@@ -665,13 +669,13 @@ def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
             return True, (f"Ankunft an {name} mit {arrival_soc:.0f} % statt "
                           f"{planned:.0f} % - Ladestopps neu rechnen."), False
 
-    # 5. Ohne Plan bleibt die Abweichung hier die beste verfügbare Aussage.
+    # 5. Without a plan, the deviation here remains the best statement available.
     if not upcoming and deviation is not None and abs(deviation) >= THRESHOLD_SOC_PP:
         direction = "unter" if deviation < 0 else "über"
         return True, (f"{abs(deviation):.0f} Prozentpunkte {direction} Plan - "
                       f"Ladestopps neu rechnen."), False
 
-    # 6. Stau: Der Verbrauch merkt ihn kaum, die Ankunftszeit sehr wohl.
+    # 6. Traffic jam: consumption hardly notices it, the arrival time very much.
     if shift is not None and abs(shift) >= THRESHOLD_ARRIVAL_MIN:
         word = "später" if shift > 0 else "früher"
         return True, (f"Ankunft {abs(shift):.0f} min {word} als "
@@ -684,5 +688,5 @@ def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
 
 def state_as_dict(state: State) -> dict:
     records = asdict(state)
-    records.pop("urgent", None)      # nur für die interne Sperre
+    records.pop("urgent", None)      # only for the internal lock
     return records

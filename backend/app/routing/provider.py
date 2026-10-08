@@ -1,30 +1,30 @@
-"""Das Interface zwischen jolt und dem Routing-Dienst.
+"""The interface between jolt and the routing service.
 
-Warum überhaupt ein Interface bei genau einem Adapter: Der kostenlose
-openrouteservice-Zugang hat 2.500 Anfragen am Tag. Sobald die Live-Neuplanung
-(Stufe 3) regelmässig rechnet, ist das eng, und dann tritt ein selbstgehostetes
-Valhalla an dieselbe Stelle. Diese Ablösung soll ein zweiter Adapter sein und
-kein Umbau - deshalb steht die Grenze jetzt schon fest, solange sie billig ist.
+Why have an interface at all with exactly one adapter: free openrouteservice
+access allows 2,500 requests per day. Once live re-planning (stage 3) runs
+regularly, that gets tight, and a self-hosted Valhalla would take its place.
+That replacement should be a second adapter and not a rebuild - so the
+boundary is fixed now, while it is cheap.
 
-Was ein Adapter liefern muss, ist von jolts Verbrauchsmodell diktiert:
-Geometrie **mit Höhe** und eine Geschwindigkeit je Teilstück. Eine reine
-Distanz-plus-Dauer-Antwort reicht nicht - damit liesse sich weder eine Steigung
-noch der v²-Anteil des Luftwiderstands rechnen.
+What an adapter has to deliver is dictated by jolt's consumption model:
+geometry **with elevation** and a speed per segment. A plain
+distance-plus-duration answer is not enough - it would allow computing
+neither a gradient nor the v² share of air drag.
 """
 from dataclasses import dataclass, field
 from typing import Protocol
 
 
 class RoutingError(RuntimeError):
-    """Das Routing konnte keine Route liefern - mit einem Grund für den Nutzer."""
+    """Routing could not deliver a route - with a reason for the user."""
 
 
 @dataclass
 class Route:
-    # [[lon, lat, hoehe_m], ...] - die Reihenfolge lon/lat ist die von GeoJSON,
-    # und Abweichen davon wäre eine dauerhafte Fehlerquelle.
+    # [[lon, lat, elevation_m], ...] - the lon/lat order is that of GeoJSON, and
+    # deviating from it would be a permanent source of errors.
     points: list = field(default_factory=list)
-    # Geschwindigkeit in m/s je Teilstück; Länge len(punkte) - 1.
+    # Speed in m/s per segment; length len(punkte) - 1.
     speed_ms: list = field(default_factory=list)
     distance_m: float = 0.0
     drive_time_s: float = 0.0
@@ -37,10 +37,10 @@ class City:
     lon: float
 
 
-# Die drei Vorgaben, die openrouteservice als "preference" kennt und die
-# /api/route parallel abfragt: Zeit, Distanz, und das, was ORS ohne weitere
-# Angabe für die beste Abwägung hält. Verbrauchsoptimal ist bewusst keine
-# eigene Anfrage - das kann ORS nicht als Kantengewicht, siehe unten.
+# The three presets openrouteservice knows as "preference" and that
+# /api/route queries in parallel: time, distance, and what ORS considers the
+# best trade-off without further input. Consumption-optimal is deliberately
+# not a request of its own - ORS cannot do that as an edge weight, see below.
 PREFERENCES = ("fastest", "shortest", "recommended")
 
 
@@ -49,46 +49,46 @@ class RoutingProvider(Protocol):
               intermediate_stops: list[tuple[float, float]] | None = None,
               preference: str = "recommended",
               toll_free: bool = False) -> Route:
-        """Route von Start nach Ziel. Koordinaten als (lat, lon).
+        """Route from start to destination. Coordinates as (lat, lon).
 
-        `mautfrei` meidet Mautstrassen. Fuer Frankreich ist das die einzige
-        Alternative, die sich wirklich lohnt zu rechnen: `fastest` und
-        `recommended` liefern auf Autobahnstrecken meist dieselbe Strasse,
-        `shortest` eine, die niemand faehrt. Der Verzicht auf die Autoroute
-        kostet Stunden und spart auf einer Langstrecke leicht vierzig Euro -
-        das ist eine Abwaegung, die dem Fahrer zusteht und die er nur
-        treffen kann, wenn beide Wege nebeneinander stehen.
+        `mautfrei` (toll-free) avoids toll roads. For France it is the only
+        alternative really worth computing: `fastest` and `recommended`
+        usually return the same road on motorway stretches, `shortest` one
+        that nobody drives. Forgoing the autoroute costs hours and easily
+        saves forty euros on a long trip - that is a trade-off the driver is
+        entitled to make, and can only make if both routes are shown side by
+        side.
 
-        `praeferenz` ist eine der drei Werte aus PRAEFERENZEN. Ein Adapter, der
-        keine echte Unterscheidung treffen kann (siehe demo.py), darf den
-        Parameter ignorieren und immer dieselbe Route liefern - /api/route
-        erkennt gleiche Ergebnisse und zeigt sie nur einmal, mit mehreren
-        Kennzeichnungen.
+        `praeferenz` (preference) is one of the three values from
+        PRAEFERENZEN. An adapter that cannot make a real distinction (see
+        demo.py) may ignore the parameter and always return the same route -
+        /api/route detects identical results and shows them only once, with
+        several labels.
         """
         ...
 
     def elevations(self, points: list) -> list | None:
-        """Höhen zu einer Liste [[lon, lat], ...] nachschlagen.
+        """Look up elevations for a list [[lon, lat], ...].
 
-        Gebraucht für aufgezeichnete Fahrten: Dort steht die Strecke erst
-        hinterher fest, und ohne Höhenprofil ist eine Verbrauchsmessung
-        nicht deutbar - ob der Mehrverbrauch am Fahrstil lag oder am Berg,
-        lässt sich sonst nicht trennen.
+        Needed for recorded trips: there the route is only known afterwards,
+        and without an elevation profile a consumption measurement cannot be
+        interpreted - whether the extra consumption was due to driving style
+        or the hill cannot otherwise be told apart.
 
-        Ausdrücklich **nicht** aus dem GPS: Dessen Höhe streut um zehn bis
-        zwanzig Meter, und aufsummierte Differenzen ergeben für eine Fahrt
-        durch die Ebene mehrere hundert Meter Steigung.
+        Explicitly **not** from GPS: its elevation scatters by ten to twenty
+        meters, and summed-up differences yield several hundred meters of
+        climb for a trip across flat terrain.
 
-        `None` heisst "kann dieser Adapter nicht" - der Aufrufer fällt dann
-        auf die GPS-Höhe zurück oder rechnet flach.
+        `None` means "this adapter cannot do that" - the caller then falls
+        back to the GPS elevation or computes flat.
         """
         ...
 
     def seek(self, text: str, country: str = "") -> list[City]:
-        """Ortsnamen zu Koordinaten auflösen.
+        """Resolve place names to coordinates.
 
-        `land` (ISO-3166-Alpha-2, z.B. "DE") schränkt die Suche auf ein Land
-        ein. Leer gelassen sucht sie weltweit - jolt ist kein
-        Deutschland-Planer, ein Ziel darf jenseits der Grenze liegen.
+        `land` (country; ISO 3166 alpha-2, e.g. "DE") restricts the search to
+        one country. Left empty it searches worldwide - jolt is not a
+        Germany-only planner, a destination may lie across the border.
         """
         ...

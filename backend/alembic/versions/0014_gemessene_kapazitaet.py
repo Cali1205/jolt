@@ -1,24 +1,24 @@
-"""Die vom Fahrzeug gemeldete Akkukapazitaet aufheben.
+"""Keep the battery capacity reported by the vehicle.
 
-Im Fahrzeugprofil steht eine Prospektangabe - beim ID.Buzz 77 kWh netto.
-Das Fahrzeug selbst meldet ueber `222AB2` eine andere Zahl: gemessen wurden
-73,8 kWh bei 59 581 km, also 96 % davon. Der Unterschied ist keine
-Messungenauigkeit, sondern Alterung, und er waechst mit den Jahren.
+The vehicle profile holds a brochure figure - 77 kWh net for the ID.Buzz.
+The vehicle itself reports a different number via `222AB2`: 73.8 kWh was
+measured at 59,581 km, i.e. 96 % of it. The difference is not measurement
+inaccuracy but ageing, and it grows over the years.
 
-Warum das mehr ist als Neugier: An dieser Zahl haengt **jede** Umrechnung
-zwischen Ladestand und Kilowattstunden. Der gemessene Verbrauch einer
-Aufzeichnung, der daraus gelernte Korrekturfaktor, die Ladehuebe im
-Ladeplan und die Restreichweite - alle rechnen `Prozent mal Kapazitaet`.
-Vier Prozent zu viel Kapazitaet heissen vier Prozent zu viel angenommene
-Energie, und zwar durchgaengig in dieselbe Richtung.
+Why this is more than curiosity: **every** conversion between state of
+charge and kilowatt-hours hangs on this number. The measured consumption of
+a recording, the correction factor learned from it, the charging
+increments in the charging plan and the remaining range - all compute
+`percent times capacity`. Four percent too much capacity means four percent
+too much assumed energy, consistently in the same direction.
 
-Zwei Spalten statt einer: Ohne den Zeitpunkt weiss niemand, ob die Zahl von
-gestern oder von vorletztem Jahr stammt - und ein Wert, dessen Alter man
-nicht kennt, ist bei einer langsam wandernden Groesse wenig wert.
+Two columns instead of one: without the timestamp nobody knows whether the
+number is from yesterday or from the year before last - and a value whose
+age is unknown is worth little for a slowly drifting quantity.
 
-Beide sind NULL, solange nichts gemessen wurde. NULL heisst hier "keine
-Messung", nicht "null kWh"; die Auswertung faellt dann auf das Profil
-zurueck.
+Both are NULL as long as nothing has been measured. NULL here means "no
+measurement", not "zero kWh"; the evaluation then falls back to the
+profile.
 """
 from alembic import op
 import sqlalchemy as sa
