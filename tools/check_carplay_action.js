@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Checks starting and stopping the recording from CarPlay
-// (frontend/trips.js: carplayAktion).
+// (frontend/trips.js: carplayAction).
 //
-// The CarPlay list sends an event ("carplayAktion": start or
+// The CarPlay list sends an event ("carplayAction": start or
 // stop) and gets the result back. In the car nobody sees the
 // messages of the UI - a start that fails silently would be a
 // button that does nothing there. So the main thing checked is: does an
@@ -47,13 +47,13 @@ function build(o) {
   };
   const plugin = {
     addListener: async (name, f) => { calls.listener[name] = f; return { remove() {} }; },
-    bereit: async (a) => { calls.ready.push(a); },
-    aktionErgebnis: async (a) => { calls.result.push(a); },
+    ready: async (a) => { calls.ready.push(a); },
+    actionResult: async (a) => { calls.result.push(a); },
   };
   const timeframe = {
     jolt: K,
     joltBlePlugin: o.browser ? undefined
-      : { JoltAnzeige: plugin, Capacitor: { isNativePlatform: () => true } },
+      : { JoltDisplay: plugin, Capacitor: { isNativePlatform: () => true } },
     joltApp: { showView() {} },
     joltObd: { obtainable: () => false },
     joltLive: {
@@ -85,13 +85,13 @@ function build(o) {
 (async () => {
   console.log("Anbindung");
   let t = build();
-  verify(typeof t.calls.listener.carplayAktion === "function",
-         "in der iOS-App haengt sich trips.js an das Ereignis 'carplayAktion'");
-  verify(t.calls.ready.length === 1 && t.calls.ready[0].fahrzeug === "ID.Buzz",
+  verify(typeof t.calls.listener.carplayAction === "function",
+         "in der iOS-App haengt sich trips.js an das Ereignis 'carplayAction'");
+  verify(t.calls.ready.length === 1 && t.calls.ready[0].vehicle === "ID.Buzz",
          "und meldet CarPlay das gewaehlte Fahrzeug (ohne Leerzeichen am Rand)",
          JSON.stringify(t.calls.ready));
   t = build({ vehicle: "" });
-  verify(t.calls.ready[0] && t.calls.ready[0].fahrzeug === "",
+  verify(t.calls.ready[0] && t.calls.ready[0].vehicle === "",
          "ohne gewaehltes Fahrzeug meldet es einen leeren Namen - CarPlay zeigt dann keinen erfundenen");
   t = build({ browser: true });
   verify(Object.keys(t.calls.listener).length === 0,
@@ -99,39 +99,39 @@ function build(o) {
 
   console.log("\nStarten");
   t = build();
-  await t.calls.listener.carplayAktion({ aktion: "starten" });
+  await t.calls.listener.carplayAction({ action: "starten" });
   verify(t.calls.api.length === 1 && t.calls.api[0].fs_path === "/api/live/recording"
          && t.calls.api[0].body.vehicle_id === 1,
          "legt die Aufzeichnung mit dem gewaehlten (zuletzt benutzten) Fahrzeug an",
          JSON.stringify(t.calls.api));
   verify(t.calls.result.length === 1 && t.calls.result[0].ok === true
-         && t.calls.result[0].aktion === "starten",
+         && t.calls.result[0].action === "starten",
          "und meldet CarPlay den Erfolg", JSON.stringify(t.calls.result));
   verify(t.calls.saved["jolt-aufz-fahrzeug"] === "1",
          "das Fahrzeug wird als zuletzt benutzt gemerkt");
 
   t = build({ running: true });
-  await t.calls.listener.carplayAktion({ aktion: "starten" });
+  await t.calls.listener.carplayAction({ action: "starten" });
   verify(t.calls.api.length === 0 && t.calls.result[0].ok === true
          && /läuft schon/.test(t.calls.result[0].text),
          "laeuft schon eine Aufzeichnung, wird keine zweite angelegt - und das wird gesagt",
          JSON.stringify(t.calls));
 
   t = build({ startRunning: true });
-  await t.calls.listener.carplayAktion({ aktion: "starten" });
+  await t.calls.listener.carplayAction({ action: "starten" });
   verify(t.calls.api.length === 0 && t.calls.result[0].ok === false
          && /Start läuft/.test(t.calls.result[0].text),
          "ein Start, der gerade laeuft, wird nicht doppelt ausgeloest");
 
   console.log("\nStarten scheitert - CarPlay erfaehrt den Grund");
   t = build({ noLocation: true });
-  await t.calls.listener.carplayAktion({ aktion: "starten" });
+  await t.calls.listener.carplayAction({ action: "starten" });
   verify(t.calls.result[0].ok === false && /Standort/.test(t.calls.result[0].text)
          && t.calls.api.length === 0,
          "kein Standort: keine Aufzeichnung, und der Grund steht im Ergebnis",
          JSON.stringify(t.calls.result));
   t = build({ vehicle: "" });
-  await t.calls.listener.carplayAktion({ aktion: "starten" });
+  await t.calls.listener.carplayAction({ action: "starten" });
   verify(t.calls.result[0].ok === false && /Fahrzeug/.test(t.calls.result[0].text)
          && t.calls.api.length === 0,
          "kein Fahrzeug gewaehlt: wird nicht geraten, und CarPlay sagt es",
@@ -139,23 +139,23 @@ function build(o) {
 
   console.log("\nBeenden");
   t = build({ running: true });
-  await t.calls.listener.carplayAktion({ aktion: "beenden" });
+  await t.calls.listener.carplayAction({ action: "beenden" });
   verify(t.calls.finish === 1 && t.calls.result[0].ok === true
-         && t.calls.result[0].aktion === "beenden",
+         && t.calls.result[0].action === "beenden",
          "beendet die laufende Aufzeichnung und meldet es", JSON.stringify(t.calls.result));
   t = build({ running: true, endStuck: true });
-  await t.calls.listener.carplayAktion({ aktion: "beenden" });
+  await t.calls.listener.carplayAction({ action: "beenden" });
   verify(t.calls.result[0].ok === false && /Beenden/.test(t.calls.result[0].text),
          "geht das Beenden schief, sagt CarPlay es - statt eine laufende Fahrt fuer beendet zu halten");
   t = build();
-  await t.calls.listener.carplayAktion({ aktion: "beenden" });
+  await t.calls.listener.carplayAction({ action: "beenden" });
   verify(t.calls.finish === 0 && t.calls.result[0].ok === true,
          "ohne laufende Aufzeichnung gibt es nichts zu beenden");
 
   console.log("\nUnsinn");
   t = build();
-  await t.calls.listener.carplayAktion({ aktion: "loeschen" });
-  await t.calls.listener.carplayAktion(undefined);
+  await t.calls.listener.carplayAction({ action: "loeschen" });
+  await t.calls.listener.carplayAction(undefined);
   verify(t.calls.api.length === 0 && t.calls.result.length === 0 && t.calls.finish === 0,
          "eine unbekannte Aktion tut nichts");
 

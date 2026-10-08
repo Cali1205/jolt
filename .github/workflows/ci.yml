@@ -34,11 +34,11 @@ jobs:
       - run: ./tools/check_push.py
       - run: ./tools/check_backend.py
 
-      # Die Revisionen sind die einzige Quelle des Schemas - ein create_all
-      # als Notnagel gibt es nicht. Also muss der Weg von null bis head und
-      # wieder zurück laufen, sonst kommt eine bestehende Installation beim
-      # Aktualisieren nicht mit.
-      - name: Alembic hoch und runter
+      # The revisions are the only source of the schema - there is no
+      # create_all as a fallback. So the path from zero to head and back
+      # again must work, otherwise an existing installation cannot keep up
+      # when updating.
+      - name: Alembic up and down
         working-directory: backend
         env:
           DATABASE_URL: sqlite:///./ci-migration.db
@@ -47,21 +47,20 @@ jobs:
           python -m alembic downgrade base
           python -m alembic upgrade head
 
-  # frontend/ble-plugin.js ist erzeugt, liegt aber im Repository: Die
-  # Oberflaeche wird ohne Bauschritt ausgeliefert, also muss die gebuendelte
-  # Plugin-Huelle als fertige Datei danebenliegen. Genau daraus entsteht die
-  # Gefahr, gegen die dieser Auftrag laeuft - jemand aendert
-  # tools/ble-shell-entry.js oder hebt eine Plugin-Fassung an und vergisst
-  # `npm run huelle`. Die App zoege dann weiter die alte Huelle, und der
-  # Fehler zeigte sich erst am Auto.
+  # frontend/ble-plugin.js is generated, but lives in the repository: the UI
+  # is delivered without a build step, so the bundled plugin shell has to sit
+  # next to it as a finished file. That is exactly where the danger this job
+  # guards against comes from - someone changes tools/ble-shell-entry.js or
+  # raises a plugin version and forgets `npm run huelle`. The app would then
+  # keep pulling the old shell, and the bug would only show up at the car.
   huelle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Node 22, nicht 20: @capacitor/cli verlangt es ausdruecklich
-      # ("Unsupported engine" bei 20), und esbuild soll aus derselben
-      # Umgebung kommen wie beim Erzeugen.
+      # Node 22, not 20: @capacitor/cli explicitly requires it
+      # ("Unsupported engine" on 20), and esbuild should come from the same
+      # environment as when generating.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -69,95 +68,95 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      - name: Huelle neu bauen und vergleichen
+      - name: Rebuild the shell and compare
         run: |
           cp frontend/ble-plugin.js /tmp/ble-plugin.eingecheckt.js
           npm run huelle
           if ! cmp -s /tmp/ble-plugin.eingecheckt.js frontend/ble-plugin.js; then
-            echo "::error::frontend/ble-plugin.js ist nicht mehr aktuell." \
-                 "Bitte 'npm run huelle' laufen lassen und das Ergebnis einchecken."
+            echo "::error::frontend/ble-plugin.js is no longer up to date." \
+                 "Please run 'npm run huelle' and check in the result."
             exit 1
           fi
-          echo "Huelle ist aktuell."
+          echo "Shell is up to date."
 
-      # Die Bruecke laesst sich vollstaendig nur am Auto pruefen. Was sich
-      # vorher feststellen laesst, soll aber auch vorher auffallen: Der Weg
-      # anschliessen -> Dienste -> Benachrichtigungen -> Befehl -> Antwort
-      # wird hier gegen einen nachgebildeten Dongle durchgespielt, samt dem
-      # Rueckfall auf echtes Web Bluetooth ohne Capacitor.
-      - name: Bluetooth-Bruecke pruefen
+      # The bridge can only be checked completely at the car. What can be
+      # established beforehand should be noticed beforehand: the path
+      # connect -> services -> notifications -> command -> response is played
+      # through here against a simulated dongle, including the fallback to
+      # real Web Bluetooth without Capacitor.
+      - name: Check Bluetooth bridge
         run: node tools/check_ble_bridge.js
 
-      # Die Umrechnungen sind aus handgeschriebenen Funktionen zu
-      # Tabellenzeilen geworden. Diese Pruefung haelt die alten Funktionen
-      # als Vorgabe daneben und vergleicht ueber mehrere hundert
-      # Bytefolgen - genau dort gehen Vorzeichen, Teiler und Bytelage bei
-      # so einem Umbau still daneben.
-      - name: Messwert-Tabelle gegen die alten Formeln pruefen
+      # The conversions have turned from hand-written functions into table
+      # rows. This check keeps the old functions alongside as the reference
+      # and compares over several hundred byte sequences - that is exactly
+      # where signs, divisors and byte positions silently go wrong in such a
+      # rework.
+      - name: Check reading table against the old formulas
         run: node tools/check_readings.js
 
-      # Die Warteschlange fuer Messpunkte laeuft in live.js gegen einen
-      # Server, der ausfaellt - Funkloch, Nachreichen, abgelehnte Stapel.
-      - name: Messpunkt-Warteschlange pruefen
+      # The queue for data points in live.js runs against a server that goes
+      # down - dead spot, resubmission, rejected batches.
+      - name: Check data point queue
         run: node tools/check_buffer.js
 
-      # Der Standort-Weg: Browser ueber navigator.geolocation, iOS-App ueber
-      # das Hintergrund-Plugin - samt Rueckfall, wenn die App aelter ist als
-      # die Oberflaeche, die der Server ihr liefert.
-      - name: Standort-Weg pruefen
+      # The location path: browser via navigator.geolocation, iOS app via the
+      # background plugin - including the fallback when the app is older than
+      # the UI the server delivers to it.
+      - name: Check location path
         run: node tools/check_location.js
 
-      # Wann der Dongle das Auto fragen darf: nur bei Fahrt, nie am
-      # verriegelten Auto (Alarmanlage) - und von selbst wieder verbinden.
-      - name: Fahrzustand pruefen
+      # When the dongle may query the car: only while driving, never on a
+      # locked car (alarm system) - and reconnect by itself.
+      - name: Check driving state
         run: node tools/check_driving_state.js
 
-      # Der Start einer Aufzeichnung gegen einen Dongle, der nicht antwortet:
-      # Er bleibt in Benutzung, solange die Verbindung steht.
-      - name: Aufzeichnungsstart pruefen
+      # Starting a recording against a dongle that does not respond: it stays
+      # in use as long as the connection holds.
+      - name: Check recording start
         run: node tools/check_recording.js
 
-      # Die Verkehrskachel der gewaehlten Route: Der Verkehr steht nur in der
-      # Antwort der letzten Planung, nicht an der gespeicherten Fahrt.
-      - name: Verkehrskachel pruefen
+      # The traffic tile of the chosen route: the traffic is only in the
+      # response of the last planning run, not on the saved trip.
+      - name: Check traffic tile
         run: node tools/check_route_display.js
 
-      # Zeiten vom Server: UTC, und der Browser darf sie nie als Ortszeit lesen.
-      # Das Ergebnis darf von der Zeitzone nicht abhaengen - die Pruefung laeuft
-      # unter vier Zeitzonen.
-      - name: Zeiten pruefen
+      # Times from the server: UTC, and the browser must never read them as
+      # local time. The result must not depend on the time zone - the check
+      # runs under four time zones.
+      - name: Check timestamps
         run: node tools/check_timestamp.js
 
-      # Die Einstellungen-Ansicht zeigt Zaehler und Protokoll des Dongle-
-      # Bausteins. Stimmen die nicht, fuehrt die Diagnose in die Irre - und
-      # sie wird gerade dann gebraucht, wenn im Auto etwas nicht stimmt.
-      - name: Dongle-Diagnose pruefen
+      # The settings view shows counters and log of the dongle module. If
+      # those are wrong, the diagnosis misleads - and it is needed exactly
+      # when something in the car is not right.
+      - name: Check dongle diagnostics
         run: node tools/check_diagnose.js
 
-      # Das Anzeigemodell fuer CarPlay und Widget: wenige Zahlen, gedrosselt,
-      # ohne erfundene Felder - ohne Swift und ohne Mac pruefbar.
-      - name: Anzeigemodell pruefen
+      # The display model for CarPlay and widget: few numbers, throttled,
+      # without invented fields - checkable without Swift and without a Mac.
+      - name: Check display model
         run: node tools/check_display.js
 
-      # Die Karte sprang beim Kneifen und Ziehen: Gesten gegen eine Attrappe der
-      # Leinwand, ohne Browser.
-      - name: Kartenbedienung pruefen
+      # The map jumped when pinching and dragging: gestures against a dummy of
+      # the canvas, without a browser.
+      - name: Check map controls
         run: node tools/check_map.js
 
-      # Das passive Mithoeren darf nichts auf den CAN senden - was gesendet wird,
-      # ist das, woran die Alarmanlage haengt.
-      - name: Mithoeren pruefen
+      # Passive listening must not send anything onto the CAN - what is sent
+      # is what the alarm system hangs on.
+      - name: Check listening
         run: node tools/check_listen.js
 
-      # Aufzeichnung starten und beenden aus der CarPlay-Liste.
-      - name: CarPlay-Aktionen pruefen
+      # Starting and stopping a recording from the CarPlay list.
+      - name: Check CarPlay actions
         run: node tools/check_carplay_action.js
 
-      # Verbinden und Mithoeren aus den Einstellungen, vom Tippen bis zum Text.
-      - name: Dongle-Knoepfe der Einstellungen pruefen
+      # Connecting and listening from the settings, from the tap to the text.
+      - name: Check dongle buttons in the settings
         run: node tools/check_settings.js
 
-      # Die gezeichneten CarPlay-Kacheln: kein Text ueber den Rand, keine
-      # Kachel stuerzt ohne Wert ab, die Farben melden den richtigen Zustand.
-      - name: CarPlay-Kacheln pruefen
+      # The drawn CarPlay tiles: no text over the edge, no tile crashes
+      # without a value, the colors report the right state.
+      - name: Check CarPlay tiles
         run: node tools/check_tiles.js

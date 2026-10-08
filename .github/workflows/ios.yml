@@ -1,21 +1,20 @@
 name: iOS
 
-# Der Ablauf beantwortet genau eine Frage: Laesst sich aus package.json und
-# capacitor.config.json ein iOS-Projekt erzeugen, das compiliert?
+# This workflow answers exactly one question: can package.json and
+# capacitor.config.json be turned into an iOS project that compiles?
 #
-# **Der Pfadfilter ist eng, und das ist Absicht.** macos-Laeufer zaehlen bei
-# privaten Repositories mit dem Faktor 10 gegen das Minutenkontingent: Fuenf
-# Minuten Bauen sind fuenfzig verbrauchte Minuten. Eine Aenderung an
-# frontend/ steht bewusst **nicht** in der Liste - die App laedt ihre
-# Oberflaeche zur Laufzeit vom Server (siehe server.url in
-# capacitor.config.json), eine geaenderte Zeile in live.js braucht also
-# keinen neuen App-Bau. Genau deshalb ist der Capacitor-Weg gewaehlt: Der
-# schnelle Deploy-Weg ueber den Container bleibt erhalten.
+# **The path filter is narrow, and that is deliberate.** macOS runners count
+# with a factor of 10 against the minutes quota on private repositories: five
+# minutes of building are fifty minutes used. A change to frontend/ is
+# deliberately **not** in the list - the app loads its UI from the server at
+# runtime (see server.url in capacitor.config.json), so a changed line in
+# live.js needs no new app build. That is exactly why the Capacitor route was
+# chosen: the fast deploy route via the container stays intact.
 #
-# Was hier fehlt, ist ein Geraetebau. Der braeuchte Zertifikat und
-# Bereitstellungsprofil als Geheimnisse; fuer "compiliert es ueberhaupt" ist
-# das ein hoher Preis. Der signierte Bau samt TestFlight-Upload liegt in
-# ios-testflight.yml, einrichten laesst er sich nach ios-einrichten.md.
+# What is missing here is a device build. It would need the certificate and
+# provisioning profile as secrets; for "does it compile at all" that is a high
+# price. The signed build including the TestFlight upload lives in
+# ios-testflight.yml, and can be set up following ios-einrichten.md.
 on:
   push:
     branches: [main]
@@ -49,8 +48,8 @@ on:
       - "ios-native/**"
       - "tools/ios-app-icon.png"
       - ".github/workflows/ios.yml"
-  # Von Hand ausloesbar, um den Ablauf einmal zu pruefen, ohne dafuer eine
-  # Aenderung erfinden zu muessen.
+  # Can be triggered by hand, to check the workflow once without having to
+  # invent a change for it.
   workflow_dispatch:
 
 jobs:
@@ -60,89 +59,91 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Node 22 ist Bedingung, nicht Vorliebe: @capacitor/cli gibt bei 20
-      # "Unsupported engine" aus.
+      # Node 22 is a requirement, not a preference: @capacitor/cli prints
+      # "Unsupported engine" on 20.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
 
-      # Der Laeufer bringt mehrere Xcode-Fassungen mit und waehlt nicht
-      # unbedingt die neueste. Festlegen statt hoffen: Sonst aendert sich die
-      # Werkzeugkette unter dem Projekt weg, sobald GitHub sein Abbild
-      # aktualisiert - und der Fehler sieht dann nach einem Codefehler aus.
-      - name: Xcode festlegen
+      # The runner ships several Xcode versions and does not necessarily pick
+      # the newest. Pin it instead of hoping: otherwise the toolchain changes
+      # under the project as soon as GitHub updates its image - and the
+      # failure then looks like a code error.
+      - name: Pin Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Fassungen protokollieren
+      - name: Log versions
         run: |
           xcodebuild -version
           node --version
 
       - run: npm ci --no-audit --no-fund
 
-      # ios/ ist nicht eingecheckt und entsteht hier neu. Ein eingechecktes
-      # Xcode-Projekt waere eine zweite Wahrheit neben capacitor.config.json,
-      # und die beiden liefen unbemerkt auseinander.
-      - name: iOS-Projekt erzeugen
+      # ios/ is not checked in and is created anew here. A checked-in Xcode
+      # project would be a second source of truth next to
+      # capacitor.config.json, and the two would drift apart unnoticed.
+      - name: Generate iOS project
         run: npx cap add ios
 
-      # Muss **nach** `cap add` und **vor** dem Bauen laufen: Die Vorlage
-      # kennt weder die Bluetooth-Verwendungszwecke noch die
-      # Hintergrundmodi. Ohne NSBluetoothAlwaysUsageDescription raeumt iOS
-      # die App beim ersten CoreBluetooth-Zugriff ab.
-      - name: Info.plist ergaenzen
+      # Must run **after** `cap add` and **before** building: the template
+      # knows neither the Bluetooth usage descriptions nor the background
+      # modes. Without NSBluetoothAlwaysUsageDescription, iOS removes the app
+      # on the first CoreBluetooth access.
+      - name: Add Info.plist entries
         run: bash tools/ios_info_plist.sh ios/App/App/Info.plist
 
-      # Das Symbol der Vorlage ist das Capacitor-Logo.
-      - name: App-Symbol ersetzen
+      # The template's icon is the Capacitor logo.
+      - name: Replace app icon
         run: bash tools/ios_symbol.sh
 
-      - name: Abgleichen
+      - name: Sync
         run: npx cap sync ios
 
-      # **Nach** dem Abgleich, nicht davor: `cap sync` liest die Mindestfassung
-      # aus dem ersten IPHONEOS_DEPLOYMENT_TARGET der Projektdatei und schreibt
-      # sie als `.iOS(.vNN)` in CapApp-SPM/Package.swift. Stuende die
-      # Erweiterung (iOS 18) schon darin, kaeme `.v18`, und der Paketmanager
-      # lehnt das ab (tools-version 5.9) - so scheiterten die ersten Laeufe.
+      # **After** the sync, not before: `cap sync` reads the minimum version
+      # from the first IPHONEOS_DEPLOYMENT_TARGET in the project file and
+      # writes it as `.iOS(.vNN)` into CapApp-SPM/Package.swift. If the
+      # extension (iOS 18) were already in there, `.v18` would come out, and
+      # the package manager rejects that (tools-version 5.9) - that is how the
+      # first runs failed.
       #
-      # Die Live Activity (CarPlay-Dashboard, Sperrbildschirm) ist eine
-      # Widget-Erweiterung, also ein eigenes Ziel im Xcode-Projekt. Die Vorlage
-      # kennt es nicht; dieses Skript haengt es ein.
-      - name: Live Activity einbauen
+      # The Live Activity (CarPlay dashboard, lock screen) is a widget
+      # extension, so a target of its own in the Xcode project. The template
+      # does not know it; this script hooks it in.
+      - name: Add Live Activity
         run: bash tools/ios_widget.sh ios/App
 
-      # Die CarPlay-Szene: zweite Szene in der Info.plist, AppDelegate, und der
-      # Entitlement - hier immer **mit**, damit der Simulatorbau den ganzen Weg
-      # prueft. Im signierten Bau (ios-testflight.yml) ist der Entitlement ein
-      # Schalter, bis er im Developer-Portal fuer die App-ID eingeschaltet ist.
-      - name: CarPlay-Szene einbauen
+      # The CarPlay scene: second scene in the Info.plist, AppDelegate, and the
+      # entitlement - always **with** it here, so that the simulator build
+      # checks the whole path. In the signed build (ios-testflight.yml) the
+      # entitlement is a switch, until it is enabled for the app ID in the
+      # Developer Portal.
+      - name: Add CarPlay scene
         run: bash tools/ios_carplay.sh ios/App true
 
-      # Auf GitHubs macOS-Abbild ist xcbeautify normalerweise vorhanden. Das
-      # "normalerweise" ist der Grund fuer diese Zeile: Faellt es einmal aus
-      # dem Abbild, scheitert sonst die ganze Pipe, und der Fehler sieht nach
-      # einem Baufehler aus statt nach einem fehlenden Werkzeug.
-      - name: xcbeautify sicherstellen
+      # On GitHub's macOS image xcbeautify is normally present. The "normally"
+      # is the reason for this line: if it ever drops out of the image, the
+      # whole pipe fails otherwise, and the failure looks like a build error
+      # instead of a missing tool.
+      - name: Ensure xcbeautify
         run: command -v xcbeautify >/dev/null || brew install xcbeautify
 
-      # `set -o pipefail` ist hier nicht Kosmetik: Ohne sie liefert die Pipe
-      # den Rueckgabewert von xcbeautify, und der ist null, auch wenn
-      # xcodebuild davor gescheitert ist. Der Ablauf waere gruen und der Bau
-      # kaputt - der unangenehmste Zustand, den eine Pruefung haben kann.
+      # `set -o pipefail` is not cosmetic here: without it the pipe returns
+      # the exit code of xcbeautify, and that is zero even if xcodebuild
+      # failed before it. The workflow would be green and the build broken -
+      # the most unpleasant state a check can have.
       #
-      # `generic/platform=iOS Simulator` statt eines Geraetenamens: Welche
-      # Simulatoren im Abbild liegen, aendert GitHub ohne Ankuendigung, und
-      # ein fest verdrahtetes "iPhone 16" faellt dann aus.
+      # `generic/platform=iOS Simulator` instead of a device name: which
+      # simulators are in the image, GitHub changes without announcement, and
+      # a hard-wired "iPhone 16" then drops out.
       #
-      # Capacitor 8 bindet Plugins ueber den Swift Package Manager ein, nicht
-      # ueber CocoaPods. Es gibt deshalb **keine** .xcworkspace, und gebaut
-      # wird `-project`; die Pakete loest xcodebuild beim ersten Aufruf selbst
-      # auf. Das Schema heisst "App".
-      - name: Bauen
+      # Capacitor 8 pulls in plugins via the Swift Package Manager, not via
+      # CocoaPods. There is therefore **no** .xcworkspace, and what is built
+      # is `-project`; xcodebuild resolves the packages itself on the first
+      # call. The scheme is called "App".
+      - name: Build
         run: |
           set -o pipefail
           xcodebuild build \
@@ -154,9 +155,9 @@ jobs:
             | xcbeautify --renderer github-actions
         shell: bash
 
-      # Nach einem gescheiterten Bau ist die erzeugte Plist das Erste, was
-      # man sehen will - und sie existiert nur auf dem Laeufer.
-      - name: Info.plist sichern
+      # After a failed build, the generated plist is the first thing you want
+      # to see - and it exists only on the runner.
+      - name: Save Info.plist
         if: always()
         uses: actions/upload-artifact@v4
         with:

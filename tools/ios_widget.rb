@@ -1,54 +1,54 @@
-# Das Widget-Ziel (Live Activity) in das erzeugte Xcode-Projekt einhängen.
+# Hook the widget target (Live Activity) into the generated Xcode project.
 #
-# `cap add ios` kennt nur das App-Ziel. Eine Live Activity braucht aber eine
-# Widget-Erweiterung, also ein eigenes Ziel mit eigener Bundle-Kennung, das in
-# die App eingebettet wird. Das lässt sich nicht als Swift-Paket abbilden, und
-# das Projekt ist nicht eingecheckt - deshalb wird es nach `cap add` mit dem
-# Ruby-Werkzeug `xcodeproj` (dasselbe, das CocoaPods benutzt) ergänzt.
+# `cap add ios` only knows the app target. A Live Activity needs a widget
+# extension, though - a target of its own with its own bundle identifier,
+# embedded into the app. That cannot be expressed as a Swift package, and the
+# project is not checked in - so after `cap add` it is added with the Ruby
+# tool `xcodeproj` (the same one CocoaPods uses).
 #
-# Aufruf (über tools/ios_widget.sh, das vorher die Quellen hinkopiert):
+# Invocation (via tools/ios_widget.sh, which copies the sources in first):
 #
 #     ruby tools/ios_widget.rb ios/App/App.xcodeproj de.thesmarthome.jolt TEAMID
 #
-# Die Quellen liegen dann schon in ios/App/JoltWidget/.
+# The sources are then already in ios/App/JoltWidget/.
 require "xcodeproj"
 
-pfad, app_id, team = ARGV
-abort "Aufruf: ios_widget.rb PROJEKT APP_ID [TEAM]" if pfad.nil? || app_id.nil?
+path, app_id, team = ARGV
+abort "Usage: ios_widget.rb PROJECT APP_ID [TEAM]" if path.nil? || app_id.nil?
 
 NAME = "JoltWidget"
-MIN_IOS = "18.0"   # supplementalActivityFamilies (CarPlay) gibt es ab iOS 18
+MIN_IOS = "18.0"   # supplementalActivityFamilies (CarPlay) exists from iOS 18
 
-projekt = Xcodeproj::Project.open(pfad)
-app = projekt.targets.find { |t| t.name == "App" }
-abort "Ziel 'App' nicht gefunden - die Capacitor-Vorlage hat sich geaendert." unless app
+project = Xcodeproj::Project.open(path)
+app = project.targets.find { |t| t.name == "App" }
+abort "Target 'App' not found - the Capacitor template has changed." unless app
 
-if projekt.targets.any? { |t| t.name == NAME }
-  puts "Ziel #{NAME} gibt es schon - nichts zu tun."
+if project.targets.any? { |t| t.name == NAME }
+  puts "Target #{NAME} already exists - nothing to do."
   exit 0
 end
 
-ordner = File.join(File.dirname(pfad), NAME)
-%w[Info.plist JoltWidget.swift JoltFahrtAttributes.swift].each do |datei|
-  abort "Fehlt: #{File.join(ordner, datei)}" unless File.exist?(File.join(ordner, datei))
+folder = File.join(File.dirname(path), NAME)
+%w[Info.plist JoltWidget.swift JoltTripAttributes.swift].each do |file|
+  abort "Missing: #{File.join(folder, file)}" unless File.exist?(File.join(folder, file))
 end
 
-# Die Fassung der App uebernehmen: Eine Erweiterung mit anderer Versions-
-# nummer lehnt App Store Connect ab.
-app_einstellungen = app.build_configurations.first.build_settings
-version = app_einstellungen["MARKETING_VERSION"] || "1.0"
-bau = app_einstellungen["CURRENT_PROJECT_VERSION"] || "1"
+# Take over the app's version: App Store Connect rejects an extension with a
+# different version number.
+app_settings = app.build_configurations.first.build_settings
+version = app_settings["MARKETING_VERSION"] || "1.0"
+build = app_settings["CURRENT_PROJECT_VERSION"] || "1"
 
-ziel = projekt.new_target(:app_extension, NAME, :ios, MIN_IOS, nil, :swift)
+target = project.new_target(:app_extension, NAME, :ios, MIN_IOS, nil, :swift)
 
-gruppe = projekt.main_group.new_group(NAME, NAME)
-quellen = %w[JoltWidget.swift JoltFahrtAttributes.swift].map { |d| gruppe.new_file(d) }
-gruppe.new_file("Info.plist")
-ziel.add_file_references(quellen)
+group = project.main_group.new_group(NAME, NAME)
+sources = %w[JoltWidget.swift JoltTripAttributes.swift].map { |d| group.new_file(d) }
+group.new_file("Info.plist")
+target.add_file_references(sources)
 
-%w[WidgetKit SwiftUI ActivityKit].each { |f| ziel.add_system_framework(f) }
+%w[WidgetKit SwiftUI ActivityKit].each { |f| target.add_system_framework(f) }
 
-ziel.build_configurations.each do |k|
+target.build_configurations.each do |k|
   s = k.build_settings
   s["PRODUCT_BUNDLE_IDENTIFIER"] = "#{app_id}.widget"
   s["PRODUCT_NAME"] = "$(TARGET_NAME)"
@@ -59,23 +59,23 @@ ziel.build_configurations.each do |k|
   s["IPHONEOS_DEPLOYMENT_TARGET"] = MIN_IOS
   s["SKIP_INSTALL"] = "YES"
   s["MARKETING_VERSION"] = version
-  s["CURRENT_PROJECT_VERSION"] = bau
+  s["CURRENT_PROJECT_VERSION"] = build
   s["CODE_SIGN_STYLE"] = "Automatic"
   s["DEVELOPMENT_TEAM"] = team if team && !team.empty?
   s["LD_RUNPATHS_SEARCH_PATHS"] =
     "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
 end
 
-# Nur die Erweiterung steht auf iOS 18, die App bleibt bei ihrer Mindestfassung.
-# Die App anzuheben liess `cap sync` ein
-# Package.swift mit `.iOS(.v18)` schreiben, das der Paketmanager (tools-version
-# 5.9) ablehnt - der erste Versuch scheiterte daran.
+# Only the extension is set to iOS 18; the app stays at its minimum version.
+# Raising the app made `cap sync` write a Package.swift with `.iOS(.v18)`,
+# which the package manager (tools-version 5.9) rejects - the first attempt
+# failed because of that.
 
-einbetten = app.new_copy_files_build_phase("Embed Foundation Extensions")
-einbetten.dst_subfolder_spec = "13"   # PlugIns
-datei = einbetten.add_file_reference(ziel.product_reference, true)
-datei.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy"] }
-app.add_dependency(ziel)
+embed = app.new_copy_files_build_phase("Embed Foundation Extensions")
+embed.dst_subfolder_spec = "13"   # PlugIns
+file = embed.add_file_reference(target.product_reference, true)
+file.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy"] }
+app.add_dependency(target)
 
-projekt.save
-puts "Widget-Ziel #{NAME} eingehaengt (#{app_id}.widget, ab iOS #{MIN_IOS})."
+project.save
+puts "Widget target #{NAME} hooked in (#{app_id}.widget, from iOS #{MIN_IOS})."

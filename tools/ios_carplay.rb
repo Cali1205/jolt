@@ -1,49 +1,49 @@
-# Teil von tools/ios_carplay.sh: AppDelegate anpassen und, wenn verlangt, den
-# CarPlay-Entitlement ins Projekt eintragen.
+# Part of tools/ios_carplay.sh: adjust the AppDelegate and, if requested,
+# enter the CarPlay entitlement in the project.
 #
 #     ruby tools/ios_carplay.rb ios/App true
 #
-# Beides bricht ab, statt still weiterzumachen, wenn die Vorlage nicht mehr so
-# aussieht wie erwartet: Ein AppDelegate, der die CarPlay-Szene nicht
-# kennt, sieht im Simulator gruen aus und zeigt im Auto nichts.
+# Both abort instead of carrying on silently when the template no longer looks
+# the way it is expected to: an AppDelegate that does not know the CarPlay
+# scene looks green in the simulator and shows nothing in the car.
 app = ARGV[0] || "ios/App"
 entitlement = (ARGV[1] || "false") == "true"
 
-# ---- 1. AppDelegate: CarPlay bekommt seine Konfiguration aus der Info.plist
-pfad = File.join(app, "App", "AppDelegate.swift")
-abort "AppDelegate.swift nicht gefunden: #{pfad}" unless File.exist?(pfad)
-quelle = File.read(pfad)
+# ---- 1. AppDelegate: CarPlay gets its configuration from the Info.plist
+path = File.join(app, "App", "AppDelegate.swift")
+abort "AppDelegate.swift not found: #{path}" unless File.exist?(path)
+source = File.read(path)
 
-marke = "jolt: CarPlay-Szene"
-if quelle.include?(marke)
-  puts "AppDelegate: schon angepasst."
+marker = "jolt: CarPlay scene"
+if source.include?(marker)
+  puts "AppDelegate: already adjusted."
 else
-  muster = /(configurationForConnecting\s+connectingSceneSession:\s*UISceneSession,\s*options:\s*UIScene\.ConnectionOptions\)\s*->\s*UISceneConfiguration\s*\{)/m
-  abort "AppDelegate: configurationForConnecting nicht gefunden - die Capacitor-Vorlage hat sich geaendert (tools/ios_carplay.rb)." unless quelle =~ muster
-  einschub = <<~SWIFT.gsub(/^/, "        ")
+  pattern = /(configurationForConnecting\s+connectingSceneSession:\s*UISceneSession,\s*options:\s*UIScene\.ConnectionOptions\)\s*->\s*UISceneConfiguration\s*\{)/m
+  abort "AppDelegate: configurationForConnecting not found - the Capacitor template has changed (tools/ios_carplay.rb)." unless source =~ pattern
+  insertion = <<~SWIFT.gsub(/^/, "        ")
 
-    // #{marke}: Die Szene fuer CarPlay hat ihren eigenen Delegate (Info.plist,
-    // CPTemplateApplicationSceneSessionRoleApplication). Ohne diese Zeilen bekaeme
-    // sie den Fenster-Delegate der Oberflaeche.
+    // #{marker}: The CarPlay scene has its own delegate (Info.plist,
+    // CPTemplateApplicationSceneSessionRoleApplication). Without these lines it
+    // would get the UI's window delegate.
     if connectingSceneSession.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
         return UISceneConfiguration(name: "CarPlay Configuration", sessionRole: connectingSceneSession.role)
     }
   SWIFT
-  neu = quelle.sub(muster) { |m| m + "\n" + einschub.rstrip + "\n" }
-  abort "AppDelegate: Anpassung hat nichts geaendert." if neu == quelle
-  File.write(pfad, neu)
-  puts "AppDelegate: CarPlay-Szene wird nicht mehr mit dem Fenster-Delegate bedient."
+  updated = source.sub(pattern) { |m| m + "\n" + insertion.rstrip + "\n" }
+  abort "AppDelegate: the adjustment changed nothing." if updated == source
+  File.write(path, updated)
+  puts "AppDelegate: the CarPlay scene is no longer served by the window delegate."
 end
 
-# ---- 2. Entitlement (nur auf Verlangen)
+# ---- 2. Entitlement (only on request)
 unless entitlement
-  puts "CarPlay-Entitlement: nicht eingetragen (Schalter aus)."
+  puts "CarPlay entitlement: not entered (switch off)."
   exit 0
 end
 
 require "xcodeproj"
-datei = File.join(app, "App", "App.entitlements")
-File.write(datei, <<~PLIST)
+file = File.join(app, "App", "App.entitlements")
+File.write(file, <<~PLIST)
   <?xml version="1.0" encoding="UTF-8"?>
   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
   <plist version="1.0">
@@ -54,13 +54,13 @@ File.write(datei, <<~PLIST)
   </plist>
 PLIST
 
-projekt = Xcodeproj::Project.open(File.join(app, "App.xcodeproj"))
-ziel = projekt.targets.find { |t| t.name == "App" }
-abort "Ziel 'App' nicht gefunden." unless ziel
-ziel.build_configurations.each do |k|
+project = Xcodeproj::Project.open(File.join(app, "App.xcodeproj"))
+target = project.targets.find { |t| t.name == "App" }
+abort "Target 'App' not found." unless target
+target.build_configurations.each do |k|
   k.build_settings["CODE_SIGN_ENTITLEMENTS"] = "App/App.entitlements"
 end
-gruppe = projekt.main_group.find_subpath("App", false)
-gruppe.new_file("App.entitlements") if gruppe && gruppe.files.none? { |f| f.path == "App.entitlements" }
-projekt.save
-puts "CarPlay-Entitlement eingetragen: App/App.entitlements (com.apple.developer.carplay-charging)."
+group = project.main_group.find_subpath("App", false)
+group.new_file("App.entitlements") if group && group.files.none? { |f| f.path == "App.entitlements" }
+project.save
+puts "CarPlay entitlement entered: App/App.entitlements (com.apple.developer.carplay-charging)."

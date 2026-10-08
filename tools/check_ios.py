@@ -228,29 +228,29 @@ def part_live_activity() -> None:
     crashing.
     """
     verify.section("Live Activity")
-    bundle_ = json.loads(load("plugins", "jolt-anzeige", "package.json"))
+    bundle_ = json.loads(load("plugins", "jolt-display", "package.json"))
     verify(bundle_.get("capacitor", {}).get("ios", {}).get("src") == "ios",
            "das Plugin meldet sich bei Capacitor als iOS-Plugin an")
     root = json.loads(load("package.json"))
-    verify("jolt-anzeige" in root.get("dependencies", {}),
+    verify("jolt-display" in root.get("dependencies", {}),
            "und steht in den Abhängigkeiten - sonst bindet `cap sync` es nicht ein")
     ignoriert = subprocess.run(["git", "check-ignore", "-q",
-        "plugins/jolt-anzeige/ios/Sources/JoltAnzeigePlugin/JoltAnzeigePlugin.swift"],
+        "plugins/jolt-display/ios/Sources/JoltDisplayPlugin/JoltDisplayPlugin.swift"],
         cwd=ROOT).returncode == 0
     verify(not ignoriert,
            "die Plugin-Quellen werden von .gitignore nicht verschluckt - `ios/` "
            "traf auch plugins/*/ios, und die CI fand die Dateien nicht")
-    plugin = load("plugins", "jolt-anzeige", "ios", "Sources",
-                   "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
-    verify('jsName = "JoltAnzeige"' in plugin
-           and "registerPlugin('JoltAnzeige')" in load("tools", "ble-shell-entry.js"),
+    plugin = load("plugins", "jolt-display", "ios", "Sources",
+                   "JoltDisplayPlugin", "JoltDisplayPlugin.swift")
+    verify('jsName = "JoltDisplay"' in plugin
+           and "registerPlugin('JoltDisplay')" in load("tools", "ble-shell-entry.js"),
            "der Name im Swift-Plugin ist der, unter dem die Oberfläche es sucht")
-    for method in ("aktualisieren", "beenden", "verfuegbar"):
+    for method in ("refresh", "finish", "available"):
         verify(f'CAPPluginMethod(name: "{method}"' in plugin
                and f"func {method}(" in plugin,
                f"{method} ist deklariert und umgesetzt - eine nur "
                f"deklarierte Methode läuft ins Leere")
-    verify("JoltAnzeigePlugin" in load("plugins", "jolt-anzeige", "Package.swift"),
+    verify("JoltDisplayPlugin" in load("plugins", "jolt-display", "Package.swift"),
            "Package.swift kennt das Ziel des Plugins")
 
     widget = load("ios-native", "JoltWidget", "JoltWidget.swift")
@@ -266,7 +266,7 @@ def part_live_activity() -> None:
            and "add_dependency" in rb,
            "das Skript gibt dem Widget eine eigene Kennung, bettet es in die "
            "App ein und macht es zur Abhängigkeit")
-    verify("JoltFahrtAttributes.swift" in load("tools", "ios_widget.sh"),
+    verify("JoltTripAttributes.swift" in load("tools", "ios_widget.sh"),
            "die gemeinsame Attribute-Datei kommt aus dem Plugin ins Widget - "
            "eine Quelle, zwei Ziele")
 
@@ -297,7 +297,7 @@ def part_live_activity() -> None:
               "for(const f of ['tiles.js','display.js'])"
               "vm.runInContext(fs.readFileSync(p.join(process.argv[1],f),'utf8'),k);"
               f"const m=w.joltDisplay.model({fixture},1e12,{extras});"
-              "console.log(JSON.stringify({modell:w.joltDisplay.toNative(m),gesendet:w.joltDisplay.toNative(w.joltDisplay.withImages(m,1e12))}))")
+              "console.log(JSON.stringify({modell:m,gesendet:w.joltDisplay.withImages(m,1e12)}))")
     try:
         output = subprocess.run(
             ["node", "-e", script, os.path.join(ROOT, "frontend")],
@@ -307,13 +307,13 @@ def part_live_activity() -> None:
     except (OSError, subprocess.CalledProcessError, ValueError) as failure:
         verify(False, "das Anzeigemodell lässt sich mit node erzeugen", str(failure))
         return
-    fields = swift_fields(load("plugins", "jolt-anzeige", "ios", "Sources",
-                                "JoltAnzeigePlugin", "JoltFahrtAttributes.swift"))
-    assignment = {"JoltAnzeige": sent, "Soc": model["soc"], "Stopp": model["stopp"],
-                 "Zeile": model["reserve"], "Verlauf": model["verlauf"],
-                 "Fenster": model["verlauf"]["fenster"][0],
-                 "Rekup": model["verlauf"]["rekup"], "Neben": model["neben"],
-                 "Listenstopp": (model["stoppListe"] or [{}])[0]}
+    fields = swift_fields(load("plugins", "jolt-display", "ios", "Sources",
+                                "JoltDisplayPlugin", "JoltTripAttributes.swift"))
+    assignment = {"JoltDisplay": sent, "Soc": model["soc"], "Stop": model["stop"],
+                  "Row": model["reserve"], "History": model["history"],
+                  "Timeframe": model["history"]["timeframe"][0],
+                  "Regen": model["history"]["regen"], "Aux": model["aux"],
+                  "ListStop": (model["stopList"] or [{}])[0]}
     for structure, present in assignment.items():
         # The template is fully populated, so every field that Swift knows must
         # be in the model - a typo in the name (kwh100 versus kwh_100) otherwise
@@ -324,23 +324,23 @@ def part_live_activity() -> None:
         verify(structure in fields and every and not missing,
                f"Swift liest {structure} ({', '.join(every)}) - jedes Feld "
                f"kommt aus display.js", str(missing))
-    for name in ("ankunft", "rest"):
+    for name in ("arrival", "rest"):
         verify("text" in model[name], f"{name} trägt den Text, den Swift liest")
 
     # The tile images: seven slots, and the Swift side uses the same names.
     # A typo here would mean: the images arrive and are never displayed, without
     # any error message.
-    place = ["soc", "ankunft", "reserve", "verbrauch", "neben", "rekup", "stopps"]
-    verify(sorted(sent.get("kachelBilder", {})) == sorted(place),
+    place = ["soc", "arrival", "reserve", "consumption", "aux", "regen", "stops"]
+    verify(sorted(sent.get("tileImages", {})) == sorted(place),
            "die Oberfläche liefert Bilder für genau die sieben Kachelplätze")
-    scene = load("plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
+    scene = load("plugins", "jolt-display", "ios", "Sources", "JoltDisplayPlugin",
                   "JoltCarPlaySceneDelegate.swift")
-    verify(all(f'bild("{n}")' in scene for n in place),
+    verify(all(f'picture("{n}")' in scene for n in place),
            "und die CarPlay-Szene fragt jeden dieser Plätze ab",
-           str([n for n in place if f'bild("{n}")' not in scene]))
-    plugin = load("plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
-                   "JoltAnzeigePlugin.swift")
-    verify("fuerActivity.kachelBilder = nil" in plugin,
+           str([n for n in place if f'picture("{n}")' not in scene]))
+    plugin = load("plugins", "jolt-display", "ios", "Sources", "JoltDisplayPlugin",
+                   "JoltDisplayPlugin.swift")
+    verify("forActivity.tileImages = nil" in plugin,
            "die Live Activity bekommt die Bilder nicht - sie darf höchstens 4 KB tragen")
     verify("CPGridTemplate.maximumGridButtonImageSize" in scene,
            "Bilder werden auf die Grösse begrenzt, die CarPlay für Kacheln zulässt")
@@ -358,8 +358,8 @@ def part_carplay() -> None:
     the portal.
     """
     verify.section("CarPlay-Szene")
-    delegate = load("plugins", "jolt-anzeige", "ios", "Sources",
-                     "JoltAnzeigePlugin", "JoltCarPlaySceneDelegate.swift")
+    delegate = load("plugins", "jolt-display", "ios", "Sources",
+                     "JoltDisplayPlugin", "JoltCarPlaySceneDelegate.swift")
     sh = load("tools", "ios_carplay.sh")
     rb = load("tools", "ios_carplay.rb")
     name = re.search(r"@objc\((\w+)\)", delegate)
@@ -387,13 +387,13 @@ def part_carplay() -> None:
            "keine Suche, keine Navigation)", str(forbidden))
     verify("CPMapTemplate" not in delegate and "CPNavigationSession" not in delegate,
            "ausdruecklich keine Kartenvorlage und keine Navigationssitzung")
-    plugin = load("plugins", "jolt-anzeige", "ios", "Sources",
-                   "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
-    verify("JoltAnzeigeStore.shared.setzen(zustand)" in plugin
-           and "JoltAnzeigeStore.shared.setzen(nil)" in plugin
-           and "JoltAnzeigeStore.shared.beobachten" in delegate,
+    plugin = load("plugins", "jolt-display", "ios", "Sources",
+                   "JoltDisplayPlugin", "JoltDisplayPlugin.swift")
+    verify("JoltDisplayStore.shared.assign(state)" in plugin
+           and "JoltDisplayStore.shared.assign(nil)" in plugin
+           and "JoltDisplayStore.shared.observe" in delegate,
            "das Plugin fuettert den Speicher, die Szene liest und beobachtet ihn")
-    verify("stoppListe = nil" in plugin,
+    verify("stopList = nil" in plugin,
            "die Live Activity bekommt die Stoppliste nicht (4-KB-Grenze)")
     verify("com.apple.developer.carplay-charging" in rb,
            "der Entitlement der Kategorie EV charging")
@@ -413,20 +413,20 @@ def part_carplay() -> None:
     # Start and stop from CarPlay: plugin, scene and UI must speak the same
     # names, otherwise a button in the car does nothing.
     trips = load("frontend", "trips.js")
-    for method in ("bereit", "aktionErgebnis"):
+    for method in ("ready", "actionResult"):
         verify(f'CAPPluginMethod(name: "{method}"' in plugin
-               and f"func {method}(" in plugin and f"native.{method}(" in trips,
+               and f"func {method}(" in plugin and f"p.{method}(" in trips,
                f"{method}: im Plugin deklariert und umgesetzt, in trips.js aufgerufen")
-    verify('notifyListeners("carplayAktion"' in plugin and '"carplayAktion"' in trips,
-           "das Ereignis heisst auf beiden Seiten carplayAktion")
-    verify('aktionAnfordern("starten")' in delegate and 'aktionAnfordern("beenden")' in delegate
+    verify('notifyListeners("carplayAction"' in plugin and '"carplayAction"' in trips,
+           "das Ereignis heisst auf beiden Seiten carplayAction")
+    verify('requestAction("starten")' in delegate and 'requestAction("beenden")' in delegate
            and 'action === "starten"' in trips and 'action === "beenden"' in trips,
            "Starten und Beenden: dieselben Aktionsnamen in Szene und Oberflaeche")
     verify("CPAlertTemplate" in delegate and "Aufzeichnung beenden?" in delegate,
            "Beenden fragt vorher nach - ein Tippen aus Versehen schliesst keine Fahrt ab")
-    verify("brueckeMelden(true)" in plugin and "guard moeglich" in load(
-               "plugins", "jolt-anzeige", "ios", "Sources", "JoltAnzeigePlugin",
-               "JoltAnzeigeStore.swift"),
+    verify("reportBridge(true)" in plugin and "guard possible" in load(
+               "plugins", "jolt-display", "ios", "Sources", "JoltDisplayPlugin",
+               "JoltDisplayStore.swift"),
            "ohne geladene Oberflaeche (Kaltstart) wird keine Aktion versprochen - CarPlay sagt es")
     verify("asyncAfter" in delegate and "Keine Antwort von jolt" in delegate,
            "antwortet die Oberflaeche nicht, bleibt 'wird gestartet' nicht ewig stehen")

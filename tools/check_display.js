@@ -387,22 +387,22 @@ function freshnessPage(shell) {
 }
 const calls = [];
 const plugin = {
-  aktualisieren: async (a) => { calls.push(["aktualisieren", a]); },
-  beenden: async () => { calls.push(["beenden"]); },
+  refresh: async (a) => { calls.push(["aktualisieren", a]); },
+  finish: async () => { calls.push(["beenden"]); },
 };
-let page = freshnessPage({ JoltAnzeige: plugin, Capacitor: { isNativePlatform: () => true } });
+let page = freshnessPage({ JoltDisplay: plugin, Capacitor: { isNativePlatform: () => true } });
 page.report(planned);
 verify(calls.length === 1 && calls[0][0] === "aktualisieren"
        && typeof calls[0][1].json === "string",
        "in der iOS-App geht das Modell als JSON-Zeichenkette an das Plugin");
 const sent = JSON.parse(calls[0][1].json);
-verify(sent.version === 1 && sent.soc && sent.kurz && typeof sent.stand === "number",
+verify(sent.version === 1 && sent.soc && sent.short && typeof sent.as_of === "number",
        "mit den Schluesseln, die Swift liest (soc, kurz, stand ...)", calls[0][1].json);
 page.finish();
 verify(calls.length === 2 && calls[1][0] === "beenden",
        "und am Fahrtende wird die Anzeige beendet");
 calls.length = 0;
-page = freshnessPage({ JoltAnzeige: plugin, Capacitor: { isNativePlatform: () => false } });
+page = freshnessPage({ JoltDisplay: plugin, Capacitor: { isNativePlatform: () => false } });
 page.report(planned);
 verify(calls.length === 0, "ausserhalb der App (Browser, Bluefy) passiert nichts");
 page = freshnessPage(null);
@@ -425,8 +425,8 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
         set: () => true }),
       toDataURL: () => "data:image/png;base64,QUJD" }) };
     f.joltBlePlugin = { Capacitor: { isNativePlatform: () => true },
-      JoltAnzeige: { aktualisieren: (a) => { aufrufe2.push(["aktualisieren", a]); return Promise.resolve(); },
-                     beenden: () => { aufrufe2.push(["beenden"]); return Promise.resolve(); } } };
+      JoltDisplay: { refresh: (a) => { aufrufe2.push(["aktualisieren", a]); return Promise.resolve(); },
+                     finish: () => { aufrufe2.push(["beenden"]); return Promise.resolve(); } } };
     const k2 = { window: f, document: f.document, console: { log() {} }, Date, JSON, Math, Number, setTimeout,
                  clearTimeout, Promise };
     vm.createContext(k2);
@@ -485,10 +485,10 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
   s3.A2.report(planned);                       // goes out first
   const earlier = s3.aufrufe2.length;
   s3.A2.setStyle("b");
-  verify(s3.aufrufe2.length === earlier + 1 && JSON.parse(s3.aufrufe2[earlier][1].json).stil === "b",
+  verify(s3.aufrufe2.length === earlier + 1 && JSON.parse(s3.aufrufe2[earlier][1].json).look === "b",
          "ein Wechsel des Stils schickt die Anzeige sofort neu - sichtbar im Auto, nicht erst nach der naechsten Meldung");
   const withB = JSON.parse(s3.aufrufe2[earlier][1].json);
-  verify(withB.soc && withB.kurz && Object.keys(withB.kachelBilder).length === 7,
+  verify(withB.soc && withB.short && Object.keys(withB.tileImages).length === 7,
          "mit dem vollen Modell und sieben Bildern");
   verify(JSON.stringify(A.model(planned, NOW)).indexOf("tileImages") === -1,
          "das Modell des Senders traegt keine Bilder: Der Vergleich 'hat sich etwas geaendert' haengt nicht an Pixeln");

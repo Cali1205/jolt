@@ -1,59 +1,59 @@
 #!/bin/bash
-# Die Info.plist des erzeugten iOS-Projekts ergaenzen.
+# Add the missing entries to the Info.plist of the generated iOS project.
 #
-# `cap add ios` legt ein Projekt aus einer Vorlage an, und die Vorlage weiss
-# nichts von Bluetooth. Zwei Sorten Eintraege fehlen deshalb:
+# `cap add ios` creates a project from a template, and the template knows
+# nothing about Bluetooth. Two kinds of entries are therefore missing:
 #
-# **Die Verwendungszwecke.** Fehlt NSBluetoothAlwaysUsageDescription, beendet
-# iOS die App beim ersten CoreBluetooth-Zugriff - ohne Fehlermeldung im
-# Protokoll der App, weil nicht sie abstuerzt, sondern das System sie
-# abraeumt. Das ist die unangenehmste Sorte Fehler: Er sieht wie ein Absturz
-# im eigenen Code aus.
+# **The usage descriptions.** If NSBluetoothAlwaysUsageDescription is missing,
+# iOS terminates the app on the first CoreBluetooth access - with no error
+# message in the app's log, because it is not the app that crashes but the
+# system that removes it. This is the most unpleasant kind of bug: it looks
+# like a crash in our own code.
 #
-# **Die Hintergrundmodi.** `bluetooth-central` haelt die Verbindung zum
-# Dongle, waehrend die App nicht im Vordergrund ist; `location` ist fuer den
-# spaeteren Schritt mit dem Hintergrund-Standort schon hier eingetragen, weil
-# ein zweiter Durchgang durch die Plist-Bearbeitung nichts besser machte.
+# **The background modes.** `bluetooth-central` keeps the connection to the
+# dongle while the app is not in the foreground; `location` is already
+# entered here for the later step with background location, because a second
+# pass through the plist editing would not make anything better.
 #
-# Laeuft in der CI nach `cap add ios`, siehe .github/workflows/ios.yml. Das
-# Verzeichnis ios/ ist nicht eingecheckt - es entsteht bei jedem Lauf neu,
-# und damit muessen diese Eintraege bei jedem Lauf neu gesetzt werden.
+# Runs in CI after `cap add ios`, see .github/workflows/ios.yml. The ios/
+# directory is not checked in - it is created anew on every run, so these
+# entries have to be set anew on every run.
 set -euo pipefail
 
 PLIST="${1:-ios/App/App/Info.plist}"
 
 if [ ! -f "$PLIST" ]; then
-  echo "Info.plist nicht gefunden: $PLIST" >&2
+  echo "Info.plist not found: $PLIST" >&2
   exit 1
 fi
 
-# Erst loeschen, dann anlegen: `Add` scheitert an einem vorhandenen
-# Schluessel, und ein `Set` scheitert an einem fehlenden. Die Reihenfolge
-# macht das Skript wiederholbar, egal welchen Stand die Datei hat.
-setze_text() {
+# Delete first, then create: `Add` fails on an existing key, and `Set` fails
+# on a missing one. This order makes the script repeatable, whatever state the
+# file is in.
+set_text() {
   /usr/libexec/PlistBuddy -c "Delete :$1" "$PLIST" 2>/dev/null || true
   /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST"
 }
 
-setze_text NSBluetoothAlwaysUsageDescription \
+set_text NSBluetoothAlwaysUsageDescription \
   "jolt liest ueber den OBD2-Adapter den Ladestand und die Zaehlerstaende aus dem Fahrzeug."
-setze_text NSBluetoothPeripheralUsageDescription \
+set_text NSBluetoothPeripheralUsageDescription \
   "jolt liest ueber den OBD2-Adapter den Ladestand und die Zaehlerstaende aus dem Fahrzeug."
-setze_text NSLocationWhenInUseUsageDescription \
+set_text NSLocationWhenInUseUsageDescription \
   "jolt zeichnet die gefahrene Strecke auf und vergleicht sie mit der geplanten Route."
-setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
+set_text NSLocationAlwaysAndWhenInUseUsageDescription \
   "jolt zeichnet die Fahrt weiter auf, waehrend das Telefon gesperrt ist."
 
-# **Ausfuhrbestimmungen.** Ohne diesen Schluessel fragt App Store Connect bei
-# jedem hochgeladenen Bau von Hand nach der Verschluesselung, und der Bau
-# bleibt bis zur Antwort fuer TestFlight gesperrt. jolt benutzt nur das, was
-# iOS ohnehin mitbringt (HTTPS, CoreBluetooth) - das ist ausgenommen.
+# **Export compliance.** Without this key, App Store Connect asks about the
+# encryption by hand for every uploaded build, and the build stays blocked
+# for TestFlight until it is answered. jolt only uses what iOS ships anyway
+# (HTTPS, CoreBluetooth) - that is exempt.
 /usr/libexec/PlistBuddy -c "Delete :ITSAppUsesNonExemptEncryption" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST"
 
-# **Live Activities.** Ohne diesen Schluessel lehnt ActivityKit jede Anfrage ab
-# (Activity.request wirft), und die Anzeige in CarPlay und auf dem
-# Sperrbildschirm bleibt leer - ohne Hinweis im Protokoll der App.
+# **Live Activities.** Without this key, ActivityKit rejects every request
+# (Activity.request throws), and the display in CarPlay and on the lock
+# screen stays empty - with no hint in the app's log.
 /usr/libexec/PlistBuddy -c "Delete :NSSupportsLiveActivities" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivities bool true" "$PLIST"
 
@@ -62,6 +62,6 @@ setze_text NSLocationAlwaysAndWhenInUseUsageDescription \
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string bluetooth-central" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string location" "$PLIST"
 
-echo "Info.plist ergaenzt:"
+echo "Info.plist updated:"
 /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E \
   "NSBluetooth|NSLocation|NSSupportsLive|UIBackgroundModes|ITSApp" -A 2 || true
