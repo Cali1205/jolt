@@ -347,7 +347,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     /// erst ab iOS 17.4, davor steht nur das Bild.
     private func bildZeilen(_ eintraege: [Eintrag]) -> [CPListSection] {
         let proZeile = 4
-        var zeilen: [CPListItem] = []
+        var zeilen: [CPListTemplateItem] = []
         var start = 0
         while start < eintraege.count {
             let teil = Array(eintraege[start..<min(start + proZeile, eintraege.count)])
@@ -355,7 +355,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
             let zeile: CPListImageRowItem
             if #available(iOS 17.4, *) {
                 zeile = CPListImageRowItem(
-                    text: nil, images: bilder, imageTitles: teil.map { $0.titel })
+                    text: "", images: bilder, imageTitles: teil.map { $0.titel })
             } else {
                 zeile = CPListImageRowItem(text: teil.map { $0.titel }.joined(separator: " · "),
                                            images: bilder)
