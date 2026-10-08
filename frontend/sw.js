@@ -63,23 +63,23 @@ self.addEventListener("fetch", (event) => {
  * and not via the open WebSocket connection.
  */
 self.addEventListener("push", (event) => {
-  let records = { title: "jolt", text: "Der Ladeplan hat sich geändert.", url: "/" };
+  let payload = { title: "jolt", text: "Der Ladeplan hat sich geändert.", url: "/" };
   try {
-    if (event.data) records = Object.assign(records, event.data.json());
+    if (event.data) payload = Object.assign(payload, event.data.json());
   } catch (e) {
     // A payload that is not JSON does not come from jolt. Showing the default
     // is better than swallowing the message entirely.
   }
 
-  event.waitUntil(self.registration.showNotification(records.title, {
-    body: records.text,
+  event.waitUntil(self.registration.showNotification(payload.title, {
+    body: payload.text,
     icon: "/static/icon.svg",
     badge: "/static/icon.svg",
     // Same tag: a new plan change replaces the old one instead of lying next
     // to it. At the wheel the current plan counts, not the history.
     day: "jolt-plan",
     renotify: true,
-    data: { url: records.url || "/" },
+    data: { url: payload.url || "/" },
   }));
 });
 
@@ -92,8 +92,8 @@ self.addEventListener("notificationclick", (event) => {
   // none of them runs the live connection that is needed right now.
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true })
-      .then((timeframe) => {
-        for (const f of timeframe) {
+      .then((openWindows) => {
+        for (const f of openWindows) {
           if (f.url.indexOf(self.location.origin) === 0 && "focus" in f) {
             return f.focus();
           }

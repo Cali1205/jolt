@@ -28,9 +28,9 @@ window.joltDisplay = (function () {
 
   const MINUS = "−";
 
-  function num(val, put) {
-    return Number(val).toLocaleString("de-DE", {
-      minimumFractionDigits: put || 0, maximumFractionDigits: put || 0 });
+  function num(value, digits) {
+    return Number(value).toLocaleString("de-DE", {
+      minimumFractionDigits: digits || 0, maximumFractionDigits: digits || 0 });
   }
 
   const actual = (x) => typeof x === "number" && Number.isFinite(x);
@@ -86,13 +86,13 @@ window.joltDisplay = (function () {
              kwh: final.net - at_first.net };
   }
 
-  function historyModel(track, now_ts) {
+  function historyModel(track, now) {
     if (!Array.isArray(track) || track.length < 2) return null;
     const last = track[track.length - 1];
-    if (!last || !actual(last.timestamp) || now_ts - last.timestamp > TRACK_FRESH_MS) return null;
+    if (!last || !actual(last.timestamp) || now - last.timestamp > TRACK_FRESH_MS) return null;
 
-    const timeframe = TIMEFRAME_MIN.map((min) => {
-      const e = energyAndDistance(track, now_ts - min * MIN_MS);
+    const windows = TIMEFRAME_MIN.map((min) => {
+      const e = energyAndDistance(track, now - min * MIN_MS);
       const empty = { min, kwh100: null, kw: null, text: "–", kwText: "–" };
       if (!e || e.duration < TIMEFRAME_COVERAGE * min * MIN_MS) return empty;
       const kw = e.kwh / (e.duration / 3600000);
@@ -108,25 +108,25 @@ window.joltDisplay = (function () {
     // without distance (standstill, traffic light) is a gap, not a zero.
     const bar = [];
     for (let i = BAR_NUMBER - 1; i >= 0; i--) {
-      const upto = now_ts - i * 5 * MIN_MS;
-      const begin = upto - 5 * MIN_MS;
-      const p = track.filter((x) => x.timestamp >= begin && x.timestamp <= upto && actual(x.gps) && actual(x.net));
-      let val = null;
+      const bucketEnd = now - i * 5 * MIN_MS;
+      const begin = bucketEnd - 5 * MIN_MS;
+      const p = track.filter((x) => x.timestamp >= begin && x.timestamp <= bucketEnd && actual(x.gps) && actual(x.net));
+      let barValue = null;
       if (p.length >= 2) {
         const km = p[p.length - 1].gps - p[0].gps;
         const duration = p[p.length - 1].timestamp - p[0].timestamp;
         if (km >= MIN_KM && duration >= 2 * MIN_MS) {
-          val = Math.round((p[p.length - 1].net - p[0].net) / km * 1000) / 10;
+          barValue = Math.round((p[p.length - 1].net - p[0].net) / km * 1000) / 10;
         }
       }
-      bar.push(val);
+      bar.push(barValue);
     }
     const hasBar = bar.some((b) => b !== null);
 
     // Regeneration: how much of the drawn energy came back, over the last
     // hour (or as long as the trace allows, at least five minutes).
     let regen = null;
-    const r = track.filter((x) => x.timestamp >= now_ts - 60 * MIN_MS && actual(x.disch) && actual(x.chg));
+    const r = track.filter((x) => x.timestamp >= now - 60 * MIN_MS && actual(x.disch) && actual(x.chg));
     if (r.length >= 2) {
       const duration = r[r.length - 1].timestamp - r[0].timestamp;
       const disch = r[r.length - 1].disch - r[0].disch;
@@ -137,13 +137,13 @@ window.joltDisplay = (function () {
       }
     }
 
-    if (!timeframe.some((f) => f.kw !== null) && !hasBar && !regen) return null;
-    return { timeframe, bar: hasBar ? bar : null, regen };
+    if (!windows.some((f) => f.kw !== null) && !hasBar && !regen) return null;
+    return { timeframe: windows, bar: hasBar ? bar : null, regen };
   }
 
-  function valueFresh(vals, name, now_ts) {
+  function valueFresh(vals, name, now) {
     const w = vals && vals[name];
-    return w && actual(w.val) && now_ts - w.timestamp <= VALUE_OLD_MS ? w.val : null;
+    return w && actual(w.val) && now - w.timestamp <= VALUE_OLD_MS ? w.val : null;
   }
 
   /* The auxiliary consumers: what the car draws without driving. The measured
@@ -151,19 +151,19 @@ window.joltDisplay = (function () {
    * Heating (PTC) and A/C compressor are added if they were read: they are
    * the two big consumers one can influence oneself. The heater power is
    * current times pack voltage - an approximation, not a measurement. */
-  function auxModel(vals, approximation, now_ts) {
-    let kw = valueFresh(vals, "aux_load_kw", now_ts);
+  function auxModel(vals, approximation, now) {
+    let kw = valueFresh(vals, "aux_load_kw", now);
     let source = "gemessen";
-    if (kw === null && approximation && actual(approximation.kw) && now_ts - approximation.timestamp <= VALUE_OLD_MS) {
+    if (kw === null && approximation && actual(approximation.kw) && now - approximation.timestamp <= VALUE_OLD_MS) {
       kw = approximation.kw;
       source = "geschaetzt";
     }
-    const ptcA = valueFresh(vals, "ptc_current_a", now_ts);
-    const voltage = valueFresh(vals, "voltage_v", now_ts);
+    const ptcA = valueFresh(vals, "ptc_current_a", now);
+    const voltage = valueFresh(vals, "voltage_v", now);
     const heating = (ptcA !== null && voltage !== null) ? ptcA * voltage / 1000 : null;
-    const compressorW = valueFresh(vals, "compressor_w", now_ts);
+    const compressorW = valueFresh(vals, "compressor_w", now);
     const climate = compressorW !== null ? compressorW / 1000 : null;
-    const batterie = valueFresh(vals, "batterie_c", now_ts);
+    const batterie = valueFresh(vals, "batterie_c", now);
 
     if (kw === null && heating === null && climate === null && batterie === null) return null;
     const rounded = (x) => (x === null ? null : Math.round(x * 10) / 10);
@@ -188,26 +188,26 @@ window.joltDisplay = (function () {
 
   function stopListModel(plan, km) {
     if (km === null || !plan || !Array.isArray(plan.stops)) return null;
-    const origin_of = [];
+    const stops = [];
     for (const s of plan.stops) {
       if (!s || !actual(s.km_on_route)) continue;
       if (s.km_on_route < km - 0.5) continue;          // already passed
-      const upto = Math.max(0, s.km_on_route - km);
+      const remaining = Math.max(0, s.km_on_route - km);
       const at = actual(s.arrival_soc) ? Math.round(s.arrival_soc) : null;
       const downhill = actual(s.departure_soc) ? Math.round(s.departure_soc) : null;
       const min = actual(s.charge_time_minutes) ? Math.round(s.charge_time_minutes) : null;
-      origin_of.push({
+      stops.push({
         name: typeof s.name === "string" && s.name ? s.name : "Ladestopp",
-        km: Math.round(upto * 10) / 10, kmText: kmText(upto),
+        km: Math.round(remaining * 10) / 10, kmText: kmText(remaining),
         arrivalSoc: at, arrivalSocText: at === null ? null : `${num(at)} %`,
         departureSocText: downhill === null ? null : `${num(downhill)} %`,
         chargeTimeMin: min, chargeTimeText: min === null ? null : `${num(min)} min`,
         operator: typeof s.operator === "string" && s.operator ? s.operator : null,
         powerKw: actual(s.max_kw) ? Math.round(s.max_kw) : null,
       });
-      if (origin_of.length >= STOPS_MAX) break;
+      if (stops.length >= STOPS_MAX) break;
     }
-    return origin_of.length ? origin_of : null;
+    return stops.length ? stops : null;
   }
 
   /* The model for a state - or null if there is nothing to show.
@@ -216,10 +216,10 @@ window.joltDisplay = (function () {
    * a recording, no arrival without a plan. Nothing is replaced or estimated -
    * a display in the car that invents a field is worse than one that leaves
    * it out. */
-  function model(z, now_ts, extras) {
+  function model(z, now, extras) {
     // In JavaScript an array is also an object - and not a state.
     if (!z || typeof z !== "object" || Array.isArray(z)) return null;
-    const as_of = actual(now_ts) ? now_ts : Date.now();
+    const as_of = actual(now) ? now : Date.now();
     const m = { version: 1, as_of,
                 soc: null, reserve: null, stop: null, arrival: null, rest: null };
 
@@ -237,18 +237,18 @@ window.joltDisplay = (function () {
     const hasPlan = actual(z.plan_soc);
 
     if (hasPlan && km !== null && actual(z.reserve_at_km) && z.reserve_at_km >= km) {
-      const upto = z.reserve_at_km - km;
-      m.reserve = { km: Math.round(upto * 10) / 10, text: kmText(upto) };
+      const remaining = z.reserve_at_km - km;
+      m.reserve = { km: Math.round(remaining * 10) / 10, text: kmText(remaining) };
     }
 
     const s = z.next_stop;
     if (hasPlan && km !== null && s && actual(s.km_on_route) && s.km_on_route >= km) {
-      const upto = s.km_on_route - km;
+      const remaining = s.km_on_route - km;
       // Expected (extrapolated with the measured consumption), otherwise planned.
       const soc = actual(s.expected_soc) ? s.expected_soc
                 : (actual(s.planned_soc) ? s.planned_soc : null);
       m.stop = { name: typeof s.name === "string" && s.name ? s.name : "Ladestopp",
-                  km: Math.round(upto * 10) / 10, kmText: kmText(upto),
+                  km: Math.round(remaining * 10) / 10, kmText: kmText(remaining),
                   arrivalSoc: soc === null ? null : Math.round(soc),
                   arrivalSocText: soc === null ? null : `${num(Math.round(soc))} %`,
                   planned: !actual(s.expected_soc) };
@@ -348,15 +348,15 @@ window.joltDisplay = (function () {
       setTarget(f) { destination = typeof f === "function" ? f : null; },
 
       report(z, extras) {
-        const now_ts = nowFn();
-        const m = model(z, now_ts, extras);
+        const now = nowFn();
+        const m = model(z, now, extras);
         if (m === null) return;
         ended_at = false;
         const same = lastContent !== null && contents(m) === lastContent;
-        const since = latestTime === null ? Infinity : now_ts - latestTime;
+        const elapsed = latestTime === null ? Infinity : now - latestTime;
 
-        if (same && since < heartbeatMs) { waiting = null; return; }
-        if (since >= spacingMs) {
+        if (same && elapsed < heartbeatMs) { waiting = null; return; }
+        if (elapsed >= spacingMs) {
           if (clock !== null) { remove(clock); clock = null; }
           waiting = null;
           send(m);
@@ -364,7 +364,7 @@ window.joltDisplay = (function () {
         }
         // Too early: remember the newest and send at the permitted time.
         waiting = m;
-        if (clock === null) clock = schedule(sendWaiting, spacingMs - since);
+        if (clock === null) clock = schedule(sendWaiting, spacingMs - elapsed);
       },
 
       finish() {
@@ -388,29 +388,29 @@ window.joltDisplay = (function () {
   const SERIES_TIMEFRAME_MS = 30 * 60000;
   const SERIES_GAP_MS = 3 * 60000;
 
-  function seriesListAppend(series_list, m, now_ts) {
+  function seriesListAppend(series_list, m, now) {
     const r = series_list || { points: [] };
     const last = r.points[r.points.length - 1];
-    if (last && now_ts - last.timestamp > SERIES_GAP_MS) r.points = [];
+    if (last && now - last.timestamp > SERIES_GAP_MS) r.points = [];
     r.points.push({
-      timestamp: now_ts,
+      timestamp: now,
       soc: m && m.soc && actual(m.soc.percent) ? m.soc.percent : null,
       aux: m && m.aux && actual(m.aux.kw) ? m.aux.kw : null,
       regen: m && m.history && m.history.regen && actual(m.history.regen.percent)
         ? m.history.regen.percent : null,
     });
-    r.points = r.points.filter((p) => now_ts - p.timestamp <= SERIES_TIMEFRAME_MS);
+    r.points = r.points.filter((p) => now - p.timestamp <= SERIES_TIMEFRAME_MS);
     return r;
   }
 
   /* The series per tile; fewer than two points are not a line. */
   function seriesListExcerpt(series_list) {
-    const origin_of = {};
+    const result = {};
     for (const name of ["soc", "aux", "regen"]) {
       const w = ((series_list && series_list.points) || []).map((p) => p[name]).filter(actual);
-      origin_of[name] = w.length >= 2 ? w : null;
+      result[name] = w.length >= 2 ? w : null;
     }
-    return origin_of;
+    return result;
   }
 
   /* ---------- Style of the CarPlay tiles ----------
@@ -435,19 +435,19 @@ window.joltDisplay = (function () {
    * images are not in the sender's model: the comparison "has something
    * changed" should not depend on pixels, and the Live Activity carries at
    * most 4 KB (the plugin leaves them out there). */
-  function withImages(m, now_ts) {
-    seriesListState = seriesListAppend(seriesListState, m, now_ts);
-    const origin_of = Object.assign({}, m, { look: styleChoice });
+  function withImages(m, now) {
+    seriesListState = seriesListAppend(seriesListState, m, now);
+    const result = Object.assign({}, m, { look: styleChoice });
     if (styleChoice !== "klassisch" && window.joltTiles) {
       try {
-        origin_of.tileImages = window.joltTiles.pictures(styleChoice, m, seriesListExcerpt(seriesListState));
+        result.tileImages = window.joltTiles.pictures(styleChoice, m, seriesListExcerpt(seriesListState));
       } catch (failure) {
         // Without images Swift draws itself - a tile that fails must not
         // cost the display.
         console.log("[anzeige] Kacheln nicht gezeichnet:", failure && failure.message);
       }
     }
-    return origin_of;
+    return result;
   }
 
   /* The native plugin (plugins/jolt-anzeige) still reads the German keys of the
@@ -527,14 +527,14 @@ window.joltDisplay = (function () {
   }
 
   /* The UI's sender: `live.js` reports every state here. */
-  const std_default = sender({ destination: nativeTarget });
+  const defaultSender = sender({ destination: nativeTarget });
 
   return {
     model, sender, seriesListAppend, seriesListExcerpt, withImages, toNative,
     look: () => styleChoice, setStyle, STYLES,
-    report: (z, extras) => std_default.report(z, extras),
-    finish: () => std_default.finish(),
-    setTarget: (f) => std_default.setTarget(f),
+    report: (z, extras) => defaultSender.report(z, extras),
+    finish: () => defaultSender.finish(),
+    setTarget: (f) => defaultSender.setTarget(f),
     MIN_SPACING_MS, HEARTBEAT_MS,
   };
 })();

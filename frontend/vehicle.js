@@ -78,19 +78,19 @@ window.joltVehicle = (function () {
   }
 
   function readForm() {
-    const records = {};
+    const form = {};
     for (const field of FIELDS) {
       const el = document.getElementById("fz-" + field.name);
       if (!el) continue;
-      if (field.kind === "checkbox") records[field.name] = el.checked;
+      if (field.kind === "checkbox") form[field.name] = el.checked;
       else if (field.kind === "liste") {
-        records[field.name] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
-      } else if (field.kind === "text" || field.kind === "auswahl") records[field.name] = el.value;
-      else if (field.optional && el.value === "") records[field.name] = null;
-      else records[field.name] = Number(el.value);
+        form[field.name] = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (field.kind === "text" || field.kind === "auswahl") form[field.name] = el.value;
+      else if (field.optional && el.value === "") form[field.name] = null;
+      else form[field.name] = Number(el.value);
     }
-    records.charge_curve = readCurve();
-    return records;
+    form.charge_curve = readCurve();
+    return form;
   }
 
   /* ---------- Charging curve ---------- */
@@ -127,25 +127,25 @@ window.joltVehicle = (function () {
     return row;
   }
 
-  function fillPrices(lst) {
+  function fillPrices(entries) {
     const content = document.getElementById("preis-zeilen");
     if (!content) return;
     content.innerHTML = "<tr><th>Anbieter</th><th>€/kWh</th><th></th></tr>";
-    for (const entry of lst || []) {
+    for (const entry of entries || []) {
       content.appendChild(priceRow(entry.pattern, entry.eur_kwh));
     }
   }
 
   function readPrices() {
     const rows = document.querySelectorAll("#preis-zeilen tr");
-    const lst = [];
+    const prices = [];
     for (const row of rows) {
       const pattern = row.querySelector(".preis-muster");
-      const val = row.querySelector(".preis-wert");
-      if (!pattern || !val || !pattern.value.trim()) continue;
-      lst.push({ pattern: pattern.value.trim(), eur_kwh: Number(val.value) });
+      const priceField = row.querySelector(".preis-wert");
+      if (!pattern || !priceField || !pattern.value.trim()) continue;
+      prices.push({ pattern: pattern.value.trim(), eur_kwh: Number(priceField.value) });
     }
-    return lst;
+    return prices;
   }
 
   function fillCurve(pairs) {
@@ -209,10 +209,10 @@ window.joltVehicle = (function () {
       window.joltTrips.reportVehicle();
     }
 
-    const fresh = document.createElement("option");
-    fresh.value = "neu";
-    fresh.textContent = "+ neues Fahrzeug";
-    document.getElementById("fahrzeug-liste").appendChild(fresh);
+    const newOption = document.createElement("option");
+    newOption.value = "neu";
+    newOption.textContent = "+ neues Fahrzeug";
+    document.getElementById("fahrzeug-liste").appendChild(newOption);
 
     showCurrent();
   }
@@ -227,8 +227,8 @@ window.joltVehicle = (function () {
     if (vehicle) {
       fillForm(vehicle);
       fillPrices(vehicle.electricity_prices);
-      const std_default = document.getElementById("standardpreis");
-      if (std_default) std_default.value = vehicle.electricity_price_eur_kwh ?? 0.59;
+      const defaultPrice = document.getElementById("standardpreis");
+      if (defaultPrice) defaultPrice.value = vehicle.electricity_price_eur_kwh ?? 0.59;
     }
     showLogger(vehicle);
   }
@@ -307,17 +307,17 @@ window.joltVehicle = (function () {
 
   async function save() {
     const choice = document.getElementById("fahrzeug-liste").value;
-    const records = readForm();
-    records.electricity_prices = readPrices();
-    const std_default = document.getElementById("standardpreis");
-    records.electricity_price_eur_kwh = std_default ? Number(std_default.value) : 0.59;
-    if (!records.name) { K.report("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
+    const payload = readForm();
+    payload.electricity_prices = readPrices();
+    const defaultPrice = document.getElementById("standardpreis");
+    payload.electricity_price_eur_kwh = defaultPrice ? Number(defaultPrice.value) : 0.59;
+    if (!payload.name) { K.report("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
 
     // Every charge level may only occur once - the database enforces that,
     // but finding out only after a failed save which charge level was a
     // duplicate is needlessly cumbersome.
     const seen = new Set();
-    for (const [soc] of records.charge_curve) {
+    for (const [soc] of payload.charge_curve) {
       if (seen.has(soc)) {
         K.report(`Ladestand ${soc} % kommt in der Ladekurve mehrfach vor.`, "fehler");
         return;
@@ -327,9 +327,9 @@ window.joltVehicle = (function () {
 
     try {
       if (choice === "neu") {
-        await K.api("/api/fahrzeuge", { method: "POST", body: records });
+        await K.api("/api/fahrzeuge", { method: "POST", body: payload });
       } else {
-        await K.api("/api/fahrzeuge/" + choice, { method: "PUT", body: records });
+        await K.api("/api/fahrzeuge/" + choice, { method: "PUT", body: payload });
       }
       await load();
       K.report("Fahrzeug gespeichert.", "hinweis");
