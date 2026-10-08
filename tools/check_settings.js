@@ -37,8 +37,8 @@ function build(options) {
     }
     return elemente[id];
   };
-  element("lausch-protokoll").value = "6";
-  element("lausch-dauer").value = "10000";
+  element("listen-log").value = "6";
+  element("listen-duration").value = "10000";
 
   const reports = [];
   const calls = { attach: 0, listen: [], detach: 0 };
@@ -94,64 +94,64 @@ function build(options) {
 async function main() {
   console.log("Mithoeren ohne verbundenen Dongle");
   let t = build({ linked: false, frames: 120 });
-  await t.element("lausch-start").tap();
+  await t.element("listen-start").tap();
   verify(t.calls.attach === 1 && t.calls.listen.length === 1,
          "der Knopf verbindet zuerst und hoert dann zu (nach dem Parken ist der Dongle getrennt)",
          JSON.stringify(t.calls));
   verify(t.calls.listen[0].trace_log === "6" && t.calls.listen[0].duration_ms === 10000,
          "mit dem gewaehlten Protokoll und der Dauer");
-  const result = t.element("lausch-ergebnis");
+  const result = t.element("listen-result");
   verify(result.hidden === false && /120 Frames/.test(result.textContent)
          && /7B0/.test(result.textContent),
          "das Ergebnis steht im Feld, mit Kennung und Anzahl", result.textContent);
-  verify(t.element("lausch-kopieren").hidden === false, "und der Kopieren-Knopf erscheint");
-  verify(t.element("lausch-start").disabled === false, "der Knopf ist danach wieder frei");
+  verify(t.element("listen-copy").hidden === false, "und der Kopieren-Knopf erscheint");
+  verify(t.element("listen-start").disabled === false, "der Knopf ist danach wieder frei");
 
   console.log("\nMithoeren: Rueckmeldungen stehen im Feld, nicht in einer Meldung");
   t = build({ linked: false, connectionFails: true });
-  await t.element("lausch-start").tap();
-  verify(/kein Gerät gewählt/.test(t.element("lausch-ergebnis").textContent)
+  await t.element("listen-start").tap();
+  verify(/kein Gerät gewählt/.test(t.element("listen-result").textContent)
          && t.calls.listen.length === 0,
          "scheitert das Verbinden, steht der Grund im Ergebnisfeld - und es wird nicht gelauscht",
-         t.element("lausch-ergebnis").textContent);
+         t.element("listen-result").textContent);
   verify(t.reports.length === 0,
          "ohne fluechtige Meldung, die nach sechs Sekunden weg ist");
-  verify(t.element("lausch-start").disabled === false, "der Knopf bleibt benutzbar");
+  verify(t.element("listen-start").disabled === false, "der Knopf bleibt benutzbar");
 
   t = build({ linked: false, remainsSeparate: true });
-  await t.element("lausch-start").tap();
-  verify(/keine Verbindung/.test(t.element("lausch-ergebnis").textContent)
+  await t.element("listen-start").tap();
+  verify(/keine Verbindung/.test(t.element("listen-result").textContent)
          && t.calls.listen.length === 0,
          "kommt trotz Dialog keine Verbindung zustande, sagt das Feld es");
 
   t = build({ bluetooth: false });
-  await t.element("lausch-start").tap();
-  verify(/kein Bluetooth/.test(t.element("lausch-ergebnis").textContent),
+  await t.element("listen-start").tap();
+  verify(/kein Bluetooth/.test(t.element("listen-result").textContent),
          "ein Browser ohne Bluetooth bekommt einen klaren Satz",
-         t.element("lausch-ergebnis").textContent);
+         t.element("listen-result").textContent);
 
   t = build({ linked: true, tripRunning: true });
-  await t.element("lausch-start").tap();
-  verify(/Fahrt läuft/.test(t.element("lausch-ergebnis").textContent)
+  await t.element("listen-start").tap();
+  verify(/Fahrt läuft/.test(t.element("listen-result").textContent)
          && t.calls.listen.length === 0 && t.calls.attach === 0,
          "waehrend einer Aufzeichnung wird nicht gelauscht, und das steht im Feld",
-         t.element("lausch-ergebnis").textContent);
+         t.element("listen-result").textContent);
 
   t = build({ linked: true, frames: 0 });
-  await t.element("lausch-start").tap();
-  verify(t.calls.attach === 0 && /Nichts angekommen/.test(t.element("lausch-ergebnis").textContent),
+  await t.element("listen-start").tap();
+  verify(t.calls.attach === 0 && /Nichts angekommen/.test(t.element("listen-result").textContent),
          "ist der Dongle schon verbunden, wird nicht erneut verbunden; ein stiller Bus wird benannt");
 
   console.log("\nDongle verbinden in den Einstellungen");
   t = build({ linked: false });
-  await t.element("einst-verbinden").tap();
+  await t.element("settings-connect").tap();
   verify(t.calls.attach === 1
-         && /Verbunden: IOS-Vlink/.test(t.element("einst-verbinden-stand").textContent),
-         "der Knopf verbindet und nennt das Geraet", t.element("einst-verbinden-stand").textContent);
+         && /Verbunden: IOS-Vlink/.test(t.element("settings-connect-status").textContent),
+         "der Knopf verbindet und nennt das Geraet", t.element("settings-connect-status").textContent);
   verify(t.calls.listen.length === 0, "es wird dabei nichts gelauscht oder gelesen");
   t = build({ linked: false, connectionFails: true });
-  await t.element("einst-verbinden").tap();
-  verify(/Nicht verbunden: kein Gerät gewählt/.test(t.element("einst-verbinden-stand").textContent),
+  await t.element("settings-connect").tap();
+  verify(/Nicht verbunden: kein Gerät gewählt/.test(t.element("settings-connect-status").textContent),
          "scheitert es, steht der Grund neben dem Knopf");
 
   console.log(failure ? `\n${failure} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");

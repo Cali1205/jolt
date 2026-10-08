@@ -91,14 +91,14 @@ window.joltTrips = (function () {
         ? Math.round(trip.speed_factor * 100) : ""}</td>
       <td class="num weg-schmal">${soc}</td>
       <td class="tat-spalte">
-        <button class="klein" data-oeffnen="${trip.id}">öffnen</button>
-        <button class="klein" data-loeschen="${trip.id}">×</button>
+        <button class="klein" data-open="${trip.id}">öffnen</button>
+        <button class="klein" data-delete="${trip.id}">×</button>
       </td>
     </tr>`;
   }
 
   async function load() {
-    const holder = document.getElementById("fahrten-liste");
+    const holder = document.getElementById("trips-list");
     if (!holder) return;
     holder.innerHTML = '<p class="leer">lädt …</p>';
     try {
@@ -141,7 +141,7 @@ window.joltTrips = (function () {
   async function open_it(id) {
     try {
       await window.joltRoute.tripCharging(Number(id));
-      window.joltApp.showView("planen");
+      window.joltApp.showView("plan");
     } catch (failure) {
       K.report("Fahrt öffnen: " + failure.message, "fehler");
     }
@@ -188,9 +188,9 @@ window.joltTrips = (function () {
 
   async function startRecording() {
     lastStartError = "";
-    const btn = document.getElementById("aufz-start");
+    const btn = document.getElementById("rec-start");
     const as_of = (text) => {
-      const el = document.getElementById("aufz-stand");
+      const el = document.getElementById("rec-status");
       if (el) el.textContent = text;
     };
     btn.disabled = true;
@@ -221,7 +221,7 @@ window.joltTrips = (function () {
       // (generic EV), and everything was calculated with it afterwards -
       // battery size, mass, drag. Better not to record at all than for the
       // wrong car.
-      const choice = document.getElementById("aufz-fahrzeug");
+      const choice = document.getElementById("rec-vehicle");
       const id = choice && choice.value ? Number(choice.value) : null;
       if (!id) {
         K.report("Erst ein Fahrzeug wählen – ohne das gehört die "
@@ -275,7 +275,7 @@ window.joltTrips = (function () {
         method: "POST",
         body: { vehicle_id: id, lat: city.latitude, lon: city.longitude,
                 soc: soc,
-                name: document.getElementById("aufz-name").value },
+                name: document.getElementById("rec-name").value },
       });
       K.state.sessionId = response.session_id;
       K.sessionRemember(response.session_id);
@@ -284,8 +284,8 @@ window.joltTrips = (function () {
       // The new recording belongs in the list.
       K.state.tripsStale = true;
       window.joltApp.showView("live");
-      document.getElementById("live-leer").hidden = true;
-      document.getElementById("live-inhalt").hidden = false;
+      document.getElementById("live-empty").hidden = true;
+      document.getElementById("live-content").hidden = false;
       window.joltLive.link(response.session_id);
       // Whoever starts the recording is sitting in the car: reading is allowed
       // until the phone says the car is stationary. Without that it began in the
@@ -351,7 +351,7 @@ window.joltTrips = (function () {
   function reportVehicle() {
     const p = carplayPlugin();
     if (!p) return;
-    const choice = document.getElementById("aufz-fahrzeug");
+    const choice = document.getElementById("rec-vehicle");
     const option = choice && choice.selectedOptions && choice.selectedOptions[0];
     const name = option && choice.value ? String(option.textContent || "").trim() : "";
     try {
@@ -367,8 +367,8 @@ window.joltTrips = (function () {
       if (action === "starten") {
         if (K.state.sessionId) {
           ok = true; text = "Die Aufzeichnung läuft schon.";
-        } else if (document.getElementById("aufz-start")
-                   && document.getElementById("aufz-start").disabled) {
+        } else if (document.getElementById("rec-start")
+                   && document.getElementById("rec-start").disabled) {
           ok = false; text = "Ein Start läuft gerade.";
         } else {
           ok = await startRecording();
@@ -411,7 +411,7 @@ window.joltTrips = (function () {
   /* On opening, say what this browser can do - before someone taps and
    * wonders why no device dialog appears. */
   function dongleHint() {
-    const el = document.getElementById("aufz-dongle-hinweis");
+    const el = document.getElementById("rec-dongle-hint");
     if (!el) return;
     el.innerHTML = (window.joltObd && window.joltObd.obtainable())
       ? "Dieser Browser kann Bluetooth – beim Starten wird versucht, den "
@@ -423,21 +423,21 @@ window.joltTrips = (function () {
   }
 
   function set_up() {
-    K.at("aufz-start", "click", startRecording);
+    K.at("rec-start", "click", startRecording);
     carplayConnect();
     dongleHint();
-    const holder = document.getElementById("fahrten-liste");
+    const holder = document.getElementById("trips-list");
     if (!holder) return;
     // One listener on the holder instead of one per row: the list is rebuilt
     // after every deletion, individually bound listeners would then be dead.
     holder.addEventListener("click", (event) => {
-      const uphill = event.target.closest("[data-oeffnen]");
-      if (uphill) { open_it(uphill.dataset.oeffnen); return; }
-      const path = event.target.closest("[data-loeschen]");
+      const uphill = event.target.closest("[data-open]");
+      if (uphill) { open_it(uphill.dataset.open); return; }
+      const path = event.target.closest("[data-delete]");
       if (path) {
         const row = path.closest("tr");
         const title = row ? row.querySelector(".titel") : null;
-        remove(path.dataset.loeschen,
+        remove(path.dataset.delete,
                  title ? title.textContent.trim() : "Diese Fahrt");
       }
     });

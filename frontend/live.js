@@ -96,7 +96,7 @@ window.joltLive = (function () {
   const REPORT_INTERVAL_MS = 12000;
 
   function showConnection(text, colour) {
-    const el = document.getElementById("live-verbindung");
+    const el = document.getElementById("live-connection");
     if (!el) return;
     el.textContent = text;
     el.style.color = colour || "";
@@ -115,13 +115,13 @@ window.joltLive = (function () {
       // The effort per stop goes along too: a plan that is suddenly
       // re-planned on the road by a different yardstick than when setting
       // off would no longer be comprehensible.
-      const holding_cost = document.getElementById("haltekosten");
+      const holding_cost = document.getElementById("holding-cost");
       const response = await K.api(`/api/live/start/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
         + (holding_cost ? `&stop_fixed_cost_min=${holding_cost.value}` : "")
         + (function () {
-            const p = document.getElementById("ladepark");
+            const p = document.getElementById("charge-park");
             return p ? `&charge_park_bonus_min=${p.value}` : "";
           })(),
         { method: "POST" });
@@ -130,8 +130,8 @@ window.joltLive = (function () {
       // Whoever starts the trip is sitting in the car: reading is allowed
       // until the phone says the car is standing.
       drivingStateStart("faehrt");
-      document.getElementById("live-leer").hidden = true;
-      document.getElementById("live-inhalt").hidden = false;
+      document.getElementById("live-empty").hidden = true;
+      document.getElementById("live-content").hidden = false;
       plan = response.plan || null;
       drawPlan();
       // At departure the starting state of charge is the best known value -
@@ -264,7 +264,7 @@ window.joltLive = (function () {
     /* Below it only what changes a decision. State of charge and
      * deviation deliberately sit here and not above: they are evidence, not
      * the answer - you read them when you want to follow up the big number. */
-    document.getElementById("live-werte").innerHTML = [
+    document.getElementById("live-values").innerHTML = [
       // One decimal place: the dongle delivers the state of charge in steps
       // of 0.4 percentage points (one byte divided by 2.5). Rounded to whole
       // percent the number stands still for minutes although it is moving -
@@ -330,12 +330,12 @@ window.joltLive = (function () {
     autoRow(z);
     showDongle();
 
-    const bar = document.getElementById("live-balken");
+    const bar = document.getElementById("live-bars");
     bar.style.width = Math.max(0, Math.min(100, z.actual_soc)) + "%";
     bar.style.background = z.actual_soc <= reserve ? "#e2596a"
       : (z.actual_soc <= reserve + 10 ? "#e8804f" : "#57c98a");
 
-    const hint = document.getElementById("live-hinweis");
+    const hint = document.getElementById("live-hint");
     hint.textContent = z.reason || "im Plan";
     hint.style.color = z.replanning_required ? "#e8804f" : "";
 
@@ -382,9 +382,9 @@ window.joltLive = (function () {
   /* ---------- The answer ---------- */
 
   function showResponse(z, reserve) {
-    const box = document.getElementById("live-antwort");
-    const numberEl = document.getElementById("live-antwort-zahl");
-    const text = document.getElementById("live-antwort-text");
+    const box = document.getElementById("live-response");
+    const numberEl = document.getElementById("live-response-number");
+    const text = document.getElementById("live-response-text");
     if (!box) return;
 
     const stop = z.next_stop;
@@ -445,7 +445,7 @@ window.joltLive = (function () {
    * want to see.
    */
   function drawHistory() {
-    const canvas = document.getElementById("live-verlauf");
+    const canvas = document.getElementById("live-history");
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.clientWidth, height = canvas.clientHeight;
@@ -577,7 +577,7 @@ window.joltLive = (function () {
 
   function drawPlan() {
     const listEl = document.getElementById("live-plan");
-    const as_of = document.getElementById("live-plan-stand");
+    const as_of = document.getElementById("live-plan-status");
     if (!listEl || !as_of) return;
 
     if (!plan) {
@@ -617,7 +617,7 @@ window.joltLive = (function () {
   /* A change to the plan is the only reason to disturb someone at the
    * wheel - hence a notification here and nowhere else. */
   function reportChange(text) {
-    const box = document.getElementById("live-aenderung");
+    const box = document.getElementById("live-change");
     if (box) {
       box.textContent = text || "Der Ladeplan hat sich geändert.";
       box.hidden = false;
@@ -737,8 +737,8 @@ window.joltLive = (function () {
 
   async function simulate() {
     if (!K.state.sessionId) { K.report("Keine Live-Fahrt.", "fehler"); return; }
-    const more = Number(document.getElementById("mehrverbrauch").value) / 100;
-    const jam = Number(document.getElementById("stau").value) / 100;
+    const more = Number(document.getElementById("extra-consumption").value) / 100;
+    const jam = Number(document.getElementById("jam").value) / 100;
     try {
       await K.api(`/api/live/${K.state.sessionId}/simulieren`
         + `?extra_consumption=${more}&tick_s=0.3&time_factor=${jam}`,
@@ -1330,7 +1330,7 @@ window.joltLive = (function () {
   }
 
   function showDongle() {
-    const connectBtn = document.getElementById("dongle-an");
+    const connectBtn = document.getElementById("dongle-on");
     const pause = document.getElementById("dongle-pause");
     if (!connectBtn || !pause) return;
     const linked = dongle && window.joltObd && window.joltObd.linked();
@@ -1438,7 +1438,7 @@ window.joltLive = (function () {
   }
 
   async function connectDongle() {
-    const btn = document.getElementById("dongle-an");
+    const btn = document.getElementById("dongle-on");
     if (btn) btn.disabled = true;
     try {
       if (!window.joltObd || !window.joltObd.obtainable()) {
@@ -1509,12 +1509,12 @@ window.joltLive = (function () {
    * *why* the consumption is high - not to learn that it is.
    */
   function autoRow(z) {
-    const block = document.getElementById("live-auto");
+    const block = document.getElementById("live-car");
     const raw = latestRawValues;
     if (!block) return;
     if (!raw) {
       block.hidden = true;
-      const to = document.getElementById("live-roh");
+      const to = document.getElementById("live-raw");
       if (to) to.hidden = true;
       return;
     }
@@ -1560,11 +1560,11 @@ window.joltLive = (function () {
 
     // Row and table now sit in different places: the row
     // up by the tiles, the table below behind the flap.
-    document.getElementById("live-auto-zeile").innerHTML = parts.join(" · ");
-    const flap = document.getElementById("live-roh");
+    document.getElementById("live-car-row").innerHTML = parts.join(" · ");
+    const flap = document.getElementById("live-raw");
     if (flap) {
       flap.hidden = false;
-      document.getElementById("live-auto-werte").innerHTML =
+      document.getElementById("live-car-values").innerHTML =
         rawValuesTable(raw);
     }
 
@@ -1574,7 +1574,7 @@ window.joltLive = (function () {
      * display looks exactly like a running one. */
     const age = latestRawValuesTime
       ? Math.round((Date.now() - latestRawValuesTime) / 1000) : null;
-    const as_of = document.getElementById("live-auto-stand");
+    const as_of = document.getElementById("live-car-status");
     if (age === null) {
       as_of.textContent = "";
     } else if (age < 90) {
@@ -1817,8 +1817,8 @@ window.joltLive = (function () {
   }
 
   function drawConsumption() {
-    const canvas = document.getElementById("live-verbrauch");
-    const foot = document.getElementById("live-verbrauch-fuss");
+    const canvas = document.getElementById("live-consumption");
+    const foot = document.getElementById("live-consumption-foot");
     if (!canvas || !foot) return;
     const sections = consumption_sections();
     if (!sections) { canvas.hidden = true; foot.hidden = true; return; }
@@ -2183,7 +2183,7 @@ window.joltLive = (function () {
    * that changes under the fingers while typing because a
    * message just came in over the WebSocket is worse than an empty one. */
   function socFieldPrefill(val) {
-    const field = document.getElementById("ist-soc");
+    const field = document.getElementById("actual-soc");
     if (!field || document.activeElement === field) return;
     if (val === null || val === undefined || Number.isNaN(val)) return;
     field.value = Math.round(val);
@@ -2191,8 +2191,8 @@ window.joltLive = (function () {
 
   async function reportSoc() {
     if (!K.state.sessionId) { K.report("Keine Live-Fahrt.", "fehler"); return; }
-    const btn = document.getElementById("soc-melden");
-    const field = document.getElementById("ist-soc");
+    const btn = document.getElementById("soc-report");
+    const field = document.getElementById("actual-soc");
     const soc = Number(field.value);
     if (!field.value || !(soc >= 0 && soc <= 100)) {
       K.report("Ladestand zwischen 0 und 100 % angeben.", "fehler");
@@ -2212,7 +2212,7 @@ window.joltLive = (function () {
       // The deviation is the reason typing it in is worthwhile - so
       // it belongs on screen right afterwards as a sentence and not just
       // as a tile among five others.
-      const explanation = document.getElementById("soc-erklaerung");
+      const explanation = document.getElementById("soc-explanation");
       if (explanation) {
         explanation.textContent = state.deviation_pp === null
           || state.deviation_pp === undefined
@@ -2276,10 +2276,10 @@ window.joltLive = (function () {
     try { if (window.joltDisplay) window.joltDisplay.finish(); }
     catch (e) { console.log("[anzeige]", e && e.message); }
     plan = null;
-    const box = document.getElementById("live-aenderung");
+    const box = document.getElementById("live-change");
     if (box) box.hidden = true;
-    document.getElementById("live-inhalt").hidden = true;
-    document.getElementById("live-leer").hidden = false;
+    document.getElementById("live-content").hidden = true;
+    document.getElementById("live-empty").hidden = false;
     reportLearned(result);
     if (result && result.as_of_discarded) {
       K.report(`Die letzten ${result.as_of_discarded.discarded_minutes} min `
@@ -2487,8 +2487,8 @@ window.joltLive = (function () {
       try { await window.joltRoute.tripCharging(state.trip_id); }
       catch (failure) { /* a recording does not have any geometry yet */ }
     }
-    const empty = document.getElementById("live-leer");
-    const contents = document.getElementById("live-inhalt");
+    const empty = document.getElementById("live-empty");
+    const contents = document.getElementById("live-content");
     if (empty) empty.hidden = true;
     if (contents) contents.hidden = false;
     if (state.plan) { plan = state.plan; drawPlan(); }
@@ -2515,18 +2515,18 @@ window.joltLive = (function () {
     // zero, and after showing or rotating it has to be redrawn.
     window.addEventListener("resize", drawHistory);
     window.addEventListener("resize", drawConsumption);
-    K.sliderCouple("mehrverbrauch", "mehrverbrauch-wert");
-    K.sliderCouple("stau", "stau-wert");
-    K.at("live-starten", "click", launch);
-    K.at("simulieren", "click", simulate);
-    K.at("live-beenden", "click", finish);
-    K.at("soc-melden", "click", reportSoc);
-    K.at("dongle-an", "click", connectDongle);
+    K.sliderCouple("extra-consumption", "extra-consumption-output");
+    K.sliderCouple("jam", "jam-output");
+    K.at("live-start", "click", launch);
+    K.at("simulate", "click", simulate);
+    K.at("live-end", "click", finish);
+    K.at("soc-report", "click", reportSoc);
+    K.at("dongle-on", "click", connectDongle);
     // Only when the vehicle list is up - otherwise the battery size is missing.
     setTimeout(resumeSession, 800);
     K.at("dongle-pause", "click", donglePausieren);
     setInterval(examineVoltage, VOLTAGE_TICK_MS);
-    const autoCheckbox = document.getElementById("dongle-auto");
+    const autoCheckbox = document.getElementById("dongle-car");
     if (autoCheckbox) {
       autoCheckbox.checked = autoMode;
       autoCheckbox.addEventListener("change", () => {
@@ -2539,7 +2539,7 @@ window.joltLive = (function () {
     }
     // On the phone the Enter key is a shorter way than aiming at
     // a button - `enterkeyhint="send"` labels it appropriately.
-    K.at("ist-soc", "keydown", (e) => {
+    K.at("actual-soc", "keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); reportSoc(); }
     });
   }

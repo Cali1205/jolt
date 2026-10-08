@@ -63,7 +63,7 @@ window.joltSettings = (function () {
   /* ---------- Account and server ---------- */
 
   async function showServer() {
-    const as_of = el("stand");
+    const as_of = el("status");
     const rows = [];
     rows.push(row("Code-Stand", esc(as_of ? as_of.textContent : "–")));
     try {
@@ -79,8 +79,8 @@ window.joltSettings = (function () {
     }
     rows.push(row("Angemeldet", K.token() ? "ja, auf diesem Gerät" : "nein"));
     rows.push(row("Oberfläche", esc(location.origin)));
-    el("einst-server").innerHTML = rows.join("");
-    el("einst-abmelden").hidden = !K.token();
+    el("settings-server").innerHTML = rows.join("");
+    el("settings-sign-out").hidden = !K.token();
   }
 
   async function sign_out() {
@@ -123,11 +123,11 @@ window.joltSettings = (function () {
       try { signed_in = !!(await subscription()); } catch (failure) { /* unknown */ }
       rows.push(row("Abo", signed_in ? "angemeldet" : "keines",
         signed_in ? "gut" : ""));
-      el("einst-push-aus").hidden = !signed_in;
+      el("settings-push-off").hidden = !signed_in;
     }
-    el("einst-push").innerHTML = rows.join("");
-    el("einst-push-an").disabled = !supported || !serverReady;
-    el("einst-push-probe").disabled = !serverReady;
+    el("settings-push").innerHTML = rows.join("");
+    el("settings-push-on").disabled = !supported || !serverReady;
+    el("settings-push-probe").disabled = !serverReady;
   }
 
   async function activatePush() {
@@ -166,16 +166,16 @@ window.joltSettings = (function () {
    * sets state and storage, so it is triggered instead of keeping the logic
    * here a second time. */
   function autoAdopt() {
-    const live = el("dongle-auto");
+    const live = el("dongle-car");
     if (!live) return;
-    live.checked = el("einst-auto").checked;
+    live.checked = el("settings-car").checked;
     live.dispatchEvent(new Event("change"));
   }
 
   function showDongleSettings() {
-    const live = el("dongle-auto");
-    if (live) el("einst-auto").checked = live.checked;
-    el("einst-trennen").disabled = !O.linked();
+    const live = el("dongle-car");
+    if (live) el("settings-car").checked = live.checked;
+    el("settings-disconnect").disabled = !O.linked();
   }
 
   /* Connect the dongle - first without a dialog (known device), then with one.
@@ -196,8 +196,8 @@ window.joltSettings = (function () {
   }
 
   async function connectButton() {
-    const btn = el("einst-verbinden");
-    const as_of = el("einst-verbinden-stand");
+    const btn = el("settings-connect");
+    const as_of = el("settings-connect-status");
     btn.disabled = true;
     as_of.textContent = "verbinde …";
     try {
@@ -255,11 +255,11 @@ window.joltSettings = (function () {
     if (d.tablesError.length) {
       z.push(row("Fehler in readings.js", esc(d.tablesError.join(" · ")), "schlecht"));
     }
-    el("diag-verbindung").innerHTML = z.join("");
+    el("diag-connection").innerHTML = z.join("");
 
     const short = !d.linked ? "getrennt"
       : (d.rounds.n ? `${d.rounds.n} Runden` : "verbunden");
-    el("einst-diag-kurz").textContent = short;
+    el("settings-diag-short").textContent = short;
   }
 
   /* ---------- Diagnostics: readings ---------- */
@@ -298,7 +298,7 @@ window.joltSettings = (function () {
         + `<td class="${failures && failures * 4 > total ? "schlecht" : (failures ? "warnung" : "still")}">${failures}</td>`
         + `<td>${duration(total ? count.sumMs / total : null)}</td></tr>`);
     }
-    el("diag-messwerte").innerHTML = header + rows.join("");
+    el("diag-readings").innerHTML = header + rows.join("");
   }
 
   function showRounds(d) {
@@ -317,7 +317,7 @@ window.joltSettings = (function () {
       + (b.delayed ? `, ${b.delayed} verspätet eingetroffen` : ""),
       b.timeout ? "warnung" : ""));
     if (d.commandRunning) z.push(row("Gerade", "ein Befehl wartet auf Antwort"));
-    el("diag-runden").innerHTML = z.join("");
+    el("diag-rounds").innerHTML = z.join("");
   }
 
   /* ---------- Diagnostics: log ---------- */
@@ -325,8 +325,8 @@ window.joltSettings = (function () {
   const CONSPICUOUS = /FEHLER|Zeitüberschreitung|keine Antwort|verspätet|fehlgeschlagen|NO DATA|ERROR|UNABLE|BUS/i;
 
   function showLog() {
-    const container = el("diag-protokoll");
-    const rows = O.trace_log(el("diag-auffaellig").checked).slice(-250);
+    const container = el("diag-log");
+    const rows = O.trace_log(el("diag-flagged").checked).slice(-250);
     // Only jump to the end if you were already at the bottom - someone who
     // scrolled up to read something should not be yanked back every second.
     const bottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
@@ -344,7 +344,7 @@ window.joltSettings = (function () {
 
   function writeup() {
     const d = O.diagnose();
-    const as_of = el("stand");
+    const as_of = el("status");
     const header = [
       "jolt-Diagnosebericht",
       "Stand: " + (as_of ? as_of.textContent : "?"),
@@ -377,7 +377,7 @@ window.joltSettings = (function () {
     } catch (failure) {
       // Without clipboard permission (insecure context, older WebViews):
       // write into the log field, selected, for copying by hand.
-      const field = el("diag-protokoll");
+      const field = el("diag-log");
       field.textContent = text;
       const selection = window.getSelection();
       const zone = document.createRange();
@@ -392,25 +392,25 @@ window.joltSettings = (function () {
   /* ---------- Diagnostics: send command ---------- */
 
   async function sendCommand() {
-    const field = el("diag-befehl");
+    const field = el("diag-command");
     const text = field.value.trim().toUpperCase();
     if (!text) return;
     if (!O.linked()) {
       K.report("Kein Dongle verbunden.", "warnung");
       return;
     }
-    if (tripRunning() && !el("diag-fahrt-ok").checked) {
+    if (tripRunning() && !el("diag-trip-ok").checked) {
       K.report("Eine Fahrt läuft. Zum Senden das Häkchen „Trotz laufender "
         + "Fahrt senden“ setzen – der Befehl stört die Messung.", "warnung");
       return;
     }
-    el("diag-senden").disabled = true;
+    el("diag-send").disabled = true;
     try {
       await O.cli(text);        // the response appears in the log
     } catch (failure) {
       K.report("Befehl: " + failure.message, "fehler");
     } finally {
-      el("diag-senden").disabled = false;
+      el("diag-send").disabled = false;
       field.value = "";
       refresh();
     }
@@ -438,8 +438,8 @@ window.joltSettings = (function () {
   }
 
   async function startListen() {
-    const btn = el("lausch-start");
-    const destination = el("lausch-ergebnis");
+    const btn = el("listen-start");
+    const destination = el("listen-result");
     // Every feedback appears in the result field - it is what you look at.
     destination.hidden = false;
     if (tripRunning()) {
@@ -453,13 +453,13 @@ window.joltSettings = (function () {
         destination.textContent = "verbinde mit dem Dongle …";
         await connectDongle();
       }
-      destination.textContent = "höre zu … (" + el("lausch-dauer").value / 1000 + " s)";
+      destination.textContent = "höre zu … (" + el("listen-duration").value / 1000 + " s)";
       const result = await O.listen({
-        trace_log: el("lausch-protokoll").value,
-        duration_ms: Number(el("lausch-dauer").value) });
+        trace_log: el("listen-log").value,
+        duration_ms: Number(el("listen-duration").value) });
       listenText = listenFormat(result);
       destination.textContent = listenText;
-      el("lausch-kopieren").hidden = false;
+      el("listen-copy").hidden = false;
     } catch (failure) {
       destination.textContent = "Mithören: " + failure.message;
     } finally {
@@ -500,14 +500,14 @@ window.joltSettings = (function () {
     z.push(row("Wartende Messpunkte", points
       ? `${points} – noch nicht an den Server gegangen` : "keine",
       points ? "warnung" : "gut"));
-    el("einst-puffer-leeren").hidden = !points;
+    el("settings-buffer-clear").hidden = !points;
     z.push(row("Service Worker", "serviceWorker" in navigator
       ? (K.state.serviceWorker ? "aktiv" : "nicht registriert") : "nicht unterstützt"));
-    el("einst-speicher").innerHTML = z.join("");
+    el("settings-storage").innerHTML = z.join("");
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then((e) => {
         if (!e || !e.usage) return;
-        el("einst-speicher").insertAdjacentHTML("beforeend",
+        el("settings-storage").insertAdjacentHTML("beforeend",
           row("Belegt", K.num(e.usage / 1048576, 1) + " MB"));
       }).catch(() => {});
     }
@@ -549,9 +549,9 @@ window.joltSettings = (function () {
     showReadings(d);
     showRounds(d);
     showLog();
-    el("einst-trennen").disabled = !d.linked;
-    el("einst-verbinden").disabled = d.linked;
-    el("diag-fahrt-zeile").hidden = !tripRunning();
+    el("settings-disconnect").disabled = !d.linked;
+    el("settings-connect").disabled = d.linked;
+    el("diag-trip-row").hidden = !tripRunning();
   }
 
   /* ---------- CarPlay display ---------- */
@@ -562,7 +562,7 @@ window.joltSettings = (function () {
     const tiles = window.joltTiles;
     const display = window.joltDisplay;
     if (!tiles || !display) return;
-    const choice = el("einst-carplay-stil");
+    const choice = el("settings-carplay-style");
     if (!choice.options.length) {
       for (const look of tiles.STYLES) {
         const o = document.createElement("option");
@@ -572,12 +572,12 @@ window.joltSettings = (function () {
     }
     choice.value = display.look();
     const names = { classic: "klassisch", a: "A – Instrument", b: "B – Telemetrie" };
-    el("einst-carplay-kurz").textContent = names[display.look()] || display.look();
+    el("settings-carplay-short").textContent = names[display.look()] || display.look();
 
     const probe = tiles.probe();
     const vals = tiles.records(probe.m, probe.series_list);
     for (const look of ["a", "b"]) {
-      const container = el("vorschau-" + look);
+      const container = el("preview-" + look);
       if (!container || container.childElementCount) continue;     // once is enough
       for (const slot of tiles.SLOTS) {
         const canvas = tiles.browserCanvas(tiles.PAGE * 2);
@@ -591,9 +591,9 @@ window.joltSettings = (function () {
   }
 
   function carplayStyleChoose() {
-    const look = el("einst-carplay-stil").value;
+    const look = el("settings-carplay-style").value;
     if (window.joltDisplay && window.joltDisplay.setStyle(look)) {
-      K.report("CarPlay-Darstellung: " + el("einst-carplay-stil").selectedOptions[0].textContent
+      K.report("CarPlay-Darstellung: " + el("settings-carplay-style").selectedOptions[0].textContent
         + ". Gilt ab der nächsten Meldung im Auto.", "hinweis");
       showCarplay();
     }
@@ -619,27 +619,27 @@ window.joltSettings = (function () {
   }
 
   function set_up() {
-    K.at("einst-carplay-stil", "change", carplayStyleChoose);
-    K.at("einst-abmelden", "click", sign_out);
-    K.at("einst-push-an", "click", activatePush);
-    K.at("einst-push-aus", "click", signOutPush);
-    K.at("einst-push-probe", "click", pushProbe);
-    K.at("einst-auto", "change", autoAdopt);
-    K.at("einst-verbinden", "click", connectButton);
-    K.at("einst-trennen", "click", detach);
-    K.at("einst-vergessen", "click", forget);
-    K.at("diag-auffaellig", "change", showLog);
-    K.at("diag-kopieren", "click", copyWriteup);
-    K.at("diag-protokoll-leeren", "click", () => { O.logClear(); showLog(); });
-    K.at("diag-zuruecksetzen", "click", () => { O.resetCounter(); refresh(); });
-    K.at("diag-senden", "click", sendCommand);
-    K.at("diag-befehl", "keydown", (e) => {
+    K.at("settings-carplay-style", "change", carplayStyleChoose);
+    K.at("settings-sign-out", "click", sign_out);
+    K.at("settings-push-on", "click", activatePush);
+    K.at("settings-push-off", "click", signOutPush);
+    K.at("settings-push-probe", "click", pushProbe);
+    K.at("settings-car", "change", autoAdopt);
+    K.at("settings-connect", "click", connectButton);
+    K.at("settings-disconnect", "click", detach);
+    K.at("settings-forget", "click", forget);
+    K.at("diag-flagged", "change", showLog);
+    K.at("diag-copy", "click", copyWriteup);
+    K.at("diag-log-clear", "click", () => { O.logClear(); showLog(); });
+    K.at("diag-reset", "click", () => { O.resetCounter(); refresh(); });
+    K.at("diag-send", "click", sendCommand);
+    K.at("diag-command", "keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); sendCommand(); }
     });
-    K.at("lausch-start", "click", startListen);
-    K.at("lausch-kopieren", "click", copyListen);
-    K.at("einst-puffer-leeren", "click", discardBuffer);
-    K.at("einst-cache-leeren", "click", cacheClear);
+    K.at("listen-start", "click", startListen);
+    K.at("listen-copy", "click", copyListen);
+    K.at("settings-buffer-clear", "click", discardBuffer);
+    K.at("settings-cache-clear", "click", cacheClear);
   }
 
   return { set_up, show, writeup };

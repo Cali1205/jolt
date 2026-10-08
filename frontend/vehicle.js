@@ -44,9 +44,9 @@ window.joltVehicle = (function () {
   ];
 
   function formBuild() {
-    const container = document.getElementById("fahrzeug-formular");
+    const container = document.getElementById("vehicle-form");
     container.innerHTML = FIELDS.map((field) => {
-      const id = "fz-" + field.name;
+      const id = "veh-" + field.name;
       let user_input;
       if (field.kind === "checkbox") {
         user_input = `<input type="checkbox" id="${id}" style="width:auto">`;
@@ -67,7 +67,7 @@ window.joltVehicle = (function () {
 
   function fillForm(vehicle) {
     for (const field of FIELDS) {
-      const el = document.getElementById("fz-" + field.name);
+      const el = document.getElementById("veh-" + field.name);
       if (!el) continue;
       if (field.kind === "checkbox") el.checked = !!vehicle[field.name];
       else if (field.kind === "liste") el.value = (vehicle[field.name] || []).join(", ");
@@ -80,7 +80,7 @@ window.joltVehicle = (function () {
   function readForm() {
     const form = {};
     for (const field of FIELDS) {
-      const el = document.getElementById("fz-" + field.name);
+      const el = document.getElementById("veh-" + field.name);
       if (!el) continue;
       if (field.kind === "checkbox") form[field.name] = el.checked;
       else if (field.kind === "liste") {
@@ -128,7 +128,7 @@ window.joltVehicle = (function () {
   }
 
   function fillPrices(entries) {
-    const content = document.getElementById("preis-zeilen");
+    const content = document.getElementById("price-rows");
     if (!content) return;
     content.innerHTML = "<tr><th>Anbieter</th><th>€/kWh</th><th></th></tr>";
     for (const entry of entries || []) {
@@ -137,7 +137,7 @@ window.joltVehicle = (function () {
   }
 
   function readPrices() {
-    const rows = document.querySelectorAll("#preis-zeilen tr");
+    const rows = document.querySelectorAll("#price-rows tr");
     const prices = [];
     for (const row of rows) {
       const pattern = row.querySelector(".preis-muster");
@@ -149,13 +149,13 @@ window.joltVehicle = (function () {
   }
 
   function fillCurve(pairs) {
-    const content = document.getElementById("kurve-zeilen");
+    const content = document.getElementById("curve-rows");
     content.innerHTML = `<tr><th>Ladestand %</th><th>Leistung kW</th><th></th></tr>`;
     for (const [soc, kw] of pairs) content.appendChild(curveRow(soc, kw));
   }
 
   function readCurve() {
-    const content = document.getElementById("kurve-zeilen");
+    const content = document.getElementById("curve-rows");
     const pairs = [];
     for (const row of content.querySelectorAll("tr")) {
       const soc = row.querySelector(".kurve-soc");
@@ -177,7 +177,7 @@ window.joltVehicle = (function () {
       return;
     }
 
-    for (const id of ["fahrzeug-wahl", "fahrzeug-liste", "aufz-fahrzeug"]) {
+    for (const id of ["vehicle-choice", "vehicle-list", "rec-vehicle"]) {
       const selection = document.getElementById(id);
       if (!selection) continue;
       const earlier = selection.value;
@@ -187,7 +187,7 @@ window.joltVehicle = (function () {
       // The choice for recording survives the restart: whoever sits in the
       // car wants to make it once and never again. Same consideration as on
       // the /obd page.
-      if (id === "aufz-fahrzeug" && !earlier) {
+      if (id === "rec-vehicle" && !earlier) {
         try {
           const remembered = localStorage.getItem("jolt-aufz-fahrzeug");
           if (remembered && K.state.vehicles.some(
@@ -212,13 +212,13 @@ window.joltVehicle = (function () {
     const newOption = document.createElement("option");
     newOption.value = "neu";
     newOption.textContent = "+ neues Fahrzeug";
-    document.getElementById("fahrzeug-liste").appendChild(newOption);
+    document.getElementById("vehicle-list").appendChild(newOption);
 
     showCurrent();
   }
 
   function showCurrent() {
-    const choice = document.getElementById("fahrzeug-liste").value;
+    const choice = document.getElementById("vehicle-list").value;
     if (choice === "neu") {
       fillForm(Object.assign({}, templates[0] || {}, { name: "" }));
       return;
@@ -227,7 +227,7 @@ window.joltVehicle = (function () {
     if (vehicle) {
       fillForm(vehicle);
       fillPrices(vehicle.electricity_prices);
-      const defaultPrice = document.getElementById("standardpreis");
+      const defaultPrice = document.getElementById("default-price");
       if (defaultPrice) defaultPrice.value = vehicle.electricity_price_eur_kwh ?? 0.59;
     }
     showLogger(vehicle);
@@ -238,7 +238,7 @@ window.joltVehicle = (function () {
   /* The token only appears in the response that creates it - afterwards the
    * UI no longer knows it. So otherwise only *whether* one is valid is shown. */
   function showLogger(vehicle) {
-    const as_of = document.getElementById("logger-stand");
+    const as_of = document.getElementById("logger-status");
     const box = document.getElementById("logger-token");
     if (!as_of || !box) return;
     box.hidden = true;
@@ -253,7 +253,7 @@ window.joltVehicle = (function () {
   }
 
   function chosenVehicle() {
-    const choice = document.getElementById("fahrzeug-liste").value;
+    const choice = document.getElementById("vehicle-list").value;
     if (choice === "neu") return null;
     return K.state.vehicles.find((f) => String(f.id) === String(choice)) || null;
   }
@@ -300,16 +300,16 @@ window.joltVehicle = (function () {
     try {
       templates = await K.api("/api/fahrzeuge/vorlagen");
     } catch (failure) { return; }
-    const selection = document.getElementById("vorlage");
+    const selection = document.getElementById("template");
     selection.innerHTML = '<option value="">– auswählen –</option>'
       + templates.map((v, i) => `<option value="${i}">${v.name}</option>`).join("");
   }
 
   async function save() {
-    const choice = document.getElementById("fahrzeug-liste").value;
+    const choice = document.getElementById("vehicle-list").value;
     const payload = readForm();
     payload.electricity_prices = readPrices();
-    const defaultPrice = document.getElementById("standardpreis");
+    const defaultPrice = document.getElementById("default-price");
     payload.electricity_price_eur_kwh = defaultPrice ? Number(defaultPrice.value) : 0.59;
     if (!payload.name) { K.report("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
 
@@ -340,22 +340,22 @@ window.joltVehicle = (function () {
 
   function set_up() {
     formBuild();
-    K.at("fahrzeug-liste", "change", showCurrent);
-    K.at("vorlage", "change", (e) => {
+    K.at("vehicle-list", "change", showCurrent);
+    K.at("template", "change", (e) => {
       const template = templates[Number(e.target.value)];
       if (!template) return;
       fillForm(template);
       K.report("Vorlage übernommen – Werte prüfen und speichern.", "hinweis");
     });
-    K.at("kurve-zeile-neu", "click", () => {
-      document.getElementById("kurve-zeilen").appendChild(curveRow(50, 100));
+    K.at("curve-row-new", "click", () => {
+      document.getElementById("curve-rows").appendChild(curveRow(50, 100));
     });
-    K.at("preis-zeile-neu", "click", () => {
-      document.getElementById("preis-zeilen").appendChild(priceRow("", 0.39));
+    K.at("price-row-new", "click", () => {
+      document.getElementById("price-rows").appendChild(priceRow("", 0.39));
     });
-    K.at("fahrzeug-speichern", "click", save);
-    K.at("logger-neu", "click", loggerNew);
-    K.at("logger-weg", "click", loggerPath);
+    K.at("vehicle-save", "click", save);
+    K.at("logger-new", "click", loggerNew);
+    K.at("logger-remove", "click", loggerPath);
   }
 
   return { set_up, load, templatesCharging };

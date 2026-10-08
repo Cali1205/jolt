@@ -1266,8 +1266,8 @@ def main() -> int:
     # service worker shell, otherwise the view is missing on poor reception.
     page_text = client.get("/").text
     sw_text = client.get("/sw.js").text
-    verify('data-ansicht="einstellungen"' in page_text
-           and 'id="ansicht-einstellungen"' in page_text
+    verify('data-view="settings"' in page_text
+           and 'id="view-settings"' in page_text
            and "/static/settings.js" in page_text,
            "die Einstellungen haben Reiter, Abschnitt und Skript")
     verify("/static/tiles.js" in page_text and "/static/tiles.js" in sw_text
@@ -1320,15 +1320,15 @@ def main() -> int:
     html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
     trips_js = open(os.path.join(FRONTEND, "trips.js"),
                       encoding="utf-8").read()
-    verify('id="aufz-fahrzeug"' in html,
+    verify('id="rec-vehicle"' in html,
            "der Aufzeichnungs-Abschnitt hat eine eigene Fahrzeugwahl")
-    verify("aufz-fahrzeug" in trips_js and "fahrzeug-wahl" not in trips_js,
+    verify("rec-vehicle" in trips_js and "vehicle-choice" not in trips_js,
            "und das Aufzeichnen nimmt sie, nicht die aus der Planen-Ansicht",
-           "trips.js greift noch auf fahrzeug-wahl zu")
+           "trips.js greift noch auf vehicle-choice zu")
     verify("K.state.vehicles || [])[0]" not in trips_js,
            "ohne Rückfall auf das erste Fahrzeug der Liste - lieber gar "
            "nicht aufzeichnen als dem falschen Auto")
-    verify("aufz-fahrzeug" in open(os.path.join(FRONTEND, "vehicle.js"),
+    verify("rec-vehicle" in open(os.path.join(FRONTEND, "vehicle.js"),
                                    encoding="utf-8").read(),
            "und sie wird mit den Fahrzeugen gefüllt")
 
@@ -1367,7 +1367,7 @@ def main() -> int:
     verify("donglePause" in live and "function detach" in core,
            "der Dongle lässt sich trennen und pausieren - ein verriegeltes "
            "Auto, das weiter über CAN gefragt wird, löst die Alarmanlage aus")
-    verify('id="dongle-an"' in html,
+    verify('id="dongle-on"' in html,
            "und er lässt sich auch auf einer geplanten Fahrt verbinden, "
            "nicht nur beim Aufzeichnen")
 
@@ -1422,12 +1422,12 @@ def main() -> int:
     # byte layouts at once - without a single minute driven.
     obd_js = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     obd_html = open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8").read()
-    verify('id="pruefen"' in obd_html and "valuesCall" in obd_js,
+    verify('id="check"' in obd_html and "valuesCall" in obd_js,
            "die Diagnoseseite kann alle Werte im Stand prüfen")
     verify("RANGES" in obd_js and "Kreuzvergleich" in obd_js,
            "gegen Bereiche und über einen Kreuzvergleich - der prüft zwei "
            "Formeln auf einmal, ohne dass gefahren werden muss")
-    verify('id="klima-a"' in obd_html and 'id="klima-b"' in obd_html
+    verify('id="climate-a"' in obd_html and 'id="climate-b"' in obd_html
            and "showClimate" in obd_js,
            "und der Klimakompressor über eine Differenzmessung statt über "
            "eine geratene Formel")
@@ -1477,12 +1477,12 @@ def main() -> int:
     # The raw values belong behind a flap: seventeen lines in the middle of the
     # driving view are noise. And the tiles you read belong above
     # the charts, not below them.
-    verify('<details id="live-roh"' in html,
+    verify('<details id="live-raw"' in html,
            "die Rohwerte stehen hinter einer Klappe, nicht im Fahrbild")
-    verify(html.index('id="live-werte"') < html.index('id="live-verlauf"'),
+    verify(html.index('id="live-values"') < html.index('id="live-history"'),
            "und die Kacheln über den Diagrammen - was man im Fahren liest, "
            "steht oben")
-    verify('id="live-auto-stand"' in html.split("<summary>")[1].split("</summary>")[0],
+    verify('id="live-car-status"' in html.split("<summary>")[1].split("</summary>")[0],
            "das Alter steht in der zugeklappten Zeile - man soll ohne "
            "Aufklappen sehen, ob es lebt")
 

@@ -57,7 +57,7 @@ function newMap() {
   vm.createContext(context);
   vm.runInContext(source, context);
   const k = timeframe.joltMap;
-  k.create("karte");
+  k.create("map");
   const finger = (kind, id, x, y) => events[kind]({
     pointerId: id, pointerType: "touch", button: 0,
     clientX: x + 10, clientY: y + 20,        // screen = canvas + offset

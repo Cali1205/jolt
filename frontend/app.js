@@ -6,17 +6,17 @@ window.joltApp = (function () {
 
   function showView(name) {
     for (const btn of document.querySelectorAll("nav button")) {
-      const active = btn.dataset.ansicht === name;
+      const active = btn.dataset.view === name;
       btn.setAttribute("aria-selected", active ? "true" : "false");
-      const section = document.getElementById("ansicht-" + btn.dataset.ansicht);
+      const section = document.getElementById("view-" + btn.dataset.view);
       if (section) section.hidden = !active;
     }
     mapRehang(name);
     // The trips list only fetches its data when someone is looking.
-    if (name === "fahrten" && window.joltTrips) window.joltTrips.show();
+    if (name === "trips" && window.joltTrips) window.joltTrips.show();
     // The settings update every second - but only while they are being
     // looked at.
-    if (window.joltSettings) window.joltSettings.show(name === "einstellungen");
+    if (window.joltSettings) window.joltSettings.show(name === "settings");
   }
 
   /* The one map moves into the currently visible view.
@@ -27,8 +27,8 @@ window.joltApp = (function () {
    * states that drift apart; moving it in the DOM keeps context, cache and
    * zoom. */
   function mapRehang(view) {
-    const block = document.getElementById("karte-block");
-    const holder = document.getElementById("karte-halter-" + view);
+    const block = document.getElementById("map-block");
+    const holder = document.getElementById("map-holder-" + view);
     if (block && holder && block.parentElement !== holder) {
       holder.appendChild(block);
     }
@@ -43,11 +43,11 @@ window.joltApp = (function () {
 
   async function launch() {
     for (const btn of document.querySelectorAll("nav button")) {
-      btn.addEventListener("click", () => showView(btn.dataset.ansicht));
+      btn.addEventListener("click", () => showView(btn.dataset.view));
     }
 
-    window.joltMap.create("karte");
-    mapRehang("planen");
+    window.joltMap.create("map");
+    mapRehang("plan");
     window.joltRoute.set_up();
     window.joltLive.set_up();
     window.joltTrips.set_up();
@@ -62,7 +62,7 @@ window.joltApp = (function () {
       return;
     }
     if (status.demo_routing) {
-      document.getElementById("demo-plakette").hidden = false;
+      document.getElementById("demo-badge").hidden = false;
       K.report("Ohne ORS_API_KEY rechnet jolt mit erfundenen Demo-Routen. "
         + "Ein kostenloser Schlüssel von openrouteservice.org macht daraus "
         + "echte Strecken mit Höhenprofil.", "warnung");
@@ -106,14 +106,14 @@ window.joltApp = (function () {
    * only returns 401 on every click would be worse than none at all. */
   function sign_in() {
     for (const section of document.querySelectorAll("main > section")) {
-      section.hidden = section.id !== "ansicht-login";
+      section.hidden = section.id !== "view-login";
     }
     document.querySelector("nav").hidden = true;
 
     return new Promise((fulfil) => {
-      const form = document.getElementById("login-formular");
-      const field = document.getElementById("login-passwort");
-      const errorElement = document.getElementById("login-fehler");
+      const form = document.getElementById("login-form");
+      const field = document.getElementById("login-password");
+      const errorElement = document.getElementById("login-error");
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -122,9 +122,9 @@ window.joltApp = (function () {
           const response = await K.api("/api/login", { method: "POST", body: {
             password: field.value, device: navigator.userAgent.slice(0, 120) }});
           K.setToken(response.token);
-          document.getElementById("ansicht-login").hidden = true;
+          document.getElementById("view-login").hidden = true;
           document.querySelector("nav").hidden = false;
-          showView("planen");
+          showView("plan");
           fulfil();
         } catch (failure) {
           errorElement.textContent = failure.message;
@@ -144,9 +144,9 @@ window.joltApp = (function () {
    * after a deploy, either the image was not rebuilt or the page comes from
    * the cache. "seit" (since) says when the server last started. */
   function showAsOf() {
-    const field = document.getElementById("stand");
+    const field = document.getElementById("status");
     if (!field) return;
-    const as_of = Number(field.dataset.stand);
+    const as_of = Number(field.dataset.status);
     const start = Number(field.dataset.start);
     if (!as_of) return;                    // placeholder not replaced
     // By hand instead of via `toLocaleString`: the German format inserts a
