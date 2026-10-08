@@ -91,12 +91,12 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .variante .etikett.sparsamste { background: #163021; border-color: #235c3c; color: var(--gut); }
 .variante .kennwerte { font-size: 12px; color: var(--gedaempft); text-align: right;
   white-space: nowrap; }
-#karte { width: 100%; height: 340px; border-radius: 12px; border: 1px solid var(--rand);
+#map { width: 100%; height: 340px; border-radius: 12px; border: 1px solid var(--rand);
   display: block; touch-action: none; background: #0c1116; cursor: grab; }
-#karte:active { cursor: grabbing; }
+#map:active { cursor: grabbing; }
 .karte-fuss { font-size: 11px; color: var(--gedaempft); margin-top: 6px;
   display: flex; justify-content: space-between; gap: 8px; }
-#profil { width: 100%; height: 140px; display: block; margin-top: 10px;
+#profile { width: 100%; height: 140px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
 .liste { list-style: none; padding: 0; margin: 0; }
 .liste li { border-top: 1px solid var(--rand); padding: 10px 2px;
@@ -169,37 +169,37 @@ pre.diag-protokoll .zeit { color: var(--gedaempft); }
 
 /* The one number that counts while driving: is it enough? Everything else is
    extra, and extras do not belong in the same size as the answer. */
-#live-antwort { text-align: center; padding: 6px 0 12px; }
-#live-antwort .antwort-zahl { font-size: 46px; font-weight: 700;
+#live-response { text-align: center; padding: 6px 0 12px; }
+#live-response .antwort-zahl { font-size: 46px; font-weight: 700;
   letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
-#live-antwort .antwort-text { font-size: 13px; color: var(--gedaempft);
+#live-response .antwort-text { font-size: 13px; color: var(--gedaempft);
   margin-top: 2px; }
-#live-antwort.gut .antwort-zahl { color: var(--gut); }
-#live-antwort.warnung .antwort-zahl { color: var(--warnung); }
-#live-antwort.schlecht .antwort-zahl { color: var(--schlecht); }
-#live-verlauf { width: 100%; height: 150px; display: block; margin-top: 10px;
+#live-response.gut .antwort-zahl { color: var(--gut); }
+#live-response.warnung .antwort-zahl { color: var(--warnung); }
+#live-response.schlecht .antwort-zahl { color: var(--schlecht); }
+#live-history { width: 100%; height: 150px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
-#live-verbrauch { width: 100%; height: 110px; display: block; margin-top: 10px;
+#live-consumption { width: 100%; height: 110px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
 /* The raw values behind a collapsible. Collapsed a single line, expanded the
    whole table - so the diagnostics are available without being in the
    driving view. */
-#live-roh { margin-top: 14px; border-top: 1px solid var(--rand);
+#live-raw { margin-top: 14px; border-top: 1px solid var(--rand);
   padding-top: 10px; }
-#live-roh > summary { cursor: pointer; font-size: 13px;
+#live-raw > summary { cursor: pointer; font-size: 13px;
   color: var(--gedaempft); display: flex; justify-content: space-between;
   gap: 12px; list-style: none; }
-#live-roh > summary::-webkit-details-marker { display: none; }
-#live-roh > summary::after { content: "▸"; }
-#live-roh[open] > summary::after { content: "▾"; }
-#live-roh > summary:hover { color: var(--text); }
-#live-auto-zeile { margin-top: 12px; padding-top: 10px;
+#live-raw > summary::-webkit-details-marker { display: none; }
+#live-raw > summary::after { content: "▸"; }
+#live-raw[open] > summary::after { content: "▾"; }
+#live-raw > summary:hover { color: var(--text); }
+#live-car-row { margin-top: 12px; padding-top: 10px;
   border-top: 1px solid var(--rand); }
 /* The context strip: one line of text instead of six tiles. What one only
    needs occasionally should not look like what one needs constantly. */
-#live-auto-zeile { font-size: 13px; color: var(--gedaempft);
+#live-car-row { font-size: 13px; color: var(--gedaempft);
   line-height: 1.6; }
-#live-auto-zeile b { color: var(--text); font-weight: 600;
+#live-car-row b { color: var(--text); font-weight: 600;
   font-variant-numeric: tabular-nums; }
 /* All raw values, for looking things up rather than for driving.
  *
@@ -297,7 +297,7 @@ table.kurve input { padding: 6px 8px; }
 
 <header>
   <span class="marke"><b>jolt</b></span>
-  <span id="demo-plakette" class="plakette" hidden>Demo-Routen</span>
+  <span id="demo-badge" class="plakette" hidden>Demo-Routen</span>
   <!-- Far right and unobtrusive: the line answers exactly one question -
        "is the new version really running here?". It is inserted on delivery
        (see _stand_zeile in main.py); if the placeholder stays in place, the
@@ -308,61 +308,61 @@ table.kurve input { padding: 6px 8px; }
        that on a display meant to dispel doubt. Formatting is therefore done
        in the browser (app.js); the text here is only the fallback in case
        JavaScript does not run. -->
-  <span class="stand" id="stand" title="Code-Stand · Start des Servers"
-        data-stand="{{STAND_S}}" data-start="{{START_S}}">{{STAND}}</span>
+  <span class="stand" id="status" title="Code-Stand · Start des Servers"
+        data-status="{{STAND_S}}" data-start="{{START_S}}">{{STAND}}</span>
 </header>
 
 <nav>
-  <button data-ansicht="planen" aria-selected="true">Planen</button>
-  <button data-ansicht="live" aria-selected="false">Live</button>
-  <button data-ansicht="fahrten" aria-selected="false">Fahrten</button>
-  <button data-ansicht="fahrzeug" aria-selected="false">Fahrzeug</button>
-  <button data-ansicht="einstellungen" aria-selected="false">Einstellungen</button>
+  <button data-view="plan" aria-selected="true">Planen</button>
+  <button data-view="live" aria-selected="false">Live</button>
+  <button data-view="trips" aria-selected="false">Fahrten</button>
+  <button data-view="vehicle" aria-selected="false">Fahrzeug</button>
+  <button data-view="settings" aria-selected="false">Einstellungen</button>
 </nav>
 
 <main>
-  <div id="meldungen"></div>
+  <div id="reports"></div>
 
   <!-- ------------------------------- Login (Anmelden) -->
   <!-- Only visible if APP_PASSWORT is set and no valid token is present -
        see app.js. Until then it covers nav and all other views, so that
        nobody sees a UI that only returns 401. -->
-  <section id="ansicht-login" hidden>
+  <section id="view-login" hidden>
     <div class="karte-block">
       <h2 style="margin-top:0">Anmelden</h2>
-      <form id="login-formular">
-        <label for="login-passwort">Passwort</label>
-        <input type="password" id="login-passwort" autocomplete="current-password"
+      <form id="login-form">
+        <label for="login-password">Passwort</label>
+        <input type="password" id="login-password" autocomplete="current-password"
                autofocus>
-        <div id="login-fehler" class="meldung fehler" hidden></div>
+        <div id="login-error" class="meldung fehler" hidden></div>
         <button class="tat" type="submit">Anmelden</button>
       </form>
     </div>
   </section>
 
   <!-- ------------------------------- Plan (Planen) -->
-  <section id="ansicht-planen">
+  <section id="view-plan">
     <div class="karte-block">
       <div class="reihe">
         <div>
           <label for="start">Start</label>
           <input id="start" placeholder="Hamburg" autocomplete="off">
-          <ul class="treffer" id="start-treffer"></ul>
+          <ul class="treffer" id="start-hits"></ul>
         </div>
         <div>
-          <label for="ziel">Ziel</label>
-          <input id="ziel" placeholder="München" autocomplete="off">
-          <ul class="treffer" id="ziel-treffer"></ul>
+          <label for="destination">Ziel</label>
+          <input id="destination" placeholder="München" autocomplete="off">
+          <ul class="treffer" id="destination-hits"></ul>
         </div>
       </div>
 
       <div class="reihe">
         <div>
-          <label for="fahrzeug-wahl">Fahrzeug</label>
-          <select id="fahrzeug-wahl"></select>
+          <label for="vehicle-choice">Fahrzeug</label>
+          <select id="vehicle-choice"></select>
         </div>
         <div>
-          <label for="start-soc">Ladestand beim Start: <span id="start-soc-wert">80</span> %</label>
+          <label for="start-soc">Ladestand beim Start: <span id="start-soc-output">80</span> %</label>
           <input type="range" id="start-soc" min="5" max="100" step="1" value="80">
         </div>
       </div>
@@ -385,7 +385,7 @@ table.kurve input { padding: 6px 8px; }
         halten.</p>
 
       <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <input type="checkbox" id="eigene-fahrten" style="width:auto" checked>
+        <input type="checkbox" id="own-trips" style="width:auto" checked>
         <span>Meine gefahrenen Strecken mitrechnen</span>
       </label>
       <p class="leer" style="padding-top:0">Ist zu Start und Ziel schon einmal
@@ -393,8 +393,8 @@ table.kurve input { padding: 6px 8px; }
         als weitere Route mit und vergleicht ihn am fertigen Ladeplan. Das
         kostet höchstens zwei Routing-Anfragen mehr.</p>
 
-      <label for="abfahrt">Abfahrt</label>
-      <input type="datetime-local" id="abfahrt">
+      <label for="departure">Abfahrt</label>
+      <input type="datetime-local" id="departure">
       <p class="leer" style="padding-top:0">Leer heisst jetzt. Mit einer Zeit
         rechnet jolt den <strong>Verkehr</strong> (TomTom, zeitabhängig
         prognostiziert - Freitag um vier ist ein anderer Tag als Sonntag um
@@ -412,8 +412,8 @@ table.kurve input { padding: 6px 8px; }
         kommt weiter von OpenRouteService. Ohne Schlüssel auf dem Server
         passiert nichts.</p>
 
-      <label for="anbau">Aussen am Auto</label>
-      <select id="anbau">
+      <label for="attachment">Aussen am Auto</label>
+      <select id="attachment">
         <option value="1.0" selected>nichts</option>
         <option value="1.15">Fahrradträger, 2 Räder</option>
         <option value="1.25">Fahrradträger, 4 Räder</option>
@@ -430,12 +430,12 @@ table.kurve input { padding: 6px 8px; }
            not even drive.
            Whoever drives faster moves the slider; as the default, what was
            measured belongs there. -->
-      <label for="tempo">Tempo gegenüber der Routing-Annahme:
-        <span id="tempo-wert">100</span> %</label>
-      <input type="range" id="tempo" min="70" max="130" step="5" value="100">
+      <label for="speed">Tempo gegenüber der Routing-Annahme:
+        <span id="speed-output">100</span> %</label>
+      <input type="range" id="speed" min="70" max="130" step="5" value="100">
 
-      <label for="zuladung">Zuladung: <span id="zuladung-wert">–</span></label>
-      <input type="range" id="zuladung" min="-25" max="800" step="25" value="-25">
+      <label for="payload">Zuladung: <span id="payload-output">–</span></label>
+      <input type="range" id="payload" min="-25" max="800" step="25" value="-25">
       <div class="unter" style="margin-top:2px">Personen und Gepäck dieser
         Fahrt. Ganz links gilt der Wert aus dem Fahrzeugprofil.</div>
 
@@ -443,75 +443,75 @@ table.kurve input { padding: 6px 8px; }
            estimates (area = cw times A of the trailer in the slipstream of
            the car) - until a recorded trip confirms them. Both fields
            therefore remain editable by hand. -->
-      <label for="anhaenger">Anhänger</label>
-      <select id="anhaenger">
+      <label for="trailer">Anhänger</label>
+      <select id="trailer">
         <option value="" selected>keiner</option>
         <option value="750,0.5">Kleinanhänger / Boot, 750 kg</option>
         <option value="1300,1.1">Wohnwagen, 1300 kg</option>
         <option value="2000,1.3">Grosser Wohnwagen / Pferdeanhänger, 2000 kg</option>
         <option value="eigen">eigene Werte …</option>
       </select>
-      <div id="anhaenger-werte" hidden>
-        <label for="anhaenger-kg">Masse des Anhängers (kg)</label>
-        <input type="number" id="anhaenger-kg" min="0" max="3500" step="50">
-        <label for="anhaenger-cwa">Zusätzliche Luftwiderstandsfläche (m²)</label>
-        <input type="number" id="anhaenger-cwa" min="0" max="5" step="0.1">
+      <div id="trailer-values" hidden>
+        <label for="trailer-kg">Masse des Anhängers (kg)</label>
+        <input type="number" id="trailer-kg" min="0" max="3500" step="50">
+        <label for="trailer-cwa">Zusätzliche Luftwiderstandsfläche (m²)</label>
+        <input type="number" id="trailer-cwa" min="0" max="5" step="0.1">
         <div class="unter" style="margin-top:2px">cw mal Stirnfläche des
           Anhängers, wie sie hinter dem Auto wirkt. Ein Wohnwagen liegt grob
           bei 1 bis 1,5 m².</div>
       </div>
 
-      <label for="tempo-max">Höchstgeschwindigkeit dieser Fahrt (km/h)</label>
-      <input type="number" id="tempo-max" min="30" max="250" step="5"
+      <label for="speed-max">Höchstgeschwindigkeit dieser Fahrt (km/h)</label>
+      <input type="number" id="speed-max" min="30" max="250" step="5"
              placeholder="keine Grenze">
       <div class="unter" style="margin-top:2px">Harte Grenze, anders als der
         Tempo-Regler: Für ein Gespann sind es 100 km/h. Leer lassen, wenn nur
         die Höchstgeschwindigkeit des Fahrzeugs gilt.</div>
 
-      <button class="tat" id="rechnen">Route rechnen</button>
+      <button class="tat" id="compute">Route rechnen</button>
     </div>
 
-    <div id="ergebnis" hidden>
-      <div class="karte-block" id="varianten-block" hidden>
+    <div id="result" hidden>
+      <div class="karte-block" id="variants-block" hidden>
         <h2 style="margin-top:0">Routenvarianten</h2>
-        <div class="varianten" id="varianten"></div>
+        <div class="varianten" id="variants"></div>
       </div>
 
       <div class="karte-block">
-        <div class="werte" id="kennzahlen"></div>
-        <canvas id="profil"></canvas>
+        <div class="werte" id="metrics"></div>
+        <canvas id="profile"></canvas>
         <div class="karte-fuss">
           <span>Ladestand über der Strecke</span>
-          <span id="profil-legende"></span>
+          <span id="profile-legend"></span>
         </div>
       </div>
 
       <!-- On switching views the map moves into the respectively visible
            holder - see app.js. -->
-      <div id="karte-halter-planen"></div>
+      <div id="map-holder-plan"></div>
 
       <div class="karte-block">
         <h2 style="margin-top:0">Ladeplan</h2>
-        <div class="werte" id="ladeplan-werte"></div>
-        <ol class="liste" id="ladeplan"></ol>
+        <div class="werte" id="charge-plan-values"></div>
+        <ol class="liste" id="charge-plan"></ol>
         <!-- The slider sits with the charging plan and not with the charger
              filters: it does not change which charging points come into
              question, but how many stops are worthwhile. -->
         <div class="reihe">
           <div>
-            <label for="haltekosten">Aufwand je Halt
-              <span id="haltekosten-wert">5</span> min</label>
-            <input type="range" id="haltekosten" min="0" max="15" step="1" value="5">
+            <label for="holding-cost">Aufwand je Halt
+              <span id="holding-cost-output">5</span> min</label>
+            <input type="range" id="holding-cost" min="0" max="15" step="1" value="5">
           </div>
           <div>
-            <label for="ladepark">Grosser Ladepark zählt
-              <span id="ladepark-wert">4</span> min</label>
-            <input type="range" id="ladepark" min="0" max="12" step="1" value="4">
+            <label for="charge-park">Grosser Ladepark zählt
+              <span id="charge-park-output">4</span> min</label>
+            <input type="range" id="charge-park" min="0" max="12" step="1" value="4">
           </div>
         </div>
-        <label for="zeitwert">Deine Stunde ist
-          <span id="zeitwert-wert">30</span> € wert</label>
-        <input type="range" id="zeitwert" min="0" max="120" step="5" value="30">
+        <label for="time-value">Deine Stunde ist
+          <span id="time-value-output">30</span> € wert</label>
+        <input type="range" id="time-value" min="0" max="120" step="5" value="30">
         <p class="leer" style="padding-top:4px">Damit wird aus Geld eine Zeit,
           und beides lässt sich gegeneinander abwägen. Bei <strong>30 €</strong>
           wiegt ein Euro zwei Minuten: Zehn Minuten länger laden lohnt sich,
@@ -538,47 +538,47 @@ table.kurve input { padding: 6px 8px; }
         <h2 style="margin-top:0">Ladepunkte entlang der Route</h2>
         <div class="reihe">
           <div>
-            <label for="min-kw">Mindestens <span id="min-kw-wert">100</span> kW</label>
+            <label for="min-kw">Mindestens <span id="min-kw-output">100</span> kW</label>
             <input type="range" id="min-kw" min="0" max="300" step="10" value="100">
           </div>
           <div>
-            <label for="radius">Umkreis <span id="radius-wert">10</span> km</label>
+            <label for="radius">Umkreis <span id="radius-output">10</span> km</label>
             <input type="range" id="radius" min="2" max="30" step="1" value="10">
           </div>
         </div>
-        <ul class="liste" id="saeulen"></ul>
-        <button class="tat neben" id="live-starten">Live-Fahrt starten</button>
+        <ul class="liste" id="chargers"></ul>
+        <button class="tat neben" id="live-start">Live-Fahrt starten</button>
       </div>
     </div>
   </section>
 
   <!-- ------------------------------- Live -->
-  <section id="ansicht-live" hidden>
-    <div class="karte-block" id="live-leer">
+  <section id="view-live" hidden>
+    <div class="karte-block" id="live-empty">
       <p class="leer">Noch keine Live-Fahrt. Erst eine Route rechnen, dann unten
         auf „Live-Fahrt starten“.</p>
     </div>
 
-    <div id="live-inhalt" hidden>
+    <div id="live-content" hidden>
       <div class="karte-block">
         <!-- The answer first, big: not the charge level (that is an input),
              but whether it is enough. -->
-        <div id="live-antwort">
-          <div class="antwort-zahl" id="live-antwort-zahl">–</div>
-          <div class="antwort-text" id="live-antwort-text">warte auf Messung</div>
+        <div id="live-response">
+          <div class="antwort-zahl" id="live-response-number">–</div>
+          <div class="antwort-text" id="live-response-text">warte auf Messung</div>
         </div>
-        <div class="balken"><i id="live-balken" style="width:0%"></i></div>
+        <div class="balken"><i id="live-bars" style="width:0%"></i></div>
 
         <!-- The numbers one reads, directly under the answer - not under two
              charts. What one needs while driving is at the top; what one looks
              at when one has time, below. -->
-        <div class="werte" id="live-werte"></div>
+        <div class="werte" id="live-values"></div>
 
         <!-- One line from the car: consumption, power, auxiliary consumers.
              Separate from the tiles above, because they are two different
              things - above, what jolt calculates, here, what the car measures. -->
-        <div id="live-auto" hidden>
-          <div id="live-auto-zeile"></div>
+        <div id="live-car" hidden>
+          <div id="live-car-row"></div>
         </div>
 
         <!-- The dongle, also on a **planned** trip.
@@ -589,11 +589,11 @@ table.kurve input { padding: 6px 8px; }
              Pausing is no luxury: whoever locks the car at the charger
              while jolt keeps asking over CAN triggers the alarm system. -->
         <div class="karte-fuss" style="margin-top:12px">
-          <button class="tat neben" id="dongle-an" style="margin:0">Dongle verbinden</button>
+          <button class="tat neben" id="dongle-on" style="margin:0">Dongle verbinden</button>
           <button class="tat neben" id="dongle-pause" style="margin:0" hidden>Pause</button>
         </div>
         <label style="display:flex;gap:8px;align-items:center;margin-top:8px">
-          <input type="checkbox" id="dongle-auto" style="width:auto" checked>
+          <input type="checkbox" id="dongle-car" style="width:auto" checked>
           <span>Dongle nur beim Fahren lesen</span>
         </label>
         <div class="unter" style="margin-top:2px">Im Stand fragt jolt das Auto
@@ -602,8 +602,8 @@ table.kurve input { padding: 6px 8px; }
           selbst wieder. So löst ein abgeschlossenes Auto keinen Alarm aus.</div>
 
         <div class="karte-fuss">
-          <span id="live-hinweis">–</span>
-          <span id="live-verbindung">getrennt</span>
+          <span id="live-hint">–</span>
+          <span id="live-connection">getrennt</span>
         </div>
       </div>
 
@@ -611,13 +611,13 @@ table.kurve input { padding: 6px 8px; }
            not "how is it going" but "is it getting better or worse" -
            and one looks at them for that, instead of glancing in passing. -->
       <div class="karte-block">
-        <canvas id="live-verlauf"></canvas>
+        <canvas id="live-history"></canvas>
         <div class="karte-fuss">
-          <span id="live-verlauf-fuss">Soll und Ist über die Strecke</span>
-          <span id="live-hinweis-kurz"></span>
+          <span id="live-history-foot">Soll und Ist über die Strecke</span>
+          <span id="live-hint-short"></span>
         </div>
-        <canvas id="live-verbrauch" hidden></canvas>
-        <div class="karte-fuss" id="live-verbrauch-fuss" hidden>
+        <canvas id="live-consumption" hidden></canvas>
+        <div class="karte-fuss" id="live-consumption-foot" hidden>
           <span></span><span></span>
         </div>
 
@@ -625,10 +625,10 @@ table.kurve input { padding: 6px 8px; }
              for driving: seventeen rows in the middle of the driving view are
              noise, and whoever wants to look taps once. The age is already in
              the line above, so one sees without expanding whether it is alive. -->
-        <details id="live-roh" hidden>
+        <details id="live-raw" hidden>
           <summary>Alle Werte aus dem Auto
-            <span id="live-auto-stand"></span></summary>
-          <div id="live-auto-werte"></div>
+            <span id="live-car-status"></span></summary>
+          <div id="live-car-values"></div>
         </details>
       </div>
 
@@ -638,29 +638,29 @@ table.kurve input { padding: 6px 8px; }
            eventually stops typing it in - and then jolt calculates the rest of
            the trip against a value from two hours ago. -->
       <div class="karte-block">
-        <label for="ist-soc" style="margin-top:0">Ladestand jetzt</label>
+        <label for="actual-soc" style="margin-top:0">Ladestand jetzt</label>
         <div class="reihe">
           <!-- The field twice as wide as the button: .reihe otherwise distributes
                evenly, and a two-digit number needs less space than a word - but
                it is what is aimed at. -->
-          <input type="number" id="ist-soc" min="0" max="100" step="1"
+          <input type="number" id="actual-soc" min="0" max="100" step="1"
                  inputmode="numeric" enterkeyhint="send"
                  style="flex:2; font-size:22px; padding:12px; text-align:center">
-          <button class="tat" id="soc-melden"
+          <button class="tat" id="soc-report"
                   style="margin-top:0">Melden</button>
         </div>
-        <p class="leer" id="soc-erklaerung" style="padding-bottom:0">Vorbelegt
+        <p class="leer" id="soc-explanation" style="padding-bottom:0">Vorbelegt
           ist der zuletzt gemeldete Wert. Die Position holt das Telefon per GPS.</p>
       </div>
 
-      <div id="karte-halter-live"></div>
+      <div id="map-holder-live"></div>
 
       <div class="karte-block">
         <div class="karte-fuss" style="margin-bottom:10px">
           <h2 style="margin:0">Ladeplan unterwegs</h2>
-          <span id="live-plan-stand"></span>
+          <span id="live-plan-status"></span>
         </div>
-        <div id="live-aenderung" class="meldung warnung" hidden></div>
+        <div id="live-change" class="meldung warnung" hidden></div>
         <ol class="liste" id="live-plan"></ol>
       </div>
 
@@ -671,28 +671,28 @@ table.kurve input { padding: 6px 8px; }
           Reserve nach vorn rücken – das ist der Prüfstein.</p>
         <div class="reihe">
           <div>
-            <label for="mehrverbrauch">Mehrverbrauch
-              <span id="mehrverbrauch-wert">120</span> %</label>
-            <input type="range" id="mehrverbrauch" min="70" max="180" step="5"
+            <label for="extra-consumption">Mehrverbrauch
+              <span id="extra-consumption-output">120</span> %</label>
+            <input type="range" id="extra-consumption" min="70" max="180" step="5"
                    value="120">
           </div>
           <div>
             <!-- Traffic jam separate from consumption: whoever stands consumes
                  hardly more per kilometre, but arrives much later. Only this way
                  can the trigger be checked that consumption never triggers. -->
-            <label for="stau">Fahrzeit
-              <span id="stau-wert">100</span> %</label>
-            <input type="range" id="stau" min="100" max="200" step="10" value="100">
+            <label for="jam">Fahrzeit
+              <span id="jam-output">100</span> %</label>
+            <input type="range" id="jam" min="100" max="200" step="10" value="100">
           </div>
         </div>
-        <button class="tat neben" id="simulieren">Simulation starten</button>
-        <button class="tat neben" id="live-beenden">Fahrt beenden</button>
+        <button class="tat neben" id="simulate">Simulation starten</button>
+        <button class="tat neben" id="live-end">Fahrt beenden</button>
       </div>
     </div>
   </section>
 
   <!-- ------------------------------- Trips (Fahrten) -->
-  <section id="ansicht-fahrten" hidden>
+  <section id="view-trips" hidden>
     <div class="karte-block">
       <h2 style="margin-top:0">Fahrt aufzeichnen</h2>
       <p class="leer" style="padding-top:0">Ohne Route und ohne Planung
@@ -705,7 +705,7 @@ table.kurve input { padding: 6px 8px; }
            on tapping: in Bluefy there is Web Bluetooth, in Safari there is
            not. Two buttons for that would be a question to the user that the
            browser has already answered. -->
-      <p class="leer" style="padding-top:0" id="aufz-dongle-hinweis"></p>
+      <p class="leer" style="padding-top:0" id="rec-dongle-hint"></p>
       <!-- Own vehicle choice, not the one from the planning view.
            Recording used to access `#fahrzeug-wahl`, and that sits three
            views away. If it was empty, it fell back to the first vehicle in
@@ -713,31 +713,31 @@ table.kurve input { padding: 6px 8px; }
            start. Two real test trips were attributed to the wrong car that
            way, and because battery size, mass and drag depend on it, the
            consumption afterwards was a third too low. -->
-      <label for="aufz-fahrzeug">Fahrzeug</label>
-      <select id="aufz-fahrzeug"></select>
-      <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
-      <button class="tat" id="aufz-start">Aufzeichnung starten</button>
-      <p class="leer" id="aufz-stand"></p>
+      <label for="rec-vehicle">Fahrzeug</label>
+      <select id="rec-vehicle"></select>
+      <input type="text" id="rec-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
+      <button class="tat" id="rec-start">Aufzeichnung starten</button>
+      <p class="leer" id="rec-status"></p>
 
       <h2>Vergangene Fahrten</h2>
-      <div id="fahrten-liste"></div>
+      <div id="trips-list"></div>
     </div>
   </section>
 
   <!-- ------------------------------- Vehicle (Fahrzeug) -->
-  <section id="ansicht-fahrzeug" hidden>
+  <section id="view-vehicle" hidden>
     <div class="karte-block">
-      <label for="fahrzeug-liste">Fahrzeug</label>
-      <select id="fahrzeug-liste"></select>
-      <label for="vorlage">Aus Vorlage befüllen</label>
-      <select id="vorlage"></select>
-      <div id="fahrzeug-formular"></div>
+      <label for="vehicle-list">Fahrzeug</label>
+      <select id="vehicle-list"></select>
+      <label for="template">Aus Vorlage befüllen</label>
+      <select id="template"></select>
+      <div id="vehicle-form"></div>
       <h2>Ladekurve</h2>
       <p class="leer" style="padding-top:0">Leistung bei welchem Ladestand.
         Dazwischen wird interpoliert.</p>
-      <table class="kurve"><tbody id="kurve-zeilen"></tbody></table>
-      <button class="tat neben" id="kurve-zeile-neu">Stützstelle hinzufügen</button>
-      <button class="tat" id="fahrzeug-speichern">Speichern</button>
+      <table class="kurve"><tbody id="curve-rows"></tbody></table>
+      <button class="tat neben" id="curve-row-new">Stützstelle hinzufügen</button>
+      <button class="tat" id="vehicle-save">Speichern</button>
 
       <h2>Strompreise</h2>
       <p class="leer" style="padding-top:0">Was du je Kilowattstunde zahlst.
@@ -745,10 +745,10 @@ table.kurve input { padding: 6px 8px; }
         an der Säule: Dieselbe Ionity-Säule kostet mit Abo etwa die Hälfte
         von dem, was sie ad hoc kostet. Der Name wird als Teil verglichen,
         „Ionity“ trifft also „Ionity GmbH“.</p>
-      <label for="standardpreis">Standardpreis (alles Übrige) in €/kWh</label>
-      <input type="number" id="standardpreis" min="0" max="5" step="0.01" value="0.59">
-      <table class="kurve"><tbody id="preis-zeilen"></tbody></table>
-      <button class="tat neben" id="preis-zeile-neu">Anbieter hinzufügen</button>
+      <label for="default-price">Standardpreis (alles Übrige) in €/kWh</label>
+      <input type="number" id="default-price" min="0" max="5" step="0.01" value="0.59">
+      <table class="kurve"><tbody id="price-rows"></tbody></table>
+      <button class="tat neben" id="price-row-new">Anbieter hinzufügen</button>
 
       <h2>Logger im Auto</h2>
       <p class="leer" style="padding-top:0">Ein Gerät, das fest im Auto sitzt –
@@ -756,10 +756,10 @@ table.kurve input { padding: 6px 8px; }
         nicht kennen; die entsteht erst beim Losfahren. Mit diesem Token meldet
         es Messpunkte an <code>POST /api/live/melden</code>, und jolt sucht die
         laufende Fahrt dieses Fahrzeugs selbst.</p>
-      <p id="logger-stand" class="leer" style="padding-top:0"></p>
+      <p id="logger-status" class="leer" style="padding-top:0"></p>
       <div id="logger-token" hidden></div>
-      <button class="tat neben" id="logger-neu">Token erzeugen</button>
-      <button class="tat neben" id="logger-weg">Logger abmelden</button>
+      <button class="tat neben" id="logger-new">Token erzeugen</button>
+      <button class="tat neben" id="logger-remove">Logger abmelden</button>
       <p class="leer">Zum Ausprobieren, ob der OBD2-Dongle überhaupt antwortet,
         gibt es <a href="/obd">die Diagnoseseite</a>. Sie braucht
         einen Browser mit Web Bluetooth – auf dem iPhone <strong>Bluefy</strong>,
@@ -773,16 +773,16 @@ table.kurve input { padding: 6px 8px; }
        because one looks at them when something is wrong, not while driving.
        Each section is a collapsible; only what one is most likely to look for
        on opening is open. -->
-  <section id="ansicht-einstellungen" hidden>
+  <section id="view-settings" hidden>
 
     <details class="einst" open>
       <summary>Konto und Server</summary>
       <div class="einst-inhalt">
-        <dl class="einst-liste" id="einst-server"></dl>
-        <div id="einst-konto-zeile">
-          <button class="tat neben" id="einst-abmelden">Auf diesem Gerät abmelden</button>
+        <dl class="einst-liste" id="settings-server"></dl>
+        <div id="settings-account-row">
+          <button class="tat neben" id="settings-sign-out">Auf diesem Gerät abmelden</button>
         </div>
-        <p class="leer" id="einst-konto-hinweis" style="padding-top:6px"></p>
+        <p class="leer" id="settings-account-hint" style="padding-top:6px"></p>
       </div>
     </details>
 
@@ -791,26 +791,26 @@ table.kurve input { padding: 6px 8px; }
       <div class="einst-inhalt">
         <p class="leer" style="padding-top:0">Eine geänderte Ladeplanung meldet
           jolt aufs Telefon – auch bei dunklem Bildschirm.</p>
-        <dl class="einst-liste" id="einst-push"></dl>
-        <button class="tat neben" id="einst-push-an">Aktivieren</button>
-        <button class="tat neben" id="einst-push-aus">Auf diesem Gerät abmelden</button>
-        <button class="tat neben" id="einst-push-probe">Testnachricht senden</button>
+        <dl class="einst-liste" id="settings-push"></dl>
+        <button class="tat neben" id="settings-push-on">Aktivieren</button>
+        <button class="tat neben" id="settings-push-off">Auf diesem Gerät abmelden</button>
+        <button class="tat neben" id="settings-push-probe">Testnachricht senden</button>
       </div>
     </details>
 
-    <details class="einst" id="einst-carplay">
-      <summary>CarPlay-Darstellung <span class="einst-kurz" id="einst-carplay-kurz">–</span></summary>
+    <details class="einst" id="settings-carplay">
+      <summary>CarPlay-Darstellung <span class="einst-kurz" id="settings-carplay-short">–</span></summary>
       <div class="einst-inhalt">
         <p class="leer" style="padding-top:0">Die Kacheln im CarPlay-Dashboard
           sind Bilder. Zwei Stile zum Ausprobieren – die Vorschau unten zeigt
           sie mit Probewerten, so wie sie im Auto erscheinen. Die Umstellung
           gilt sofort, sobald eine Fahrt läuft.</p>
-        <label for="einst-carplay-stil">Stil im Auto</label>
-        <select id="einst-carplay-stil"></select>
+        <label for="settings-carplay-style">Stil im Auto</label>
+        <select id="settings-carplay-style"></select>
         <h3>A – Instrument</h3>
-        <div class="kachel-vorschau" id="vorschau-a"></div>
+        <div class="kachel-vorschau" id="preview-a"></div>
         <h3>B – Telemetrie</h3>
-        <div class="kachel-vorschau" id="vorschau-b"></div>
+        <div class="kachel-vorschau" id="preview-b"></div>
         <p class="leer" style="padding-top:6px">Rot, gelb, grün folgen dem Zustand:
           Ladestand unter 35&nbsp;% gelb, unter 20&nbsp;% rot; Ankunft ab
           +2&nbsp;min gelb, ab +15&nbsp;min rot; Reserve unter 100&nbsp;km gelb,
@@ -824,16 +824,16 @@ table.kurve input { padding: 6px 8px; }
       <summary>Dongle</summary>
       <div class="einst-inhalt">
         <label class="einst-haken">
-          <input type="checkbox" id="einst-auto" style="width:auto">
+          <input type="checkbox" id="settings-car" style="width:auto">
           <span>Dongle nur beim Fahren lesen</span>
         </label>
         <p class="leer" style="padding-top:0">Im Stand fragt jolt das Auto nichts
           und trennt den Dongle – ein abgeschlossenes Auto löst sonst die
           Alarmanlage aus. Dieselbe Einstellung wie in der Live-Ansicht.</p>
-        <button class="tat neben" id="einst-verbinden">Dongle verbinden</button>
-        <button class="tat neben" id="einst-trennen">Dongle trennen</button>
-        <button class="tat neben" id="einst-vergessen">Gemerktes Gerät vergessen</button>
-        <p class="leer" style="padding-top:6px" id="einst-verbinden-stand"></p>
+        <button class="tat neben" id="settings-connect">Dongle verbinden</button>
+        <button class="tat neben" id="settings-disconnect">Dongle trennen</button>
+        <button class="tat neben" id="settings-forget">Gemerktes Gerät vergessen</button>
+        <p class="leer" style="padding-top:6px" id="settings-connect-status"></p>
         <p class="leer" style="padding-top:6px">Verbinden geht hier, in der
           Live-Ansicht (Knopf „Dongle verbinden“) oder auf
           <a href="/obd">der Diagnoseseite</a>. Das Gerät vergessen heisst: Beim
@@ -841,11 +841,11 @@ table.kurve input { padding: 6px 8px; }
       </div>
     </details>
 
-    <details class="einst" id="einst-diagnose">
-      <summary>Dongle-Diagnose <span class="einst-kurz" id="einst-diag-kurz">–</span></summary>
+    <details class="einst" id="settings-diagnosis">
+      <summary>Dongle-Diagnose <span class="einst-kurz" id="settings-diag-short">–</span></summary>
       <div class="einst-inhalt">
         <h3>Verbindung</h3>
-        <dl class="einst-liste" id="diag-verbindung"></dl>
+        <dl class="einst-liste" id="diag-connection"></dl>
 
         <h3>Messwerte</h3>
         <p class="leer" style="padding-top:0">Je Messgrösse: letzter Wert und wie
@@ -854,21 +854,21 @@ table.kurve input { padding: 6px 8px; }
           Fahrzeug) oder ausblieb (<b>aus</b> – keine Antwort), und wie lange
           die Abfrage dauert.</p>
         <div style="overflow-x:auto">
-          <table class="diag-tabelle" id="diag-messwerte"></table>
+          <table class="diag-tabelle" id="diag-readings"></table>
         </div>
 
         <h3>Runden und Befehle</h3>
-        <dl class="einst-liste" id="diag-runden"></dl>
-        <button class="tat neben" id="diag-zuruecksetzen">Zähler zurücksetzen</button>
+        <dl class="einst-liste" id="diag-rounds"></dl>
+        <button class="tat neben" id="diag-reset">Zähler zurücksetzen</button>
 
         <h3>Protokoll</h3>
         <label class="einst-haken">
-          <input type="checkbox" id="diag-auffaellig" style="width:auto">
+          <input type="checkbox" id="diag-flagged" style="width:auto">
           <span>Nur Auffälliges (Fehler, Zeitüberschreitungen, Abrisse)</span>
         </label>
-        <pre id="diag-protokoll" class="diag-protokoll"></pre>
-        <button class="tat neben" id="diag-kopieren">Bericht kopieren</button>
-        <button class="tat neben" id="diag-protokoll-leeren">Protokoll leeren</button>
+        <pre id="diag-log" class="diag-protokoll"></pre>
+        <button class="tat neben" id="diag-copy">Bericht kopieren</button>
+        <button class="tat neben" id="diag-log-clear">Protokoll leeren</button>
         <p class="leer" style="padding-top:6px">Der Bericht enthält Fassung,
           Verbindungsdaten, Zähler, die Messwert-Tabelle und das Protokoll – nichts
           davon ist ein Geheimnis. Zum Einfügen in eine Nachricht, wenn ein Wert
@@ -881,13 +881,13 @@ table.kurve input { padding: 6px 8px; }
           ein Befehl die Messung: Adresse und Filter werden danach neu gesetzt,
           eine Runde kann ausfallen.</p>
         <div class="einst-befehl">
-          <input type="text" id="diag-befehl" placeholder="ATRV" autocomplete="off"
+          <input type="text" id="diag-command" placeholder="ATRV" autocomplete="off"
                  autocapitalize="characters" spellcheck="false"
                  enterkeyhint="send">
-          <button class="tat" id="diag-senden" style="margin:0">Senden</button>
+          <button class="tat" id="diag-send" style="margin:0">Senden</button>
         </div>
-        <label class="einst-haken" id="diag-fahrt-zeile" hidden>
-          <input type="checkbox" id="diag-fahrt-ok" style="width:auto">
+        <label class="einst-haken" id="diag-trip-row" hidden>
+          <input type="checkbox" id="diag-trip-ok" style="width:auto">
           <span>Trotz laufender Fahrt senden</span>
         </label>
 
@@ -902,28 +902,28 @@ table.kurve input { padding: 6px 8px; }
           nicht prüfen. Nicht während einer Fahrt. Ist kein Dongle verbunden, verbindet der Knopf
           zuerst – nach dem Parken ist er getrennt.</p>
         <div class="einst-befehl">
-          <select id="lausch-protokoll" aria-label="Protokoll">
+          <select id="listen-log" aria-label="Protokoll">
             <option value="6">11 Bit, 500 kbit/s (6)</option>
             <option value="7">29 Bit, 500 kbit/s (7)</option>
           </select>
-          <select id="lausch-dauer" aria-label="Dauer">
+          <select id="listen-duration" aria-label="Dauer">
             <option value="10000">10 s</option>
             <option value="30000">30 s</option>
             <option value="60000">60 s</option>
           </select>
-          <button class="tat" id="lausch-start" style="margin:0">Mithören</button>
+          <button class="tat" id="listen-start" style="margin:0">Mithören</button>
         </div>
-        <pre id="lausch-ergebnis" class="diag-protokoll" hidden></pre>
-        <button class="tat neben" id="lausch-kopieren" hidden>Ergebnis kopieren</button>
+        <pre id="listen-result" class="diag-protokoll" hidden></pre>
+        <button class="tat neben" id="listen-copy" hidden>Ergebnis kopieren</button>
       </div>
     </details>
 
     <details class="einst">
       <summary>Speicher und App</summary>
       <div class="einst-inhalt">
-        <dl class="einst-liste" id="einst-speicher"></dl>
-        <button class="tat neben" id="einst-puffer-leeren" hidden>Wartende Messpunkte verwerfen</button>
-        <button class="tat neben" id="einst-cache-leeren">App-Cache zurücksetzen</button>
+        <dl class="einst-liste" id="settings-storage"></dl>
+        <button class="tat neben" id="settings-buffer-clear" hidden>Wartende Messpunkte verwerfen</button>
+        <button class="tat neben" id="settings-cache-clear">App-Cache zurücksetzen</button>
         <p class="leer" style="padding-top:6px">Der Cache hält die Oberfläche für
           schlechten Empfang bereit. Setzt du ihn zurück, lädt jolt beim nächsten
           Start alles frisch – der Weg, wenn nach einem Update noch die alte
@@ -934,8 +934,8 @@ table.kurve input { padding: 6px 8px; }
 
   <!-- Exactly one map for the whole app. Two canvas elements would mean two
        tile caches and two states that can drift apart. -->
-  <div id="karte-block" class="karte-block">
-    <canvas id="karte"></canvas>
+  <div id="map-block" class="karte-block">
+    <canvas id="map"></canvas>
     <div class="karte-fuss">
       <span>Ziehen zum Verschieben, Rad oder Kneifen zum Zoomen</span>
       <span>© OpenStreetMap-Mitwirkende</span>

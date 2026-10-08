@@ -29,12 +29,12 @@ async function cycle(scenario) {
                     state: null, order: [] };
   const sent = [];
   const elemente = {
-    "aufz-start": { disabled: false },
-    "aufz-stand": { textContent: "" },
-    "aufz-fahrzeug": { value: "1" },
-    "aufz-name": { value: "Testfahrt" },
-    "live-leer": { hidden: false },
-    "live-inhalt": { hidden: true },
+    "rec-start": { disabled: false },
+    "rec-status": { textContent: "" },
+    "rec-vehicle": { value: "1" },
+    "rec-name": { value: "Testfahrt" },
+    "live-empty": { hidden: false },
+    "live-content": { hidden: true },
   };
   const empty = () => new Proxy(function () { return ""; }, {
     get: (z, n) => (n === Symbol.toPrimitive ? () => "" : n === "style" ? {} : empty()),
@@ -85,8 +85,8 @@ async function cycle(scenario) {
   vm.createContext(context);
   vm.runInContext(source, context);
   await timeframe.joltTrips.startRecording();
-  return { calls, sent, reports, as_of: elemente["aufz-stand"].textContent,
-           btn: elemente["aufz-start"] };
+  return { calls, sent, reports, as_of: elemente["rec-status"].textContent,
+           btn: elemente["rec-start"] };
 }
 
 (async () => {

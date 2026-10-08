@@ -39,19 +39,19 @@
   }
 
   function as_of(text, level) {
-    const k = el("verbindung");
+    const k = el("connection");
     k.textContent = text;
     k.className = "stand " + (level || "");
   }
 
   function buttons(at) {
-    for (const id of ["init", "soc", "senden", "melden", "fahrt-start", "pruefen"]) el(id).disabled = !at;
+    for (const id of ["init", "soc", "send", "report", "trip-start", "check"]) el(id).disabled = !at;
   }
 
   /* ---------- Charge level ---------- */
 
   async function readSoc() {
-    el("soc-wert").textContent = "…";
+    el("soc-output").textContent = "…";
     try {
       // Address and filters have been in place since the handshake; setting
       // them again here would not repeat ATCP17 and ATCAF1 and would thereby
@@ -59,7 +59,7 @@
       const response = await O.command("22028C");
       const reading = O.socFromResponse(response);
       if (reading === null) {
-        el("soc-wert").textContent = "?";
+        el("soc-output").textContent = "?";
         log("Antwort enthält kein 62028C - siehe oben. Entweder ist die "
             + "Datenkennung eine andere, oder das Steuergerät antwortet "
             + "nicht auf dieser Kennung.");
@@ -68,14 +68,14 @@
       lastSoc = Math.round(reading.hmi * 10) / 10;
       // Show both numbers: the big one is what is in the car and what jolt
       // gets; the small one next to it makes it traceable what it came from.
-      el("soc-wert").textContent = lastSoc + " %";
-      el("soc-herkunft").textContent =
+      el("soc-output").textContent = lastSoc + " %";
+      el("soc-origin").textContent =
         `Rohwert 0x${reading.raw.toString(16).toUpperCase()} = ${reading.raw}`
         + ` → brutto ${reading.bms.toFixed(1)} % → Anzeige ${reading.hmi.toFixed(1)} %`;
       log(`Ladestand: brutto ${reading.bms.toFixed(1)} %, `
           + `Anzeige ${reading.hmi.toFixed(1)} % (Rohwert ${reading.raw})`);
     } catch (failure) {
-      el("soc-wert").textContent = "–";
+      el("soc-output").textContent = "–";
       log("FEHLER " + failure.message);
     }
   }
@@ -93,7 +93,7 @@
    * does accept the measurement points but stores them nowhere - and one
    * only notices afterwards. */
   function goAsOf(text, level) {
-    const k = el("los-stand");
+    const k = el("go-status");
     k.textContent = text;
     k.className = "stand " + (level || "");
   }
@@ -121,7 +121,7 @@
    * jolt fills in start and destination itself when finishing, from the
    * first and last measurement point. */
   function tripName() {
-    const own = el("fahrt-name").value.trim();
+    const own = el("trip-name").value.trim();
     if (own) return own;
     return new Date().toLocaleString("de-DE", {
       weekday: "short", day: "2-digit", month: "2-digit",
@@ -129,7 +129,7 @@
   }
 
   async function start_driving() {
-    const btn = el("los");
+    const btn = el("go");
     btn.disabled = true;
     try {
       if (!O.linked()) {
@@ -149,9 +149,9 @@
       goAsOf("Ladestand lesen …");
       const probe = O.socFromResponse(await O.command("22028C"));
       if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
-      el("soc-wert").textContent = Math.round(probe.hmi * 10) / 10 + " %";
+      el("soc-output").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
-      if (el("automatik").checked) {
+      if (el("auto").checked) {
         // The same check as with the manual start. Without it the loop would
         // start and fail with a 401 on every creation of the trip - visible only
         // in the log, while "Bereit" is shown above.
@@ -169,8 +169,8 @@
         // Without resetting, the second trip of a session continues counting
         // where the first one stopped.
         round = 0;
-        el("fahrt-start").hidden = true;
-        el("fahrt-stop").hidden = false;
+        el("trip-start").hidden = true;
+        el("trip-stop").hidden = false;
         await screenAwakeHold();
         log("Automatik: warte auf Bewegung.");
         tripLoop();
@@ -224,7 +224,7 @@
    * The choice stays in the browser. Whoever sits in the car wants to make
    * it once and never again. */
   async function vehiclesCharging() {
-    const selection = el("fahrzeug-wahl-obd");
+    const selection = el("vehicle-choice-obd");
     if (!selection) return;
     try {
       const response = await fetch("/api/fahrzeuge",
@@ -249,7 +249,7 @@
   }
 
   function vehicleId() {
-    const selection = el("fahrzeug-wahl-obd");
+    const selection = el("vehicle-choice-obd");
     if (!selection || !selection.value) {
       throw new Error("Kein Fahrzeug gewählt - erst in jolt anmelden, "
                       + "dann hier neu laden.");
@@ -293,7 +293,7 @@
   });
 
   function tiles(vals) {
-    el("fahrt-werte").innerHTML = vals.map(([name, num]) =>
+    el("trip-values").innerHTML = vals.map(([name, num]) =>
       `<div class="wert"><div class="zahl">${num}</div>`
       + `<div class="name">${name}</div></div>`).join("");
   }
@@ -321,7 +321,7 @@
      *
      * Two rounds in a row, so that a single outlier does not create a trip -
      * and no trip comes into being while the car shunts in the yard. */
-    if (!sessionId && el("automatik").checked && !el("token").value.trim()) {
+    if (!sessionId && el("auto").checked && !el("token").value.trim()) {
       const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh
         : (typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
            ? place.speed_kmh : null);
@@ -404,7 +404,7 @@
         } else if (result) {
           const { soc, raw, records } = result;
           lastSoc = Math.round(soc.hmi * 10) / 10;
-          el("soc-wert").textContent = lastSoc + " %";
+          el("soc-output").textContent = lastSoc + " %";
           const power = (typeof raw.voltage_v === "number"
                             && typeof raw.current_a === "number")
             ? (raw.voltage_v * raw.current_a / 1000).toFixed(1) + " kW" : "–";
@@ -431,13 +431,13 @@
         stand2("Aussetzer: " + failure.message, "schlecht");
         log("Runde übersprungen: " + failure.message);
       }
-      const rest = Number(el("takt").value) * 1000 - (Date.now() - startedAt);
+      const rest = Number(el("tick").value) * 1000 - (Date.now() - startedAt);
       await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
     }
   }
 
   function stand2(text, level) {
-    const k = el("fahrt-stand");
+    const k = el("trip-status");
     k.textContent = text;
     k.className = "stand " + (level || "");
   }
@@ -450,8 +450,8 @@
     }
     running = true;
     round = 0;
-    el("fahrt-start").hidden = true;
-    el("fahrt-stop").hidden = false;
+    el("trip-start").hidden = true;
+    el("trip-stop").hidden = false;
     await screenAwakeHold();
     log("Aufzeichnung gestartet.");
     tripLoop();
@@ -486,8 +486,8 @@
       }
       sessionId = null;
     }
-    el("fahrt-start").hidden = false;
-    el("fahrt-stop").hidden = true;
+    el("trip-start").hidden = false;
+    el("trip-stop").hidden = true;
     stand2("beendet");
     if (wake_lock) {
       try { await wake_lock.release(); } catch (e) {}
@@ -541,9 +541,9 @@
   }
 
   async function valuesCall() {
-    const btn = el("pruefen");
+    const btn = el("check");
     btn.disabled = true;
-    const resultEl = el("pruef-ergebnis");
+    const resultEl = el("check-result");
     resultEl.innerHTML = "<p>lese …</p>";
     try {
       if (!O.linked()) {
@@ -656,7 +656,7 @@
    * pairs from byte 1 - the way the control unit means them. What differs
    * clearly in both columns is the candidate. */
   function showClimate() {
-    const resultEl = el("klima-ergebnis");
+    const resultEl = el("climate-result");
     if (!climateA || !climateA.b) { resultEl.innerHTML = ""; return; }
     const a = climateA.a, b = climateA.b;
     const n = Math.min(a.length, b.length);
@@ -747,15 +747,15 @@
   // CoreBluetooth (see obd-ble-native.js). Whoever checks the Web API
   // directly here declares the page unusable precisely where it works best.
   if (!O.obtainable()) {
-    el("untauglich").hidden = false;
-    el("verbinden").disabled = true;
+    el("unsuitable").hidden = false;
+    el("connect").disabled = true;
   }
 
   /* Errors in readings.js belong on the page, not only in the console. A
    * mistyped address name looks like a silent control unit at the car -
    * and then one searches in the wrong place. */
   if (O.TABLE_ERROR && O.TABLE_ERROR.length) {
-    const box = el("untauglich");
+    const box = el("unsuitable");
     box.hidden = false;
     box.innerHTML = "<strong>Fehler in der Messwert-Tabelle "
       + "(readings.js):</strong><ul><li>"
@@ -765,7 +765,7 @@
   // The module reports everything here, and a dropout during a recording
   // is a reason to reconnect - otherwise not.
   O.set_up(log, () => { if (running) O.reconnect(1, () => running); });
-  el("verbinden").addEventListener("click", async () => {
+  el("connect").addEventListener("click", async () => {
     as_of("verbinde …");
     await O.attach();
     if (O.linked()) { as_of("verbunden", "gut"); buttons(true); }
@@ -781,70 +781,70 @@
    * time starts a second series, and it stabs the first command in the
    * back: "es läuft noch ein Befehl". In the log it then looked as if the
    * control unit had not answered - when it was the UI. */
-  el("senden").addEventListener("click", async () => {
-    const btn = el("senden");
+  el("send").addEventListener("click", async () => {
+    const btn = el("send");
     btn.disabled = true;
     const earlier = btn.textContent;
     btn.textContent = "läuft …";
     try {
-      await O.series(el("frei").value.split("\n"));
+      await O.series(el("free").value.split("\n"));
     } finally {
       btn.disabled = false;
       btn.textContent = earlier;
     }
   });
-  el("melden").addEventListener("click", report);
-  el("pruefen").addEventListener("click", valuesCall);
-  el("klima-a").addEventListener("click", async () => {
-    const k = el("klima-a");
+  el("report").addEventListener("click", report);
+  el("check").addEventListener("click", valuesCall);
+  el("climate-a").addEventListener("click", async () => {
+    const k = el("climate-a");
     k.disabled = true;
     try {
       climateA = { a: await readClimate(), b: null };
       log("Klima-Messung 1 (aus): " + climateA.a.join(" "));
-      el("klima-ergebnis").innerHTML =
+      el("climate-result").innerHTML =
         "<p>Erste Messung steht. Jetzt die Klimaanlage <strong>kräftig "
         + "einschalten</strong> (kalt, hohe Gebläsestufe), eine halbe Minute "
         + "warten und dann die zweite Messung.</p>";
-      el("klima-b").disabled = false;
+      el("climate-b").disabled = false;
     } catch (failure) {
-      el("klima-ergebnis").innerHTML =
+      el("climate-result").innerHTML =
         `<p class="stand schlecht">${failure.message}</p>`;
       log("Klima-Messung 1: " + failure.message);
     } finally {
       k.disabled = false;
     }
   });
-  el("klima-b").addEventListener("click", async () => {
-    const k = el("klima-b");
+  el("climate-b").addEventListener("click", async () => {
+    const k = el("climate-b");
     k.disabled = true;
     try {
       climateA.b = await readClimate();
       log("Klima-Messung 2 (an): " + climateA.b.join(" "));
       showClimate();
     } catch (failure) {
-      el("klima-ergebnis").innerHTML =
+      el("climate-result").innerHTML =
         `<p class="stand schlecht">${failure.message}</p>`;
       log("Klima-Messung 2: " + failure.message);
     } finally {
       k.disabled = false;
     }
   });
-  el("log-leeren").addEventListener("click", () => { el("log").textContent = ""; });
+  el("log-clear").addEventListener("click", () => { el("log").textContent = ""; });
   /* On the phone, selecting inside a scrolling box is fiddly, and a
    * screenshot loses exactly what matters: the hex responses character by
    * character. */
-  el("los").addEventListener("click", start_driving);
-  el("fahrt-start").addEventListener("click", startTrip);
-  el("fahrt-stop").addEventListener("click", endTrip);
-  el("takt").addEventListener("input", (e) => {
-    el("takt-wert").textContent = e.target.value;
+  el("go").addEventListener("click", start_driving);
+  el("trip-start").addEventListener("click", startTrip);
+  el("trip-stop").addEventListener("click", endTrip);
+  el("tick").addEventListener("input", (e) => {
+    el("tick-output").textContent = e.target.value;
   });
-  el("log-kopieren").addEventListener("click", async () => {
+  el("log-copy").addEventListener("click", async () => {
     const text = el("log").textContent;
     try {
       await navigator.clipboard.writeText(text);
-      el("log-kopieren").textContent = "kopiert";
-      setTimeout(() => { el("log-kopieren").textContent = "Protokoll kopieren"; }, 2000);
+      el("log-copy").textContent = "kopiert";
+      setTimeout(() => { el("log-copy").textContent = "Protokoll kopieren"; }, 2000);
     } catch (failure) {
       // Without clipboard (older browser, missing permission) selecting by hand
       // remains - then at least select everything at once.

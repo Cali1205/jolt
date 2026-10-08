@@ -25,12 +25,12 @@ function verify(ok, text, detail) {
 function build(o) {
   o = o || {};
   const elemente = {
-    "aufz-fahrzeug": { value: o.vehicle === undefined ? "1" : o.vehicle,
+    "rec-vehicle": { value: o.vehicle === undefined ? "1" : o.vehicle,
                        selectedOptions: [{ textContent: " ID.Buzz " }] },
-    "aufz-name": { value: "" },
-    "aufz-start": { disabled: !!o.startRunning, textContent: "" },
-    "aufz-stand": { textContent: "" },
-    "live-leer": { hidden: false }, "live-inhalt": { hidden: true },
+    "rec-name": { value: "" },
+    "rec-start": { disabled: !!o.startRunning, textContent: "" },
+    "rec-status": { textContent: "" },
+    "live-empty": { hidden: false }, "live-content": { hidden: true },
   };
   const empty = () => new Proxy(function () { return ""; }, {
     get: (z, n) => (n === Symbol.toPrimitive ? () => "" : n === "style" ? {} : empty()),

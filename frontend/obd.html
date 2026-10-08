@@ -32,12 +32,12 @@
   Store. Safari und Chrome auf dem iPhone können es nicht und werden es
   melden.</p>
 
-<div id="untauglich" class="kasten fehler" hidden>
+<div id="unsuitable" class="kasten fehler" hidden>
   Dieser Browser kennt kein <code>navigator.bluetooth</code>. Auf dem iPhone
   diese Seite in <strong>Bluefy</strong> öffnen, auf Android in Chrome.
 </div>
 
-<div class="kasten" id="loslegen">
+<div class="kasten" id="get-started">
   <h2>Losfahren</h2>
   <p class="hinweis"><strong>Hier wird der Dongle verbunden</strong> – ein
     Knopf für alles: verbinden, vorbereiten, Ladestand probelesen, Fahrt
@@ -48,16 +48,16 @@
     tun: Mit Automatik wartet die Seite, bis das Auto fährt, und legt die
     Fahrt dann selbst an. Ans Beenden musst du auch nicht denken – jolt
     schliesst eine Fahrt ab, die anderthalb Stunden schweigt.</p>
-  <label for="fahrzeug-wahl-obd">Fahrzeug</label>
-  <select id="fahrzeug-wahl-obd"></select>
+  <label for="vehicle-choice-obd">Fahrzeug</label>
+  <select id="vehicle-choice-obd"></select>
   <label style="display:flex;gap:8px;align-items:center">
-    <input type="checkbox" id="automatik" checked style="width:auto">
+    <input type="checkbox" id="auto" checked style="width:auto">
     <span>Von selbst starten, sobald das Auto fährt</span>
   </label>
-  <input type="text" id="fahrt-name"
+  <input type="text" id="trip-name"
          placeholder="Bezeichnung (leer = Datum und Uhrzeit)">
-  <button id="los" class="tat">Verbinden und aufzeichnen</button>
-  <div id="los-stand" class="stand"></div>
+  <button id="go" class="tat">Verbinden und aufzeichnen</button>
+  <div id="go-status" class="stand"></div>
 </div>
 
 <h2 style="margin-top:26px">Einzelschritte</h2>
@@ -67,8 +67,8 @@
   <p class="hinweis">Der Dongle muss im Auto stecken und die Zündung an sein.
     Er heisst meist <code>IOS-Vlink</code>, <code>VEEPEAK</code> oder
     ähnlich.</p>
-  <button id="verbinden" class="tat">Dongle suchen</button>
-  <div id="verbindung" class="stand">nicht verbunden</div>
+  <button id="connect" class="tat">Dongle suchen</button>
+  <div id="connection" class="stand">nicht verbunden</div>
 </div>
 
 <div class="kasten">
@@ -91,16 +91,16 @@
     zeigt – den braucht jolt, weil Reserve und Ziel-Ladestand darauf
     gedacht sind.</p>
   <button id="soc" class="tat" disabled>SoC abfragen</button>
-  <div id="soc-wert" class="gross">–</div>
-  <p class="hinweis" id="soc-herkunft" style="margin:4px 0 0"></p>
+  <div id="soc-output" class="gross">–</div>
+  <p class="hinweis" id="soc-origin" style="margin:4px 0 0"></p>
 </div>
 
 <div class="kasten">
   <h2>4. Werte prüfen</h2>
   <p class="hinweis">Im Stand, ohne Fahrt: einmal alles lesen und gegen das
     halten, was plausibel wäre. Zündung an, Auto wach.</p>
-  <button id="pruefen" class="tat" disabled>Alle Werte prüfen</button>
-  <div id="pruef-ergebnis"></div>
+  <button id="check" class="tat" disabled>Alle Werte prüfen</button>
+  <div id="check-result"></div>
 </section>
 
 <section>
@@ -109,9 +109,9 @@
     16-Bit-Zahlen, und keine Quelle sagt, welche die Leistung ist. Zwei
     Messungen mit <strong>verschiedenem Klimazustand</strong> verraten es:
     Was sich deutlich ändert, hängt am Kompressor.</p>
-  <button id="klima-a" class="tat">1. Messen (Klima <em>aus</em>)</button>
-  <button id="klima-b" class="tat neben" disabled>2. Messen (Klima <em>an</em>)</button>
-  <div id="klima-ergebnis"></div>
+  <button id="climate-a" class="tat">1. Messen (Klima <em>aus</em>)</button>
+  <button id="climate-b" class="tat neben" disabled>2. Messen (Klima <em>an</em>)</button>
+  <div id="climate-result"></div>
 </section>
 
 <section>
@@ -123,14 +123,14 @@
     Weitere bewährte Kennungen: <code>221E3B</code> Spannung,
     <code>221E3D</code> Strom, <code>22295A</code> Kilometerstand (dafür
     aber <code>ATSH17FC0076</code> / <code>ATCRA17FE0076</code>).</p>
-  <textarea id="frei" rows="3" spellcheck="false"
+  <textarea id="free" rows="3" spellcheck="false"
             placeholder="221E3B">221E3B
 221E3D
 22295A</textarea>
-  <button id="senden" class="tat" disabled>Senden</button>
+  <button id="send" class="tat" disabled>Senden</button>
 </div>
 
-<div class="kasten" id="fahrt-kasten">
+<div class="kasten" id="trip-box">
   <h2>7. Fahrt aufzeichnen</h2>
   <p class="hinweis">Liest im eingestellten Takt alle Werte, holt die
     Position und meldet beides an jolt. <strong>Bildschirm an lassen und
@@ -141,14 +141,14 @@
          autocomplete="off" spellcheck="false">
   <div class="reihe">
     <div>
-      <label for="takt">Takt <span id="takt-wert">30</span> s</label>
-      <input type="range" id="takt" min="10" max="120" step="5" value="30">
+      <label for="tick">Takt <span id="tick-output">30</span> s</label>
+      <input type="range" id="tick" min="10" max="120" step="5" value="30">
     </div>
   </div>
-  <button id="fahrt-start" class="tat" disabled>Aufzeichnung starten</button>
-  <button id="fahrt-stop" class="tat neben" hidden>Beenden</button>
-  <div id="fahrt-stand" class="stand"></div>
-  <div class="werte" id="fahrt-werte"></div>
+  <button id="trip-start" class="tat" disabled>Aufzeichnung starten</button>
+  <button id="trip-stop" class="tat neben" hidden>Beenden</button>
+  <div id="trip-status" class="stand"></div>
+  <div class="werte" id="trip-values"></div>
 </div>
 
 <div class="kasten">
@@ -158,13 +158,13 @@
     Fahrzeug-Ansicht unter „Logger im Auto“ (dasselbe wie oben). Ohne
     laufende Fahrt antwortet jolt mit <code>aufgenommen: false</code> – das
     ist kein Fehler.</p>
-  <button id="melden" class="tat" disabled>Einmal melden</button>
+  <button id="report" class="tat" disabled>Einmal melden</button>
 </div>
 
 <h2>Protokoll</h2>
 <pre id="log"></pre>
-<button id="log-kopieren" class="tat neben">Protokoll kopieren</button>
-<button id="log-leeren" class="tat neben">Protokoll leeren</button>
+<button id="log-copy" class="tat neben">Protokoll kopieren</button>
+<button id="log-clear" class="tat neben">Protokoll leeren</button>
 
 <!-- Order as in index.html: first the plugin shell, then the
      emulation, then the core. -->

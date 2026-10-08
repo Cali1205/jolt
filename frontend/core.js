@@ -106,7 +106,7 @@ window.jolt = (function () {
   /* ---------- Meldungen ---------- */
 
   function report(text, variety) {
-    const container = document.getElementById("meldungen");
+    const container = document.getElementById("reports");
     if (!container) return;
     const box = document.createElement("div");
     box.className = "meldung " + (variety || "hinweis");
@@ -120,7 +120,7 @@ window.jolt = (function () {
   }
 
   function reportsClear() {
-    const container = document.getElementById("meldungen");
+    const container = document.getElementById("reports");
     if (container) container.innerHTML = "";
   }
 

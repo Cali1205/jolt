@@ -64,8 +64,8 @@ window.joltRoute = (function () {
   /* ---------- Compute route ---------- */
 
   async function compute() {
-    const btn = document.getElementById("rechnen");
-    const vehicleId = Number(document.getElementById("fahrzeug-wahl").value);
+    const btn = document.getElementById("compute");
+    const vehicleId = Number(document.getElementById("vehicle-choice").value);
     if (!vehicleId) { K.report("Erst ein Fahrzeug anlegen.", "fehler"); return; }
     if (!chosen.start || !chosen.destination) {
       K.report("Start und Ziel aus der Vorschlagsliste auswählen.", "fehler");
@@ -86,19 +86,19 @@ window.joltRoute = (function () {
         destination: { lat: chosen.destination.lat, lon: chosen.destination.lon,
                 text: chosen.destination.name },
         start_soc: Number(document.getElementById("start-soc").value),
-        speed_factor: Number(document.getElementById("tempo").value) / 100,
-        air_drag_factor: Number(document.getElementById("anbau").value),
+        speed_factor: Number(document.getElementById("speed").value) / 100,
+        air_drag_factor: Number(document.getElementById("attachment").value),
         alternative: document.getElementById("alternative").checked,
-        own_trips: document.getElementById("eigene-fahrten").checked,
+        own_trips: document.getElementById("own-trips").checked,
         tomtom: document.getElementById("tomtom").checked,
-        departure: departureIso(document.getElementById("abfahrt").value),
+        departure: departureIso(document.getElementById("departure").value),
         // The slider sits at the far left on a negative value - that means
         // "not set", and then the vehicle profile applies. A separate switch
         // next to it would be a second control for a question the slider
         // already answers.
         payload_kg: payloadValue(),
         ...trailerValues(),
-        speed_max_kmh: numberOrNull("tempo-max"),
+        speed_max_kmh: numberOrNull("speed-max"),
       }});
       latestVariants = response.variants || [];
       latestDeparture = response.departure || null;
@@ -143,8 +143,8 @@ window.joltRoute = (function () {
   /* ---------- Variant cards ---------- */
 
   function drawVariants() {
-    const block = document.getElementById("varianten-block");
-    const variantList = document.getElementById("varianten");
+    const block = document.getElementById("variants-block");
+    const variantList = document.getElementById("variants");
     if (!block || !variantList) return;
     block.hidden = latestVariants.length < 2;
     if (latestVariants.length < 2) { variantList.innerHTML = ""; return; }
@@ -237,10 +237,10 @@ window.joltRoute = (function () {
   }
 
   function show(trip) {
-    document.getElementById("ergebnis").hidden = false;
+    document.getElementById("result").hidden = false;
 
     const reserveVariety = trip.suffices ? "gut" : "schlecht";
-    document.getElementById("kennzahlen").innerHTML = [
+    document.getElementById("metrics").innerHTML = [
       K.valueTile("Strecke", K.num(trip.distance_km) + " km"),
       K.valueTile("Fahrzeit", K.duration(trip.drive_time_minutes)),
       trafficTile(trip, latestVariants),
@@ -303,7 +303,7 @@ window.joltRoute = (function () {
   /* ---------- State of charge along the route ---------- */
 
   function drawProfile(trip) {
-    const canvas = document.getElementById("profil");
+    const canvas = document.getElementById("profile");
     if (!canvas) return;
     const ratio = window.devicePixelRatio || 1;
     const width = canvas.clientWidth, height = canvas.clientHeight;
@@ -361,7 +361,7 @@ window.joltRoute = (function () {
     pen.font = "11px system-ui, sans-serif";
     pen.fillStyle = "#8a97a5";
     pen.fillText(`Reserve ${reserve} %`, 6, y(reserve) - 4);
-    document.getElementById("profil-legende").textContent =
+    document.getElementById("profile-legend").textContent =
       `0 – ${K.num(maxKm)} km · bis ${K.num(maxElevation)} m`;
   }
 
@@ -369,7 +369,7 @@ window.joltRoute = (function () {
 
   async function chargersCharging() {
     const trip = K.state.trip;
-    const chargerList = document.getElementById("saeulen");
+    const chargerList = document.getElementById("chargers");
     if (!trip || !chargerList) return;
 
     chargerList.innerHTML = '<li class="leer">sucht …</li>';
@@ -391,7 +391,7 @@ window.joltRoute = (function () {
   /* What a stop costs before charging begins - the slider in the
    * charging plan view. If it is missing (old UI in the cache), the server's
    * default applies, instead of sending a zero and fragmenting the plan. */
-  function holding_cost() { return slider("haltekosten", 5); }
+  function holding_cost() { return slider("holding-cost", 5); }
 
   function slider(id, preset) {
     const el = document.getElementById(id);
@@ -400,8 +400,8 @@ window.joltRoute = (function () {
 
   async function chargePlanCharging() {
     const trip = K.state.trip;
-    const planList = document.getElementById("ladeplan");
-    const vals = document.getElementById("ladeplan-werte");
+    const planList = document.getElementById("charge-plan");
+    const vals = document.getElementById("charge-plan-values");
     if (!trip || !planList || !vals) return;
 
     planList.innerHTML = '<li class="leer">plant …</li>';
@@ -411,8 +411,8 @@ window.joltRoute = (function () {
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`
         + `&stop_fixed_cost_min=${holding_cost()}`
-        + `&charge_park_bonus_min=${slider("ladepark", 4)}`
-        + `&time_value_eur_h=${slider("zeitwert", 30)}`,
+        + `&charge_park_bonus_min=${slider("charge-park", 4)}`
+        + `&time_value_eur_h=${slider("time-value", 30)}`,
         { method: "POST" });
       lastPlan = plan;
       drawPlan(plan, planList, vals);
@@ -549,15 +549,15 @@ window.joltRoute = (function () {
    * second switch for the question "own payload or the one from the
    * profile?" - far left means profile. */
   function payloadValue() {
-    const slider = document.getElementById("zuladung");
+    const slider = document.getElementById("payload");
     if (!slider) return null;
     const value = Number(slider.value);
     return value < 0 ? null : value;
   }
 
   function payloadCouple() {
-    const slider = document.getElementById("zuladung");
-    const display = document.getElementById("zuladung-wert");
+    const slider = document.getElementById("payload");
+    const display = document.getElementById("payload-output");
     if (!slider || !display) return;
     const refresh = () => {
       const value = payloadValue();
@@ -598,7 +598,7 @@ window.joltRoute = (function () {
   /* The server also rejects the past and more than 60 days ahead; the field
    * shows it already when selecting. */
   function departureLimits() {
-    const field = document.getElementById("abfahrt");
+    const field = document.getElementById("departure");
     if (!field) return;
     const now = new Date();
     field.min = localForField(now);
@@ -617,9 +617,9 @@ window.joltRoute = (function () {
   }
 
   function trailerValues() {
-    const kg = numberOrNull("anhaenger-kg");
+    const kg = numberOrNull("trailer-kg");
     if (!kg) return { trailer_kg: null, trailer_cwa_m2: null };
-    return { trailer_kg: kg, trailer_cwa_m2: numberOrNull("anhaenger-cwa") || 0 };
+    return { trailer_kg: kg, trailer_cwa_m2: numberOrNull("trailer-cwa") || 0 };
   }
 
   /* The selection prefills the two fields; they stay editable. Anyone who
@@ -627,13 +627,13 @@ window.joltRoute = (function () {
    * limit for a combination in Germany, and the one thing you
    * otherwise forget. */
   function trailerCouple() {
-    const choice = document.getElementById("anhaenger");
-    const fields = document.getElementById("anhaenger-werte");
+    const choice = document.getElementById("trailer");
+    const fields = document.getElementById("trailer-values");
     if (!choice || !fields) return;
     choice.addEventListener("change", () => {
-      const kg = document.getElementById("anhaenger-kg");
-      const cwa = document.getElementById("anhaenger-cwa");
-      const speedMax = document.getElementById("tempo-max");
+      const kg = document.getElementById("trailer-kg");
+      const cwa = document.getElementById("trailer-cwa");
+      const speedMax = document.getElementById("speed-max");
       if (choice.value === "") {
         fields.hidden = true;
         kg.value = ""; cwa.value = "";
@@ -652,14 +652,14 @@ window.joltRoute = (function () {
   /* ---------- Set up ---------- */
 
   function set_up() {
-    placeSearchSetUp("start", "start-treffer", "start");
-    placeSearchSetUp("ziel", "ziel-treffer", "ziel");
-    K.sliderCouple("start-soc", "start-soc-wert");
-    K.sliderCouple("tempo", "tempo-wert");
+    placeSearchSetUp("start", "start-hits", "start");
+    placeSearchSetUp("destination", "destination-hits", "destination");
+    K.sliderCouple("start-soc", "start-soc-output");
+    K.sliderCouple("speed", "speed-output");
     payloadCouple();
     trailerCouple();
     departureLimits();
-    const departureField = document.getElementById("abfahrt");
+    const departureField = document.getElementById("departure");
     // Anyone touching the field again after an hour's break should not work
     // with the limits from before.
     if (departureField) departureField.addEventListener("focus", departureLimits);
@@ -676,8 +676,8 @@ window.joltRoute = (function () {
         await chargePlanCharging();
       }, 350);
     };
-    K.sliderCouple("min-kw", "min-kw-wert", newCharging);
-    K.sliderCouple("radius", "radius-wert", newCharging);
+    K.sliderCouple("min-kw", "min-kw-output", newCharging);
+    K.sliderCouple("radius", "radius-output", newCharging);
     // The effort per stop only changes the planning, not the candidates -
     // hence without chargersCharging(), otherwise the list flickers for no reason.
     // Both sliders only change the planning, not the candidates - hence
@@ -686,11 +686,11 @@ window.joltRoute = (function () {
       clearTimeout(waitPlan);
       waitPlan = setTimeout(chargePlanCharging, 350);
     };
-    K.sliderCouple("haltekosten", "haltekosten-wert", catchUpPlan);
-    K.sliderCouple("ladepark", "ladepark-wert", catchUpPlan);
-    K.sliderCouple("zeitwert", "zeitwert-wert", catchUpPlan);
+    K.sliderCouple("holding-cost", "holding-cost-output", catchUpPlan);
+    K.sliderCouple("charge-park", "charge-park-output", catchUpPlan);
+    K.sliderCouple("time-value", "time-value-output", catchUpPlan);
 
-    K.at("rechnen", "click", compute);
+    K.at("compute", "click", compute);
     window.addEventListener("resize", () => {
       if (K.state.trip) drawProfile(K.state.trip);
     });
