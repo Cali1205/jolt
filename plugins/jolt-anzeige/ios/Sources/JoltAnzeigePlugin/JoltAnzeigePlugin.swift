@@ -30,7 +30,7 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
     /// Das Plugin ist geladen, also läuft die Oberfläche: CarPlay darf ihr
     /// Aufträge geben (Aufzeichnung starten und beenden). Die Anfragen aus der
     /// Liste kommen als Benachrichtigung und gehen als Ereignis "carplayAktion"
-    /// an das JavaScript (fahrten.js).
+    /// an das JavaScript (trips.js).
     public override func load() {
         JoltAnzeigeStore.shared.brueckeMelden(true)
         NotificationCenter.default.addObserver(
@@ -58,7 +58,7 @@ public class JoltAnzeigePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// `json`: das Anzeigemodell als Zeichenkette. Als Zeichenkette statt als
     /// Objekt, damit die Brücke nichts umformt - gelesen wird es hier genau
-    /// einmal, mit denselben Schlüsseln wie in anzeige.js.
+    /// einmal, mit denselben Schlüsseln wie in display.js.
     @objc func aktualisieren(_ call: CAPPluginCall) {
         guard let text = call.getString("json"), let daten = text.data(using: .utf8) else {
             call.reject("json fehlt")

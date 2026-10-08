@@ -13,19 +13,19 @@ from sqlalchemy.orm import relationship
 from .database import Base
 
 
-class Sitzung(Base):
+class AuthSession(Base):
     """Angemeldetes Gerät. Ein Token je Gerät, damit sich eines einzeln
     abmelden lässt, ohne die anderen mitzunehmen."""
-    __tablename__ = "sitzungen"
+    __tablename__ = "auth_sessions"
 
     id = Column(Integer, primary_key=True)
     token = Column(String(64), unique=True, nullable=False, index=True)
-    geraet = Column(String(120), default="")
-    erstellt = Column(DateTime, default=datetime.utcnow, nullable=False)
-    zuletzt_gesehen = Column(DateTime, default=datetime.utcnow, nullable=False)
+    device = Column(String(120), default="")
+    created = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class PushAbo(Base):
+class PushSubscription(Base):
     """Ein Gerät, das Benachrichtigungen bekommen will.
 
     Der `endpoint` ist die vom Browser vergebene Adresse beim Push-Dienst und
@@ -37,88 +37,88 @@ class PushAbo(Base):
     die Nutzlast so verschlüsselt, dass der Push-Dienst sie weiterreicht, ohne
     sie lesen zu können.
     """
-    __tablename__ = "push_abos"
+    __tablename__ = "push_subscriptions"
 
     id = Column(Integer, primary_key=True)
     endpoint = Column(String(500), unique=True, nullable=False, index=True)
     p256dh = Column(String(200), nullable=False)
     auth = Column(String(100), nullable=False)
-    geraet = Column(String(120), default="")
+    device = Column(String(120), default="")
 
     # Aufeinanderfolgende Fehlversuche. Ein totes Abo wird sofort gelöscht
     # (404/410); dieser Zähler zeigt nur, dass ein Gerät dauerhaft nicht
     # erreichbar ist, ohne sich abgemeldet zu haben.
-    fehler = Column(Integer, default=0, nullable=False)
-    angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
+    failure = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class Fahrzeug(Base):
+class Vehicle(Base):
     """Alles, was das Verbrauchsmodell über das Auto wissen muss.
 
     Die Parameter sind absichtlich physikalisch und nicht "kWh/100 km": Nur so
     lässt sich beantworten, was 130 statt 110 km/h kosten oder was ein Pass
     verbraucht. Der pauschale Wert kann das nicht - siehe konzept-routenplaner.md.
     """
-    __tablename__ = "fahrzeuge"
+    __tablename__ = "vehicles"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(120), nullable=False)
 
-    akku_brutto_kwh = Column(Float, nullable=False)
+    battery_gross_kwh = Column(Float, nullable=False)
     # Nutzbar ist immer weniger als brutto - der Puffer oben und unten gehört
     # dem Batteriemanagement. Gerechnet wird ausschliesslich mit netto.
-    akku_netto_kwh = Column(Float, nullable=False)
+    battery_net_kwh = Column(Float, nullable=False)
 
-    leermasse_kg = Column(Float, nullable=False, default=1800.0)
-    zuladung_kg = Column(Float, nullable=False, default=150.0)
+    curb_mass_kg = Column(Float, nullable=False, default=1800.0)
+    payload_kg = Column(Float, nullable=False, default=150.0)
 
     c_w = Column(Float, nullable=False, default=0.28)
-    stirnflaeche_m2 = Column(Float, nullable=False, default=2.3)
+    frontal_area_m2 = Column(Float, nullable=False, default=2.3)
     c_rr = Column(Float, nullable=False, default=0.010)
 
     # Höchstgeschwindigkeit des Fahrzeugs in km/h. NULL = keine Grenze im
     # Modell. Der Tempo-Regler der Planung stösst daran an, statt das
     # Modell mit Geschwindigkeiten rechnen zu lassen, die das Auto nicht fährt.
-    max_tempo_kmh = Column(Float)
+    max_speed_kmh = Column(Float)
 
-    eta_antrieb = Column(Float, nullable=False, default=0.88)
+    eta_drive = Column(Float, nullable=False, default=0.88)
     # Rekuperation holt nie alles zurück. Deshalb ist die Bilanz über einen
     # Pass negativ, obwohl man am Ende wieder auf Ausgangshöhe steht.
-    eta_rekup = Column(Float, nullable=False, default=0.70)
+    eta_regen = Column(Float, nullable=False, default=0.70)
 
     # Grundlast unabhängig von der Heizung: Steuergeräte, Licht, Pumpen.
-    p_neben_w = Column(Float, nullable=False, default=350.0)
+    p_aux_w = Column(Float, nullable=False, default=350.0)
     # Der grösste Einzelunterschied im Winter: Eine Wärmepumpe braucht für
     # dieselbe Kabinentemperatur grob die Hälfte eines elektrischen Heizers.
     # Bei -5 °C sind das rund 1,8 kW Unterschied - über vier Stunden Fahrt
     # mehr als 7 kWh, also der Grund für einen zusätzlichen Ladestopp.
-    waermepumpe = Column(Boolean, nullable=False, default=True)
+    heat_pump = Column(Boolean, nullable=False, default=True)
 
     reserve_soc = Column(Float, nullable=False, default=10.0)
-    ziel_soc = Column(Float, nullable=False, default=20.0)
+    target_soc = Column(Float, nullable=False, default=20.0)
 
-    max_ladeleistung_kw = Column(Float, nullable=False, default=150.0)
-    steckertyp = Column(String(20), nullable=False, default="CCS")
+    max_charge_power_kw = Column(Float, nullable=False, default=150.0)
+    connector_type = Column(String(20), nullable=False, default="CCS")
 
     # Namen (oder Teile davon, z.B. "EnBW"), die der Optimierer bei der
-    # Stoppwahl bevorzugt - siehe laden/verfuegbarkeit.py:betreiber_bonus().
+    # Stoppwahl bevorzugt - siehe laden/availability.py:betreiber_bonus().
     # Kein harter Filter: ein nicht bevorzugter Anbieter bleibt wählbar, wird
     # nur nicht zusätzlich begünstigt.
-    bevorzugte_betreiber = Column(JSON, nullable=False, default=list)
+    preferred_operators = Column(JSON, nullable=False, default=list)
 
     # Was eine Kilowattstunde kostet - am Fahrzeug, weil sie am Vertrag
     # hängt und nicht an der Säule. `strompreise` ist eine Liste von
     # {muster, eur_kwh}, `strompreis_eur_kwh` gilt für alles Übrige.
-    # Siehe laden/preise.py.
-    strompreis_eur_kwh = Column(Float, nullable=False, default=0.59)
-    strompreise = Column(JSON)
+    # Siehe laden/prices.py.
+    electricity_price_eur_kwh = Column(Float, nullable=False, default=0.59)
+    electricity_prices = Column(JSON)
 
-    # Aus echten Fahrten gelernt (energie/kalibrierung.py). 1.0 = ungeprüft.
-    korrekturfaktor = Column(Float, nullable=False, default=1.0)
+    # Aus echten Fahrten gelernt (energie/calibration.py). 1.0 = ungeprüft.
+    correction_factor = Column(Float, nullable=False, default=1.0)
     # Was das Fahrzeug selbst ueber seine Kapazitaet sagt (DID 222AB2),
     # und wann. NULL heisst "nie gemessen" - siehe Migration 0014.
-    gemessene_kapazitaet_kwh = Column(Float)
-    kapazitaet_gemessen_am = Column(DateTime)
+    measured_capacity_kwh = Column(Float)
+    capacity_measured_at = Column(DateTime)
 
     # Langlebiges Geheimnis für einen Logger im Auto - OBD2-Dongle, Kurzbefehl,
     # was auch immer. Er kann die ID der laufenden Live-Sitzung nicht kennen:
@@ -129,10 +129,10 @@ class Fahrzeug(Base):
     # NULL heisst "kein Logger eingerichtet".
     logger_token = Column(String(64), unique=True, index=True)
 
-    angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     @property
-    def kapazitaet_kwh(self) -> float:
+    def capacity_kwh(self) -> float:
         """Die Kapazitaet, mit der gerechnet wird - gemessen vor Prospekt.
 
         Der Wert im Profil ist die Angabe des Herstellers fuer ein neues
@@ -145,42 +145,42 @@ class Fahrzeug(Base):
         Prospektwert oder unter der Haelfte davon ist keine Alterung,
         sondern ein Lesefehler, und dann gilt das Profil.
         """
-        gemessen = self.gemessene_kapazitaet_kwh
-        if gemessen and 0.5 * self.akku_netto_kwh <= gemessen <= self.akku_netto_kwh * 1.05:
-            return gemessen
-        return self.akku_netto_kwh
+        measured = self.measured_capacity_kwh
+        if measured and 0.5 * self.battery_net_kwh <= measured <= self.battery_net_kwh * 1.05:
+            return measured
+        return self.battery_net_kwh
 
-    ladekurve = relationship("Ladekurvenpunkt", back_populates="fahrzeug",
+    charge_curve = relationship("ChargeCurvePoint", back_populates="vehicle",
                              cascade="all, delete-orphan",
-                             order_by="Ladekurvenpunkt.soc_prozent")
+                             order_by="ChargeCurvePoint.soc_percent")
 
     @property
-    def masse_kg(self) -> float:
-        return self.leermasse_kg + self.zuladung_kg
+    def mass_kg(self) -> float:
+        return self.curb_mass_kg + self.payload_kg
 
 
-class Ladekurvenpunkt(Base):
+class ChargeCurvePoint(Base):
     """Stützstelle der Ladekurve: bei diesem SoC diese Leistung.
 
     Eigene Tabelle statt eines JSON-Feldes am Fahrzeug, weil die Kurve das ist,
     was man nach den ersten echten Ladevorgängen nachschärft - unabhängig von
     allen anderen Fahrzeugdaten.
     """
-    __tablename__ = "ladekurvenpunkte"
+    __tablename__ = "charge_curve_points"
 
     id = Column(Integer, primary_key=True)
-    fahrzeug_id = Column(Integer, ForeignKey("fahrzeuge.id", ondelete="CASCADE"),
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"),
                          nullable=False, index=True)
-    soc_prozent = Column(Float, nullable=False)
+    soc_percent = Column(Float, nullable=False)
     kw = Column(Float, nullable=False)
 
-    fahrzeug = relationship("Fahrzeug", back_populates="ladekurve")
+    vehicle = relationship("Vehicle", back_populates="charge_curve")
 
-    __table_args__ = (UniqueConstraint("fahrzeug_id", "soc_prozent",
+    __table_args__ = (UniqueConstraint("vehicle_id", "soc_percent",
                                        name="uq_ladekurve_soc"),)
 
 
-class Ladepunkt(Base):
+class ChargePoint(Base):
     """Ein Ladestandort aus einer der Importquellen.
 
     `anschluesse` ist bewusst JSON: Die Quellen liefern unterschiedlich viele
@@ -188,33 +188,33 @@ class Ladepunkt(Base):
     zu machen brächte nichts - gefiltert wird über `max_kw` und `steckertypen`,
     beide beim Import mitgeschrieben.
     """
-    __tablename__ = "ladepunkte"
+    __tablename__ = "charge_points"
 
     id = Column(Integer, primary_key=True)
-    quelle = Column(String(20), nullable=False)      # "bnetza" | "ocm"
-    fremd_id = Column(String(80), nullable=False)
+    source = Column(String(20), nullable=False)      # "bnetza" | "ocm"
+    foreign_id = Column(String(80), nullable=False)
 
     name = Column(String(200), default="")
-    betreiber = Column(String(200), default="")
+    operator = Column(String(200), default="")
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
-    adresse = Column(String(250), default="")
+    address = Column(String(250), default="")
     # OCM liefert bei Standorten, die mehrere Postleitzahlen abdecken (grosse
     # Einkaufszentren etwa), eine Semikolon-Liste statt einer einzelnen PLZ -
     # "33000;33100;33200;33300;33800" ist 29 Zeichen lang und hat den
     # OCM-Import an einem realen Datensatz ("Auchan Bordeaux Lac") abgebrochen.
-    plz = Column(String(40), default="")
-    ort = Column(String(120), default="")
-    land = Column(String(2), default="DE")
+    postcode = Column(String(40), default="")
+    city = Column(String(120), default="")
+    country = Column(String(2), default="DE")
 
-    anschluesse = Column(JSON, default=list)
+    connectors = Column(JSON, default=list)
     # Denormalisiert, damit die Korridor-Abfrage ohne JSON-Auswertung filtern
     # kann - JSON-Zugriffe unterscheiden sich zwischen SQLite und Postgres.
     max_kw = Column(Float, nullable=False, default=0.0)
-    anzahl_punkte = Column(Integer, nullable=False, default=1)
-    steckertypen = Column(String(120), default="")   # "CCS,Typ2"
+    point_count = Column(Integer, nullable=False, default=1)
+    connector_types = Column(String(120), default="")   # "CCS,Typ2"
 
-    stand = Column(String(20), default="")
+    as_of = Column(String(20), default="")
 
     # Was einen Ladepunkt für eine konkrete Fahrt unbrauchbar macht, steht
     # bei den Quellen in Worten - und wurde bisher weggeworfen. Siehe
@@ -223,113 +223,113 @@ class Ladepunkt(Base):
     # NULL heisst bei den Wahrheitswerten **unbekannt** und nicht "nein":
     # Für den grössten Teil der Datenbank gibt es die Angabe nicht, und wer
     # Unbekanntes wie Ausgeschlossenes behandelt, verliert fast alles.
-    betriebsbereit = Column(Boolean)
-    zugang = Column(String(60))
-    mitgliedschaft_noetig = Column(Boolean)
+    operational = Column(Boolean)
+    access = Column(String(60))
+    membership_required = Column(Boolean)
     # Freitext der Quelle: Kosten, Zugangshinweise, Kommentare. Wird
     # zunächst nur aufgehoben - siehe Migration 0013.
-    hinweise = Column(JSON)
+    hints = Column(JSON)
 
-    aktualisiert = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("quelle", "fremd_id", name="uq_ladepunkt_quelle"),
+        UniqueConstraint("source", "foreign_id", name="uq_ladepunkt_quelle"),
         # Der Korridor fragt immer über ein Rechteck ab: erst lat, dann lon.
         Index("ix_ladepunkt_pos", "lat", "lon"),
         Index("ix_ladepunkt_kw", "max_kw"),
     )
 
 
-class Fahrt(Base):
+class Trip(Base):
     """Eine geplante Fahrt samt gerechnetem Energieprofil."""
-    __tablename__ = "fahrten"
+    __tablename__ = "trips"
 
     id = Column(Integer, primary_key=True)
-    fahrzeug_id = Column(Integer, ForeignKey("fahrzeuge.id"), nullable=False)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=False)
 
     start_text = Column(String(250), default="")
     start_lat = Column(Float, nullable=False)
     start_lon = Column(Float, nullable=False)
-    ziel_text = Column(String(250), default="")
-    ziel_lat = Column(Float, nullable=False)
-    ziel_lon = Column(Float, nullable=False)
+    target_text = Column(String(250), default="")
+    target_lat = Column(Float, nullable=False)
+    target_lon = Column(Float, nullable=False)
 
     start_soc = Column(Float, nullable=False)
-    tempo_faktor = Column(Float, nullable=False, default=1.0)
-    aussentemp_c = Column(Float)
+    speed_factor = Column(Float, nullable=False, default=1.0)
+    outside_temp_c = Column(Float)
     # Zuladung dieser Fahrt. NULL heisst "es galt das Fahrzeugprofil" - so
     # bleiben Fahrten aus der Zeit vor diesem Feld korrekt lesbar, statt
     # rückwirkend eine Zuladung von 0 kg zu behaupten.
-    zuladung_kg = Column(Float)
+    payload_kg = Column(Float)
 
     # Zuschlag auf den Luftwiderstand für alles, was aussen dranhängt -
     # Fahrradträger, Dachbox. 1.0 heisst "nichts dran". Gehört zur Fahrt und
     # nicht zum Fahrzeug: Dieselbe Strecke einmal mit und einmal ohne Träger
     # sind zwei verschiedene Energiebilanzen, und der Träger ist im Sommer
     # dran und im Winter nicht.
-    luftwiderstand_faktor = Column(Float, nullable=False, default=1.0)
+    air_drag_factor = Column(Float, nullable=False, default=1.0)
 
     # Ein Anhänger gehört zur Fahrt: Masse in kg und zusätzliche
     # Luftwiderstandsfläche (c_w mal A) in m². NULL heisst "keiner".
     # Bewusst nicht im `luftwiderstand_faktor` aufgegangen: Ein Wohnwagen
     # verdoppelt nicht den cw-Wert des Autos, er bringt eine eigene Fläche mit
     # und 1,3 t dazu.
-    anhaenger_kg = Column(Float)
-    anhaenger_cwa_m2 = Column(Float)
+    trailer_kg = Column(Float)
+    trailer_cwa_m2 = Column(Float)
     # Höchstgeschwindigkeit dieser Fahrt in km/h - für ein Gespann 100, als
     # harte Grenze und nicht als Vorliebe. NULL = keine über die des
     # Fahrzeugs hinaus.
-    tempo_max_kmh = Column(Float)
+    speed_max_kmh = Column(Float)
 
     # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
     # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe
-    # live/aufzeichnung.py.
-    aufzeichnung = Column(Boolean, nullable=False, default=False)
+    # live/recording.py.
+    recording = Column(Boolean, nullable=False, default=False)
 
-    strecke_m = Column(Float, default=0.0)
-    fahrzeit_s = Column(Float, default=0.0)
+    distance_m = Column(Float, default=0.0)
+    drive_time_s = Column(Float, default=0.0)
 
     # Anzeige-Geometrie, auf ~1 Punkt je 250 m ausgedünnt. Die volle
     # ORS-Antwort hat auf einer Langstrecke fünfstellig viele Stützpunkte;
     # die brauchen weder die Karte noch die Prognose.
-    geometrie = Column(JSON, default=list)          # [[lon, lat, hoehe], ...]
-    energieprofil = Column(JSON, default=list)      # [{"km","soc","kwh"}, ...]
+    geometry = Column(JSON, default=list)          # [[lon, lat, hoehe], ...]
+    energy_profile = Column(JSON, default=list)      # [{"km","soc","kwh"}, ...]
 
-    angelegt = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    fahrzeug = relationship("Fahrzeug")
+    vehicle = relationship("Vehicle")
     # Damit die Historie "geplant" von "tatsächlich gefahren" unterscheiden
     # kann, und das Löschen einer Fahrt ihre Sitzungen mitnimmt statt an der
     # Fremdschlüsselbedingung zu scheitern.
-    live_sitzungen = relationship("LiveSitzung", back_populates="fahrt",
+    live_sessions = relationship("LiveSession", back_populates="trip",
                                   cascade="all, delete-orphan")
 
 
-class LiveSitzung(Base):
+class LiveSession(Base):
     """Eine laufende Fahrt, in die Messpunkte hereinkommen.
 
     Die Quelle der Messpunkte ist bewusst offen: heute die PWA oder der
     Simulator, später der OBD2-Logger oder eine Hersteller-API. Am Schema
     ändert das nichts - nur daran, wer POSTet.
     """
-    __tablename__ = "live_sitzungen"
+    __tablename__ = "live_sessions"
 
     id = Column(Integer, primary_key=True)
-    fahrt_id = Column(Integer, ForeignKey("fahrten.id", ondelete="CASCADE"),
+    trip_id = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"),
                       nullable=False, index=True)
-    gestartet = Column(DateTime, default=datetime.utcnow, nullable=False)
-    beendet = Column(DateTime)
-    laeuft = Column(Boolean, default=True, nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime)
+    running = Column(Boolean, default=True, nullable=False)
 
     # Laufender Verbrauchsfaktor: Ist geteilt durch Soll über die letzten
     # Kilometer. > 1 heisst "verbraucht mehr als gerechnet".
-    verbrauchsfaktor = Column(Float, default=1.0, nullable=False)
+    consumption_factor = Column(Float, default=1.0, nullable=False)
     # Dasselbe für die Zeit. Der Verbrauchsfaktor allein sieht einen Stau
     # nicht: Wer im Stau steht, verbraucht je Kilometer sogar mehr, aber die
     # Ankunftszeit verschiebt sich um ein Vielfaches davon. Für den Auslöser
     # "Ankunftszeit verschiebt sich" braucht es deshalb eine eigene Zahl.
-    zeitfaktor = Column(Float, default=1.0, nullable=False)
-    hinweis = Column(Text, default="")
+    time_factor = Column(Float, default=1.0, nullable=False)
+    hint = Column(Text, default="")
 
     # Der aktuell gültige Ladeplan. Beim Start der Fahrt gerechnet und
     # unterwegs ersetzt, sobald ein Auslöser greift. Er liegt hier und nicht
@@ -339,32 +339,32 @@ class LiveSitzung(Base):
     # Seit wann das Fahrzeug neben der Route ist. Die Schwelle ist "mehr als
     # 500 m für mehr als eine Minute" - ohne diesen Zeitstempel wäre jede
     # ungenaue GPS-Messung an einer Brücke eine Neuplanung.
-    abweg_seit = Column(DateTime)
+    detour_since = Column(DateTime)
 
-    fahrt = relationship("Fahrt", back_populates="live_sitzungen")
-    punkte = relationship("LivePunkt", back_populates="sitzung",
+    trip = relationship("Trip", back_populates="live_sessions")
+    points = relationship("LivePoint", back_populates="session",
                           cascade="all, delete-orphan",
-                          order_by="LivePunkt.zeit")
+                          order_by="LivePoint.timestamp")
 
 
-class LivePunkt(Base):
-    __tablename__ = "live_punkte"
+class LivePoint(Base):
+    __tablename__ = "live_points"
 
     id = Column(Integer, primary_key=True)
-    sitzung_id = Column(Integer, ForeignKey("live_sitzungen.id", ondelete="CASCADE"),
+    session_id = Column(Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"),
                         nullable=False, index=True)
-    zeit = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
     # NULL heisst "Position gemeldet, Ladestand nicht bekannt". Die beiden
     # Grössen haben verschiedene Taktraten: Das Telefon liefert die Position
     # im Sekundentakt und umsonst, den Ladestand tippt jemand ein, wenn er
     # ohnehin an der Säule steht. Was dazwischen gilt, rechnet
-    # `live/sitzung.py` aus dem Energieprofil hoch.
+    # `live/session.py` aus dem Energieprofil hoch.
     soc = Column(Float)
     # Rohmessung, absichtlich nicht die Grundlage des Tempofaktors. Der wird
     # aus Strecke und Zeit über ein Fenster von Kilometern gebildet
-    # (`live/sitzung.py`), und zwar aus zwei Gründen: Die Momentangeschwindig-
+    # (`live/session.py`), und zwar aus zwei Gründen: Die Momentangeschwindig-
     # keit des GPS ist verrauscht, und auf iOS liefert `coords.speed`
     # regelmässig gar nichts. Ein Faktor, der auf einem Feld beruht, das je
     # nach Telefon fehlt, wäre kein Faktor.
@@ -372,18 +372,18 @@ class LivePunkt(Base):
     # Aufgehoben wird sie trotzdem: Sie kostet vier Byte je Messpunkt und ist
     # das einzige, woran sich später nachprüfen liesse, ob die Rechnung aus
     # Strecke und Zeit mit dem übereinstimmt, was der Tacho sah.
-    tempo_kmh = Column(Float)
-    aussentemp_c = Column(Float)
+    speed_kmh = Column(Float)
+    outside_temp_c = Column(Float)
 
     # Alles, was die Quelle sonst noch mitgeschickt hat - Packspannung,
     # Strom, Kilometerstand, der unverrechnete Rohwert des Ladestands.
     # Gerechnet wird damit nicht; es liegt hier, damit sich später auswerten
     # lässt, was sich sonst nur durch eine zweite Fahrt klären liesse.
-    rohwerte = Column(JSON)
+    raw_values = Column(JSON)
 
     # Beim Eintreffen berechnet und mitgeschrieben, damit die Auswertung
     # später nicht die ganze Route erneut projizieren muss.
-    km_auf_route = Column(Float)
-    soll_soc = Column(Float)
+    km_on_route = Column(Float)
+    plan_soc = Column(Float)
 
-    sitzung = relationship("LiveSitzung", back_populates="punkte")
+    session = relationship("LiveSession", back_populates="points")

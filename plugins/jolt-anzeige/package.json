@@ -2,7 +2,7 @@
   "name": "jolt-anzeige",
   "version": "1.0.0",
   "private": true,
-  "description": "Gibt das Anzeigemodell von jolt (frontend/anzeige.js) als Live Activity weiter - sichtbar auf dem Sperrbildschirm und im CarPlay-Dashboard.",
+  "description": "Gibt das Anzeigemodell von jolt (frontend/display.js) als Live Activity weiter - sichtbar auf dem Sperrbildschirm und im CarPlay-Dashboard.",
   "files": ["ios/Sources", "Package.swift"],
   "keywords": ["capacitor", "plugin", "native"],
   "capacitor": {

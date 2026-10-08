@@ -18,47 +18,47 @@ log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/push", tags=["push"])
 
 
-class Abo(BaseModel):
+class Subscription(BaseModel):
     endpoint: str = Field(min_length=8, max_length=500)
     p256dh: str = Field(min_length=8, max_length=200)
     auth: str = Field(min_length=4, max_length=100)
-    geraet: str = ""
+    device: str = ""
 
 
-class Abmeldung(BaseModel):
+class SignOut(BaseModel):
     endpoint: str = Field(min_length=8, max_length=500)
 
 
 @router.get("/schluessel")
-def schluessel():
+def keyname():
     """Was der Browser braucht, um ein Abo anzulegen.
 
     Ohne Anmeldung erreichbar: Der öffentliche Schlüssel ist kein Geheimnis,
     und die Oberfläche muss vor dem Anmelden wissen, ob sie den Knopf
     überhaupt anbieten kann.
     """
-    return {"eingerichtet": push.ist_eingerichtet(),
-            "schluessel": push.oeffentlicher_schluessel()}
+    return {"configured": push.actual_configured(),
+            "keyname": push.pub_key()}
 
 
-@router.post("/abo", dependencies=[Depends(deps.aktuelle_sitzung)])
-def abo_anlegen(abo: Abo, db: Session = Depends(get_db)):
-    if not push.ist_eingerichtet():
+@router.post("/abo", dependencies=[Depends(deps.current_session)])
+def create_subscription(subscription: Subscription, db: Session = Depends(get_db)):
+    if not push.actual_configured():
         raise HTTPException(409, "Es ist kein VAPID-Schlüssel gesetzt - "
                                  "Benachrichtigungen sind aus.")
-    if not push.endpoint_erlaubt(abo.endpoint):
+    if not push.endpoint_allowed(subscription.endpoint):
         raise HTTPException(422, "Der Endpunkt muss eine https-Adresse eines "
                                  "öffentlichen Push-Dienstes sein.")
-    push.abo_speichern(db, abo.endpoint, abo.p256dh, abo.auth, abo.geraet)
+    push.save_subscription(db, subscription.endpoint, subscription.p256dh, subscription.auth, subscription.device)
     return {"ok": True}
 
 
-@router.delete("/abo", dependencies=[Depends(deps.aktuelle_sitzung)])
-def abo_abmelden(abmeldung: Abmeldung, db: Session = Depends(get_db)):
-    return {"ok": push.abo_loeschen(db, abmeldung.endpoint)}
+@router.delete("/abo", dependencies=[Depends(deps.current_session)])
+def sign_out_subscription(sign_out: SignOut, db: Session = Depends(get_db)):
+    return {"ok": push.delete_subscription(db, sign_out.endpoint)}
 
 
-@router.post("/probe", dependencies=[Depends(deps.aktuelle_sitzung)])
+@router.post("/probe", dependencies=[Depends(deps.current_session)])
 def probe(db: Session = Depends(get_db)):
     """Eine Testnachricht an alle angemeldeten Geräte.
 
@@ -66,8 +66,8 @@ def probe(db: Session = Depends(get_db)):
     Service Worker zu prüfen, ohne eine Fahrt zu machen - und der Weg, auf dem
     man merkt, dass der Schlüssel nicht zum Abo passt.
     """
-    if not push.ist_eingerichtet():
+    if not push.actual_configured():
         raise HTTPException(409, "Es ist kein VAPID-Schlüssel gesetzt.")
-    ergebnis = push.senden(db, "jolt", "Benachrichtigungen sind eingerichtet.",
+    result = push.send(db, "jolt", "Benachrichtigungen sind eingerichtet.",
                            url="/")
-    return ergebnis
+    return result

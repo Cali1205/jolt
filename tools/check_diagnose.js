@@ -18,186 +18,186 @@ const path = require("path");
 const vm = require("vm");
 
 const FRONTEND = path.join(__dirname, "..", "frontend");
-let fehler = 0;
+let failure = 0;
 
-function pruefe(sollGelten, text, zusatz) {
-  if (sollGelten) {
+function verify(planApply, text, extra) {
+  if (planApply) {
     console.log("  ok    " + text);
   } else {
-    console.log("  FEHLT " + text + (zusatz ? "   " + zusatz : ""));
-    fehler += 1;
+    console.log("  FEHLT " + text + (extra ? "   " + extra : ""));
+    failure += 1;
   }
 }
 
 /* Ein ELM327, der auf bekannte Abfragen antwortet, auf eine gar nicht
  * (Zeitablauf) und auf den Rest mit NO DATA. */
-function dongle(gesendet, optionen) {
-  const hoerer = [];
-  const antworten = {
+function dongle(sent, options) {
+  const listener = [];
+  const responses = {
     "ATZ": "ELM327 v2.3", "ATRV": "12.6V",
     "22028C": "17FE007B 04 62028C B4",
   };
   const ch = {
     uuid: "fff1",
     properties: { write: true, writeWithoutResponse: true, notify: true },
-    addEventListener(t, f) { hoerer.push(f); },
+    addEventListener(t, f) { listener.push(f); },
     removeEventListener() {},
     async startNotifications() {},
     async writeValueWithoutResponse(d) {
       const t = new TextDecoder().decode(d).trim();
-      gesendet.push(t);
-      if (optionen && optionen.stumm && optionen.stumm.includes(t)) return;
-      const a = antworten[t] !== undefined ? antworten[t]
+      sent.push(t);
+      if (options && options.muted && options.muted.includes(t)) return;
+      const a = responses[t] !== undefined ? responses[t]
         : (t.startsWith("AT") ? "OK" : "NO DATA");
       setTimeout(() => {
         const text = a + "\r\r>";
-        for (const teil of [text.slice(0, 6), text.slice(6)]) {
-          const wert = new DataView(new TextEncoder().encode(teil).buffer);
-          for (const f of hoerer) f({ target: { value: wert } });
+        for (const part of [text.slice(0, 6), text.slice(6)]) {
+          const val = new DataView(new TextEncoder().encode(part).buffer);
+          for (const f of listener) f({ target: { value: val } });
         }
       }, 1);
     },
   };
-  const dienst = { uuid: "fff0", async getCharacteristics() { return [ch]; } };
-  const geraet = {
+  const service = { uuid: "fff0", async getCharacteristics() { return [ch]; } };
+  const device = {
     name: "IOS-Vlink", addEventListener() {},
     gatt: { connected: true,
-      async connect() { return { async getPrimaryServices() { return [dienst]; } }; },
+      async connect() { return { async getPrimaryServices() { return [service]; } }; },
       disconnect() { this.connected = false; } },
   };
-  return { requestDevice: async () => geraet, getDevices: async () => [geraet] };
+  return { requestDevice: async () => device, getDevices: async () => [device] };
 }
 
-function umgebung(bluetooth) {
-  const speicher = {};
-  const fenster = {
+function environment(bluetooth) {
+  const storage = {};
+  const timeframe = {
     localStorage: {
-      getItem: (k) => (k in speicher ? speicher[k] : null),
-      setItem: (k, v) => { speicher[k] = String(v); },
-      removeItem: (k) => { delete speicher[k]; },
+      getItem: (k) => (k in storage ? storage[k] : null),
+      setItem: (k, v) => { storage[k] = String(v); },
+      removeItem: (k) => { delete storage[k]; },
     },
     navigator: { bluetooth },
     TextEncoder, TextDecoder, DataView, Uint8Array,
     setTimeout, clearTimeout, console,
   };
-  fenster.window = fenster;
-  const kontext = vm.createContext(fenster);
-  for (const datei of ["obd-ble-nativ.js", "messwerte.js", "obd-kern.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(FRONTEND, datei), "utf8"),
-                    kontext, { filename: datei });
+  timeframe.window = timeframe;
+  const context = vm.createContext(timeframe);
+  for (const file of ["obd-ble-native.js", "readings.js", "obd-core.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(FRONTEND, file), "utf8"),
+                    context, { filename: file });
   }
-  return fenster;
+  return timeframe;
 }
 
 async function main() {
   console.log("\nZaehler und Protokoll");
-  const gesendet = [];
-  const f = umgebung(dongle(gesendet));
+  const sent = [];
+  const f = environment(dongle(sent));
   const O = f.joltObd;
 
-  const vorher = O.diagnose();
-  pruefe(vorher.verbunden === false && vorher.runden.n === 0
-         && vorher.transport === "web",
+  const earlier = O.diagnose();
+  verify(earlier.linked === false && earlier.rounds.n === 0
+         && earlier.transport === "web",
          "vor dem Verbinden: getrennt, keine Runden, Zugang 'web'");
 
-  await O.verbinden();
+  await O.link();
   await O.handshake();
   let d = O.diagnose();
-  pruefe(d.verbunden && d.verbindung.geraet === "IOS-Vlink"
-         && typeof d.verbindung.seit === "number",
+  verify(d.linked && d.connection.device === "IOS-Vlink"
+         && typeof d.connection.since === "number",
          "nach dem Verbinden: Geraet und Zeitpunkt stehen drin");
-  pruefe(d.befehle.gesendet === gesendet.length && d.befehle.beantwortet === gesendet.length
-         && d.befehle.zeitablauf === 0,
+  verify(d.commands.sent === sent.length && d.commands.answered === sent.length
+         && d.commands.timeout === 0,
          "jeder gesendete Befehl ist gezaehlt und beantwortet",
-         `${d.befehle.gesendet}/${d.befehle.beantwortet}/${gesendet.length}`);
-  pruefe(d.befehle.letzterEmpfang !== null && d.befehle.letzteMs !== null,
+         `${d.commands.sent}/${d.commands.answered}/${sent.length}`);
+  verify(d.commands.lastReception !== null && d.commands.latestMs !== null,
          "letzte Antwort und Antwortzeit sind vermerkt");
 
-  const satz = await O.satzLesen(0);
+  const record = await O.readRecord(0);
   d = O.diagnose();
-  pruefe(satz.soc_roh === 180, "der Ladestand wird wie bisher gelesen (0xB4 = 180)");
-  pruefe(d.runden.n === 1 && d.runden.fehler === 0 && d.runden.letzteMs !== null,
+  verify(record.soc_raw === 180, "der Ladestand wird wie bisher gelesen (0xB4 = 180)");
+  verify(d.rounds.n === 1 && d.rounds.failure === 0 && d.rounds.latestMs !== null,
          "eine Runde ist gezaehlt");
-  pruefe(d.messwerte.soc_roh.ok === 1 && d.messwerte.soc_roh.wert === 180,
+  verify(d.readings.soc_raw.ok === 1 && d.readings.soc_raw.val === 180,
          "der Ladestand zaehlt als ok, mit letztem Wert");
-  pruefe(d.messwerte.strom_a.leer === 1 && d.messwerte.strom_a.ok === 0,
+  verify(d.readings.current_a.empty === 1 && d.readings.current_a.ok === 0,
          "NO DATA zaehlt als 'leer' - das Steuergeraet antwortet, die Kennung passt nicht");
-  pruefe(d.letzterSatz && d.letzterSatz.werte.soc_roh === 180,
+  verify(d.lastRecord && d.lastRecord.vals.soc_raw === 180,
          "der letzte Satz steht zur Anzeige bereit");
 
   // Selten gelesene Werte: in Runde 0 dran, in Runde 1 nicht.
-  const vorherN = d.messwerte.akku_kwh ? (d.messwerte.akku_kwh.ok + d.messwerte.akku_kwh.leer + d.messwerte.akku_kwh.fehler) : 0;
-  await O.satzLesen(1);
+  const earlierN = d.readings.battery_kwh ? (d.readings.battery_kwh.ok + d.readings.battery_kwh.empty + d.readings.battery_kwh.failure) : 0;
+  await O.readRecord(1);
   d = O.diagnose();
-  const nachherN = d.messwerte.akku_kwh.ok + d.messwerte.akku_kwh.leer + d.messwerte.akku_kwh.fehler;
-  pruefe(nachherN === vorherN, "was in der Runde nicht dran ist, wird nicht mitgezaehlt");
+  const afterN = d.readings.battery_kwh.ok + d.readings.battery_kwh.empty + d.readings.battery_kwh.failure;
+  verify(afterN === earlierN, "was in der Runde nicht dran ist, wird nicht mitgezaehlt");
 
   console.log("\nProtokoll");
-  const log = O.protokoll(false);
-  pruefe(log.length > 10 && log.some((z) => z.art === "raus" && z.text === "22028C")
-         && log.some((z) => z.art === "rein" && z.text.includes("62028C")),
+  const log = O.trace_log(false);
+  verify(log.length > 10 && log.some((z) => z.variety === "raus" && z.text === "22028C")
+         && log.some((z) => z.variety === "rein" && z.text.includes("62028C")),
          "gesendete und empfangene Zeilen stehen im Protokoll, mit Richtung");
-  pruefe(log.every((z) => typeof z.zeit === "number"), "jede Zeile traegt eine Zeit");
-  pruefe(O.protokoll(true).every((z) => /NO DATA|FEHLER|Zeit|keine Antwort|verspätet|getrennt|fehlgeschlagen|ERROR|UNABLE|BUS/i.test(z.text))
-         && O.protokoll(true).length > 0,
+  verify(log.every((z) => typeof z.timestamp === "number"), "jede Zeile traegt eine Zeit");
+  verify(O.trace_log(true).every((z) => /NO DATA|FEHLER|Zeit|keine Antwort|verspätet|getrennt|fehlgeschlagen|ERROR|UNABLE|BUS/i.test(z.text))
+         && O.trace_log(true).length > 0,
          "der Filter 'nur Auffaelliges' zeigt nur Auffaelliges");
   log[0].text = "veraendert";
-  pruefe(O.protokoll(false)[0].text !== "veraendert",
+  verify(O.trace_log(false)[0].text !== "veraendert",
          "das Protokoll nach aussen ist eine Kopie");
 
   // Ringpuffer
-  const f2 = umgebung(dongle([]));
-  await f2.joltObd.verbinden();
-  for (let i = 0; i < 400; i++) await f2.joltObd.befehl("ATRV");
-  pruefe(f2.joltObd.protokoll(false).length <= 600,
+  const f2 = environment(dongle([]));
+  await f2.joltObd.link();
+  for (let i = 0; i < 400; i++) await f2.joltObd.command("ATRV");
+  verify(f2.joltObd.trace_log(false).length <= 600,
          "das Protokoll waechst nicht unbegrenzt (Ringpuffer)",
-         String(f2.joltObd.protokoll(false).length));
+         String(f2.joltObd.trace_log(false).length));
 
   console.log("\nKonsole");
-  const vorBefehl = gesendet.length;
-  await O.konsole("ATSH123");
-  pruefe(gesendet[vorBefehl] === "ATSH123",
+  const priorCommand = sent.length;
+  await O.cli("ATSH123");
+  verify(sent[priorCommand] === "ATSH123",
          "ein von Hand gesendeter Befehl geht unveraendert hinaus (ohne Umformen ausser dem Trimmen)");
-  pruefe(O.diagnose().letzteAdresse === null,
+  verify(O.diagnose().latestAddress === null,
          "danach ist die gemerkte Adresse verworfen - die naechste Runde setzt sie neu");
-  const nachKonsole = gesendet.length;
-  await O.satzLesen(2);
-  pruefe(gesendet.slice(nachKonsole).some((t) => t.startsWith("ATSH")),
+  const pastConsole = sent.length;
+  await O.readRecord(2);
+  verify(sent.slice(pastConsole).some((t) => t.startsWith("ATSH")),
          "und setzt sie dann wirklich neu");
 
   console.log("\nAusfaelle");
   const gesendet3 = [];
-  const f3 = umgebung(dongle(gesendet3, { stumm: ["ATRV"] }));
-  await f3.joltObd.verbinden();
-  let wurf = null;
-  try { await f3.joltObd.befehl("ATRV", 40); } catch (e) { wurf = e; }
+  const f3 = environment(dongle(gesendet3, { muted: ["ATRV"] }));
+  await f3.joltObd.link();
+  let toss = null;
+  try { await f3.joltObd.command("ATRV", 40); } catch (e) { toss = e; }
   const d3 = f3.joltObd.diagnose();
-  pruefe(wurf && /Zeit/.test(wurf.message) && d3.befehle.zeitablauf === 1
-         && d3.befehle.beantwortet === 0,
+  verify(toss && /Zeit/.test(toss.message) && d3.commands.timeout === 1
+         && d3.commands.answered === 0,
          "ein Befehl ohne Antwort ist als Zeitablauf gezaehlt, nicht als beantwortet");
-  pruefe(f3.joltObd.protokoll(true).some((z) => /keine Antwort/.test(z.text)),
+  verify(f3.joltObd.trace_log(true).some((z) => /keine Antwort/.test(z.text)),
          "und steht als Auffaelliges im Protokoll");
 
   console.log("\nZuruecksetzen und Vergessen");
-  O.zaehlerZuruecksetzen();
+  O.resetCounter();
   d = O.diagnose();
-  pruefe(d.runden.n === 0 && d.befehle.gesendet === 0
-         && Object.keys(d.messwerte).length === 0,
+  verify(d.rounds.n === 0 && d.commands.sent === 0
+         && Object.keys(d.readings).length === 0,
          "Zaehler zuruecksetzen leert Runden, Befehle und Messwerte");
-  pruefe(d.verbunden === true, "und trennt nichts");
-  O.vergessen();
-  pruefe(O.diagnose().gemerktesGeraet === null && O.diagnose().verbindung.geraet === "",
+  verify(d.linked === true, "und trennt nichts");
+  O.forget();
+  verify(O.diagnose().rememberedDevice === null && O.diagnose().connection.device === "",
          "Vergessen loescht das gemerkte Geraet");
-  pruefe(f.localStorage.getItem("jolt-ble-geraet") === null,
+  verify(f.localStorage.getItem("jolt-ble-geraet") === null,
          "und die Merkkennung der nativen Bruecke");
 
-  O.trennen();
+  O.detach();
   d = O.diagnose();
-  pruefe(d.verbunden === false && d.verbindung.seit === null,
+  verify(d.linked === false && d.connection.since === null,
          "Trennen setzt 'verbunden seit' zurueck");
 
-  console.log(fehler ? `\n${fehler} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
-  process.exit(fehler ? 1 : 0);
+  console.log(failure ? `\n${failure} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
+  process.exit(failure ? 1 : 0);
 }
 
 main().catch((e) => { console.log("ABBRUCH", e); process.exit(2); });

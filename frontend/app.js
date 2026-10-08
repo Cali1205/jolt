@@ -4,19 +4,19 @@ window.joltApp = (function () {
 
   const K = window.jolt;
 
-  function ansichtZeigen(name) {
-    for (const knopf of document.querySelectorAll("nav button")) {
-      const aktiv = knopf.dataset.ansicht === name;
-      knopf.setAttribute("aria-selected", aktiv ? "true" : "false");
-      const abschnitt = document.getElementById("ansicht-" + knopf.dataset.ansicht);
-      if (abschnitt) abschnitt.hidden = !aktiv;
+  function showView(name) {
+    for (const btn of document.querySelectorAll("nav button")) {
+      const active = btn.dataset.ansicht === name;
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+      const section = document.getElementById("ansicht-" + btn.dataset.ansicht);
+      if (section) section.hidden = !active;
     }
-    karteUmhaengen(name);
+    mapRehang(name);
     // Die Fahrtenliste holt sich ihre Daten erst, wenn jemand hinsieht.
-    if (name === "fahrten" && window.joltFahrten) window.joltFahrten.anzeigen();
+    if (name === "fahrten" && window.joltTrips) window.joltTrips.show();
     // Die Einstellungen aktualisieren sich sekündlich - aber nur, solange man
     // sie ansieht.
-    if (window.joltEinstellungen) window.joltEinstellungen.anzeigen(name === "einstellungen");
+    if (window.joltSettings) window.joltSettings.show(name === "einstellungen");
   }
 
   /* Die eine Karte wandert in die gerade sichtbare Ansicht.
@@ -26,77 +26,77 @@ window.joltApp = (function () {
    * beiden Ansichten. Ein zweites Canvas hiesse ein zweiter Kachel-Cache
    * und zwei Zustände, die auseinanderlaufen; ein Verschieben im DOM behält
    * Kontext, Cache und Zoom. */
-  function karteUmhaengen(ansicht) {
+  function mapRehang(view) {
     const block = document.getElementById("karte-block");
-    const halter = document.getElementById("karte-halter-" + ansicht);
-    if (block && halter && block.parentElement !== halter) {
-      halter.appendChild(block);
+    const holder = document.getElementById("karte-halter-" + view);
+    if (block && holder && block.parentElement !== holder) {
+      holder.appendChild(block);
     }
-    if (block) block.hidden = !halter;
+    if (block) block.hidden = !holder;
     // Im versteckten Abschnitt hatte das Canvas die Breite null. Nach dem
     // Einblenden muss es neu vermessen werden, sonst bleibt es ein Strich.
-    if (window.joltKarte) window.joltKarte.neuZeichnen();
+    if (window.joltMap) window.joltMap.drawNew();
     // Dasselbe für die Verlaufskurve der Live-Ansicht.
-    if (ansicht === "live" && window.joltLive
-        && window.joltLive.verlaufZeichnen) window.joltLive.verlaufZeichnen();
+    if (view === "live" && window.joltLive
+        && window.joltLive.drawHistory) window.joltLive.drawHistory();
   }
 
-  async function starten() {
-    for (const knopf of document.querySelectorAll("nav button")) {
-      knopf.addEventListener("click", () => ansichtZeigen(knopf.dataset.ansicht));
+  async function launch() {
+    for (const btn of document.querySelectorAll("nav button")) {
+      btn.addEventListener("click", () => showView(btn.dataset.ansicht));
     }
 
-    window.joltKarte.erstellen("karte");
-    karteUmhaengen("planen");
-    window.joltRoute.einrichten();
-    window.joltLive.einrichten();
-    window.joltFahrten.einrichten();
-    window.joltFahrzeug.einrichten();
-    window.joltEinstellungen.einrichten();
+    window.joltMap.create("karte");
+    mapRehang("planen");
+    window.joltRoute.set_up();
+    window.joltLive.set_up();
+    window.joltTrips.set_up();
+    window.joltVehicle.set_up();
+    window.joltSettings.set_up();
 
     let status;
     try {
       status = await K.api("/api/status");
-    } catch (fehler) {
-      K.melden("Server nicht erreichbar.", "fehler");
+    } catch (failure) {
+      K.report("Server nicht erreichbar.", "fehler");
       return;
     }
     if (status.demo_routing) {
       document.getElementById("demo-plakette").hidden = false;
-      K.melden("Ohne ORS_API_KEY rechnet jolt mit erfundenen Demo-Routen. "
+      K.report("Ohne ORS_API_KEY rechnet jolt mit erfundenen Demo-Routen. "
         + "Ein kostenloser Schlüssel von openrouteservice.org macht daraus "
         + "echte Strecken mit Höhenprofil.", "warnung");
     }
 
-    if (status.passwort_noetig && !(await angemeldet())) {
-      await anmelden();
+    if (status.password_required && !(await signed_in())) {
+      await sign_in();
     }
 
-    await window.joltFahrzeug.vorlagenLaden();
-    await window.joltFahrzeug.laden();
+    await window.joltVehicle.templatesCharging();
+    await window.joltVehicle.load();
 
     if ("serviceWorker" in navigator) {
       // Die Registrierung wird festgehalten, weil das Abo für die
       // Benachrichtigungen daran hängt (siehe live.js). Ohne sie gäbe es
       // keinen Weg, den Push-Empfänger anzumelden.
       try {
-        K.zustand.serviceWorker = await navigator.serviceWorker.register("/sw.js");
-      } catch (fehler) {
+        K.state.serviceWorker = await navigator.serviceWorker.register("/sw.js");
+      } catch (failure) {
         // Ohne Service Worker läuft alles weiter, nur eben ohne Offline-Gerüst
         // und ohne Benachrichtigungen bei dunklem Bildschirm.
-        K.zustand.serviceWorker = null;
+        K.state.serviceWorker = null;
       }
     }
   }
 
   /* Ein gespeichertes Token kann von einer abgelaufenen Sitzung stammen - erst
    * ein echter, geschützter Aufruf zeigt, ob es noch gilt. */
-  async function angemeldet() {
+  async function signed_in() {
     if (!K.token()) return false;
     try {
       await K.api("/api/fahrzeuge/vorlagen");
       return true;
-    } catch (fehler) {
+    } catch (failure) {
       return false;
     }
   }
@@ -105,33 +105,33 @@ window.joltApp = (function () {
    * Token voraus. Nav und Inhalt bleiben bis dahin verborgen: Eine
    * Oberfläche zu zeigen, die bei jedem Klick nur 401 zurückgibt, wäre
    * schlimmer als gar keine. */
-  function anmelden() {
-    for (const abschnitt of document.querySelectorAll("main > section")) {
-      abschnitt.hidden = abschnitt.id !== "ansicht-login";
+  function sign_in() {
+    for (const section of document.querySelectorAll("main > section")) {
+      section.hidden = section.id !== "ansicht-login";
     }
     document.querySelector("nav").hidden = true;
 
-    return new Promise((erfuellen) => {
-      const formular = document.getElementById("login-formular");
-      const feld = document.getElementById("login-passwort");
-      const fehlerElement = document.getElementById("login-fehler");
+    return new Promise((fulfil) => {
+      const form = document.getElementById("login-formular");
+      const field = document.getElementById("login-passwort");
+      const errorElement = document.getElementById("login-fehler");
 
-      formular.addEventListener("submit", async (ereignis) => {
-        ereignis.preventDefault();
-        fehlerElement.hidden = true;
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorElement.hidden = true;
         try {
-          const antwort = await K.api("/api/login", { method: "POST", body: {
-            passwort: feld.value, geraet: navigator.userAgent.slice(0, 120) }});
-          K.tokenSetzen(antwort.token);
+          const response = await K.api("/api/login", { method: "POST", body: {
+            password: field.value, device: navigator.userAgent.slice(0, 120) }});
+          K.setToken(response.token);
           document.getElementById("ansicht-login").hidden = true;
           document.querySelector("nav").hidden = false;
-          ansichtZeigen("planen");
-          erfuellen();
-        } catch (fehler) {
-          fehlerElement.textContent = fehler.message;
-          fehlerElement.hidden = false;
-          feld.value = "";
-          feld.focus();
+          showView("planen");
+          fulfil();
+        } catch (failure) {
+          errorElement.textContent = failure.message;
+          errorElement.hidden = false;
+          field.value = "";
+          field.focus();
         }
       });
     });
@@ -145,30 +145,30 @@ window.joltApp = (function () {
    * Deploy noch das alte Datum, ist entweder das Image nicht neu gebaut
    * oder die Seite kommt aus dem Cache. "seit" sagt, wann der Server
    * zuletzt gestartet ist. */
-  function standZeigen() {
-    const feld = document.getElementById("stand");
-    if (!feld) return;
-    const stand = Number(feld.dataset.stand);
-    const start = Number(feld.dataset.start);
-    if (!stand) return;                    // Platzhalter nicht ersetzt
+  function showAsOf() {
+    const field = document.getElementById("stand");
+    if (!field) return;
+    const as_of = Number(field.dataset.stand);
+    const start = Number(field.dataset.start);
+    if (!as_of) return;                    // Platzhalter nicht ersetzt
     // Von Hand statt über `toLocaleString`: Das deutsche Format schiebt
     // zwischen Datum und Uhrzeit ein Komma, und die Zeile ist zu kurz, um
     // sich das leisten zu können.
-    const zwei = (n) => String(n).padStart(2, "0");
-    const datum = (s, mitTag) => {
+    const two = (n) => String(n).padStart(2, "0");
+    const date = (s, withDay) => {
       const d = new Date(s * 1000);
-      const uhr = zwei(d.getHours()) + ":" + zwei(d.getMinutes());
-      return mitTag
-        ? zwei(d.getDate()) + "." + zwei(d.getMonth() + 1) + ". " + uhr : uhr;
+      const clock = two(d.getHours()) + ":" + two(d.getMinutes());
+      return withDay
+        ? two(d.getDate()) + "." + two(d.getMonth() + 1) + ". " + clock : clock;
     };
-    feld.textContent = datum(stand, true)
-      + (start ? " · seit " + datum(start, false) : "");
+    field.textContent = date(as_of, true)
+      + (start ? " · seit " + date(start, false) : "");
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    starten();
-    standZeigen();
+    launch();
+    showAsOf();
   });
 
-  return { ansichtZeigen };
+  return { showView };
 })();

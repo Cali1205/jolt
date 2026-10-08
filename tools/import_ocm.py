@@ -11,40 +11,40 @@ https://openchargemap.org/site/profile/applications
 import os
 import sys
 
-HIER = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 # Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
 # per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
 # Layouts müssen funktionieren.
-for _kandidat in (os.path.join(HIER, "..", "backend"), os.path.join(HIER, "..")):
-    if os.path.isdir(os.path.join(_kandidat, "app")):
-        sys.path.insert(0, _kandidat)
+for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
+    if os.path.isdir(os.path.join(_candidate, "app")):
+        sys.path.insert(0, _candidate)
         break
 
 from app.database import SessionLocal, migrate  # noqa: E402
-from app.laden.saeulen_import import aus_ocm  # noqa: E402
+from app.charging.chargers_import import from_ocm  # noqa: E402
 
 
 def main() -> int:
-    schluessel = os.environ.get("OCM_API_KEY", "")
-    if not schluessel:
+    keyname = os.environ.get("OCM_API_KEY", "")
+    if not keyname:
         print("OCM_API_KEY ist nicht gesetzt.")
         print(__doc__)
         return 2
 
-    laender = (sys.argv[1] if len(sys.argv) > 1 else "DE").split(",")
-    anzahl = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
+    countries = (sys.argv[1] if len(sys.argv) > 1 else "DE").split(",")
+    count = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
     min_kw = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
 
     migrate()
     db = SessionLocal()
     try:
-        zaehler = aus_ocm(db, schluessel, laender=[l.strip() for l in laender],
-                          max_ergebnisse=anzahl, min_kw=min_kw)
+        counter = from_ocm(db, keyname, countries=[l.strip() for l in countries],
+                          max_results=count, min_kw=min_kw)
     finally:
         db.close()
 
-    print(f"Fertig: {zaehler['neu']} neu, {zaehler['aktualisiert']} aktualisiert, "
-          f"{zaehler['uebersprungen']} übersprungen.")
+    print(f"Fertig: {counter['neu']} neu, {counter['aktualisiert']} aktualisiert, "
+          f"{counter['skipped']} übersprungen.")
     return 0
 
 

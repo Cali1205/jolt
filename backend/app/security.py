@@ -23,19 +23,19 @@ GLOBAL_MAX = int(os.environ.get("RATE_LIMIT_PER_MIN", "120"))
 LOGIN_WINDOW = 15 * 60
 LOGIN_MAX = int(os.environ.get("LOGIN_LIMIT_PER_15MIN", "10"))
 
-_sperre = threading.Lock()
-_treffer: dict[str, deque] = defaultdict(deque)
-_login_treffer: dict[str, deque] = defaultdict(deque)
+_lock = threading.Lock()
+_hit: dict[str, deque] = defaultdict(deque)
+_login_hit: dict[str, deque] = defaultdict(deque)
 # Fehlversuche mit einem falschen Logger-Token an /api/live/melden. Der Pfad
 # ist vom allgemeinen Limit ausgenommen (er bekommt Messpunkte im Sekundentakt),
 # also braucht das Durchprobieren von Tokens ein eigenes.
-_melden_fehler: dict[str, deque] = defaultdict(deque)
-MELDEN_FEHLER_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
+_report_error: dict[str, deque] = defaultdict(deque)
+REPORT_ERROR_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 
 # Der Live-Endpunkt bekommt im Sekundentakt Messpunkte. Ein Limit von 120
 # Anfragen je Minute wäre dafür genau falsch: Es würde ausgerechnet die
 # Funktion abwürgen, um die es geht.
-AUSGENOMMEN = ("/api/live/",)
+EXEMPT = ("/api/live/",)
 
 CSP = ("default-src 'self'; "
        # Kartenkacheln kommen vom OSM-Tileserver, sonst bliebe die Karte leer.
@@ -64,102 +64,102 @@ def client_ip(request: Request) -> str:
     """
     peer = request.client.host if request.client else "unbekannt"
     if peer in TRUSTED_PROXIES:
-        weitergereicht = request.headers.get("x-forwarded-for", "")
-        eintraege = [e.strip() for e in weitergereicht.split(",") if e.strip()]
-        for eintrag in reversed(eintraege):
-            if eintrag not in TRUSTED_PROXIES:
-                return eintrag
+        forwarded = request.headers.get("x-forwarded-for", "")
+        entries = [e.strip() for e in forwarded.split(",") if e.strip()]
+        for entry in reversed(entries):
+            if entry not in TRUSTED_PROXIES:
+                return entry
     return peer
 
 
-def _verfallen(warteschlange: deque, jetzt: float, fenster: int) -> None:
-    while warteschlange and jetzt - warteschlange[0] > fenster:
-        warteschlange.popleft()
+def _expired(queue: deque, now_ts: float, timeframe: int) -> None:
+    while queue and now_ts - queue[0] > timeframe:
+        queue.popleft()
 
 
 # Wie oft abgelaufene Absender aus dem Speicher genommen werden. Der Zähler
 # legt je Absender-IP einen Eintrag an; ohne Aufräumen wüchse er mit jeder IP,
 # die je angefragt hat - und hinter einem Proxy, der den Header nicht
 # überschreibt, mit jedem erfundenen Wert.
-AUFRAEUMEN_ALLE_S = 60
-_zuletzt_aufgeraeumt: dict[int, float] = {}
+CLEANUP_ALL_S = 60
+_last_cleaned_up: dict[int, float] = {}
 
 
-def _zaehlen(eimer: dict, schluessel: str, fenster: int, grenze: int,
-             aufraeumen_ab: float | None = None) -> bool:
+def _count(eimer: dict, keyname: str, timeframe: int, bound: int,
+             cleanup_from: float | None = None) -> bool:
     """True, wenn die Anfrage erlaubt ist.
 
     `aufraeumen_ab` gibt es nur für die Prüfung: Zeitpunkt der letzten
     Aufräumrunde, damit sich die Runde ohne Warten auslösen lässt.
     """
-    jetzt = time.time()
-    with _sperre:
-        _abgelaufene_entfernen(eimer, jetzt, fenster, aufraeumen_ab)
-        warteschlange = eimer[schluessel]
-        _verfallen(warteschlange, jetzt, fenster)
-        if len(warteschlange) >= grenze:
+    now_ts = time.time()
+    with _lock:
+        _remove_expired(eimer, now_ts, timeframe, cleanup_from)
+        queue = eimer[keyname]
+        _expired(queue, now_ts, timeframe)
+        if len(queue) >= bound:
             return False
-        warteschlange.append(jetzt)
+        queue.append(now_ts)
         return True
 
 
-def _abgelaufene_entfernen(eimer: dict, jetzt: float, fenster: int,
-                           zuletzt: float | None) -> None:
+def _remove_expired(eimer: dict, now_ts: float, timeframe: int,
+                           most_recent: float | None) -> None:
     """Absender ohne Treffer im Fenster löschen - höchstens einmal je Minute."""
-    zuletzt = _zuletzt_aufgeraeumt.get(id(eimer), 0.0) if zuletzt is None else zuletzt
-    if jetzt - zuletzt < AUFRAEUMEN_ALLE_S:
+    most_recent = _last_cleaned_up.get(id(eimer), 0.0) if most_recent is None else most_recent
+    if now_ts - most_recent < CLEANUP_ALL_S:
         return
-    _zuletzt_aufgeraeumt[id(eimer)] = jetzt
-    for schluessel in [k for k, q in eimer.items()
-                       if not q or jetzt - q[-1] > fenster]:
-        del eimer[schluessel]
+    _last_cleaned_up[id(eimer)] = now_ts
+    for keyname in [k for k, q in eimer.items()
+                       if not q or now_ts - q[-1] > timeframe]:
+        del eimer[keyname]
 
 
 def login_limit(request: Request) -> None:
     """Eigenes, enges Limit für den Login - gegen das Durchprobieren."""
-    if not _zaehlen(_login_treffer, client_ip(request), LOGIN_WINDOW, LOGIN_MAX):
+    if not _count(_login_hit, client_ip(request), LOGIN_WINDOW, LOGIN_MAX):
         raise HTTPException(429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
 
 
-def melden_gesperrt(request: Request) -> bool:
+def report_locked(request: Request) -> bool:
     """True, wenn diese Adresse zu oft ein falsches Logger-Token geschickt hat."""
-    jetzt = time.time()
-    with _sperre:
-        _abgelaufene_entfernen(_melden_fehler, jetzt, LOGIN_WINDOW, None)
-        warteschlange = _melden_fehler.get(client_ip(request))
-        if not warteschlange:
+    now_ts = time.time()
+    with _lock:
+        _remove_expired(_report_error, now_ts, LOGIN_WINDOW, None)
+        queue = _report_error.get(client_ip(request))
+        if not queue:
             return False
-        _verfallen(warteschlange, jetzt, LOGIN_WINDOW)
-        return len(warteschlange) >= MELDEN_FEHLER_MAX
+        _expired(queue, now_ts, LOGIN_WINDOW)
+        return len(queue) >= REPORT_ERROR_MAX
 
 
-def melden_fehler_zaehlen(request: Request) -> None:
+def count_report_error(request: Request) -> None:
     """Einen Fehlversuch vermerken - nur falsche Token, nicht jede Meldung."""
-    with _sperre:
-        _melden_fehler[client_ip(request)].append(time.time())
+    with _lock:
+        _report_error[client_ip(request)].append(time.time())
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        pfad = request.url.path
-        if pfad.startswith("/api/") and not pfad.startswith(AUSGENOMMEN):
-            if not _zaehlen(_treffer, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
+        fs_path = request.url.path
+        if fs_path.startswith("/api/") and not fs_path.startswith(EXEMPT):
+            if not _count(_hit, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
                 # Antwort zurückgeben statt `HTTPException` zu werfen: FastAPIs
                 # Ausnahmebehandlung greift in einer Middleware nicht, der
                 # Aufrufer bekam einen 500er mit Traceback im Log.
-                antwort = JSONResponse({"detail": "Zu viele Anfragen."},
+                response = JSONResponse({"detail": "Zu viele Anfragen."},
                                        status_code=429)
-                return self._kopfzeilen(request, antwort)
+                return self._header_rows(request, response)
 
-        return self._kopfzeilen(request, await call_next(request))
+        return self._header_rows(request, await call_next(request))
 
     @staticmethod
-    def _kopfzeilen(request: Request, antwort):
-        antwort.headers["X-Content-Type-Options"] = "nosniff"
-        antwort.headers["X-Frame-Options"] = "DENY"
-        antwort.headers["Referrer-Policy"] = "same-origin"
-        antwort.headers["Content-Security-Policy"] = CSP
+    def _header_rows(request: Request, response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Content-Security-Policy"] = CSP
         if request.url.scheme == "https" or request.headers.get(
                 "x-forwarded-proto") == "https":
-            antwort.headers["Strict-Transport-Security"] = "max-age=31536000"
-        return antwort
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return response

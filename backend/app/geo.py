@@ -1,7 +1,7 @@
 """Geometrie auf der Erdkugel. Zwei Funktionen, keine Abhängigkeiten.
 
-Diese beiden standen in `energie/modell.py`, und das war die einzige
-Schichtverletzung im Backend: `routing/korridor.py` musste für eine
+Diese beiden standen in `energie/model.py`, und das war die einzige
+Schichtverletzung im Backend: `routing/corridor.py` musste für eine
 Entfernung zwischen zwei Punkten in die Physik greifen. Eine Entfernung ist
 aber keine Aussage über Energie, und `routing` liegt unter `energie`.
 
@@ -31,7 +31,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * ERDRADIUS_M * math.asin(min(1.0, math.sqrt(a)))
 
 
-def peilung_grad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def bearing_degree(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Fahrtrichtung von Punkt 1 nach Punkt 2, 0 = Norden."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dl = math.radians(lon2 - lon1)
@@ -40,20 +40,20 @@ def peilung_grad(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
 
 
-def punkt_versetzen(lat: float, lon: float, peilung: float,
-                    strecke_m: float) -> tuple[float, float]:
+def offset_point(lat: float, lon: float, bearing: float,
+                    distance_m: float) -> tuple[float, float]:
     """Der Punkt, der `strecke_m` weit in Richtung `peilung` liegt.
 
     Die Umkehrung von `haversine_m` und `peilung_grad` zusammen. Gebraucht
-    von `routing/varianten.py`, um Ausweichpunkte neben eine Route zu legen -
+    von `routing/variants.py`, um Ausweichpunkte neben eine Route zu legen -
     dafür genügt die Kugelnäherung ebenso wie für die Entfernung.
 
     Bewusst nicht "ein Grad Breite sind 111,32 km": Das stimmt nur für die
     Breite. Bei der Länge hängt es vom Breitengrad ab, und wer es dort
     vergisst, versetzt einen Punkt in Südfrankreich um ein Drittel zu weit.
     """
-    d = strecke_m / ERDRADIUS_M
-    b = math.radians(peilung)
+    d = distance_m / ERDRADIUS_M
+    b = math.radians(bearing)
     p1 = math.radians(lat)
     p2 = math.asin(math.sin(p1) * math.cos(d)
                    + math.cos(p1) * math.sin(d) * math.cos(b))
@@ -61,5 +61,5 @@ def punkt_versetzen(lat: float, lon: float, peilung: float,
                     math.cos(d) - math.sin(p1) * math.sin(p2))
     # Auf -180..180 normieren, damit ein Versatz über den Datumswechsel
     # hinweg keine Länge von 190 Grad ergibt.
-    neue_lon = (lon + math.degrees(dl) + 540.0) % 360.0 - 180.0
-    return math.degrees(p2), neue_lon
+    new_lon = (lon + math.degrees(dl) + 540.0) % 360.0 - 180.0
+    return math.degrees(p2), new_lon

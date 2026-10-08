@@ -4,7 +4,7 @@
 // Datei ist deshalb die einzige Quelle, und ändert man sie, ändern sich beide
 // Seiten gleichzeitig.
 //
-// Die Felder sind das Anzeigemodell aus frontend/anzeige.js, Schlüssel für
+// Die Felder sind das Anzeigemodell aus frontend/display.js, Schlüssel für
 // Schlüssel. Was dort fehlt (kein Plan, kein Ladestopp), ist hier nil.
 import Foundation
 
@@ -87,7 +87,7 @@ public struct JoltAnzeige: Codable, Hashable {
     /// "klassisch".
     public var stil: String?
     /// Je Kachelplatz ein PNG in Base64, von der Oberfläche gezeichnet
-    /// (frontend/kacheln.js): soc, ankunft, reserve, verbrauch, neben, rekup,
+    /// (frontend/tiles.js): soc, ankunft, reserve, verbrauch, neben, rekup,
     /// stopps. Nur für CarPlay - die Live Activity darf höchstens 4 KB tragen
     /// und bekommt sie nicht.
     public var kachelBilder: [String: String]?

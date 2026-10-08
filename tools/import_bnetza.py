@@ -18,17 +18,17 @@ Im laufenden Container:
 import os
 import sys
 
-HIER = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 # Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
 # per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
 # Layouts müssen funktionieren.
-for _kandidat in (os.path.join(HIER, "..", "backend"), os.path.join(HIER, "..")):
-    if os.path.isdir(os.path.join(_kandidat, "app")):
-        sys.path.insert(0, _kandidat)
+for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
+    if os.path.isdir(os.path.join(_candidate, "app")):
+        sys.path.insert(0, _candidate)
         break
 
 from app.database import SessionLocal, migrate  # noqa: E402
-from app.laden.saeulen_import import aus_bnetza_csv  # noqa: E402
+from app.charging.chargers_import import from_bnetza_csv  # noqa: E402
 
 
 def main() -> int:
@@ -36,27 +36,27 @@ def main() -> int:
         print(__doc__)
         return 2
 
-    pfad = sys.argv[1]
-    if not os.path.isfile(pfad):
-        print(f"Datei nicht gefunden: {pfad}")
+    fs_path = sys.argv[1]
+    if not os.path.isfile(fs_path):
+        print(f"Datei nicht gefunden: {fs_path}")
         return 2
 
     migrate()
-    with open(pfad, "rb") as datei:
-        inhalt = datei.read()
+    with open(fs_path, "rb") as file:
+        contents = file.read()
 
-    print(f"Lese {len(inhalt) / 1e6:.1f} MB aus {pfad} ...")
+    print(f"Lese {len(contents) / 1e6:.1f} MB aus {fs_path} ...")
     db = SessionLocal()
     try:
-        zaehler = aus_bnetza_csv(db, inhalt)
-    except ValueError as fehler:
-        print(f"Abbruch: {fehler}")
+        counter = from_bnetza_csv(db, contents)
+    except ValueError as failure:
+        print(f"Abbruch: {failure}")
         return 1
     finally:
         db.close()
 
-    print(f"Fertig: {zaehler['neu']} neu, {zaehler['aktualisiert']} aktualisiert, "
-          f"{zaehler['uebersprungen']} übersprungen.")
+    print(f"Fertig: {counter['neu']} neu, {counter['aktualisiert']} aktualisiert, "
+          f"{counter['skipped']} übersprungen.")
     return 0
 
 

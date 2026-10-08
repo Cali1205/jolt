@@ -25,18 +25,18 @@ log = logging.getLogger("uvicorn.error")
 # Abgelaufen heisst "lange nicht benutzt", nicht "lange her angemeldet". Ein
 # Telefon, das bei jeder Fahrt dabei ist, bleibt damit angemeldet - und genau
 # darauf verlässt sich, wer unterwegs nicht erst ein Passwort tippen will.
-SITZUNG_MAX_ALTER = timedelta(days=180)
+SESSION_MAX_AGE = timedelta(days=180)
 # So oft höchstens wird "zuletzt gesehen" fortgeschrieben.
-SITZUNG_BERUEHREN = timedelta(hours=1)
+SESSION_TOUCH = timedelta(hours=1)
 
 
-def passwort_gesetzt() -> bool:
+def password_set() -> bool:
     return bool(os.environ.get("APP_PASSWORT", "").strip())
 
 
-def passwort_pruefen(eingabe: str) -> bool:
-    erwartet = os.environ.get("APP_PASSWORT", "").strip()
-    if not erwartet:
+def examine_password(user_input: str) -> bool:
+    expected = os.environ.get("APP_PASSWORT", "").strip()
+    if not expected:
         return True
     # compare_digest statt ==, damit die Laufzeit nichts über das Passwort
     # verrät. Bei einem Heimserver ist das Paranoia mit vernachlässigbaren
@@ -44,18 +44,18 @@ def passwort_pruefen(eingabe: str) -> bool:
     # Bytes, nicht Strings: compare_digest wirft bei Nicht-ASCII in str einen
     # TypeError. Ein Passwort mit Umlaut machte den Login zum 500er - und ein
     # so eingerichtetes APP_PASSWORT hätte nie angenommen werden können.
-    return secrets.compare_digest((eingabe or "").encode("utf-8"),
-                                  erwartet.encode("utf-8"))
+    return secrets.compare_digest((user_input or "").encode("utf-8"),
+                                  expected.encode("utf-8"))
 
 
-def sitzung_anlegen(db: Session, geraet: str = "") -> str:
+def create_session(db: Session, device: str = "") -> str:
     token = secrets.token_urlsafe(32)
-    db.add(models.Sitzung(token=token, geraet=geraet[:120]))
+    db.add(models.AuthSession(token=token, device=device[:120]))
     db.commit()
     return token
 
 
-def sitzung_pruefen(x_token: str, db: Session) -> models.Sitzung:
+def examine_session(x_token: str, db: Session) -> models.AuthSession:
     """Den Token einer Anmeldung prüfen und die Sitzung fortschreiben.
 
     Eigene Funktion, weil zwei Wege hineinführen: die Dependency für HTTP
@@ -65,37 +65,37 @@ def sitzung_pruefen(x_token: str, db: Session) -> models.Sitzung:
     if not x_token:
         raise HTTPException(401, "Nicht angemeldet.")
 
-    sitzung = db.query(models.Sitzung).filter_by(token=x_token).one_or_none()
-    if not sitzung:
+    session = db.query(models.AuthSession).filter_by(token=x_token).one_or_none()
+    if not session:
         raise HTTPException(401, "Sitzung unbekannt - bitte neu anmelden.")
 
-    jetzt = datetime.utcnow()
-    if jetzt - sitzung.zuletzt_gesehen > SITZUNG_MAX_ALTER:
-        db.delete(sitzung)
+    now_ts = datetime.utcnow()
+    if now_ts - session.last_seen > SESSION_MAX_AGE:
+        db.delete(session)
         db.commit()
         raise HTTPException(401, "Sitzung abgelaufen - bitte neu anmelden.")
 
-    if jetzt - sitzung.zuletzt_gesehen > SITZUNG_BERUEHREN:
-        sitzung.zuletzt_gesehen = jetzt
+    if now_ts - session.last_seen > SESSION_TOUCH:
+        session.last_seen = now_ts
         db.commit()
-    return sitzung
+    return session
 
 
-def aktuelle_sitzung(x_token: str = Header(default=""),
-                     db: Session = Depends(get_db)) -> models.Sitzung | None:
+def current_session(x_token: str = Header(default=""),
+                     db: Session = Depends(get_db)) -> models.AuthSession | None:
     """Dependency für alles, was Zugang braucht."""
-    if not passwort_gesetzt():
+    if not password_set():
         return None
-    return sitzung_pruefen(x_token, db)
+    return examine_session(x_token, db)
 
 
-def token_gueltig(x_token: str) -> bool:
+def token_valid(x_token: str) -> bool:
     """Für den WebSocket: ist dieser Token angemeldet? Ohne Ausnahme."""
-    if not passwort_gesetzt():
+    if not password_set():
         return True
     db = SessionLocal()
     try:
-        sitzung_pruefen(x_token or "", db)
+        examine_session(x_token or "", db)
         return True
     except HTTPException:
         return False
@@ -103,7 +103,7 @@ def token_gueltig(x_token: str) -> bool:
         db.close()
 
 
-def beim_start_warnen() -> None:
-    if not passwort_gesetzt():
+def at_start_warn() -> None:
+    if not password_set():
         log.warning("APP_PASSWORT ist leer - jolt ist ohne Anmeldung "
                     "erreichbar. Nur im eigenen Netz vertretbar.")

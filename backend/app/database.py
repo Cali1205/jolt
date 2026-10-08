@@ -38,13 +38,13 @@ def migrate() -> None:
     from alembic import command
     from alembic.config import Config
 
-    hier = os.path.dirname(os.path.abspath(__file__))
-    cfg = Config(os.path.join(hier, "..", "alembic.ini"))
-    cfg.set_main_option("script_location", os.path.join(hier, "..", "alembic"))
+    here = os.path.dirname(os.path.abspath(__file__))
+    cfg = Config(os.path.join(here, "..", "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(here, "..", "alembic"))
     command.upgrade(cfg, "head")
 
 
-def seed_vorlagen() -> None:
+def seed_templates() -> None:
     """Fahrzeug-Vorlagen bereitstellen, falls noch kein Fahrzeug angelegt ist.
 
     Ohne Vorlage müsste man beim ersten Start c_w-Wert, Stirnfläche und eine
@@ -53,26 +53,26 @@ def seed_vorlagen() -> None:
     angepasstes Fahrzeug wird nie wieder überschrieben.
     """
     from . import models
-    from .laden.kurven import VORLAGEN
+    from .charging.curves import TEMPLATES
 
     db = SessionLocal()
     try:
-        if db.query(models.Fahrzeug).first():
+        if db.query(models.Vehicle).first():
             return
-        vorlage = VORLAGEN[0]
-        fahrzeug = models.Fahrzeug(**{k: v for k, v in vorlage.items()
-                                      if k != "ladekurve"})
-        db.add(fahrzeug)
+        template = TEMPLATES[0]
+        vehicle = models.Vehicle(**{k: v for k, v in template.items()
+                                      if k != "charge_curve"})
+        db.add(vehicle)
         db.flush()
-        for soc, kw in vorlage["ladekurve"]:
-            db.add(models.Ladekurvenpunkt(fahrzeug_id=fahrzeug.id,
-                                          soc_prozent=soc, kw=kw))
+        for soc, kw in template["charge_curve"]:
+            db.add(models.ChargeCurvePoint(vehicle_id=vehicle.id,
+                                          soc_percent=soc, kw=kw))
         db.commit()
         logging.getLogger("uvicorn.error").info(
-            "Erstes Fahrzeug aus Vorlage angelegt: %s", vorlage["name"])
+            "Erstes Fahrzeug aus Vorlage angelegt: %s", template["name"])
     finally:
         db.close()
 
 
-def tabellen_vorhanden() -> bool:
+def tables_present() -> bool:
     return bool(inspect(engine).get_table_names())

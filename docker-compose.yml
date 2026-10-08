@@ -43,7 +43,7 @@ services:
       LOGIN_LIMIT_PER_15MIN: ${LOGIN_LIMIT_PER_15MIN:-10}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
       # Benachrichtigungen aufs Telefon: ohne diese drei bleibt die Funktion
-      # aus, siehe tools/push_schluessel.py.
+      # aus, siehe tools/push_keyname.py.
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}

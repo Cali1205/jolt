@@ -242,7 +242,7 @@ def teil_live_activity() -> None:
     plugin = lesen("plugins", "jolt-anzeige", "ios", "Sources",
                    "JoltAnzeigePlugin", "JoltAnzeigePlugin.swift")
     pruefe('jsName = "JoltAnzeige"' in plugin
-           and "registerPlugin('JoltAnzeige')" in lesen("tools", "ble-huelle-eintrag.js"),
+           and "registerPlugin('JoltAnzeige')" in lesen("tools", "ble-shell-entry.js"),
            "der Name im Swift-Plugin ist der, unter dem die Oberfläche es sucht")
     for methode in ("aktualisieren", "beenden", "verfuegbar"):
         pruefe(f'CAPPluginMethod(name: "{methode}"' in plugin
@@ -270,21 +270,21 @@ def teil_live_activity() -> None:
            "eine Quelle, zwei Ziele")
 
     # JS-Modell gegen Swift-Felder.
-    fixtur = ("{km_auf_route:100,ist_soc:72.1,soc_gemeldet:true,soc_quelle:'gemessen',"
-              "soll_soc:73,rest_km:87.4,reserve_bei_km:160,ankunft_verschiebung_min:12,"
-              "naechster_stopp:{name:'X',km_auf_route:141,geplant_soc:19,erwartet_soc:17.6}}")
-    # Eine Fahrt von siebzig Minuten, damit Verlauf, Balken und Rekuperation
-    # alle Felder tragen, und Messwerte für die Nebenverbraucher.
-    extras = ("{plan:{stopps:[{name:'Ionity',km_auf_route:141,ankunft_soc:19,"
-              "abfahrt_soc:80,ladezeit_minuten:25,betreiber:'Ionity',max_kw:350}]},"
-              "spur:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
-              "for(let t=-4200000;t<=0;t+=12000){s.push({zeit:1e12+t,gps:km,netto:n,entl:e,gel:g});"
+    fixtur = ("{km_on_route:100,actual_soc:72.1,soc_reported:true,soc_quelle:'gemessen',"
+              "plan_soc:73,remaining_km:87.4,reserve_at_km:160,arrival_shift_min:12,"
+              "next_stop:{name:'X',km_on_route:141,planned_soc:19,expected_soc:17.6}}")
+    # Eine Trip begin siebzig Minuten, damit History, Balken und Regeneration
+    # every Felder tragen, und Messwerte für the AuxLoads.
+    extras = ("{plan:{stops:[{name:'Ionity',km_on_route:141,arrival_soc:19,"
+              "departure_soc:80,charge_time_minutes:25,operator:'Ionity',max_kw:350}]},"
+              "track:(()=>{const s=[];let km=0,n=0,e=0,g=0;"
+              "for(let t=-4200000;t<=0;t+=12000){s.push({timestamp:1e12+t,gps:km,net:n,disch:e,chg:g});"
               "km+=0.233;n+=0.035;e+=0.042;g+=0.007}return s})(),"
-              "werte:{nebenverbrauch_kw:{wert:1.8,zeit:1e12},ptc_strom_a:{wert:5,zeit:1e12},"
-              "spannung_v:{wert:380,zeit:1e12},kompressor_w:{wert:450,zeit:1e12},"
-              "batterie_c:{wert:27,zeit:1e12}}}")
-    # Gesendet wird nicht das reine Modell, sondern `mitBildern`: dazu kommen
-    # `stil` und `kachelBilder`. Mit Stil "a" und einer Attrappe der Leinwand.
+              "vals:{aux_load_kw:{val:1.8,timestamp:1e12},ptc_current_a:{val:5,timestamp:1e12},"
+              "voltage_v:{val:380,timestamp:1e12},compressor_w:{val:450,timestamp:1e12},"
+              "batterie_c:{val:27,timestamp:1e12}}}")
+    # Gesendet becomes negated das reine Modell, sondern `withImages`: dazu kommen
+    # `look` und `tileImages`. Mit Stil "a" und einer Attrappe der Leinwand.
     skript = ("const vm=require('vm'),fs=require('fs'),p=require('path');"
               "const w={localStorage:{getItem:()=>'a',setItem(){}}};w.window=w;"
               "w.document={createElement:()=>({getContext:()=>new Proxy({},{get:(z,n)=>"
@@ -292,10 +292,10 @@ def teil_live_activity() -> None:
               "set:()=>true}),toDataURL:()=>'data:image/png;base64,QUJD'})};"
               "const k={window:w,document:w.document,console,Date,JSON,Math,Number,setTimeout,clearTimeout,Promise};"
               "vm.createContext(k);"
-              "for(const f of ['kacheln.js','anzeige.js'])"
+              "for(const f of ['tiles.js','display.js'])"
               "vm.runInContext(fs.readFileSync(p.join(process.argv[1],f),'utf8'),k);"
-              f"const m=w.joltAnzeige.modell({fixtur},1e12,{extras});"
-              "console.log(JSON.stringify({modell:m,gesendet:w.joltAnzeige.mitBildern(m,1e12)}))")
+              f"const m=w.joltDisplay.model({fixtur},1e12,{extras});"
+              "console.log(JSON.stringify({modell:w.joltDisplay.toNative(m),gesendet:w.joltDisplay.toNative(w.joltDisplay.withImages(m,1e12))}))")
     try:
         ausgabe = subprocess.run(
             ["node", "-e", skript, os.path.join(WURZEL, "frontend")],
@@ -321,7 +321,7 @@ def teil_live_activity() -> None:
         fehlt = [f for f in alle if f not in vorhanden]
         pruefe(struktur in felder and alle and not fehlt,
                f"Swift liest {struktur} ({', '.join(alle)}) - jedes Feld "
-               f"kommt aus anzeige.js", str(fehlt))
+               f"kommt aus display.js", str(fehlt))
     for name in ("ankunft", "rest"):
         pruefe("text" in modell[name], f"{name} trägt den Text, den Swift liest")
 
@@ -409,15 +409,15 @@ def teil_carplay() -> None:
            "und das Häkchen steht auf aus")
     # Start und Beenden aus CarPlay: Plugin, Szene und Oberflaeche muessen
     # dieselben Namen sprechen, sonst tut ein Knopf im Auto nichts.
-    fahrten = lesen("frontend", "fahrten.js")
+    fahrten = lesen("frontend", "trips.js")
     for methode in ("bereit", "aktionErgebnis"):
         pruefe(f'CAPPluginMethod(name: "{methode}"' in plugin
-               and f"func {methode}(" in plugin and f"p.{methode}(" in fahrten,
-               f"{methode}: im Plugin deklariert und umgesetzt, in fahrten.js aufgerufen")
+               and f"func {methode}(" in plugin and f"native.{methode}(" in fahrten,
+               f"{methode}: im Plugin deklariert und umgesetzt, in trips.js aufgerufen")
     pruefe('notifyListeners("carplayAktion"' in plugin and '"carplayAktion"' in fahrten,
            "das Ereignis heisst auf beiden Seiten carplayAktion")
     pruefe('aktionAnfordern("starten")' in delegate and 'aktionAnfordern("beenden")' in delegate
-           and 'aktion === "starten"' in fahrten and 'aktion === "beenden"' in fahrten,
+           and 'action === "starten"' in fahrten and 'action === "beenden"' in fahrten,
            "Starten und Beenden: dieselben Aktionsnamen in Szene und Oberflaeche")
     pruefe("CPAlertTemplate" in delegate and "Aufzeichnung beenden?" in delegate,
            "Beenden fragt vorher nach - ein Tippen aus Versehen schliesst keine Fahrt ab")

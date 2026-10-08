@@ -118,6 +118,6 @@ steht es als Plan.
 1. Entitlement `com.apple.developer.carplay-charging` im Provisionierungsprofil.
 2. CarPlay-Szene (Szenen-Delegate) im Plugin, Szenen-Manifest über
    `tools/ios_info_plist.sh`, Entitlement per `CODE_SIGN_ENTITLEMENTS`.
-3. Die Vorlagen füllt dasselbe Anzeigemodell (`frontend/anzeige.js`), das schon
+3. Die Vorlagen füllt dasselbe Anzeigemodell (`frontend/display.js`), das schon
    die Live Activity speist.
 4. Prüfen: im CarPlay Simulator (Mac) oder im Fahrzeug über TestFlight.

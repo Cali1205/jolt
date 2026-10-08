@@ -10,22 +10,22 @@ import os
 
 from .demo import DemoRouting
 from .ors import ORS
-from .provider import Ort, Route, RoutingFehler, RoutingProvider  # noqa: F401
+from .provider import City, Route, RoutingError, RoutingProvider  # noqa: F401
 
 log = logging.getLogger("uvicorn.error")
-_gewarnt = False
+_warned = False
 
 
 def provider():
-    global _gewarnt
+    global _warned
     if os.environ.get("ORS_API_KEY"):
         return ORS()
-    if not _gewarnt:
+    if not _warned:
         log.warning("Kein ORS_API_KEY gesetzt - jolt rechnet mit erfundenen "
                     "Demo-Routen. Kostenloser Schlüssel: openrouteservice.org/dev")
-        _gewarnt = True
+        _warned = True
     return DemoRouting()
 
 
-def ist_demo(p=None) -> bool:
-    return getattr(p or provider(), "ist_demo", False)
+def is_demo(p=None) -> bool:
+    return getattr(p or provider(), "is_demo", False)

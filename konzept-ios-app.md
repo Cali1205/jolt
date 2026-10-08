@@ -47,7 +47,7 @@ Xcode-Projekt, in dem beliebiges Swift liegen darf.
 | Standort im Hintergrund | Plugin über `CLLocationManager` |
 | CarPlay | eigener `CPTemplateApplicationSceneDelegate`, echte Swift-Arbeit |
 
-**Den Ausschlag gibt `obd-kern.js`.** Dieses Dokument nennt die Datei weiter
+**Den Ausschlag gibt `obd-core.js`.** Dieses Dokument nennt die Datei weiter
 unten das wertvollste Stück des Frontends und Schritt 3 den Prüfstein des
 ganzen Umbaus — zu Recht: Bei einer Übersetzung gehen Vorzeichen, Skalierung
 und Bytereihenfolge still daneben, und ein falscher Wert sieht plausibel aus.
@@ -57,7 +57,7 @@ Web-Bluetooth-API an, gebündelt in `verbinden`, `verbindungAufbauen`,
 `trennen`, `befehl` und `verbindenOhneDialog`. Der Rest ist Rechnerei ohne
 Browser-Bezug.
 
-Getauscht wird deshalb nur der Transport: `frontend/obd-ble-nativ.js` bildet
+Getauscht wird deshalb nur der Transport: `frontend/obd-ble-native.js` bildet
 die benutzte Teilmenge von Web Bluetooth nach und beantwortet sie über das
 Plugin. Im Kern steht dafür eine einzige neue Funktion, `bt()`, die zur
 Laufzeit entscheidet, woher das Bluetooth kommt. Die Zahlen bleiben damit
@@ -86,7 +86,7 @@ Schritt nötig.
 funktioniert, und es ist die Rückfallebene, solange die App noch nicht trägt.
 Erst wenn sie es tut, ist über einen Rückbau zu reden — vorher nicht.
 
-**`obd-kern.js` wird übersetzt, nicht ersetzt.** Darin stecken siebzehn
+**`obd-core.js` wird übersetzt, nicht ersetzt.** Darin stecken siebzehn
 Messwerte mit ihren Datenkennungen, die 11-/29-Bit-Adressumschaltung und die
 Byte-Formeln, und ein Teil davon ist am Fahrzeug erarbeitet und nicht aus einer
 Referenz abgeschrieben. Diese Datei ist das wertvollste Stück des Frontends.
@@ -101,7 +101,7 @@ ios/
   Jolt/
     App/            Einstieg, Szenen, Einstellungen
     Netz/           HTTP-Anbindung an jolts API
-    OBD/            CoreBluetooth + Protokoll (Übersetzung aus obd-kern.js)
+    OBD/            CoreBluetooth + Protokoll (Übersetzung aus obd-core.js)
     Fahrt/          Live-Aufzeichnung, Hintergrund-Standort
     Ansichten/      SwiftUI: Planung, Live, Fahrten, Fahrzeuge
     CarPlay/        CPTemplateApplicationSceneDelegate + Statusvorlage
@@ -157,7 +157,7 @@ die serielle Kennung finden, Kommandos schreiben, Antworten in Rahmen
 zusammensetzen. Das ist Fleissarbeit mit bekannten Fallstricken
 (Mehrrahmen-Antworten, Flusskontrolle).
 
-**Das Protokoll** kommt aus `frontend/obd-kern.js`. Zu übertragen sind:
+**Das Protokoll** kommt aus `frontend/obd-core.js`. Zu übertragen sind:
 
 - die Adressblöcke `BMS`, `KLIMA`, `AKKU11`, `FAHRZEUG`, `DCDC` mit ihren
   `cp`/`sh`/`cra`/`fcsh`-Werten,
@@ -379,7 +379,7 @@ Byte-Formeln anzufassen.
 | 4 | Apple-Developer-Programm, Signatur, TestFlight | App kommt aufs iPhone | Ablauf fertig (`ios-testflight.yml`), wartet auf Konto und Geheimnisse — Anleitung: [`ios-einrichten.md`](ios-einrichten.md) |
 | 5 | Hintergrund-Standort über Plugin | Aufzeichnung bei gesperrtem Bildschirm | eingebaut (`@capacitor-community/background-geolocation`), **ungeprüft auf dem Gerät** |
 | 6 | Warteschlange gegen Funklöcher | keine Lücken mehr | erledigt (`live.js`, Stapel-Endpunkt `/punkte`) |
-| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | **erledigt:** `frontend/anzeige.js` (reine Funktion, gedrosselter Sender) und `tools/check_anzeige.js`; `live.js` meldet Zustand und Fahrtende, ein Plugin setzt später nur noch das Ziel |
+| 7 | Anzeigemodell: Zustand → wenige Zahlen (`live.js`), mit Test | die Grundlage für beide Wege, ohne Swift und ohne Apple | **erledigt:** `frontend/display.js` (reine Funktion, gedrosselter Sender) und `tools/check_display.js`; `live.js` meldet Zustand und Fahrtende, ein Plugin setzt später nur noch das Ziel |
 | 8 | CarPlay-Antrag bei Apple (Kategorie wählen, Vorlagen im Leitfaden prüfen) | Entitlement für Weg B | **Entwurf fertig:** [`carplay-antrag.md`](carplay-antrag.md) (Kategorie EV charging, englischer Text zum Einfügen); abgeschickt wird er von dir |
 | 9 | Weg A: Plugin, Live Activity, Widget-Ziel in der CI, Signatur | Ladestand und nächster Stopp im CarPlay-Dashboard | **gebaut, ungeprüft auf dem Gerät:** Plugin `plugins/jolt-anzeige` (ActivityKit), Widget-Erweiterung `ios-native/JoltWidget` (Familie `.small`), `tools/ios_widget.sh/.rb` hängt das Ziel nach `cap add ios` ein, `check_ios.py` prüft Modell gegen Swift-Felder. **Offen:** ob die automatische Signatur Kennung und Profil der Erweiterung (`<App-ID>.widget`) beim Export selbst anlegt; ob CarPlay die Activity zeigt. Apple beendet eine Live Activity nach 8 Stunden. Kein `systemSmall`-Widget (nur die Live Activity). Die Erweiterung gilt ab iOS 18 (kleine CarPlay-Familie; `if #available` im `WidgetBundle` baut nicht), die App behält ihre Mindestfassung (sie anzuheben liess `cap sync` ein ungültiges `Package.swift` schreiben). **Ungeprüft:** ob App Store Connect eine Erweiterung mit höherer Mindestfassung als die App annimmt. |
 | 10 | Weg B: CarPlay-Szene mit Vorlagen | Liste der Ladestopps im Auto | **gebaut, ungeprüft im Auto:** Entitlement `carplay-charging` ist zugeteilt (Oktober 2026). `JoltCarPlaySceneDelegate` (Liste „Jetzt“ und „Ladestopps“, Stopp-Seite), `JoltAnzeigeStore` als Brücke vom Plugin, `tools/ios_carplay.sh/.rb` (zweite Szene in der Info.plist, AppDelegate, Entitlement). **Offen:** Entitlement im Portal für die App-ID einschalten und `CARPLAY_ENTITLEMENT` setzen ([`ios-einrichten.md`](ios-einrichten.md)); ob die Szene beim Kaltstart ohne Oberfläche etwas zeigt (dann nur der abgelegte letzte Stand); **Aufzeichnung starten und beenden** geht aus der Liste (Start mit dem zuletzt benutzten Fahrzeug, Beenden mit Rückfrage) — aber nur, wenn die Oberfläche läuft; beim Kaltstart ohne sie sagt CarPlay, dass jolt auf dem iPhone geöffnet werden muss. Ein Start mit gesperrtem iPhone scheitert womöglich am Standort (die Oberfläche fragt ihn beim Start ab); der Grund erscheint dann in CarPlay. Eine Fahrzeugwahl in CarPlay fehlt noch. |
@@ -421,7 +421,7 @@ Genau dafür ist der Aufbau so gewählt — der schnelle Deploy-Weg bleibt.
 
 Die JavaScript-seitigen Prüfungen laufen dagegen bei jedem Commit in
 `ci.yml`, auf einem Linux-Läufer und damit ohne Minutenfaktor:
-`tools/check_ble_bruecke.js` spielt den Weg einer Runde am Auto gegen einen
+`tools/check_ble_bridge.js` spielt den Weg einer Runde am Auto gegen einen
 nachgebildeten Dongle durch, und ein Vergleich stellt sicher, dass
 `frontend/ble-plugin.js` noch zu seinem Eintrag passt.
 

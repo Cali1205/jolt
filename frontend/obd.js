@@ -27,57 +27,57 @@
    * Chrome nimmt sie ebenso. */
   const el = (id) => document.getElementById(id);
   const O = window.joltObd;   // Verbindung, ELM327, Messwerte
-  let letzterSoc = null;
+  let lastSoc = null;
 
   /* ---------- Protokoll ---------- */
 
-  function log(text, art) {
-    const zeit = new Date().toLocaleTimeString("de-DE");
-    const zeichen = art === "raus" ? "→" : (art === "rein" ? "←" : " ");
-    el("log").textContent += `${zeit} ${zeichen} ${text}\n`;
+  function log(text, variety) {
+    const timestamp = new Date().toLocaleTimeString("de-DE");
+    const character = variety === "raus" ? "→" : (variety === "rein" ? "←" : " ");
+    el("log").textContent += `${timestamp} ${character} ${text}\n`;
     el("log").scrollTop = el("log").scrollHeight;
   }
 
-  function stand(text, art) {
+  function as_of(text, variety) {
     const k = el("verbindung");
     k.textContent = text;
-    k.className = "stand " + (art || "");
+    k.className = "stand " + (variety || "");
   }
 
-  function knoepfe(an) {
-    for (const id of ["init", "soc", "senden", "melden", "fahrt-start", "pruefen"]) el(id).disabled = !an;
+  function buttons(at) {
+    for (const id of ["init", "soc", "senden", "melden", "fahrt-start", "pruefen"]) el(id).disabled = !at;
   }
 
   /* ---------- Ladestand ---------- */
 
-  async function socLesen() {
+  async function readSoc() {
     el("soc-wert").textContent = "…";
     try {
       // Adresse und Filter stehen seit dem Handshake; sie hier erneut zu
       // setzen würde ATCP17 und ATCAF1 nicht wiederholen und damit gerade
       // das zerstören, worauf es ankommt.
-      const antwort = await O.befehl("22028C");
-      const wert = O.socAusAntwort(antwort);
-      if (wert === null) {
+      const response = await O.command("22028C");
+      const val = O.socFromResponse(response);
+      if (val === null) {
         el("soc-wert").textContent = "?";
         log("Antwort enthält kein 62028C - siehe oben. Entweder ist die "
             + "Datenkennung eine andere, oder das Steuergerät antwortet "
             + "nicht auf dieser Kennung.");
         return;
       }
-      letzterSoc = Math.round(wert.hmi * 10) / 10;
+      lastSoc = Math.round(val.hmi * 10) / 10;
       // Beide Zahlen anzeigen: Die grosse ist die, die im Auto steht und die
       // jolt bekommt; die kleine daneben macht nachvollziehbar, woraus sie
       // entstanden ist.
-      el("soc-wert").textContent = letzterSoc + " %";
+      el("soc-wert").textContent = lastSoc + " %";
       el("soc-herkunft").textContent =
-        `Rohwert 0x${wert.roh.toString(16).toUpperCase()} = ${wert.roh}`
-        + ` → brutto ${wert.bms.toFixed(1)} % → Anzeige ${wert.hmi.toFixed(1)} %`;
-      log(`Ladestand: brutto ${wert.bms.toFixed(1)} %, `
-          + `Anzeige ${wert.hmi.toFixed(1)} % (Rohwert ${wert.roh})`);
-    } catch (fehler) {
+        `Rohwert 0x${val.raw.toString(16).toUpperCase()} = ${val.raw}`
+        + ` → brutto ${val.bms.toFixed(1)} % → Anzeige ${val.hmi.toFixed(1)} %`;
+      log(`Ladestand: brutto ${val.bms.toFixed(1)} %, `
+          + `Anzeige ${val.hmi.toFixed(1)} % (Rohwert ${val.raw})`);
+    } catch (failure) {
       el("soc-wert").textContent = "–";
-      log("FEHLER " + fehler.message);
+      log("FEHLER " + failure.message);
     }
   }
 
@@ -93,10 +93,10 @@
    * Die Fahrt wird hier gleich mit angelegt: Ohne laufende Sitzung nimmt
    * jolt die Messpunkte zwar entgegen, legt sie aber nirgends ab - und
    * das merkt man erst hinterher. */
-  function losStand(text, art) {
+  function goAsOf(text, variety) {
     const k = el("los-stand");
     k.textContent = text;
-    k.className = "stand " + (art || "");
+    k.className = "stand " + (variety || "");
   }
 
   function joltToken() {
@@ -109,11 +109,11 @@
   /* Wie schnell das Auto sein muss, damit es als "fährt" gilt. Zehn km/h
    * liegen sicher über GPS-Rauschen und über dem Rangieren auf dem Hof, und
    * sicher unter allem, was eine Fahrt ist. */
-  const FAEHRT_AB_KMH = 10;
+  const DRIVES_FROM_KMH = 10;
   // Zwei Messungen hintereinander, damit ein einzelner Ausreisser keine
   // Fahrt anlegt.
-  const FAEHRT_RUNDEN = 2;
-  let bewegt = 0;
+  const DRIVES_ROUNDS = 2;
+  let moved = 0;
 
   /* Ein Name, den niemand tippen muss.
    *
@@ -121,25 +121,25 @@
    * nichts. Datum und Uhrzeit sind ohnehin die Angabe, nach der man später
    * sucht - und Start und Ziel trägt jolt beim Abschliessen selbst nach,
    * aus dem ersten und letzten Messpunkt. */
-  function fahrtName() {
-    const eigener = el("fahrt-name").value.trim();
-    if (eigener) return eigener;
+  function tripName() {
+    const own = el("fahrt-name").value.trim();
+    if (own) return own;
     return new Date().toLocaleString("de-DE", {
       weekday: "short", day: "2-digit", month: "2-digit",
       hour: "2-digit", minute: "2-digit" });
   }
 
-  async function losfahren() {
-    const knopf = el("los");
-    knopf.disabled = true;
+  async function start_driving() {
+    const btn = el("los");
+    btn.disabled = true;
     try {
-      if (!O.verbunden()) {
-        losStand("Dongle suchen …");
-        await O.anschliessen();
-        if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+      if (!O.linked()) {
+        goAsOf("Dongle suchen …");
+        await O.attach();
+        if (!O.linked()) throw new Error("keine Verbindung zum Dongle");
       }
 
-      losStand("Steuergerät vorbereiten …");
+      goAsOf("Steuergerät vorbereiten …");
       if (!(await O.handshake())) {
         throw new Error("Handshake unvollständig – siehe Protokoll");
       }
@@ -147,8 +147,8 @@
       // Erst prüfen, ob überhaupt etwas ankommt. Eine Aufzeichnung zu
       // starten, die dann nur Positionen ohne Ladestand sammelt, wäre eine
       // verlorene Fahrt - und das fiele erst am Ziel auf.
-      losStand("Ladestand lesen …");
-      const probe = O.socAusAntwort(await O.befehl("22028C"));
+      goAsOf("Ladestand lesen …");
+      const probe = O.socFromResponse(await O.command("22028C"));
       if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
       el("soc-wert").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
@@ -163,54 +163,54 @@
         // Nicht sofort anlegen: Wer im Stand verbindet, bekäme sonst eine
         // Fahrt, die an der Auffahrt beginnt und eine halbe Stunde
         // Parkplatz enthält. Die Seite wartet, bis sich etwas bewegt.
-        losStand("Bereit – wartet, bis das Auto fährt.", "gut");
-        laeuft = true;
-        bewegt = 0;
+        goAsOf("Bereit – wartet, bis das Auto fährt.", "gut");
+        running = true;
+        moved = 0;
         // `runde` steuert, welche selten gelesenen Messwerte drankommen
         // (`satzLesen`). Ohne Rücksetzen zählt die zweite Fahrt einer
         // Sitzung dort weiter, wo die erste aufhörte.
-        runde = 0;
+        lap = 0;
         el("fahrt-start").hidden = true;
         el("fahrt-stop").hidden = false;
-        await bildschirmWachHalten();
+        await screenAwakeHold();
         log("Automatik: warte auf Bewegung.");
-        fahrtSchleife();
+        tripLoop();
         return;
       }
 
-      await fahrtAnlegen(probe);
-      await fahrtStarten();
-    } catch (fehler) {
-      losStand("Ging nicht: " + fehler.message, "schlecht");
-      log("FEHLER " + fehler.message);
+      await createTrip(probe);
+      await startTrip();
+    } catch (failure) {
+      goAsOf("Ging nicht: " + failure.message, "schlecht");
+      log("FEHLER " + failure.message);
     } finally {
-      knopf.disabled = false;
+      btn.disabled = false;
     }
   }
 
   /* Die Fahrt in jolt anlegen. Getrennt vom Verbinden, weil sie bei
    * eingeschalteter Automatik erst entsteht, wenn das Auto losfährt. */
-  async function fahrtAnlegen(soc) {
-    losStand("Fahrt anlegen …");
-    const wo = await ort();
-    const antwort = await fetch("/api/live/aufzeichnung", {
+  async function createTrip(soc) {
+    goAsOf("Fahrt anlegen …");
+    const wo = await city();
+    const response = await fetch("/api/live/aufzeichnung", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify({
-        fahrzeug_id: fahrzeugId(),
+        vehicle_id: vehicleId(),
         lat: wo.lat, lon: wo.lon,
         soc: soc ? Math.round(soc.hmi * 10) / 10 : null,
-        name: fahrtName() }),
+        name: tripName() }),
     });
-    if (!antwort.ok) {
-      const fehler = await antwort.json().catch(() => ({}));
-      throw new Error(fehler.detail || `jolt antwortet HTTP ${antwort.status}`);
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      throw new Error(failure.detail || `jolt antwortet HTTP ${response.status}`);
     }
-    const fahrt = await antwort.json();
-    sitzungId = fahrt.sitzung_id;
-    log(`Aufzeichnung ${fahrt.fahrt_id} läuft (Sitzung ${fahrt.sitzung_id}).`);
-    losStand(`Aufzeichnung läuft – Fahrt ${fahrt.fahrt_id}`, "gut");
-    return fahrt;
+    const trip = await response.json();
+    sessionId = trip.session_id;
+    log(`Aufzeichnung ${trip.trip_id} läuft (Sitzung ${trip.session_id}).`);
+    goAsOf(`Aufzeichnung läuft – Fahrt ${trip.trip_id}`, "gut");
+    return trip;
   }
 
   /* Welches Fahrzeug - gefragt, nicht geraten.
@@ -223,46 +223,46 @@
    *
    * Die Wahl bleibt im Browser stehen. Wer im Auto sitzt, will sie einmal
    * treffen und nie wieder. */
-  async function fahrzeugeLaden() {
-    const auswahl = el("fahrzeug-wahl-obd");
-    if (!auswahl) return;
+  async function vehiclesCharging() {
+    const selection = el("fahrzeug-wahl-obd");
+    if (!selection) return;
     try {
-      const antwort = await fetch("/api/fahrzeuge",
+      const response = await fetch("/api/fahrzeuge",
                                   { headers: { "X-Token": joltToken() } });
-      if (!antwort.ok) throw new Error(`HTTP ${antwort.status}`);
-      const fahrzeuge = await antwort.json();
-      let gemerkt = null;
-      try { gemerkt = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
-      auswahl.innerHTML = fahrzeuge
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const vehicles = await response.json();
+      let remembered = null;
+      try { remembered = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
+      selection.innerHTML = vehicles
         .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
-      if (gemerkt && fahrzeuge.some((f) => String(f.id) === gemerkt)) {
-        auswahl.value = gemerkt;
+      if (remembered && vehicles.some((f) => String(f.id) === remembered)) {
+        selection.value = remembered;
       }
-      auswahl.addEventListener("change", () => {
-        try { localStorage.setItem("jolt-obd-fahrzeug", auswahl.value); }
+      selection.addEventListener("change", () => {
+        try { localStorage.setItem("jolt-obd-fahrzeug", selection.value); }
         catch (e) {}
       });
-    } catch (fehler) {
-      log("Fahrzeugliste: " + fehler.message
+    } catch (failure) {
+      log("Fahrzeugliste: " + failure.message
           + " - erst in jolt anmelden, dann hier neu laden.");
     }
   }
 
-  function fahrzeugId() {
-    const auswahl = el("fahrzeug-wahl-obd");
-    if (!auswahl || !auswahl.value) {
+  function vehicleId() {
+    const selection = el("fahrzeug-wahl-obd");
+    if (!selection || !selection.value) {
       throw new Error("Kein Fahrzeug gewählt - erst in jolt anmelden, "
                       + "dann hier neu laden.");
     }
-    return Number(auswahl.value);
+    return Number(selection.value);
   }
 
   /* ---------- Aufzeichnung ---------- */
 
-  let laeuft = false;
-  let runde = 0;
-  let wachhalter = null;   // WakeLockSentinel
-  let sitzungId = null;    // gesetzt, wenn diese Seite die Fahrt anlegte
+  let running = false;
+  let lap = 0;
+  let wake_lock = null;   // WakeLockSentinel
+  let sessionId = null;    // gesetzt, wenn diese Seite die Fahrt anlegte
 
   /* Den Bildschirm wach halten. Ohne das schaltet iOS ihn nach einer Minute
    * aus, und mit dem Bildschirm schläft der Seiteninhalt - die Verbindung
@@ -273,44 +273,44 @@
    * geholt. Kennt der Browser die Schnittstelle nicht, läuft die
    * Aufzeichnung trotzdem - dann muss man den Bildschirm eben in den
    * Einstellungen an lassen. */
-  async function bildschirmWachHalten() {
+  async function screenAwakeHold() {
     if (!("wakeLock" in navigator)) {
       log("Dieser Browser kennt keine Bildschirmsperre-Verhinderung. "
           + "Automatische Sperre bitte in den iOS-Einstellungen auf 'Nie'.");
       return;
     }
     try {
-      wachhalter = await navigator.wakeLock.request("screen");
+      wake_lock = await navigator.wakeLock.request("screen");
       log("Bildschirm wird wachgehalten.");
-    } catch (fehler) {
-      log("Bildschirm wachhalten ging nicht: " + fehler.message);
+    } catch (failure) {
+      log("Bildschirm wachhalten ging nicht: " + failure.message);
     }
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (laeuft && document.visibilityState === "visible" && !wachhalter) {
-      bildschirmWachHalten();
+    if (running && document.visibilityState === "visible" && !wake_lock) {
+      screenAwakeHold();
     }
   });
 
-  function kacheln(werte) {
-    el("fahrt-werte").innerHTML = werte.map(([name, zahl]) =>
-      `<div class="wert"><div class="zahl">${zahl}</div>`
+  function tiles(vals) {
+    el("fahrt-werte").innerHTML = vals.map(([name, num]) =>
+      `<div class="wert"><div class="zahl">${num}</div>`
       + `<div class="name">${name}</div></div>`).join("");
   }
 
-  async function eineRunde() {
-    const roh = await O.satzLesen(runde);
-    runde += 1;
+  async function aRound() {
+    const raw = await O.readRecord(lap);
+    lap += 1;
 
-    const soc = O.socAusRoh(roh.soc_roh);
-    const wo = await ort().catch((f) => {
+    const soc = O.socFromRaw(raw.soc_raw);
+    const wo = await city().catch((f) => {
       log("Standort: " + f.message);
       return null;
     });
     if (!wo) return null;
 
-    if (typeof wo.hoehe_m === "number") roh.hoehe_m = Math.round(wo.hoehe_m);
+    if (typeof wo.elevation_m === "number") raw.elevation_m = Math.round(wo.elevation_m);
 
     /* Automatik: warten, bis das Auto wirklich fährt.
      *
@@ -323,45 +323,45 @@
      * Zwei Runden hintereinander, damit ein einzelner Ausreisser keine
      * Fahrt anlegt - und keine Fahrt entsteht, während das Auto auf dem Hof
      * rangiert. */
-    if (!sitzungId && el("automatik").checked && !el("token").value.trim()) {
-      const tempo = typeof roh.tempo_kmh === "number" ? roh.tempo_kmh
-        : (typeof wo.tempo_kmh === "number" && !Number.isNaN(wo.tempo_kmh)
-           ? wo.tempo_kmh : null);
-      if (tempo !== null && tempo < FAEHRT_AB_KMH) {
-        bewegt = 0;
-        return { soc, roh, wartet: true,
-                 daten: { grund: `steht (${Math.round(tempo)} km/h)` } };
+    if (!sessionId && el("automatik").checked && !el("token").value.trim()) {
+      const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh
+        : (typeof wo.speed_kmh === "number" && !Number.isNaN(wo.speed_kmh)
+           ? wo.speed_kmh : null);
+      if (velocity !== null && velocity < DRIVES_FROM_KMH) {
+        moved = 0;
+        return { soc, raw, waits: true,
+                 records: { reason: `steht (${Math.round(velocity)} km/h)` } };
       }
-      bewegt += 1;
-      if (tempo !== null && bewegt < FAEHRT_RUNDEN) {
-        return { soc, roh, wartet: true,
-                 daten: { grund: `fährt an (${Math.round(tempo)} km/h)` } };
+      moved += 1;
+      if (velocity !== null && moved < DRIVES_ROUNDS) {
+        return { soc, raw, waits: true,
+                 records: { reason: `fährt an (${Math.round(velocity)} km/h)` } };
       }
-      log(`Bewegung erkannt${tempo === null ? " (kein Tempo messbar)"
-                                            : ` (${Math.round(tempo)} km/h)`}`
+      log(`Bewegung erkannt${velocity === null ? " (kein Tempo messbar)"
+                                            : ` (${Math.round(velocity)} km/h)`}`
           + " - Fahrt wird angelegt.");
       try {
-        await fahrtAnlegen(soc);
-      } catch (fehler) {
+        await createTrip(soc);
+      } catch (failure) {
         // Nicht aufgeben: Die nächste Runde versucht es erneut. Ein
         // Funkloch beim Losfahren ist der Normalfall, nicht die Ausnahme.
-        log("Fahrt anlegen: " + fehler.message + " - nächste Runde erneut");
-        bewegt = 0;
-        return { soc, roh, wartet: true,
-                 daten: { grund: "jolt nicht erreichbar" } };
+        log("Fahrt anlegen: " + failure.message + " - nächste Runde erneut");
+        moved = 0;
+        return { soc, raw, waits: true,
+                 records: { reason: "jolt nicht erreichbar" } };
       }
     }
 
-    const nutzlast = {
+    const payload = {
       lat: wo.lat, lon: wo.lon,
       soc: Math.round(soc.hmi * 10) / 10,
-      rohwerte: roh,
+      raw_values: raw,
     };
     // Was das Auto selbst misst, schlägt jede Vorhersage: Die
     // Aussentemperatur ging bisher aus Open-Meteo ins Verbrauchsmodell.
-    if (typeof roh.tempo_kmh === "number") nutzlast.tempo_kmh = roh.tempo_kmh;
-    if (typeof roh.aussentemp_c === "number") {
-      nutzlast.aussentemp_c = roh.aussentemp_c;
+    if (typeof raw.speed_kmh === "number") payload.speed_kmh = raw.speed_kmh;
+    if (typeof raw.outside_temp_c === "number") {
+      payload.outside_temp_c = raw.outside_temp_c;
     }
 
     /* Zwei Wege hinein, und welcher gilt, hängt daran, wer die Fahrt
@@ -370,131 +370,131 @@
      * einem anderen Gerät, weiss diese Seite die Sitzung nicht - dann
      * weist sie sich mit dem Logger-Token des Fahrzeugs aus, und jolt
      * sucht die laufende Sitzung selbst. */
-    const ziel = sitzungId
-      ? `/api/live/${sitzungId}/punkt`
+    const destination = sessionId
+      ? `/api/live/${sessionId}/punkt`
       : "/api/live/melden";
-    if (!sitzungId) nutzlast.token = el("token").value.trim();
+    if (!sessionId) payload.token = el("token").value.trim();
 
     // `/punkt` verlangt die Anmeldung; `/melden` weist sich mit dem
     // Logger-Token im Rumpf aus und braucht den Header nicht, schadet er
     // aber auch nicht.
-    const antwort = await fetch(ziel, {
+    const response = await fetch(destination, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
-      body: JSON.stringify(nutzlast),
+      body: JSON.stringify(payload),
     });
-    const daten = await antwort.json().catch(() => ({}));
+    const records = await response.json().catch(() => ({}));
     // Der Sitzungsweg antwortet mit dem Zustand und kennt kein
     // "aufgenommen" - wenn er 200 gibt, ist der Punkt drin.
-    if (sitzungId && antwort.ok) daten.aufgenommen = true;
-    return { soc, roh, daten, status: antwort.status };
+    if (sessionId && response.ok) records.recorded = true;
+    return { soc, raw, records, status: response.status };
   }
 
-  async function fahrtSchleife() {
-    while (laeuft) {
-      const beginn = Date.now();
+  async function tripLoop() {
+    while (running) {
+      const onset = Date.now();
       try {
-        const ergebnis = await eineRunde();
-        if (ergebnis && ergebnis.wartet) {
+        const result = await aRound();
+        if (result && result.waits) {
           // Im Wartezustand wird gemessen, aber nichts gemeldet. Angezeigt
           // wird trotzdem, was gelesen wurde - sonst sähe die Seite aus,
           // als täte sie nichts.
-          kacheln([
-            ["Ladestand", Math.round(ergebnis.soc.hmi * 10) / 10 + " %"],
+          tiles([
+            ["Ladestand", Math.round(result.soc.hmi * 10) / 10 + " %"],
             ["Zustand", "wartet auf Fahrt"],
           ]);
-          stand2("Bereit – " + (ergebnis.daten.grund || "wartet"), "gut");
-        } else if (ergebnis) {
-          const { soc, roh, daten } = ergebnis;
-          letzterSoc = Math.round(soc.hmi * 10) / 10;
-          el("soc-wert").textContent = letzterSoc + " %";
-          const leistung = (typeof roh.spannung_v === "number"
-                            && typeof roh.strom_a === "number")
-            ? (roh.spannung_v * roh.strom_a / 1000).toFixed(1) + " kW" : "–";
-          kacheln([
-            ["Ladestand", letzterSoc + " %"],
+          stand2("Bereit – " + (result.records.reason || "wartet"), "gut");
+        } else if (result) {
+          const { soc, raw, records } = result;
+          lastSoc = Math.round(soc.hmi * 10) / 10;
+          el("soc-wert").textContent = lastSoc + " %";
+          const power = (typeof raw.voltage_v === "number"
+                            && typeof raw.current_a === "number")
+            ? (raw.voltage_v * raw.current_a / 1000).toFixed(1) + " kW" : "–";
+          tiles([
+            ["Ladestand", lastSoc + " %"],
             ["brutto", soc.bms.toFixed(1) + " %"],
-            ["Leistung", leistung],
-            ["Spannung", (roh.spannung_v ?? "–") + " V"],
-            ["aufgenommen", daten.aufgenommen ? "ja" : "nein"],
-            ["Runde", String(runde)],
+            ["Leistung", power],
+            ["Spannung", (raw.voltage_v ?? "–") + " V"],
+            ["aufgenommen", records.recorded ? "ja" : "nein"],
+            ["Runde", String(lap)],
           ]);
-          stand2(daten.aufgenommen
+          stand2(records.recorded
             ? `läuft – zuletzt ${new Date().toLocaleTimeString("de-DE")}`
-            : `läuft – jolt: ${daten.grund || "nicht aufgenommen"}`,
-            daten.aufgenommen ? "gut" : "");
-          log(`Runde ${runde}: ${letzterSoc} % (roh ${roh.soc_roh})`
-              + `${roh._fehlend ? ", ohne " + roh._fehlend.join("/") : ""}`
-              + ` → jolt ${daten.aufgenommen ? "ok" : (daten.grund || "?")}`);
+            : `läuft – jolt: ${records.reason || "nicht aufgenommen"}`,
+            records.recorded ? "gut" : "");
+          log(`Runde ${lap}: ${lastSoc} % (roh ${raw.soc_raw})`
+              + `${raw._missing ? ", ohne " + raw._missing.join("/") : ""}`
+              + ` → jolt ${records.recorded ? "ok" : (records.reason || "?")}`);
         }
-      } catch (fehler) {
+      } catch (failure) {
         // Ein Aussetzer beendet die Fahrt nicht. Tunnel, Funkloch, ein
         // Steuergerät das gerade nicht mag - das nächste Mal klappt es
         // wieder, und eine abgebrochene Aufzeichnung merkt man erst hinterher.
-        stand2("Aussetzer: " + fehler.message, "schlecht");
-        log("Runde übersprungen: " + fehler.message);
+        stand2("Aussetzer: " + failure.message, "schlecht");
+        log("Runde übersprungen: " + failure.message);
       }
-      const rest = Number(el("takt").value) * 1000 - (Date.now() - beginn);
+      const rest = Number(el("takt").value) * 1000 - (Date.now() - onset);
       await new Promise((w) => setTimeout(w, Math.max(1000, rest)));
     }
   }
 
-  function stand2(text, art) {
+  function stand2(text, variety) {
     const k = el("fahrt-stand");
     k.textContent = text;
-    k.className = "stand " + (art || "");
+    k.className = "stand " + (variety || "");
   }
 
-  async function fahrtStarten() {
+  async function startTrip() {
     if (!el("token").value.trim() && !joltToken()) {
       stand2("Erst in jolt anmelden oder ein Logger-Token eintragen.",
              "schlecht");
       return;
     }
-    laeuft = true;
-    runde = 0;
+    running = true;
+    lap = 0;
     el("fahrt-start").hidden = true;
     el("fahrt-stop").hidden = false;
-    await bildschirmWachHalten();
+    await screenAwakeHold();
     log("Aufzeichnung gestartet.");
-    fahrtSchleife();
+    tripLoop();
   }
 
-  async function fahrtBeenden() {
-    laeuft = false;
+  async function endTrip() {
+    running = false;
     // Die Fahrt in jolt abschliessen, wenn diese Seite sie angelegt hat.
     // Ohne das bleibt die Aufzeichnung offen, und aus den Messpunkten
     // entsteht nie eine Strecke - der ganze Zweck wäre verfehlt.
-    if (sitzungId) {
+    if (sessionId) {
       try {
-        const antwort = await fetch(`/api/live/${sitzungId}/ende`, {
+        const response = await fetch(`/api/live/${sessionId}/ende`, {
           method: "POST", headers: { "X-Token": joltToken() } });
-        const daten = await antwort.json().catch(() => ({}));
-        const gebaut = daten.aufzeichnung || {};
-        if (gebaut.ok) {
-          log(`Fahrt abgeschlossen: ${gebaut.strecke_km} km, `
-              + `${gebaut.verbrauch_kwh} kWh gerechnet, Höhen aus `
-              + `${gebaut.hoehen}.`);
-        } else if (gebaut.grund) {
-          log("Fahrt nicht auswertbar: " + gebaut.grund);
+        const records = await response.json().catch(() => ({}));
+        const built = records.recording || {};
+        if (built.ok) {
+          log(`Fahrt abgeschlossen: ${built.distance_km} km, `
+              + `${built.consumption_kwh} kWh gerechnet, Höhen aus `
+              + `${built.elevations}.`);
+        } else if (built.reason) {
+          log("Fahrt nicht auswertbar: " + built.reason);
         }
-        if (daten.gelernt) {
-          log(`Gelernt: Faktor ${daten.gelernt.vorher} → `
-              + `${daten.gelernt.nachher} (Fahrt ×${daten.gelernt.rohfaktor})`);
-        } else if (daten.nicht_gelernt) {
-          log("Nichts gelernt: " + daten.nicht_gelernt);
+        if (records.learned) {
+          log(`Gelernt: Faktor ${records.learned.earlier} → `
+              + `${records.learned.after} (Fahrt ×${records.learned.raw_factor})`);
+        } else if (records.not_learned) {
+          log("Nichts gelernt: " + records.not_learned);
         }
-      } catch (fehler) {
-        log("Fahrt beenden: " + fehler.message);
+      } catch (failure) {
+        log("Fahrt beenden: " + failure.message);
       }
-      sitzungId = null;
+      sessionId = null;
     }
     el("fahrt-start").hidden = false;
     el("fahrt-stop").hidden = true;
     stand2("beendet");
-    if (wachhalter) {
-      try { await wachhalter.release(); } catch (e) {}
-      wachhalter = null;
+    if (wake_lock) {
+      try { await wake_lock.release(); } catch (e) {}
+      wake_lock = null;
     }
     log("Aufzeichnung beendet.");
   }
@@ -511,73 +511,73 @@
    *    er 15 bis 35 kWh/100 km, stimmen **beide** Formeln, und zwar ohne
    *    dass man je gefahren waere.
    */
-  const BEREICHE = {
-    soc_roh: [0, 255, "Rohwert, geteilt durch 2,5 ergibt Prozent"],
-    spannung_v: [250, 450, "Packspannung eines 400-V-Systems"],
-    strom_a: [-600, 600, "im Stand nahe null"],
-    ladegrenze_a: [0, 600],
-    ptc_strom_a: [-5, 100, "im Stand meist null"],
-    tempo_kmh: [0, 260, "im Stand null"],
-    aussentemp_c: [-40, 60],
-    innentemp_c: [-40, 80],
-    nebenverbrauch_kw: [-2, 20, "im Stand ein bis drei kW"],
-    km_stand: [1, 999999],
-    dcdc_strom_a: [-400, 400],
-    akku_kwh: [10, 200, "nutzbar - beim ID.Buzz 77 kWh neu, weniger mit "
+  const RANGES = {
+    soc_raw: [0, 255, "Rohwert, geteilt durch 2,5 ergibt Prozent"],
+    voltage_v: [250, 450, "Packspannung eines 400-V-Systems"],
+    current_a: [-600, 600, "im Stand nahe null"],
+    charge_limit_a: [0, 600],
+    ptc_current_a: [-5, 100, "im Stand meist null"],
+    speed_kmh: [0, 260, "im Stand null"],
+    outside_temp_c: [-40, 60],
+    inside_temp_c: [-40, 80],
+    aux_load_kw: [-2, 20, "im Stand ein bis drei kW"],
+    odometer_km: [1, 999999],
+    dcdc_current_a: [-400, 400],
+    battery_kwh: [10, 200, "nutzbar - beim ID.Buzz 77 kWh neu, weniger mit "
                + "den Jahren"],
-    reichweite_km: [0, 999, "mit der Anzeige im Auto vergleichen"],
+    range_km: [0, 999, "mit der Anzeige im Auto vergleichen"],
     batterie_c: [-40, 80, "nach dem Stehen nahe der Aussentemperatur"],
     /* Lebensdauerzaehler. Die Schranke war [1, 999999] und liess damit
      * 482 961 kWh durch - genau den Wert, den die fehlende
      * Vorzeichenbehandlung erzeugte. Eine Schranke, die den Fehler nicht
      * faengt, den sie fangen soll, ist keine. 100 000 kWh entsprechen bei
      * 20 kWh/100 km einer halben Million Kilometer. */
-    entladen_kwh: [100, 100000, "Lebensdauerzähler"],
-    geladen_kwh: [100, 100000, "Lebensdauerzähler"],
+    discharge_kwh: [100, 100000, "Lebensdauerzähler"],
+    charged_kwh: [100, 100000, "Lebensdauerzähler"],
   };
 
-  function pruefzeile(titel, wert, urteil, bemerkung) {
-    const farbe = urteil === "ok" ? "gut"
-      : (urteil === "fehlt" ? "" : "schlecht");
-    return `<tr class="${farbe}"><th>${titel}</th><td>${wert}</td>`
-      + `<td>${bemerkung || ""}</td></tr>`;
+  function check_row(title, val, verdict, note) {
+    const colour = verdict === "ok" ? "gut"
+      : (verdict === "fehlt" ? "" : "schlecht");
+    return `<tr class="${colour}"><th>${title}</th><td>${val}</td>`
+      + `<td>${note || ""}</td></tr>`;
   }
 
-  async function werteRuefen() {
-    const knopf = el("pruefen");
-    knopf.disabled = true;
-    const ziel = el("pruef-ergebnis");
-    ziel.innerHTML = "<p>lese …</p>";
+  async function valuesCall() {
+    const btn = el("pruefen");
+    btn.disabled = true;
+    const destination = el("pruef-ergebnis");
+    destination.innerHTML = "<p>lese …</p>";
     try {
-      if (!O.verbunden()) {
-        await O.anschliessen();
-        if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+      if (!O.linked()) {
+        await O.attach();
+        if (!O.linked()) throw new Error("keine Verbindung zum Dongle");
         if (!(await O.handshake())) throw new Error("Handshake unvollständig");
       }
       // Runde 0 - damit auch die selten gelesenen Werte drankommen.
-      const roh = await O.satzLesen(0);
-      const felder = O.FELDER;
-      const leer = new Set(roh._leer || []);
-      const fehlt = new Set(roh._fehlend || []);
+      const raw = await O.readRecord(0);
+      const fields = O.FIELDS;
+      const empty = new Set(raw._empty || []);
+      const missing = new Set(raw._missing || []);
 
-      const zeilen = [];
-      let gut = 0, schlecht = 0, ohne = 0;
-      for (const f of felder) {
-        const w = roh[f.name];
+      const rows = [];
+      let good = 0, bad = 0, without = 0;
+      for (const f of fields) {
+        const w = raw[f.name];
         if (typeof w !== "number") {
-          ohne += 1;
-          zeilen.push(pruefzeile(f.titel, "–",
-            "fehlt", leer.has(f.name) ? "antwortet nicht"
-              : (fehlt.has(f.name) ? "keine Antwort" : "nicht gelesen")));
+          without += 1;
+          rows.push(check_row(f.title, "–",
+            "fehlt", empty.has(f.name) ? "antwortet nicht"
+              : (missing.has(f.name) ? "keine Antwort" : "nicht gelesen")));
           continue;
         }
-        const b = BEREICHE[f.name];
-        const text = `${Math.round(w * 100) / 100}${f.einheit ? " " + f.einheit : ""}`;
-        if (!b) { zeilen.push(pruefzeile(f.titel, text, "ok", "")); gut += 1; continue; }
-        const drin = w >= b[0] && w <= b[1];
-        if (drin) gut += 1; else schlecht += 1;
-        zeilen.push(pruefzeile(f.titel, text, drin ? "ok" : "schlecht",
-          drin ? (b[2] || "") : `erwartet ${b[0]} bis ${b[1]}`));
+        const b = RANGES[f.name];
+        const text = `${Math.round(w * 100) / 100}${f.unit ? " " + f.unit : ""}`;
+        if (!b) { rows.push(check_row(f.title, text, "ok", "")); good += 1; continue; }
+        const inside = w >= b[0] && w <= b[1];
+        if (inside) good += 1; else bad += 1;
+        rows.push(check_row(f.title, text, inside ? "ok" : "schlecht",
+          inside ? (b[2] || "") : `erwartet ${b[0]} bis ${b[1]}`));
       }
 
       /* Der Kreuzvergleich. Er braucht keine Fahrt und prueft zwei Formeln
@@ -585,38 +585,38 @@
        * sinnvollen Lebensdauerverbrauch ergeben, koennen beide kaum falsch
        * sein - ein Fehler in einer der beiden Byte-Lagen wuerde das
        * Ergebnis um Zehnerpotenzen verschieben. */
-      if (typeof roh.entladen_kwh === "number"
-          && typeof roh.km_stand === "number" && roh.km_stand > 100) {
-        const netto = roh.entladen_kwh
-          - (typeof roh.geladen_kwh === "number" ? roh.geladen_kwh : 0);
-        const je100 = roh.entladen_kwh / roh.km_stand * 100;
-        const drin = je100 >= 12 && je100 <= 40;
+      if (typeof raw.discharge_kwh === "number"
+          && typeof raw.odometer_km === "number" && raw.odometer_km > 100) {
+        const net = raw.discharge_kwh
+          - (typeof raw.charged_kwh === "number" ? raw.charged_kwh : 0);
+        const je100 = raw.discharge_kwh / raw.odometer_km * 100;
+        const inside = je100 >= 12 && je100 <= 40;
         // Mitzaehlen. Vorher stand er zwar rot in der Tabelle, aber die
         // Zeile darueber meldete trotzdem "0 auffaellig" - und die liest
         // man zuerst.
-        if (drin) gut += 1; else schlecht += 1;
-        zeilen.push(pruefzeile(
+        if (inside) good += 1; else bad += 1;
+        rows.push(check_row(
           "<strong>Kreuzvergleich</strong>",
           `${je100.toFixed(1)} kWh/100 km`,
-          drin ? "ok" : "schlecht",
-          drin ? `${roh.entladen_kwh.toFixed(0)} kWh entladen auf `
-                 + `${roh.km_stand} km – das passt zusammen`
+          inside ? "ok" : "schlecht",
+          inside ? `${raw.discharge_kwh.toFixed(0)} kWh entladen auf `
+                 + `${raw.odometer_km} km – das passt zusammen`
                : "erwartet 12 bis 40 – eine der beiden Formeln stimmt nicht"));
-        zeilen.push(pruefzeile("Zähler netto",
-          `${netto.toFixed(1)} kWh`, "ok",
+        rows.push(check_row("Zähler netto",
+          `${net.toFixed(1)} kWh`, "ok",
           "entladen minus geladen, über die Lebensdauer"));
       }
 
-      ziel.innerHTML =
-        `<p><b>${gut}</b> plausibel, <b>${schlecht}</b> auffällig, `
-        + `<b>${ohne}</b> ohne Wert</p>`
-        + `<table class="pruef"><tbody>${zeilen.join("")}</tbody></table>`;
-      log(`Prüfung: ${gut} plausibel, ${schlecht} auffällig, ${ohne} ohne Wert`);
-    } catch (fehler) {
-      ziel.innerHTML = `<p class="stand schlecht">${fehler.message}</p>`;
-      log("Prüfung: " + fehler.message);
+      destination.innerHTML =
+        `<p><b>${good}</b> plausibel, <b>${bad}</b> auffällig, `
+        + `<b>${without}</b> ohne Wert</p>`
+        + `<table class="pruef"><tbody>${rows.join("")}</tbody></table>`;
+      log(`Prüfung: ${good} plausibel, ${bad} auffällig, ${without} ohne Wert`);
+    } catch (failure) {
+      destination.innerHTML = `<p class="stand schlecht">${failure.message}</p>`;
+      log("Prüfung: " + failure.message);
     } finally {
-      knopf.disabled = false;
+      btn.disabled = false;
     }
   }
 
@@ -631,19 +631,19 @@
    * einmal mit laufendem Kompressor und einmal ohne. Was sich um
    * Hunderte aendert, ist die Leistung; was gleich bleibt, ist etwas
    * anderes. */
-  let klimaA = null;
+  let climateA = null;
 
-  async function klimaLesen() {
-    if (!O.verbunden()) {
-      await O.anschliessen();
-      if (!O.verbunden()) throw new Error("keine Verbindung zum Dongle");
+  async function readClimate() {
+    if (!O.linked()) {
+      await O.attach();
+      if (!O.linked()) throw new Error("keine Verbindung zum Dongle");
       if (!(await O.handshake())) throw new Error("Handshake unvollständig");
     }
-    await O.reihe(["ATSP6", "ATSH746", "ATFCSH746", "ATFCSD300000",
+    await O.series(["ATSP6", "ATSH746", "ATFCSH746", "ATFCSD300000",
                    "ATFCSM1", "ATCRA7B0"]);
-    const antwort = await O.befehl("220800", 8000);
-    await O.befehl("ATSP7").catch(() => {});
-    const bytes = O.nutzbytes(antwort, "220800");
+    const response = await O.command("220800", 8000);
+    await O.command("ATSP7").catch(() => {});
+    const bytes = O.payload_bytes(response, "220800");
     if (!bytes || bytes.length < 8) {
       throw new Error("keine brauchbare Antwort auf 220800");
     }
@@ -661,43 +661,43 @@
    * **ausgerichteten** Paare ab Byte 1 - so, wie das Steuergeraet sie
    * meint. Was sich in beiden Spalten deutlich unterscheidet, ist der
    * Kandidat. */
-  function klimaZeigen() {
-    const ziel = el("klima-ergebnis");
-    if (!klimaA || !klimaA.b) { ziel.innerHTML = ""; return; }
-    const a = klimaA.a, b = klimaA.b;
+  function showClimate() {
+    const destination = el("klima-ergebnis");
+    if (!climateA || !climateA.b) { destination.innerHTML = ""; return; }
+    const a = climateA.a, b = climateA.b;
     const n = Math.min(a.length, b.length);
 
-    const einzeln = [];
+    const single = [];
     for (let i = 0; i < n; i++) {
       const d = b[i] - a[i];
-      einzeln.push(`<tr class="${d ? "gut" : ""}"><th>Byte ${i}</th>`
+      single.push(`<tr class="${d ? "gut" : ""}"><th>Byte ${i}</th>`
         + `<td>${a[i]}</td><td>${b[i]}</td>`
         + `<td>${d > 0 ? "+" : ""}${d || "–"}</td></tr>`);
     }
 
-    const paare = [];
-    const kandidaten = [];
+    const pairs = [];
+    const candidates = [];
     for (let i = 1; i + 1 < n; i += 2) {
       const va = a[i] * 256 + a[i + 1], vb = b[i] * 256 + b[i + 1];
       const d = vb - va;
-      const auffaellig = Math.abs(d) >= 100;
-      if (auffaellig) kandidaten.push(`Byte ${i}–${i + 1}: ${va} → ${vb}`);
-      paare.push(`<tr class="${auffaellig ? "gut" : ""}">`
+      const conspicuous = Math.abs(d) >= 100;
+      if (conspicuous) candidates.push(`Byte ${i}–${i + 1}: ${va} → ${vb}`);
+      pairs.push(`<tr class="${conspicuous ? "gut" : ""}">`
         + `<th>Byte ${i}–${i + 1}</th><td>${va}</td><td>${vb}</td>`
         + `<td>${d > 0 ? "+" : ""}${d || "–"}</td></tr>`);
     }
 
-    ziel.innerHTML =
+    destination.innerHTML =
       `<p>Bit 0 von Byte 0: <b>${a[0] & 1}</b> → <b>${b[0] & 1}</b>`
       + `${(a[0] & 1) !== (b[0] & 1) ? " – das ist das An/Aus-Bit." : ""}</p>`
       + `<table class="pruef"><tbody>`
       + `<tr><th>einzeln</th><td>aus</td><td>an</td><td>Δ</td></tr>`
-      + einzeln.join("")
+      + single.join("")
       + `<tr><th>Paare ab Byte 1</th><td>aus</td><td>an</td><td>Δ</td></tr>`
-      + paare.join("")
+      + pairs.join("")
       + `</tbody></table>`
-      + `<p>${kandidaten.length
-          ? "Deutlich verändert: <b>" + kandidaten.join(", ") + "</b>. "
+      + `<p>${candidates.length
+          ? "Deutlich verändert: <b>" + candidates.join(", ") + "</b>. "
             + "Die kleinste dieser Zahlen ist meist die Leistung in Watt, "
             + "die grösseren sind Soll- und Ist-Drehzahl."
           : "Nichts hat sich deutlich verändert – war der Kompressor bei "
@@ -706,9 +706,9 @@
 
   /* ---------- An jolt melden ---------- */
 
-  function ort() {
-    return new Promise((erfuellen, ablehnen) => {
-      if (!navigator.geolocation) { ablehnen(new Error("kein GPS")); return; }
+  function city() {
+    return new Promise((fulfil, reject) => {
+      if (!navigator.geolocation) { reject(new Error("kein GPS")); return; }
       navigator.geolocation.getCurrentPosition(
         // Die GPS-Höhe wird mitgeschrieben, obwohl sie für die Steigung zu
         // ungenau ist (sie streut um zehn bis zwanzig Meter). Sie kostet
@@ -719,31 +719,31 @@
         // weiter unten toter Code: `wo.tempo_kmh` gab es schlicht nicht, und
         // ohne Tempo vom Auto legte die Automatik die Fahrt sofort an -
         // mitsamt dem Parkplatz davor.
-        (p) => erfuellen({ lat: p.coords.latitude, lon: p.coords.longitude,
-                           hoehe_m: p.coords.altitude,
-                           tempo_kmh: typeof p.coords.speed === "number"
+        (p) => fulfil({ lat: p.coords.latitude, lon: p.coords.longitude,
+                           elevation_m: p.coords.altitude,
+                           speed_kmh: typeof p.coords.speed === "number"
                              ? p.coords.speed * 3.6 : null }),
-        (f) => ablehnen(new Error("Standort: " + f.message)),
+        (f) => reject(new Error("Standort: " + f.message)),
         { enableHighAccuracy: true, timeout: 10000 });
     });
   }
 
-  async function melden() {
+  async function report() {
     const token = el("token").value.trim();
     if (!token) { log("Kein Logger-Token eingetragen."); return; }
-    if (letzterSoc === null) { log("Erst den Ladestand abfragen."); return; }
+    if (lastSoc === null) { log("Erst den Ladestand abfragen."); return; }
     try {
-      const wo = await ort();
-      const antwort = await fetch("/api/live/melden", {
+      const wo = await city();
+      const response = await fetch("/api/live/melden", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, soc: letzterSoc,
+        body: JSON.stringify({ token, soc: lastSoc,
                                lat: wo.lat, lon: wo.lon }),
       });
-      const daten = await antwort.json();
-      log(`jolt: HTTP ${antwort.status} ${JSON.stringify(daten).slice(0, 200)}`);
-    } catch (fehler) {
-      log("FEHLER " + fehler.message);
+      const records = await response.json();
+      log(`jolt: HTTP ${response.status} ${JSON.stringify(records).slice(0, 200)}`);
+    } catch (failure) {
+      log("FEHLER " + failure.message);
     }
   }
 
@@ -751,39 +751,39 @@
 
   // `O.verfuegbar()` statt `navigator.bluetooth`: In der iOS-App gibt es die
   // Web-API nicht, wohl aber Bluetooth - es kommt dort ueber CoreBluetooth
-  // (siehe obd-ble-nativ.js). Wer hier direkt auf die Web-API prueft,
+  // (siehe obd-ble-native.js). Wer hier direkt auf die Web-API prueft,
   // erklaert die Seite ausgerechnet dort fuer untauglich, wo sie am besten
   // funktioniert.
-  if (!O.verfuegbar()) {
+  if (!O.obtainable()) {
     el("untauglich").hidden = false;
     el("verbinden").disabled = true;
   }
 
-  /* Fehler in messwerte.js gehoeren auf die Seite, nicht nur in die
+  /* Fehler in readings.js gehoeren auf die Seite, nicht nur in die
    * Konsole. Ein vertippter Adressname sieht am Auto aus wie ein
    * schweigendes Steuergeraet - und danach sucht man an der falschen
    * Stelle. */
-  if (O.TABELLE_FEHLER && O.TABELLE_FEHLER.length) {
-    const kasten = el("untauglich");
-    kasten.hidden = false;
-    kasten.innerHTML = "<strong>Fehler in der Messwert-Tabelle "
-      + "(messwerte.js):</strong><ul><li>"
-      + O.TABELLE_FEHLER.map((t) => t.replace(/[<&]/g, "")).join("</li><li>")
+  if (O.TABLE_ERROR && O.TABLE_ERROR.length) {
+    const box = el("untauglich");
+    box.hidden = false;
+    box.innerHTML = "<strong>Fehler in der Messwert-Tabelle "
+      + "(readings.js):</strong><ul><li>"
+      + O.TABLE_ERROR.map((t) => t.replace(/[<&]/g, "")).join("</li><li>")
       + "</li></ul>";
   }
   // Der Baustein meldet alles hierher, und ein Abriss ist während einer
   // Aufzeichnung ein Grund zum Wiederverbinden - sonst nicht.
-  O.einrichten(log, () => { if (laeuft) O.wiederverbinden(1, () => laeuft); });
+  O.set_up(log, () => { if (running) O.reconnect(1, () => running); });
   el("verbinden").addEventListener("click", async () => {
-    stand("verbinde …");
-    await O.anschliessen();
-    if (O.verbunden()) { stand("verbunden", "gut"); knoepfe(true); }
-    else { stand("nicht verbunden", "schlecht"); }
+    as_of("verbinde …");
+    await O.attach();
+    if (O.linked()) { as_of("verbunden", "gut"); buttons(true); }
+    else { as_of("nicht verbunden", "schlecht"); }
   });
   el("init").addEventListener("click", async () => {
     if (await O.handshake()) log("Handshake durch.");
   });
-  el("soc").addEventListener("click", socLesen);
+  el("soc").addEventListener("click", readSoc);
   /* Der Knopf sperrt sich, solange die Reihe laeuft.
    *
    * Eine Mehrrahmen-Antwort braucht ueber eine Sekunde. Wer in der Zeit noch
@@ -792,34 +792,34 @@
    * danach aus, als haette das Steuergeraet nicht geantwortet - dabei war es
    * die Oberflaeche. */
   el("senden").addEventListener("click", async () => {
-    const knopf = el("senden");
-    knopf.disabled = true;
-    const vorher = knopf.textContent;
-    knopf.textContent = "läuft …";
+    const btn = el("senden");
+    btn.disabled = true;
+    const earlier = btn.textContent;
+    btn.textContent = "läuft …";
     try {
-      await O.reihe(el("frei").value.split("\n"));
+      await O.series(el("frei").value.split("\n"));
     } finally {
-      knopf.disabled = false;
-      knopf.textContent = vorher;
+      btn.disabled = false;
+      btn.textContent = earlier;
     }
   });
-  el("melden").addEventListener("click", melden);
-  el("pruefen").addEventListener("click", werteRuefen);
+  el("melden").addEventListener("click", report);
+  el("pruefen").addEventListener("click", valuesCall);
   el("klima-a").addEventListener("click", async () => {
     const k = el("klima-a");
     k.disabled = true;
     try {
-      klimaA = { a: await klimaLesen(), b: null };
-      log("Klima-Messung 1 (aus): " + klimaA.a.join(" "));
+      climateA = { a: await readClimate(), b: null };
+      log("Klima-Messung 1 (aus): " + climateA.a.join(" "));
       el("klima-ergebnis").innerHTML =
         "<p>Erste Messung steht. Jetzt die Klimaanlage <strong>kräftig "
         + "einschalten</strong> (kalt, hohe Gebläsestufe), eine halbe Minute "
         + "warten und dann die zweite Messung.</p>";
       el("klima-b").disabled = false;
-    } catch (fehler) {
+    } catch (failure) {
       el("klima-ergebnis").innerHTML =
-        `<p class="stand schlecht">${fehler.message}</p>`;
-      log("Klima-Messung 1: " + fehler.message);
+        `<p class="stand schlecht">${failure.message}</p>`;
+      log("Klima-Messung 1: " + failure.message);
     } finally {
       k.disabled = false;
     }
@@ -828,13 +828,13 @@
     const k = el("klima-b");
     k.disabled = true;
     try {
-      klimaA.b = await klimaLesen();
-      log("Klima-Messung 2 (an): " + klimaA.b.join(" "));
-      klimaZeigen();
-    } catch (fehler) {
+      climateA.b = await readClimate();
+      log("Klima-Messung 2 (an): " + climateA.b.join(" "));
+      showClimate();
+    } catch (failure) {
       el("klima-ergebnis").innerHTML =
-        `<p class="stand schlecht">${fehler.message}</p>`;
-      log("Klima-Messung 2: " + fehler.message);
+        `<p class="stand schlecht">${failure.message}</p>`;
+      log("Klima-Messung 2: " + failure.message);
     } finally {
       k.disabled = false;
     }
@@ -843,9 +843,9 @@
   /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
    * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die
    * Hex-Antworten Zeichen für Zeichen. */
-  el("los").addEventListener("click", losfahren);
-  el("fahrt-start").addEventListener("click", fahrtStarten);
-  el("fahrt-stop").addEventListener("click", fahrtBeenden);
+  el("los").addEventListener("click", start_driving);
+  el("fahrt-start").addEventListener("click", startTrip);
+  el("fahrt-stop").addEventListener("click", endTrip);
   el("takt").addEventListener("input", (e) => {
     el("takt-wert").textContent = e.target.value;
   });
@@ -855,18 +855,18 @@
       await navigator.clipboard.writeText(text);
       el("log-kopieren").textContent = "kopiert";
       setTimeout(() => { el("log-kopieren").textContent = "Protokoll kopieren"; }, 2000);
-    } catch (fehler) {
+    } catch (failure) {
       // Ohne Zwischenablage (älterer Browser, fehlende Erlaubnis) bleibt das
       // Markieren von Hand - dann wenigstens alles auf einmal auswählen.
-      const bereich = document.createRange();
-      bereich.selectNodeContents(el("log"));
-      const auswahl = window.getSelection();
-      auswahl.removeAllRanges();
-      auswahl.addRange(bereich);
+      const zone = document.createRange();
+      zone.selectNodeContents(el("log"));
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(zone);
       log("Zwischenablage nicht verfügbar - Protokoll ist markiert, bitte "
           + "von Hand kopieren.");
     }
   });
-  fahrzeugeLaden();
+  vehiclesCharging();
   log("Bereit. Dongle einstecken, Zündung an, dann „Fahrt starten“.");
 })();

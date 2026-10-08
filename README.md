@@ -139,7 +139,7 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   eingefrorene Anzeige sieht sonst aus wie eine laufende. Was das Auto liefert
   und wie, steht weiter unten.
 - **CarPlay-Darstellung in zwei Stilen** — die Kacheln des CarPlay-Dashboards
-  sind Bilder, und `frontend/kacheln.js` zeichnet sie im Canvas: **A –
+  sind Bilder, und `frontend/tiles.js` zeichnet sie im Canvas: **A –
   Instrument** (Zeigerbogen mit Skala für Ladestand und Rekuperation, Balken
   über einer Mittellinie, Ankunft mit Pfeil, Reichweitenleiste) und **B –
   Telemetrie** (Zahlen links, LED-Segmentleisten, Ankunft als Abweichung von
@@ -228,7 +228,7 @@ Das ausführliche Konzept mit der Begründung jeder Entscheidung steht in
   Hintergrundmodus) statt `watchPosition`, das der WebView beim Sperren
   einfriert. Die Messpunkte laufen dabei durch dieselbe Warteschlange. Eine
   ältere App ohne das Plugin fällt auf den Browser-Standort zurück. Bisher nur
-  gegen Attrappen geprüft (`tools/check_standort.js`); ob iOS die App wirklich
+  gegen Attrappen geprüft (`tools/check_location.js`); ob iOS die App wirklich
   am Leben hält, zeigt eine Fahrt.
 - **Messpunkte puffern** — jeder Punkt trägt seine Messzeit und geht zuerst in
   eine Warteschlange (`localStorage`), von dort in Stapeln zu 100 an
@@ -306,7 +306,7 @@ Strecke einmal in der App berechnet wurde.
 ### Benachrichtigungen aufs Telefon
 
 ```bash
-./tools/push_schluessel.py      # erzeugt ein VAPID-Schlüsselpaar
+./tools/push_keyname.py      # erzeugt ein VAPID-Schlüsselpaar
 ```
 
 Die drei ausgegebenen Zeilen in die `.env` übernehmen und jolt neu starten.
@@ -345,28 +345,28 @@ Geräte senden.
 Alle Skripte laufen ohne Netz, ohne Postgres und ohne API-Schlüssel:
 
 ```bash
-./tools/check_modell.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
-./tools/check_optimierer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
-./tools/check_quellen.py    # Fremde Meldeformate übersetzen - und Schrott ablehnen
-./tools/check_umplanung.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
+./tools/check_model.py     # Physik: Luftdichte, v², Steigung, Pass, Kälte, Ladekurve
+./tools/check_optimizer.py # Ladeplanung: Reserve, Lücken, Säulenwahl, Ausweich
+./tools/check_sources.py    # Fremde Meldeformate übersetzen - und Schrott ablehnen
+./tools/check_replanning.py  # Live: Auslöser einzeln, Umplanung über die ganze Kette
 ./tools/check_push.py       # Web Push: Schlüssel, Verschlüsselung, Abos, Aufräumen
-node tools/check_puffer.js  # Messpunkt-Warteschlange im Frontend: Funkloch, Nachreichen
+node tools/check_buffer.js  # Messpunkt-Warteschlange im Frontend: Funkloch, Nachreichen
 ./tools/check_backend.py    # ganze Kette: Schema, Import, Route, Korridor, Ladeplan, Live
 ```
 
-`check_modell.py` prüft nicht auf feste Zahlen, sondern auf die Verhältnisse,
+`check_model.py` prüft nicht auf feste Zahlen, sondern auf die Verhältnisse,
 die gelten müssen — etwa dass 130 km/h mehr als 10 % über 110 km/h liegen, aber
 unter dem reinen v²-Faktor, oder dass ein Pass mehr kostet als die Ebene, obwohl
 man wieder auf Ausgangshöhe ankommt.
 
-`check_optimierer.py` glaubt dem Planer nichts: Ein zweiter, unabhängiger
+`check_optimizer.py` glaubt dem Planer nichts: Ein zweiter, unabhängiger
 Nachrechner fährt jeden fertigen Plan Kilometer für Kilometer ab und sieht nach,
 ob der Ladestand irgendwo unter die Reserve fällt. Geprüft wird ausserdem gegen
 die beiden Fälle, an denen ein gieriger Planer scheitert — eine lange Lücke ohne
 Schnelllader und die Wahl zwischen einer nahen schwachen und einer weiteren
 starken Säule.
 
-`check_quellen.py` prüft vor allem das, was schiefgeht. Eine Meldung, die
+`check_sources.py` prüft vor allem das, was schiefgeht. Eine Meldung, die
 stimmt, ist der langweilige Fall; interessant sind das fehlende Feld, der
 Zeitstempel in Millisekunden statt Sekunden und der aus dem Jahr 1970, wenn
 ein Kleinstrechner ohne Netz startet. Fremde Daten sind bis zum Beweis des
@@ -374,7 +374,7 @@ Gegenteils kaputt, und ein Übersetzer, der das nicht abfängt, verlagert den
 Fehler nur — er landet dann als 500er im Log oder, schlimmer, als stiller
 Unsinn im Energieprofil.
 
-`check_umplanung.py` prüft jeden Auslöser einzeln — über seiner Schwelle muss
+`check_replanning.py` prüft jeden Auslöser einzeln — über seiner Schwelle muss
 er greifen, darunter schweigen; ein Auslöser, der immer feuert, ist so nutzlos
 wie einer, der es nie tut. Danach die ganze Kette: Fahrt rechnen, Ladepunkte
 anlegen, mit Mehrverbrauch und mit Stau abspielen und nachsehen, ob der Plan
@@ -438,24 +438,24 @@ konzept-routenplaner.md   Das Konzept mit der Begründung jeder Entscheidung
 backend/app/
   geo.py      Haversine und Peilung - kennt nichts, wird von allen gebraucht
   models.py   SQLAlchemy · database.py · deps.py · security.py
-  energie/    modell.py (Physik) · profil.py · wetter.py
-              kalibrierung.py · ladephasen.py (Fahrt- und Ladeabschnitte)
-  routing/    provider.py (Interface) · ors.py · demo.py · korridor.py
-  laden/      optimierer.py · kurven.py · preise.py · verfuegbarkeit.py
-              saeulen_import.py
-  live/       sitzung.py · umplanung.py · aufzeichnung.py · aufraeumen.py
-              kanal.py (WebSocket) · simulator.py
+  energie/    model.py (Physik) · profile.py · weather.py
+              calibration.py · charge_phases.py (Fahrt- und Ladeabschnitte)
+  routing/    provider.py (Interface) · ors.py · demo.py · corridor.py
+  laden/      optimizer.py · curves.py · prices.py · availability.py
+              chargers_import.py
+  live/       session.py · replanning.py · recording.py · cleanup.py
+              channel.py (WebSocket) · simulator.py
               quellen/  fremde Meldeformate übersetzen (jolt.py · abrp.py)
   push.py     Web Push: Schlüssel, Abos, Versand
   routers/    auth · fahrzeuge · route (inkl. /ladeplan) · saeulen · live · push
-frontend/     index.html · core.js · app.js · karte.js (eigene Schiebekarte)
-              route.js · live.js · fahrten.js · fahrzeug.js
-              obd.html · obd-kern.js · obd.js  (Dongle, eigene Seite)
+frontend/     index.html · core.js · app.js · map.js (eigene Schiebekarte)
+              route.js · live.js · trips.js · vehicle.js
+              obd.html · obd-core.js · obd.js  (Dongle, eigene Seite)
               sw.js (Offline-Gerüst und Push-Empfang)
 tools/        import_bnetza.py · import_ocm.py · import_ocm_route.py
-              push_schluessel.py · pruefen.py (Gerüst der Prüfskripte)
-              check_modell.py · check_optimierer.py · check_quellen.py
-              check_umplanung.py · check_push.py · check_backend.py
+              push_keyname.py · examine.py (Gerüst der Prüfskripte)
+              check_model.py · check_optimizer.py · check_sources.py
+              check_replanning.py · check_push.py · check_backend.py
               probelauf.py (kein Prüfskript - siehe „Prüfen")
 ```
 
@@ -467,14 +467,14 @@ greifen müsste oder umgekehrt.
 
 **Der Dongle hat eine eigene Seite.** `/obd` funktioniert nur in einem Browser
 mit Web Bluetooth, und ein Bedienelement, das in Safari stumm bleibt, hat in
-der Hauptoberfläche nichts verloren. `obd-kern.js` ist der Baustein — die
+der Hauptoberfläche nichts verloren. `obd-core.js` ist der Baustein — die
 Liste der Messwerte, der Handshake, das Zusammensetzen mehrteiliger Antworten;
 `obd.js` ist die Diagnoseseite darum herum, und `live.js` nutzt denselben
 Baustein während der Fahrt.
 
 **Der Optimierer kennt weder Datenbank noch Netz.** Er bekommt ein fertig
 gerechnetes Streckenprofil und eine Liste von Ladeoptionen — mehr braucht er
-nicht. Das ist der Grund, warum `check_optimierer.py` ohne beides auskommt und
+nicht. Das ist der Grund, warum `check_optimizer.py` ohne beides auskommt und
 ein hypothetischer Standort („was wäre, wenn hier ein 300-kW-Lader stünde?")
 eine Zeile Code ist statt eines Datenbankeintrags.
 
@@ -490,7 +490,7 @@ Polyline". Das löst ein Index auf `(lat, lon)` mit Bounding-Box-Vorfilter und
 Haversine bei rund 150.000 deutschen Ladepunkten in Millisekunden — und erhält
 den SQLite-Fallback für die lokale Entwicklung.
 
-**Keine Kartenbibliothek.** `frontend/karte.js` sind zweihundert Zeilen für
+**Keine Kartenbibliothek.** `frontend/map.js` sind zweihundert Zeilen für
 Kacheln, eine Linie, Marker und Zoomen mit Ziehen. Eine Bibliothek einzubinden
 hiesse, sie mit ins Repo zu legen (die Content-Security-Policy verbietet CDNs)
 und dauerhaft zu pflegen — für einen Bruchteil ihres Funktionsumfangs.
@@ -516,7 +516,7 @@ teils widersprechen:
   — ESP32-Logger, liest die CAN-Rahmen direkt
 
 Wo sie sich widersprechen, steht unten, welcher Fassung jolt folgt und warum.
-Die Liste selbst steht in `frontend/obd-kern.js`; **das ist die
+Die Liste selbst steht in `frontend/obd-core.js`; **das ist die
 Referenz**, diese Tabelle ist ihre Erläuterung.
 
 ### Zieladressen
@@ -630,7 +630,7 @@ bei 79 % Anzeige sind das gut zwei Prozentpunkte.
 
 ## Nächste Schritte
 
-**Belegung der Ladepunkte.** Der Kommentar in `laden/verfuegbarkeit.py` sagt,
+**Belegung der Ladepunkte.** Der Kommentar in `laden/availability.py` sagt,
 echte Belegungsdaten seien für ein Privatprojekt nicht zu haben. Das stimmt
 nicht mehr — jedenfalls nicht für Deutschland. Die
 [OCPDB von MobiData BW](https://mobidata-bw.de/dataset/e-ladesaulen) liefert

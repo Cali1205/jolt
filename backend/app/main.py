@@ -16,15 +16,15 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 
 from . import deps, push, routing
-from .live import aufraeumen
-from .database import SessionLocal, migrate, seed_vorlagen
-from .routers import ALLE_ROUTER
+from .live import cleanup
+from .database import SessionLocal, migrate, seed_templates
+from .routers import ALL_ROUTER
 from .security import SecurityMiddleware
 
 log = logging.getLogger("uvicorn.error")
 
 migrate()
-seed_vorlagen()
+seed_templates()
 
 # Auf einem öffentlich erreichbaren Host legt die interaktive API-Doku die
 # gesamte Angriffsfläche offen. Standard daher: aus.
@@ -40,7 +40,7 @@ app.add_middleware(SecurityMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
-async def _validierung(request: Request, fehler: RequestValidationError):
+async def _validation(request: Request, failure: RequestValidationError):
     """422 ohne den Eingabewert.
 
     Pydantic hängt jedem Fehler die abgelehnte Eingabe an. Ist das `NaN` oder
@@ -52,27 +52,27 @@ async def _validierung(request: Request, fehler: RequestValidationError):
     """
     return JSONResponse(
         {"detail": [{"loc": list(e.get("loc", ())), "msg": e.get("msg", ""),
-                     "type": e.get("type", "")} for e in fehler.errors()]},
+                     "type": e.get("type", "")} for e in failure.errors()]},
         status_code=422)
 
-for router in ALLE_ROUTER:
+for router in ALL_ROUTER:
     app.include_router(router)
 
 
 # Starke Referenz: Die Ereignisschleife hält Aufgaben nur schwach.
-_aufgaben: set = set()
+_tasks: set = set()
 
 
 @app.on_event("startup")
-def _beim_start():
-    deps.beim_start_warnen()
-    push.beim_start_warnen()
-    if routing.ist_demo():
+def _at_start():
+    deps.at_start_warn()
+    push.at_start_warn()
+    if routing.is_demo():
         log.warning("jolt läuft mit Demo-Routing - die Routen sind erfunden.")
     # Vergessene Fahrten selbst beenden. Für eine Aufzeichnung ist das
     # Vergessen ein Totalverlust: Strecke und Energieprofil entstehen erst
     # beim Beenden aus den Messpunkten.
-    _aufgaben.add(asyncio.create_task(aufraeumen.schleife(SessionLocal)))
+    _tasks.add(asyncio.create_task(cleanup.loop(SessionLocal)))
 
 
 # ---------- Frontend ausliefern ----------
@@ -83,10 +83,10 @@ if not os.path.isdir(FRONTEND):
 
 # index.html und sw.js nie cachen: sonst hängen Clients - allen voran
 # iOS-PWAs - auf alten Versionen fest.
-OHNE_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+WITHOUT_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
-def _mit_version(html: str, dateien) -> str:
+def _with_version(html: str, files) -> str:
     """Verweise auf eigene Dateien mit ihrer Änderungszeit versehen.
 
     Der Kern des Problems, das hier viermal zugeschlagen hat: index.html
@@ -105,26 +105,26 @@ def _mit_version(html: str, dateien) -> str:
     Von Hand hochgezählte Versionsnummern kämen dafür nicht in Frage - man
     vergisst sie genau dann, wenn es darauf ankommt.
     """
-    for name in dateien:
+    for name in files:
         try:
-            marke = int(os.path.getmtime(os.path.join(FRONTEND, name)))
+            brand = int(os.path.getmtime(os.path.join(FRONTEND, name)))
         except OSError:
             continue
-        html = html.replace(f"/static/{name}", f"/static/{name}?v={marke}")
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={brand}")
     return html
 
 
 # Die Dateien, die index.html einbindet. Ausdrücklich aufgezählt und nicht
 # aus dem HTML geraten: Ein Suchausdruck über fremden Text ist genau die
 # Sorte Findigkeit, die beim nächsten Umbau still danebenliegt.
-INDEX_DATEIEN = ("ble-plugin.js", "obd-ble-nativ.js", "messwerte.js",
-                 "obd-kern.js",
-                 "core.js", "karte.js", "route.js", "kacheln.js", "anzeige.js", "live.js",
-                 "einstellungen.js",
-                 "fahrten.js", "fahrzeug.js", "app.js")
+INDEX_FILES = ("ble-plugin.js", "obd-ble-native.js", "readings.js",
+                 "obd-core.js",
+                 "core.js", "map.js", "route.js", "tiles.js", "display.js", "live.js",
+                 "settings.js",
+                 "trips.js", "vehicle.js", "app.js")
 
 
-def _code_stand() -> int:
+def _code_as_of() -> int:
     """Wann der Code entstanden ist, den dieser Prozess ausliefert.
 
     Nicht der Zeitpunkt des Bauens, sondern die juengste Aenderungszeit
@@ -136,25 +136,25 @@ def _code_stand() -> int:
     Einmal beim Start bestimmt: In einem laufenden Container aendert sich
     keine dieser Dateien mehr, und die Zeile soll jede Anfrage billig sein.
     """
-    neueste = 0
-    for ordner in (FRONTEND, os.path.dirname(__file__)):
-        for wurzel, _, dateien in os.walk(ordner):
-            for name in dateien:
+    newest = 0
+    for folder in (FRONTEND, os.path.dirname(__file__)):
+        for root, _, files in os.walk(folder):
+            for name in files:
                 if not name.endswith((".py", ".js", ".html", ".css")):
                     continue
                 try:
-                    neueste = max(neueste,
-                                  int(os.path.getmtime(os.path.join(wurzel, name))))
+                    newest = max(newest,
+                                  int(os.path.getmtime(os.path.join(root, name))))
                 except OSError:
                     pass
-    return neueste
+    return newest
 
 
-CODE_STAND = _code_stand()
-PROZESS_START = int(time.time())
+CODE_AS_OF = _code_as_of()
+PROCESS_START = int(time.time())
 
 
-def _stand_zeile(html: str) -> str:
+def _as_of_row(html: str) -> str:
     """Die Fassung in die Kopfzeile setzen.
 
     Zwei Zahlen, weil sie zwei verschiedene Fragen beantworten: Der
@@ -174,23 +174,23 @@ def _stand_zeile(html: str) -> str:
     ist nur der Rueckfall ohne JavaScript und deshalb als UTC benannt.
     """
     return (html
-            .replace("{{STAND_S}}", str(CODE_STAND))
-            .replace("{{START_S}}", str(PROZESS_START))
+            .replace("{{STAND_S}}", str(CODE_AS_OF))
+            .replace("{{START_S}}", str(PROCESS_START))
             .replace("{{STAND}}",
                      time.strftime("%d.%m. %H:%M UTC",
-                                   time.gmtime(CODE_STAND))))
+                                   time.gmtime(CODE_AS_OF))))
 
 
 @app.get("/")
 def index():
-    with open(os.path.join(FRONTEND, "index.html"), encoding="utf-8") as datei:
-        return HTMLResponse(_stand_zeile(_mit_version(datei.read(),
-                                                      INDEX_DATEIEN)),
-                            headers=OHNE_CACHE)
+    with open(os.path.join(FRONTEND, "index.html"), encoding="utf-8") as file:
+        return HTMLResponse(_as_of_row(_with_version(file.read(),
+                                                      INDEX_FILES)),
+                            headers=WITHOUT_CACHE)
 
 
 @app.get("/obd")
-def obd_seite():
+def obd_page():
     """Die OBD2-Diagnoseseite - bewusst **nicht** unter /static erreichbar.
 
     Alles unter /static bekommt von Cloudflare eine Browser-Frist von vier
@@ -207,28 +207,28 @@ def obd_seite():
     frische Dateien nach, ohne dass jemand eine Versionsnummer von Hand
     hochzählt - und ohne dass die Dateien selbst /static verlassen müssten.
     """
-    with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as datei:
-        html = _mit_version(datei.read(), ("ble-plugin.js", "obd-ble-nativ.js",
-                                           "messwerte.js", "obd-kern.js",
+    with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as file:
+        html = _with_version(file.read(), ("ble-plugin.js", "obd-ble-native.js",
+                                           "readings.js", "obd-core.js",
                                            "obd.js", "obd.css"))
     # Dieselbe Marke sichtbar auf der Seite: Zweimal war "welche Fassung ist
     # das eigentlich" die Antwort auf einen vermeintlichen Bluetooth-Fehler,
     # und beide Male liess sich das nur mühsam von aussen feststellen.
-    neueste = 0
-    for name in ("obd.html", "ble-plugin.js", "obd-ble-nativ.js",
-                 "messwerte.js", "obd-kern.js", "obd.js", "obd.css"):
+    newest = 0
+    for name in ("obd.html", "ble-plugin.js", "obd-ble-native.js",
+                 "readings.js", "obd-core.js", "obd.js", "obd.css"):
         try:
-            neueste = max(neueste,
+            newest = max(newest,
                           int(os.path.getmtime(os.path.join(FRONTEND, name))))
         except OSError:
             pass
     html = html.replace("STAND", time.strftime("%d.%m. %H:%M",
-                                               time.localtime(neueste)))
-    return HTMLResponse(html, headers=OHNE_CACHE)
+                                               time.localtime(newest)))
+    return HTMLResponse(html, headers=WITHOUT_CACHE)
 
 
 @app.get("/static/obd.html")
-def obd_alte_adresse():
+def obd_old_address():
     """Die alte Adresse der Diagnoseseite - leitet auf /obd um.
 
     Sie muss verschwinden, nicht nur veraltet sein: Unter /static liegt sie
@@ -243,13 +243,13 @@ def obd_alte_adresse():
     (308) merkt sich der Browser und liesse sich später nicht mehr
     zurücknehmen.
     """
-    return RedirectResponse("/obd", status_code=307, headers=OHNE_CACHE)
+    return RedirectResponse("/obd", status_code=307, headers=WITHOUT_CACHE)
 
 
 @app.get("/sw.js")
 def service_worker():
     return FileResponse(os.path.join(FRONTEND, "sw.js"),
-                        media_type="application/javascript", headers=OHNE_CACHE)
+                        media_type="application/javascript", headers=WITHOUT_CACHE)
 
 
 @app.get("/favicon.ico")
@@ -280,7 +280,7 @@ def manifest_obd():
                         media_type="application/manifest+json")
 
 
-class StatischOhneStaleCache(StaticFiles):
+class StaticWithoutStaleCache(StaticFiles):
     """Statische Dateien mit Revalidierung statt blindem Cachen.
 
     Ohne Cache-Control am Ursprung setzt ein CDN seine eigene Vorgabe - bei
@@ -297,9 +297,9 @@ class StatischOhneStaleCache(StaticFiles):
     """
 
     def file_response(self, *args, **kwargs):
-        antwort = super().file_response(*args, **kwargs)
-        antwort.headers["Cache-Control"] = "no-cache"
-        return antwort
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
-app.mount("/static", StatischOhneStaleCache(directory=FRONTEND), name="static")
+app.mount("/static", StaticWithoutStaleCache(directory=FRONTEND), name="static")

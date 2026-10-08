@@ -7,16 +7,16 @@
 window.jolt = (function () {
   "use strict";
 
-  const zustand = {
-    fahrt: null,        // eine gewählte Variante aus POST /api/route
-    fahrzeuge: [],
-    sitzungId: null,    // laufende Live-Sitzung
+  const state = {
+    trip: null,        // eine gewählte Variante aus POST /api/route
+    vehicles: [],
+    sessionId: null,    // laufende Live-Sitzung
     /* Das Fahrzeug der laufenden Aufzeichnung.
      *
      * Eine Aufzeichnung hat keine geplante Fahrt, also auch kein
      * `zustand.fahrt.fahrzeug` - und ohne die Akkugrösse lässt sich aus
      * einem Ladestand keine Kilowattstunde machen. */
-    aufzFahrzeug: null,
+    recVehicle: null,
     serviceWorker: null, // Registrierung, für das Push-Abo gebraucht
     /* Ob die Fahrtenliste neu geholt werden muss.
      *
@@ -24,15 +24,15 @@ window.jolt = (function () {
      * nicht bezahlen. Nur weiss der, der eine Fahrt anlegt, nicht, dass es
      * eine Liste gibt, und der, der die Liste zeigt, nicht, wann eine Fahrt
      * entsteht. Vorher riefen deshalb zwei Module `joltFahrten.veraltet()`
-     * und `fahrten.js` in beide zurück - zwei Zyklen für eine Marke.
+     * und `trips.js` in beide zurück - zwei Zyklen für eine Marke.
      *
      * Hier ist sie richtig aufgehoben: Wer eine Fahrt anlegt, setzt sie;
      * wer die Liste zeigt, liest sie. Keiner muss vom anderen wissen. */
-    fahrtenVeraltet: false,
+    tripsStale: false,
   };
 
-  const TOKEN_SCHLUESSEL = "jolt-token";
-  const SITZUNG_SCHLUESSEL = "jolt-sitzung";
+  const TOKEN_KEY = "jolt-token";
+  const SESSION_KEY = "jolt-sitzung";
 
   /* Die laufende Sitzung überlebt ein Neuladen.
    *
@@ -46,102 +46,102 @@ window.jolt = (function () {
    * Verbrauchsfaktor, der Zeitfaktor, die Kurve - und beim Beenden lernt
    * jolt nur aus der letzten Sitzung statt aus der ganzen Fahrt.
    */
-  function sitzungMerken(id) {
+  function sessionRemember(id) {
     try {
-      if (id) localStorage.setItem(SITZUNG_SCHLUESSEL, String(id));
-      else localStorage.removeItem(SITZUNG_SCHLUESSEL);
+      if (id) localStorage.setItem(SESSION_KEY, String(id));
+      else localStorage.removeItem(SESSION_KEY);
     } catch (e) { /* ohne Speicher eben ohne Gedächtnis */ }
   }
 
-  function gemerkteSitzung() {
+  function rememberedSession() {
     try {
-      const roh = localStorage.getItem(SITZUNG_SCHLUESSEL);
-      return roh ? Number(roh) : null;
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? Number(raw) : null;
     } catch (e) { return null; }
   }
 
   function token() {
-    try { return localStorage.getItem(TOKEN_SCHLUESSEL) || ""; }
+    try { return localStorage.getItem(TOKEN_KEY) || ""; }
     catch (e) { return ""; }
   }
 
-  function tokenSetzen(wert) {
-    try { localStorage.setItem(TOKEN_SCHLUESSEL, wert || ""); } catch (e) {}
+  function setToken(val) {
+    try { localStorage.setItem(TOKEN_KEY, val || ""); } catch (e) {}
   }
 
   /* Ein einziger Ort für alle Aufrufe - damit der Token, die Fehlerbehandlung
    * und das JSON-Auspacken nicht an zwanzig Stellen leicht verschieden sind. */
-  async function api(pfad, optionen) {
-    const opt = Object.assign({ headers: {} }, optionen || {});
+  async function api(fs_path, options) {
+    const opt = Object.assign({ headers: {} }, options || {});
     opt.headers = Object.assign({ "X-Token": token() }, opt.headers);
     if (opt.body !== undefined && typeof opt.body !== "string") {
       opt.headers["Content-Type"] = "application/json";
       opt.body = JSON.stringify(opt.body);
     }
 
-    let antwort;
+    let response;
     try {
-      antwort = await fetch(pfad, opt);
+      response = await fetch(fs_path, opt);
     } catch (e) {
       // Kein `status`: Wer puffert, unterscheidet damit "Netz weg" von
       // "Server hat abgelehnt".
       throw new Error("Server nicht erreichbar.");
     }
 
-    let daten = null;
-    try { daten = await antwort.json(); } catch (e) { /* leere Antwort */ }
+    let records = null;
+    try { records = await response.json(); } catch (e) { /* leere Antwort */ }
 
-    if (!antwort.ok) {
-      const grund = (daten && (daten.detail || daten.message))
-        || `HTTP ${antwort.status}`;
-      const fehler = new Error(typeof grund === "string" ? grund
-                                                         : JSON.stringify(grund));
-      fehler.status = antwort.status;
-      throw fehler;
+    if (!response.ok) {
+      const reason = (records && (records.detail || records.message))
+        || `HTTP ${response.status}`;
+      const failure = new Error(typeof reason === "string" ? reason
+                                                         : JSON.stringify(reason));
+      failure.status = response.status;
+      throw failure;
     }
-    return daten;
+    return records;
   }
 
   /* ---------- Meldungen ---------- */
 
-  function melden(text, art) {
-    const behaelter = document.getElementById("meldungen");
-    if (!behaelter) return;
-    const kasten = document.createElement("div");
-    kasten.className = "meldung " + (art || "hinweis");
-    kasten.textContent = text;
-    behaelter.appendChild(kasten);
+  function report(text, variety) {
+    const container = document.getElementById("meldungen");
+    if (!container) return;
+    const box = document.createElement("div");
+    box.className = "meldung " + (variety || "hinweis");
+    box.textContent = text;
+    container.appendChild(box);
     // Fehler bleiben stehen, bis der nächste Versuch läuft - eine Meldung,
     // die nach drei Sekunden verschwindet, hat man unterwegs nie gelesen.
-    if (art !== "fehler") {
-      setTimeout(() => kasten.remove(), 6000);
+    if (variety !== "fehler") {
+      setTimeout(() => box.remove(), 6000);
     }
   }
 
-  function meldungenLeeren() {
-    const behaelter = document.getElementById("meldungen");
-    if (behaelter) behaelter.innerHTML = "";
+  function reportsClear() {
+    const container = document.getElementById("meldungen");
+    if (container) container.innerHTML = "";
   }
 
   /* ---------- Formatierung ---------- */
 
-  const zahl = (wert, stellen) =>
-    (wert === null || wert === undefined || Number.isNaN(wert))
+  const num = (val, put) =>
+    (val === null || val === undefined || Number.isNaN(val))
       ? "–"
-      : Number(wert).toLocaleString("de-DE", {
-          minimumFractionDigits: stellen || 0,
-          maximumFractionDigits: stellen || 0 });
+      : Number(val).toLocaleString("de-DE", {
+          minimumFractionDigits: put || 0,
+          maximumFractionDigits: put || 0 });
 
-  function dauer(minuten) {
-    if (minuten === null || minuten === undefined) return "–";
-    const m = Math.round(minuten);
+  function duration(mins) {
+    if (mins === null || mins === undefined) return "–";
+    const m = Math.round(mins);
     if (m < 60) return m + " min";
     return Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0");
   }
 
-  function wertKachel(name, zahlText, art) {
-    return `<div class="wert ${art || ""}">
-      <div class="zahl">${zahlText}</div><div class="name">${name}</div></div>`;
+  function valueTile(name, numberText, variety) {
+    return `<div class="wert ${variety || ""}">
+      <div class="zahl">${numberText}</div><div class="name">${name}</div></div>`;
   }
 
   /* ---------- Zeiten vom Server ---------- */
@@ -154,41 +154,41 @@ window.jolt = (function () {
    * wo es 17:56 war, und jeder Vergleich mit `Date.now()` lag zwei Stunden
    * daneben - so hielt jolt nach dem Neuladen die letzten Fahrzeugwerte für
    * zwei Stunden alt und baute die Dongle-Verbindung neu auf. */
-  function zeit(text) {
+  function timestamp(text) {
     if (typeof text !== "string" || !text) return null;
     // Nur ein Datum ohne Uhrzeit liest JavaScript ohnehin als UTC.
-    const hatZone = !text.includes("T") || /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
-    const d = new Date(hatZone ? text : text + "Z");
+    const hasZone = !text.includes("T") || /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
+    const d = new Date(hasZone ? text : text + "Z");
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
   /* Dasselbe als Millisekunden - NaN, wenn es keine Zeit ist. */
-  function zeitMs(text) {
-    const d = zeit(text);
+  function timeMs(text) {
+    const d = timestamp(text);
     return d === null ? NaN : d.getTime();
   }
 
   /* ---------- Kleinkram ---------- */
 
-  function an(id, ereignis, funktion) {
+  function at(id, event, fn) {
     const el = document.getElementById(id);
-    if (el) el.addEventListener(ereignis, funktion);
+    if (el) el.addEventListener(event, fn);
     return el;
   }
 
-  function reglerKoppeln(reglerId, anzeigeId, beiAenderung) {
-    const regler = document.getElementById(reglerId);
-    const anzeige = document.getElementById(anzeigeId);
-    if (!regler || !anzeige) return;
-    const aktualisieren = () => {
-      anzeige.textContent = regler.value;
-      if (beiAenderung) beiAenderung(Number(regler.value));
+  function sliderCouple(sliderId, displayId, atChange) {
+    const slider = document.getElementById(sliderId);
+    const display = document.getElementById(displayId);
+    if (!slider || !display) return;
+    const refresh = () => {
+      display.textContent = slider.value;
+      if (atChange) atChange(Number(slider.value));
     };
-    regler.addEventListener("input", aktualisieren);
-    aktualisieren();
+    slider.addEventListener("input", refresh);
+    refresh();
   }
 
-  return { zustand, api, token, tokenSetzen, melden, meldungenLeeren,
-           sitzungMerken, gemerkteSitzung,
-           zahl, dauer, wertKachel, zeit, zeitMs, an, reglerKoppeln };
+  return { state, api, token, setToken, report, reportsClear,
+           sessionRemember, rememberedSession,
+           num, duration, valueTile, timestamp, timeMs, at, sliderCouple };
 })();

@@ -9,7 +9,7 @@ Web Push: Der Server schickt die Nachricht an den Push-Dienst des Browsers
 **Ohne VAPID-Schlüssel ist die Funktion aus.** Das ist dieselbe Haltung wie bei
 `ORS_API_KEY` und `APP_PASSWORT`: Was nicht eingerichtet ist, wird nicht
 vorgetäuscht - es steht beim Start im Log und die Oberfläche sagt es dazu.
-Schlüssel erzeugt `tools/push_schluessel.py`.
+Schlüssel erzeugt `tools/push_keyname.py`.
 
 Zwei Dinge, die hier bewusst so und nicht anders sind:
 
@@ -43,7 +43,7 @@ log = logging.getLogger("uvicorn.error")
 # Wie lange auf den Push-Dienst gewartet wird. Die Nachricht ist unterwegs
 # relevant oder gar nicht; ein Aufruf, der eine Minute hängt, hilft niemandem
 # und hält einen Thread fest.
-ZEITGRENZE_S = 10
+TIME_LIMIT_S = 10
 
 # Antworten, nach denen ein Abo endgültig weg ist.
 TOT = (404, 410)
@@ -53,58 +53,58 @@ TOT = (404, 410)
 # Schlüssel
 # ---------------------------------------------------------------------------
 
-def _b64(rohdaten: bytes) -> str:
-    return base64.urlsafe_b64encode(rohdaten).rstrip(b"=").decode("ascii")
+def _b64(raw_data: bytes) -> str:
+    return base64.urlsafe_b64encode(raw_data).rstrip(b"=").decode("ascii")
 
 
-def schluessel_erzeugen() -> tuple[str, str]:
+def generate_key() -> tuple[str, str]:
     """Ein neues VAPID-Schlüsselpaar: (privat, öffentlich), beide base64url.
 
     Der öffentliche Schlüssel ist der unkomprimierte Punkt (65 Byte) - genau
     das Format, das der Browser als `applicationServerKey` erwartet.
     """
-    privat = ec.generate_private_key(ec.SECP256R1())
-    roh_privat = privat.private_numbers().private_value.to_bytes(32, "big")
-    roh_oeffentlich = privat.public_key().public_bytes(
+    private_ = ec.generate_private_key(ec.SECP256R1())
+    raw_private_ = private_.private_numbers().private_value.to_bytes(32, "big")
+    raw_public_ = private_.public_key().public_bytes(
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-    return _b64(roh_privat), _b64(roh_oeffentlich)
+    return _b64(raw_private_), _b64(raw_public_)
 
 
-def privater_schluessel() -> str:
+def private_key() -> str:
     return os.environ.get("VAPID_PRIVATE_KEY", "").strip()
 
 
-def oeffentlicher_schluessel() -> str:
+def pub_key() -> str:
     return os.environ.get("VAPID_PUBLIC_KEY", "").strip()
 
 
-def absender() -> str:
+def sender() -> str:
     """Die `sub`-Angabe der VAPID-Behauptung.
 
     Der Push-Dienst will wissen, wen er erreichen kann, wenn ein Server
     auffällig wird. Eine mailto:- oder https:-Adresse, sonst lehnen manche
     Dienste ab.
     """
-    wert = os.environ.get("VAPID_SUBJECT", "").strip()
-    return wert or "mailto:jolt@localhost"
+    val = os.environ.get("VAPID_SUBJECT", "").strip()
+    return val or "mailto:jolt@localhost"
 
 
-def ist_eingerichtet() -> bool:
-    return bool(privater_schluessel() and oeffentlicher_schluessel())
+def actual_configured() -> bool:
+    return bool(private_key() and pub_key())
 
 
-def beim_start_warnen() -> None:
-    if not ist_eingerichtet():
+def at_start_warn() -> None:
+    if not actual_configured():
         log.info("Kein VAPID-Schlüssel gesetzt - Benachrichtigungen aufs Telefon "
-                 "sind aus. Schlüssel erzeugen: tools/push_schluessel.py")
+                 "sind aus. Schlüssel erzeugen: tools/push_keyname.py")
 
 
 # ---------------------------------------------------------------------------
 # Abos
 # ---------------------------------------------------------------------------
 
-def abo_speichern(db, endpoint: str, p256dh: str, auth: str,
-                  geraet: str = "") -> models.PushAbo:
+def save_subscription(db, endpoint: str, p256dh: str, auth: str,
+                  device: str = "") -> models.PushSubscription:
     """Ein Abo anlegen oder auffrischen.
 
     Idempotent über den Endpunkt: Der Browser liefert bei jedem Aufruf
@@ -112,38 +112,38 @@ def abo_speichern(db, endpoint: str, p256dh: str, auth: str,
     erneuern und nicht verdoppeln - sonst bekäme dasselbe Telefon die
     Benachrichtigung mehrfach.
     """
-    abo = db.query(models.PushAbo).filter_by(endpoint=endpoint).one_or_none()
-    if abo is None:
-        abo = models.PushAbo(endpoint=endpoint)
-        db.add(abo)
-    abo.p256dh = p256dh
-    abo.auth = auth
-    abo.geraet = (geraet or "")[:120]
-    abo.fehler = 0
+    subscription = db.query(models.PushSubscription).filter_by(endpoint=endpoint).one_or_none()
+    if subscription is None:
+        subscription = models.PushSubscription(endpoint=endpoint)
+        db.add(subscription)
+    subscription.p256dh = p256dh
+    subscription.auth = auth
+    subscription.device = (device or "")[:120]
+    subscription.failure = 0
     db.commit()
-    return abo
+    return subscription
 
 
-def abo_loeschen(db, endpoint: str) -> bool:
-    abo = db.query(models.PushAbo).filter_by(endpoint=endpoint).one_or_none()
-    if abo is None:
+def delete_subscription(db, endpoint: str) -> bool:
+    subscription = db.query(models.PushSubscription).filter_by(endpoint=endpoint).one_or_none()
+    if subscription is None:
         return False
-    db.delete(abo)
+    db.delete(subscription)
     db.commit()
     return True
 
 
-def _als_abo(abo: models.PushAbo) -> dict:
+def _as_subscription(subscription: models.PushSubscription) -> dict:
     """In die Form bringen, die pywebpush erwartet."""
-    return {"endpoint": abo.endpoint,
-            "keys": {"p256dh": abo.p256dh, "auth": abo.auth}}
+    return {"endpoint": subscription.endpoint,
+            "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}}
 
 
 # ---------------------------------------------------------------------------
 # Versand
 # ---------------------------------------------------------------------------
 
-def endpoint_erlaubt(endpoint: str) -> bool:
+def endpoint_allowed(endpoint: str) -> bool:
     """Ob der Server diese Adresse als Push-Dienst anrufen darf.
 
     Der Endpunkt kommt vom Browser, also von jedem, der Zugang hat - und der
@@ -153,84 +153,84 @@ def endpoint_erlaubt(endpoint: str) -> bool:
     damit heraus. Nicht auflösbar heisst abgelehnt.
     """
     try:
-        teile = urlsplit(endpoint)
-        host = teile.hostname
-        if teile.scheme != "https" or not host or teile.username or teile.password:
+        parts = urlsplit(endpoint)
+        host = parts.hostname
+        if parts.scheme != "https" or not host or parts.username or parts.password:
             return False
-        adressen = {a[4][0] for a in socket.getaddrinfo(host, teile.port or 443,
+        addresses = {a[4][0] for a in socket.getaddrinfo(host, parts.port or 443,
                                                         proto=socket.IPPROTO_TCP)}
     except (ValueError, OSError):
         return False
-    if not adressen:
+    if not addresses:
         return False
-    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in adressen)
+    return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
 
 
-def _echt_senden(abo: models.PushAbo, nachricht: bytes) -> int:
+def _send_real(subscription: models.PushSubscription, msg: bytes) -> int:
     """Der wirkliche Versand an den Push-Dienst. Gibt den HTTP-Status zurück."""
     from pywebpush import WebPushException, webpush
 
     # Auch beim Senden prüfen: Ein altes Abo oder ein Name, der inzwischen
     # woanders hinzeigt, darf den Server nicht ins eigene Netz schicken.
-    if not endpoint_erlaubt(abo.endpoint):
+    if not endpoint_allowed(subscription.endpoint):
         return 0
     try:
-        antwort = webpush(
-            subscription_info=_als_abo(abo), data=nachricht,
-            vapid_private_key=privater_schluessel(),
-            vapid_claims={"sub": absender()},
-            content_encoding="aes128gcm", timeout=ZEITGRENZE_S)
-        return getattr(antwort, "status_code", 201)
-    except WebPushException as fehler:
-        antwort = getattr(fehler, "response", None)
+        response = webpush(
+            subscription_info=_as_subscription(subscription), data=msg,
+            vapid_private_key=private_key(),
+            vapid_claims={"sub": sender()},
+            content_encoding="aes128gcm", timeout=TIME_LIMIT_S)
+        return getattr(response, "status_code", 201)
+    except WebPushException as failure:
+        response = getattr(failure, "response", None)
         # Ohne Antwort ist es ein Netzproblem, kein Urteil über das Abo.
-        return getattr(antwort, "status_code", 0) if antwort is not None else 0
+        return getattr(response, "status_code", 0) if response is not None else 0
 
 
-def senden(db, titel: str, text: str, url: str = "/", versender=None) -> dict:
+def send(db, title: str, text: str, url: str = "/", dispatcher=None) -> dict:
     """Eine Benachrichtigung an alle Abos. Räumt tote Abos dabei auf.
 
     `versender(abo, nachricht) -> HTTP-Status` lässt sich ersetzen; damit sind
     Auswahl, Nutzlast und Aufräumen prüfbar, ohne einen Push-Dienst zu
     erreichen.
     """
-    if versender is None:
-        if not ist_eingerichtet():
-            return {"gesendet": 0, "entfernt": 0, "fehler": 0, "aus": True}
-        versender = _echt_senden
+    if dispatcher is None:
+        if not actual_configured():
+            return {"sent": 0, "removed": 0, "failure": 0, "origin_of": True}
+        dispatcher = _send_real
 
-    nachricht = json.dumps({"titel": titel, "text": text, "url": url},
+    msg = json.dumps({"title": title, "text": text, "url": url},
                            ensure_ascii=False).encode("utf-8")
 
-    gesendet = fehler = 0
-    tot: list[models.PushAbo] = []
-    for abo in db.query(models.PushAbo).all():
+    sent = failure = 0
+    tot: list[models.PushSubscription] = []
+    for subscription in db.query(models.PushSubscription).all():
         try:
-            status = versender(abo, nachricht)
-        except Exception as ausnahme:      # noqa: BLE001
-            log.warning("Push an %s fehlgeschlagen: %s", abo.endpoint[:60],
-                        ausnahme)
+            status = dispatcher(subscription, msg)
+        except Exception as exception:      # noqa: BLE001
+            log.warning("Push an %s fehlgeschlagen: %s", subscription.endpoint[:60],
+                        exception)
             status = 0
 
         if status in TOT:
-            tot.append(abo)
+            tot.append(subscription)
         elif 200 <= status < 300:
-            gesendet += 1
-            abo.fehler = 0
+            sent += 1
+            subscription.failure = 0
         else:
-            fehler += 1
-            abo.fehler = (abo.fehler or 0) + 1
+            failure += 1
+            subscription.failure = (subscription.failure or 0) + 1
 
-    for abo in tot:
-        log.info("Push-Abo entfernt (abgemeldet): %s", abo.endpoint[:60])
-        db.delete(abo)
+    for subscription in tot:
+        log.info("Push-Abo entfernt (abgemeldet): %s", subscription.endpoint[:60])
+        db.delete(subscription)
     db.commit()
 
-    return {"gesendet": gesendet, "entfernt": len(tot), "fehler": fehler,
-            "aus": False}
+    return {"sent": sent, "removed": len(tot), "failure": failure,
+            "origin_of": False}
 
 
-def senden_hintergrund(db_factory, titel: str, text: str, url: str = "/") -> None:
+def send_background(db_factory, title: str, text: str, url: str = "/") -> None:
     """Wie `senden`, aber ohne den Aufrufer aufzuhalten.
 
     Ein Messpunkt kommt aus einem fahrenden Auto; die Antwort darauf darf nicht
@@ -238,16 +238,16 @@ def senden_hintergrund(db_factory, titel: str, text: str, url: str = "/") -> Non
     Datenbanksitzung - eine über Threads geteilte wäre genau der Fehler, den
     SQLAlchemy nicht verzeiht.
     """
-    if not ist_eingerichtet():
+    if not actual_configured():
         return
 
-    def lauf():
+    def cycle():
         db = db_factory()
         try:
-            senden(db, titel, text, url)
-        except Exception as fehler:      # noqa: BLE001
-            log.warning("Push im Hintergrund fehlgeschlagen: %s", fehler)
+            send(db, title, text, url)
+        except Exception as failure:      # noqa: BLE001
+            log.warning("Push im Hintergrund fehlgeschlagen: %s", failure)
         finally:
             db.close()
 
-    threading.Thread(target=lauf, daemon=True, name="jolt-push").start()
+    threading.Thread(target=cycle, daemon=True, name="jolt-push").start()
