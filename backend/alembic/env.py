@@ -1,13 +1,13 @@
-"""Alembic-Umgebung für jolt.
+"""Alembic environment for jolt.
 
-Zwei Dinge weichen bewusst vom Standard-Gerüst ab:
+Two things deliberately deviate from the standard scaffold:
 
-1. Die Datenbank-URL kommt aus `DATABASE_URL`, nicht aus alembic.ini - so
-   steht kein Passwort in einer eingecheckten Datei.
-2. `render_as_batch=True`, damit `alter_column` auch unter SQLite läuft.
-   SQLite kann keine Spalten ändern; Alembic baut die Tabelle dann neu. Ohne
-   das wären die Entwicklungs-DB und die Prüfläufe von den Migrationen
-   ausgeschlossen - also genau von dem, was geprüft werden müsste.
+1. The database URL comes from `DATABASE_URL`, not from alembic.ini - so no
+   password sits in a checked-in file.
+2. `render_as_batch=True`, so that `alter_column` also works on SQLite.
+   SQLite cannot alter columns; Alembic then rebuilds the table. Without
+   this, the development DB and the test runs would be excluded from the
+   migrations - i.e. exactly from what is supposed to be tested.
 """
 import os
 import sys
@@ -18,7 +18,7 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import Base  # noqa: E402
-from app import models  # noqa: E402,F401  - füllt Base.metadata
+from app import models  # noqa: E402,F401  - populates Base.metadata
 
 config = context.config
 config.set_main_option(

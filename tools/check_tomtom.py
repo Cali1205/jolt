@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Prüft die Anbindung an TomTom - `routing/tomtom.py` - ohne Netz.
+"""Checks the TomTom integration - `routing/tomtom.py` - without network.
 
-TomTom ist hier nur Berater: Vorschläge und Verkehr, nichts davon wird
-gespeichert. Geprüft wird, was schiefgehen kann, ohne dass es jemand merkt:
+TomTom is only an adviser here: suggestions and traffic, none of it is
+stored. What is checked is what can go wrong without anyone noticing:
 
-- dass der Schlüssel nie in einer Fehlermeldung landet (er steht in der
-  Adresse, und `requests` hängt die Adresse an jede Ausnahme),
-- dass ein Vorschlag, der keinen Ladeplan retten kann, gar nicht erst
-  nachgefahren wird (jeder kostet eine Anfrage beim Routing),
-- dass kaputte Antworten die Planung nicht mitreissen.
+- that the key never ends up in an error message (it is part of the
+  address, and `requests` attaches the address to every exception),
+- that a suggestion that cannot rescue a charging plan is not even
+  driven (each one costs a request to the routing service),
+- that broken responses do not drag the planning down with them.
 
-Die Zahlen für die Vorschläge sind an echten Strecken gemessen (5.10.2026).
+The numbers for the suggestions were measured on real routes (5 Oct 2026).
 
     ./tools/check_tomtom.py
 """
@@ -58,9 +58,9 @@ def route_json(km, seconds, points=3, traffic=0, without=None):
 
 
 def with_response(response_or_error, fn):
-    """`funktion` ausführen, während `requests.get` die vorgegebene Antwort
-    liefert (oder die Ausnahme wirft). Gibt zurück, was `funktion` liefert oder
-    die Ausnahme."""
+    """Run `fn` while `requests.get` returns the given response
+    (or raises the exception). Returns what `fn` returns or
+    the exception."""
     real = requests.get
 
     def wrong(url, **kw):
@@ -117,13 +117,13 @@ def main() -> int:
            "fehlt die Zeit ohne Verkehr, gilt die mit - keine Verzögerung erfunden")
 
     verify.section("Nicht überholte Vorschläge")
-    # Gemessen: Reutlingen - Gueugnon. Jede Alternative länger UND langsamer.
+    # Measured: Reutlingen - Gueugnon. Every alternative longer AND slower.
     gueugnon = [v(538, 353), v(663, 394), v(682, 430), v(559, 460), v(618, 457), v(758, 502)]
     verify(len(tomtom.not_overtaken(gueugnon)) == 1,
            "wo jede Alternative länger und langsamer ist, bleibt nur die beste - "
            "keine Anfrage beim Routing für aussichtslose Wege",
            str(len(tomtom.not_overtaken(gueugnon))))
-    # Gemessen: Reutlingen - München. Zwei Wege sind nicht zu schlagen.
+    # Measured: Reutlingen - München. Two routes cannot be beaten.
     munich = [v(264, 149), v(257, 182), v(215, 163), v(240, 195), v(280, 222), v(304, 225)]
     front = tomtom.not_overtaken(munich)
     verify([round(x.distance_m / 1000) for x in front] == [264, 215],
@@ -133,7 +133,7 @@ def main() -> int:
     verify(len(tomtom.not_overtaken([v(100, 60), v(100, 60)])) == 2,
            "zwei gleiche Vorschläge überholen einander nicht (das Routing legt "
            "sie später selbst zusammen)")
-    many = [v(300 - 10 * i, 150 + 15 * i) for i in range(6)]       # alle nicht überholt
+    many = [v(300 - 10 * i, 150 + 15 * i) for i in range(6)]       # none overtaken
     verify(len(tomtom.not_overtaken(many)) == tomtom.MAX_FOLLOW,
            "und höchstens drei werden nachgefahren - jeder kostet ein Stück vom "
            "Tageskontingent", str(len(tomtom.not_overtaken(many))))
@@ -149,8 +149,8 @@ def main() -> int:
     failure, _ = with_response(Response(invalid=True), lambda: tomtom.alternativen(city, (49.0, 9.0)))
     verify(isinstance(failure, TomTomError), "eine Antwort, die kein JSON ist, auch")
 
-    # Der Schlüssel steht in der Adresse, und requests hängt die Adresse an
-    # die Ausnahme. Sie darf nie in der Meldung stehen.
+    # The key is part of the address, and requests attaches the address to the
+    # exception. It must never appear in the message.
     bad = requests.exceptions.ConnectionError(
         f"HTTPSConnectionPool: Max retries exceeded with url: /routing/1/x?key={SECRET}")
     failure, _ = with_response(bad, lambda: tomtom.alternativen(city, (49.0, 9.0)))
@@ -182,9 +182,9 @@ def main() -> int:
            "mehr als fünf verlangt TomTom nicht - zu hoch gegriffen wird gedeckelt")
 
     verify.section("Verkehr")
-    # trafficDelayInSeconds steht absichtlich daneben und stimmt nicht: Es
-    # meint nur die Echtzeit-Verzögerung (gemessen +12,9 min, wo die Reisezeiten
-    # 21 Minuten Unterschied zeigen).
+    # trafficDelayInSeconds is deliberately placed next to it and is wrong: it
+    # only means the real-time delay (measured +12.9 min, where the travel times
+    # show a difference of 21 minutes).
     summary = {"routes": [{"summary": {"travelTimeInSeconds": 23340,
                                                "trafficDelayInSeconds": 100,
                                                "noTrafficTravelTimeInSeconds": 22638}}]}
@@ -210,7 +210,7 @@ def main() -> int:
     verify.section("Abfahrtszeit")
     from datetime import datetime, timedelta, timezone
     later = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=4)
-    ant = {"routes": [route_json(723, 23400, without=21720)]}      # Fr 16 Uhr, gemessen
+    ant = {"routes": [route_json(723, 23400, without=21720)]}      # Fri 4 pm, measured
 
     def params_from(departure):
         _, calls = with_response(Response(200, ant),

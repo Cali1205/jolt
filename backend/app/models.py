@@ -1,8 +1,8 @@
-"""Datenmodell von jolt.
+"""Data model of jolt.
 
-Die Aufteilung folgt der Frage, was sich wie oft ändert: Fahrzeugparameter
-selten, Ladekurven gelegentlich, Ladepunkte bei jedem Import, Live-Messpunkte
-im Sekundentakt.
+The division follows the question of what changes how often: vehicle
+parameters rarely, charging curves occasionally, charging points on every
+import, live measurement points every second.
 """
 from datetime import datetime
 
@@ -14,8 +14,8 @@ from .database import Base
 
 
 class AuthSession(Base):
-    """Angemeldetes Gerät. Ein Token je Gerät, damit sich eines einzeln
-    abmelden lässt, ohne die anderen mitzunehmen."""
+    """A logged-in device. One token per device, so that one can be logged out
+    individually without taking the others along."""
     __tablename__ = "auth_sessions"
 
     id = Column(Integer, primary_key=True)
@@ -26,16 +26,16 @@ class AuthSession(Base):
 
 
 class PushSubscription(Base):
-    """Ein Gerät, das Benachrichtigungen bekommen will.
+    """A device that wants to receive notifications.
 
-    Der `endpoint` ist die vom Browser vergebene Adresse beim Push-Dienst und
-    zugleich der Schlüssel: Derselbe Browser liefert ihn erneut, solange die
-    Erlaubnis besteht. Deshalb ist er eindeutig - ein zweites Abo desselben
-    Geräts hiesse, dass dasselbe Telefon jede Meldung doppelt bekommt.
+    The `endpoint` is the address at the push service assigned by the browser
+    and at the same time the key: the same browser delivers it again as long
+    as the permission exists. That is why it is unique - a second subscription
+    of the same device would mean that the same phone gets every message twice.
 
-    Die beiden Schlüssel gehören dem Gerät, nicht dem Server: Mit ihnen wird
-    die Nutzlast so verschlüsselt, dass der Push-Dienst sie weiterreicht, ohne
-    sie lesen zu können.
+    The two keys belong to the device, not to the server: with them the payload
+    is encrypted so that the push service passes it on without being able to
+    read it.
     """
     __tablename__ = "push_subscriptions"
 
@@ -45,19 +45,19 @@ class PushSubscription(Base):
     auth = Column(String(100), nullable=False)
     device = Column(String(120), default="")
 
-    # Aufeinanderfolgende Fehlversuche. Ein totes Abo wird sofort gelöscht
-    # (404/410); dieser Zähler zeigt nur, dass ein Gerät dauerhaft nicht
-    # erreichbar ist, ohne sich abgemeldet zu haben.
+    # Consecutive failed attempts. A dead subscription is deleted immediately
+    # (404/410); this counter only shows that a device is permanently
+    # unreachable without having unsubscribed.
     failure = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Vehicle(Base):
-    """Alles, was das Verbrauchsmodell über das Auto wissen muss.
+    """Everything the consumption model needs to know about the car.
 
-    Die Parameter sind absichtlich physikalisch und nicht "kWh/100 km": Nur so
-    lässt sich beantworten, was 130 statt 110 km/h kosten oder was ein Pass
-    verbraucht. Der pauschale Wert kann das nicht - siehe konzept-routenplaner.md.
+    The parameters are deliberately physical and not "kWh/100 km": only that
+    way can it be answered what 130 instead of 110 km/h costs or what a pass
+    consumes. The flat value cannot do that - see konzept-routenplaner.md.
     """
     __tablename__ = "vehicles"
 
@@ -65,8 +65,8 @@ class Vehicle(Base):
     name = Column(String(120), nullable=False)
 
     battery_gross_kwh = Column(Float, nullable=False)
-    # Nutzbar ist immer weniger als brutto - der Puffer oben und unten gehört
-    # dem Batteriemanagement. Gerechnet wird ausschliesslich mit netto.
+    # Usable is always less than gross - the buffer at the top and bottom
+    # belongs to the battery management. Only net is used for calculations.
     battery_net_kwh = Column(Float, nullable=False)
 
     curb_mass_kg = Column(Float, nullable=False, default=1800.0)
@@ -76,22 +76,22 @@ class Vehicle(Base):
     frontal_area_m2 = Column(Float, nullable=False, default=2.3)
     c_rr = Column(Float, nullable=False, default=0.010)
 
-    # Höchstgeschwindigkeit des Fahrzeugs in km/h. NULL = keine Grenze im
-    # Modell. Der Tempo-Regler der Planung stösst daran an, statt das
-    # Modell mit Geschwindigkeiten rechnen zu lassen, die das Auto nicht fährt.
+    # Top speed of the vehicle in km/h. NULL = no limit in the model. The
+    # planning speed slider runs into it, instead of letting the model
+    # calculate with speeds that the car does not drive.
     max_speed_kmh = Column(Float)
 
     eta_drive = Column(Float, nullable=False, default=0.88)
-    # Rekuperation holt nie alles zurück. Deshalb ist die Bilanz über einen
-    # Pass negativ, obwohl man am Ende wieder auf Ausgangshöhe steht.
+    # Regeneration never recovers everything. That is why the balance over a
+    # pass is negative, even though one ends up at the starting elevation.
     eta_regen = Column(Float, nullable=False, default=0.70)
 
-    # Grundlast unabhängig von der Heizung: Steuergeräte, Licht, Pumpen.
+    # Base load independent of the heating: control units, lights, pumps.
     p_aux_w = Column(Float, nullable=False, default=350.0)
-    # Der grösste Einzelunterschied im Winter: Eine Wärmepumpe braucht für
-    # dieselbe Kabinentemperatur grob die Hälfte eines elektrischen Heizers.
-    # Bei -5 °C sind das rund 1,8 kW Unterschied - über vier Stunden Fahrt
-    # mehr als 7 kWh, also der Grund für einen zusätzlichen Ladestopp.
+    # The largest single difference in winter: a heat pump needs roughly half
+    # of what an electric heater needs for the same cabin temperature. At
+    # -5 °C that is about 1.8 kW difference - over four hours of driving more
+    # than 7 kWh, i.e. the reason for an additional charging stop.
     heat_pump = Column(Boolean, nullable=False, default=True)
 
     reserve_soc = Column(Float, nullable=False, default=10.0)
@@ -100,50 +100,50 @@ class Vehicle(Base):
     max_charge_power_kw = Column(Float, nullable=False, default=150.0)
     connector_type = Column(String(20), nullable=False, default="CCS")
 
-    # Namen (oder Teile davon, z.B. "EnBW"), die der Optimierer bei der
-    # Stoppwahl bevorzugt - siehe laden/availability.py:betreiber_bonus().
-    # Kein harter Filter: ein nicht bevorzugter Anbieter bleibt wählbar, wird
-    # nur nicht zusätzlich begünstigt.
+    # Names (or parts of them, e.g. "EnBW") that the optimiser prefers when
+    # choosing stops - see charging/availability.py:operator_bonus().
+    # Not a hard filter: a non-preferred provider remains selectable, it just
+    # does not get an additional advantage.
     preferred_operators = Column(JSON, nullable=False, default=list)
 
-    # Was eine Kilowattstunde kostet - am Fahrzeug, weil sie am Vertrag
-    # hängt und nicht an der Säule. `strompreise` ist eine Liste von
-    # {muster, eur_kwh}, `strompreis_eur_kwh` gilt für alles Übrige.
-    # Siehe laden/prices.py.
+    # What a kilowatt hour costs - on the vehicle, because it depends on the
+    # contract and not on the charger. `electricity_prices` is a list of
+    # {pattern, eur_kwh}, `electricity_price_eur_kwh` applies to everything
+    # else. See charging/prices.py.
     electricity_price_eur_kwh = Column(Float, nullable=False, default=0.59)
     electricity_prices = Column(JSON)
 
-    # Aus echten Fahrten gelernt (energie/calibration.py). 1.0 = ungeprüft.
+    # Learned from real trips (energy/calibration.py). 1.0 = unchecked.
     correction_factor = Column(Float, nullable=False, default=1.0)
-    # Was das Fahrzeug selbst ueber seine Kapazitaet sagt (DID 222AB2),
-    # und wann. NULL heisst "nie gemessen" - siehe Migration 0014.
+    # What the vehicle itself says about its capacity (DID 222AB2),
+    # and when. NULL means "never measured" - see migration 0014.
     measured_capacity_kwh = Column(Float)
     capacity_measured_at = Column(DateTime)
 
-    # Langlebiges Geheimnis für einen Logger im Auto - OBD2-Dongle, Kurzbefehl,
-    # was auch immer. Er kann die ID der laufenden Live-Sitzung nicht kennen:
-    # Die entsteht erst beim Losfahren in der App und wechselt mit jeder Fahrt.
-    # Ein Gerät, das im Auto verbaut ist und beim Anschalten einfach zu senden
-    # beginnt, braucht deshalb einen Schlüssel, der bleibt - das Backend sucht
-    # sich die laufende Sitzung dieses Fahrzeugs dann selbst.
-    # NULL heisst "kein Logger eingerichtet".
+    # Long-lived secret for a logger in the car - OBD2 dongle, shortcut,
+    # whatever. It cannot know the ID of the running live session: that is only
+    # created when setting off in the app and changes with every trip. A device
+    # that is installed in the car and simply starts sending when switched on
+    # therefore needs a key that stays - the backend then finds the running
+    # session of this vehicle by itself.
+    # NULL means "no logger set up".
     logger_token = Column(String(64), unique=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     @property
     def capacity_kwh(self) -> float:
-        """Die Kapazitaet, mit der gerechnet wird - gemessen vor Prospekt.
+        """The capacity that is used for calculations - measured before brochure.
 
-        Der Wert im Profil ist die Angabe des Herstellers fuer ein neues
-        Fahrzeug. Meldet das Auto selbst eine Zahl, ist sie besser: Sie
-        beschreibt **diesen** Akku in **diesem** Zustand. Beim ID.Buzz nach
-        knapp 60 000 km sind das 73,8 statt 77 kWh - vier Prozent, die
-        sonst durchgaengig in dieselbe Richtung falsch liegen.
+        The value in the profile is the manufacturer's figure for a new
+        vehicle. If the car itself reports a number, it is better: it describes
+        **this** battery in **this** condition. For the ID.Buzz after almost
+        60,000 km that is 73.8 instead of 77 kWh - four percent that would
+        otherwise be wrong consistently in the same direction.
 
-        Die Schranke faengt eine unsinnige Messung ab: Ein Wert ueber dem
-        Prospektwert oder unter der Haelfte davon ist keine Alterung,
-        sondern ein Lesefehler, und dann gilt das Profil.
+        The bound catches a nonsensical measurement: a value above the
+        brochure value or below half of it is not ageing but a reading error,
+        and then the profile applies.
         """
         measured = self.measured_capacity_kwh
         if measured and 0.5 * self.battery_net_kwh <= measured <= self.battery_net_kwh * 1.05:
@@ -160,11 +160,11 @@ class Vehicle(Base):
 
 
 class ChargeCurvePoint(Base):
-    """Stützstelle der Ladekurve: bei diesem SoC diese Leistung.
+    """Support point of the charging curve: at this SoC this power.
 
-    Eigene Tabelle statt eines JSON-Feldes am Fahrzeug, weil die Kurve das ist,
-    was man nach den ersten echten Ladevorgängen nachschärft - unabhängig von
-    allen anderen Fahrzeugdaten.
+    A table of its own instead of a JSON field on the vehicle, because the
+    curve is what one refines after the first real charging sessions -
+    independently of all other vehicle data.
     """
     __tablename__ = "charge_curve_points"
 
@@ -181,12 +181,12 @@ class ChargeCurvePoint(Base):
 
 
 class ChargePoint(Base):
-    """Ein Ladestandort aus einer der Importquellen.
+    """A charging location from one of the import sources.
 
-    `anschluesse` ist bewusst JSON: Die Quellen liefern unterschiedlich viele
-    Stecker mit unterschiedlichen Leistungen, und daraus je ein eigenes Objekt
-    zu machen brächte nichts - gefiltert wird über `max_kw` und `steckertypen`,
-    beide beim Import mitgeschrieben.
+    `connectors` is deliberately JSON: the sources deliver varying numbers of
+    plugs with varying power, and turning each into an object of its own
+    would gain nothing - filtering is done via `max_kw` and `connector_types`,
+    both written along during import.
     """
     __tablename__ = "charge_points"
 
@@ -199,49 +199,49 @@ class ChargePoint(Base):
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
     address = Column(String(250), default="")
-    # OCM liefert bei Standorten, die mehrere Postleitzahlen abdecken (grosse
-    # Einkaufszentren etwa), eine Semikolon-Liste statt einer einzelnen PLZ -
-    # "33000;33100;33200;33300;33800" ist 29 Zeichen lang und hat den
-    # OCM-Import an einem realen Datensatz ("Auchan Bordeaux Lac") abgebrochen.
+    # For locations that cover several postcodes (large shopping centres, for
+    # example), OCM delivers a semicolon list instead of a single postcode -
+    # "33000;33100;33200;33300;33800" is 29 characters long and aborted the
+    # OCM import on a real data set ("Auchan Bordeaux Lac").
     postcode = Column(String(40), default="")
     city = Column(String(120), default="")
     country = Column(String(2), default="DE")
 
     connectors = Column(JSON, default=list)
-    # Denormalisiert, damit die Korridor-Abfrage ohne JSON-Auswertung filtern
-    # kann - JSON-Zugriffe unterscheiden sich zwischen SQLite und Postgres.
+    # Denormalised, so that the corridor query can filter without evaluating
+    # JSON - JSON access differs between SQLite and Postgres.
     max_kw = Column(Float, nullable=False, default=0.0)
     point_count = Column(Integer, nullable=False, default=1)
     connector_types = Column(String(120), default="")   # "CCS,Typ2"
 
     as_of = Column(String(20), default="")
 
-    # Was einen Ladepunkt für eine konkrete Fahrt unbrauchbar macht, steht
-    # bei den Quellen in Worten - und wurde bisher weggeworfen. Siehe
-    # Migration 0013.
+    # What makes a charging point unusable for a specific trip is stated in
+    # words in the sources - and was thrown away until now. See migration
+    # 0013.
     #
-    # NULL heisst bei den Wahrheitswerten **unbekannt** und nicht "nein":
-    # Für den grössten Teil der Datenbank gibt es die Angabe nicht, und wer
-    # Unbekanntes wie Ausgeschlossenes behandelt, verliert fast alles.
+    # NULL means **unknown** for the boolean values and not "no": for the
+    # largest part of the database the information does not exist, and
+    # whoever treats unknown like excluded loses almost everything.
     operational = Column(Boolean)
     access = Column(String(60))
     membership_required = Column(Boolean)
-    # Freitext der Quelle: Kosten, Zugangshinweise, Kommentare. Wird
-    # zunächst nur aufgehoben - siehe Migration 0013.
+    # Free text from the source: costs, access notes, comments. For now only
+    # kept - see migration 0013.
     hints = Column(JSON)
 
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("source", "foreign_id", name="uq_ladepunkt_quelle"),
-        # Der Korridor fragt immer über ein Rechteck ab: erst lat, dann lon.
+        # The corridor always queries via a rectangle: first lat, then lon.
         Index("ix_ladepunkt_pos", "lat", "lon"),
         Index("ix_ladepunkt_kw", "max_kw"),
     )
 
 
 class Trip(Base):
-    """Eine geplante Fahrt samt gerechnetem Energieprofil."""
+    """A planned trip including the calculated energy profile."""
     __tablename__ = "trips"
 
     id = Column(Integer, primary_key=True)
@@ -257,60 +257,59 @@ class Trip(Base):
     start_soc = Column(Float, nullable=False)
     speed_factor = Column(Float, nullable=False, default=1.0)
     outside_temp_c = Column(Float)
-    # Zuladung dieser Fahrt. NULL heisst "es galt das Fahrzeugprofil" - so
-    # bleiben Fahrten aus der Zeit vor diesem Feld korrekt lesbar, statt
-    # rückwirkend eine Zuladung von 0 kg zu behaupten.
+    # Payload of this trip. NULL means "the vehicle profile applied" - that way
+    # trips from before this field remain correctly readable, instead of
+    # retroactively claiming a payload of 0 kg.
     payload_kg = Column(Float)
 
-    # Zuschlag auf den Luftwiderstand für alles, was aussen dranhängt -
-    # Fahrradträger, Dachbox. 1.0 heisst "nichts dran". Gehört zur Fahrt und
-    # nicht zum Fahrzeug: Dieselbe Strecke einmal mit und einmal ohne Träger
-    # sind zwei verschiedene Energiebilanzen, und der Träger ist im Sommer
-    # dran und im Winter nicht.
+    # Surcharge on air resistance for everything hanging on the outside -
+    # bike carrier, roof box. 1.0 means "nothing attached". Belongs to the trip
+    # and not to the vehicle: the same route once with and once without a
+    # carrier are two different energy balances, and the carrier is on in
+    # summer and not in winter.
     air_drag_factor = Column(Float, nullable=False, default=1.0)
 
-    # Ein Anhänger gehört zur Fahrt: Masse in kg und zusätzliche
-    # Luftwiderstandsfläche (c_w mal A) in m². NULL heisst "keiner".
-    # Bewusst nicht im `luftwiderstand_faktor` aufgegangen: Ein Wohnwagen
-    # verdoppelt nicht den cw-Wert des Autos, er bringt eine eigene Fläche mit
-    # und 1,3 t dazu.
+    # A trailer belongs to the trip: mass in kg and additional air-resistance
+    # area (c_w times A) in m². NULL means "none". Deliberately not absorbed
+    # into `air_drag_factor`: a caravan does not double the car's c_w value, it
+    # brings an area of its own and 1.3 t on top.
     trailer_kg = Column(Float)
     trailer_cwa_m2 = Column(Float)
-    # Höchstgeschwindigkeit dieser Fahrt in km/h - für ein Gespann 100, als
-    # harte Grenze und nicht als Vorliebe. NULL = keine über die des
-    # Fahrzeugs hinaus.
+    # Top speed of this trip in km/h - 100 for a combination with trailer, as a
+    # hard limit and not as a preference. NULL = none beyond that of the
+    # vehicle.
     speed_max_kmh = Column(Float)
 
-    # Aufgezeichnet statt geplant: Geometrie und Energieprofil sind dann zu
-    # Beginn leer und entstehen beim Beenden aus den Messpunkten. Siehe
-    # live/recording.py.
+    # Recorded instead of planned: geometry and energy profile are then empty
+    # at the start and are created from the measurement points when it ends.
+    # See live/recording.py.
     recording = Column(Boolean, nullable=False, default=False)
 
     distance_m = Column(Float, default=0.0)
     drive_time_s = Column(Float, default=0.0)
 
-    # Anzeige-Geometrie, auf ~1 Punkt je 250 m ausgedünnt. Die volle
-    # ORS-Antwort hat auf einer Langstrecke fünfstellig viele Stützpunkte;
-    # die brauchen weder die Karte noch die Prognose.
-    geometry = Column(JSON, default=list)          # [[lon, lat, hoehe], ...]
+    # Display geometry, thinned out to ~1 point per 250 m. The full ORS
+    # response has a five-digit number of support points on a long route;
+    # neither the map nor the forecast needs them.
+    geometry = Column(JSON, default=list)          # [[lon, lat, elevation], ...]
     energy_profile = Column(JSON, default=list)      # [{"km","soc","kwh"}, ...]
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     vehicle = relationship("Vehicle")
-    # Damit die Historie "geplant" von "tatsächlich gefahren" unterscheiden
-    # kann, und das Löschen einer Fahrt ihre Sitzungen mitnimmt statt an der
-    # Fremdschlüsselbedingung zu scheitern.
+    # So that the history can distinguish "planned" from "actually driven",
+    # and deleting a trip takes its sessions along instead of failing on the
+    # foreign key constraint.
     live_sessions = relationship("LiveSession", back_populates="trip",
                                   cascade="all, delete-orphan")
 
 
 class LiveSession(Base):
-    """Eine laufende Fahrt, in die Messpunkte hereinkommen.
+    """A running trip into which measurement points arrive.
 
-    Die Quelle der Messpunkte ist bewusst offen: heute die PWA oder der
-    Simulator, später der OBD2-Logger oder eine Hersteller-API. Am Schema
-    ändert das nichts - nur daran, wer POSTet.
+    The source of the measurement points is deliberately open: today the PWA
+    or the simulator, later the OBD2 logger or a manufacturer API. That does
+    not change the schema - only who POSTs.
     """
     __tablename__ = "live_sessions"
 
@@ -321,24 +320,24 @@ class LiveSession(Base):
     ended_at = Column(DateTime)
     running = Column(Boolean, default=True, nullable=False)
 
-    # Laufender Verbrauchsfaktor: Ist geteilt durch Soll über die letzten
-    # Kilometer. > 1 heisst "verbraucht mehr als gerechnet".
+    # Running consumption factor: actual divided by planned over the last
+    # kilometres. > 1 means "consumes more than calculated".
     consumption_factor = Column(Float, default=1.0, nullable=False)
-    # Dasselbe für die Zeit. Der Verbrauchsfaktor allein sieht einen Stau
-    # nicht: Wer im Stau steht, verbraucht je Kilometer sogar mehr, aber die
-    # Ankunftszeit verschiebt sich um ein Vielfaches davon. Für den Auslöser
-    # "Ankunftszeit verschiebt sich" braucht es deshalb eine eigene Zahl.
+    # The same for time. The consumption factor alone does not see a traffic
+    # jam: someone stuck in a jam even consumes more per kilometre, but the
+    # arrival time shifts by a multiple of that. For the trigger "arrival time
+    # shifts" a number of its own is therefore needed.
     time_factor = Column(Float, default=1.0, nullable=False)
     hint = Column(Text, default="")
 
-    # Der aktuell gültige Ladeplan. Beim Start der Fahrt gerechnet und
-    # unterwegs ersetzt, sobald ein Auslöser greift. Er liegt hier und nicht
-    # an der Fahrt, weil er zur *laufenden* Fahrt gehört: Dieselbe geplante
-    # Strecke ein zweites Mal gefahren ergibt einen anderen Plan.
+    # The currently valid charging plan. Calculated at the start of the trip
+    # and replaced on the road as soon as a trigger fires. It lives here and
+    # not on the trip, because it belongs to the *running* trip: driving the
+    # same planned route a second time results in a different plan.
     plan = Column(JSON)
-    # Seit wann das Fahrzeug neben der Route ist. Die Schwelle ist "mehr als
-    # 500 m für mehr als eine Minute" - ohne diesen Zeitstempel wäre jede
-    # ungenaue GPS-Messung an einer Brücke eine Neuplanung.
+    # Since when the vehicle has been off the route. The threshold is "more
+    # than 500 m for more than a minute" - without this timestamp every
+    # inaccurate GPS reading at a bridge would be a re-plan.
     detour_since = Column(DateTime)
 
     trip = relationship("Trip", back_populates="live_sessions")
@@ -356,33 +355,33 @@ class LivePoint(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
-    # NULL heisst "Position gemeldet, Ladestand nicht bekannt". Die beiden
-    # Grössen haben verschiedene Taktraten: Das Telefon liefert die Position
-    # im Sekundentakt und umsonst, den Ladestand tippt jemand ein, wenn er
-    # ohnehin an der Säule steht. Was dazwischen gilt, rechnet
-    # `live/session.py` aus dem Energieprofil hoch.
+    # NULL means "position reported, charge level not known". The two
+    # quantities have different rates: the phone delivers the position every
+    # second and for free, the charge level is typed in by someone when
+    # standing at the charger anyway. What applies in between is extrapolated
+    # by `live/session.py` from the energy profile.
     soc = Column(Float)
-    # Rohmessung, absichtlich nicht die Grundlage des Tempofaktors. Der wird
-    # aus Strecke und Zeit über ein Fenster von Kilometern gebildet
-    # (`live/session.py`), und zwar aus zwei Gründen: Die Momentangeschwindig-
-    # keit des GPS ist verrauscht, und auf iOS liefert `coords.speed`
-    # regelmässig gar nichts. Ein Faktor, der auf einem Feld beruht, das je
-    # nach Telefon fehlt, wäre kein Faktor.
+    # Raw measurement, deliberately not the basis of the speed factor. That is
+    # formed from distance and time over a window of kilometres
+    # (`live/session.py`), for two reasons: the instantaneous speed from GPS is
+    # noisy, and on iOS `coords.speed` regularly delivers nothing at all. A
+    # factor based on a field that is missing depending on the phone would not
+    # be a factor.
     #
-    # Aufgehoben wird sie trotzdem: Sie kostet vier Byte je Messpunkt und ist
-    # das einzige, woran sich später nachprüfen liesse, ob die Rechnung aus
-    # Strecke und Zeit mit dem übereinstimmt, was der Tacho sah.
+    # It is kept anyway: it costs four bytes per measurement point and is the
+    # only thing by which one could later verify whether the calculation from
+    # distance and time agrees with what the speedometer saw.
     speed_kmh = Column(Float)
     outside_temp_c = Column(Float)
 
-    # Alles, was die Quelle sonst noch mitgeschickt hat - Packspannung,
-    # Strom, Kilometerstand, der unverrechnete Rohwert des Ladestands.
-    # Gerechnet wird damit nicht; es liegt hier, damit sich später auswerten
-    # lässt, was sich sonst nur durch eine zweite Fahrt klären liesse.
+    # Everything else the source sent along - pack voltage, current, odometer
+    # reading, the unprocessed raw value of the charge level. Not used for
+    # calculations; it is kept here so that later one can evaluate what could
+    # otherwise only be clarified by a second trip.
     raw_values = Column(JSON)
 
-    # Beim Eintreffen berechnet und mitgeschrieben, damit die Auswertung
-    # später nicht die ganze Route erneut projizieren muss.
+    # Calculated and written along on arrival, so that the evaluation later
+    # does not have to project the whole route again.
     km_on_route = Column(Float)
     plan_soc = Column(Float)
 

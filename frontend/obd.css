@@ -1,6 +1,6 @@
-/* Eigenes Stylesheet statt der Hauptoberfläche: Diese Seite ist ein
-   Werkzeug, kein Teil der App, und soll nicht mitwandern, wenn jolt sein
-   Aussehen ändert. Die Farben sind dieselben, damit sie nicht fremd wirkt. */
+/* Own stylesheet instead of the main UI: this page is a tool, not part of
+   the app, and should not move along when jolt changes its look. The colours
+   are the same so that it does not feel foreign. */
 :root {
   --grund: #0a0e12;
   --flaeche: #121820;
@@ -66,14 +66,13 @@ textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 .stand.gut { color: #57c98a; }
 .stand.schlecht { color: #e2596a; }
 
-/* Der Ladestand ist die Zahl, wegen der die ganze Seite existiert. */
+/* The charge level is the number the whole page exists for. */
 .gross { font-size: 34px; font-weight: 700; margin-top: 10px;
   font-variant-numeric: tabular-nums; }
 
-/* Das Protokoll ist hier kein Beiwerk, sondern das eigentliche Ergebnis:
-   Was der Dongle *wirklich* geantwortet hat, entscheidet darüber, ob die
-   Annahmen über die PIDs stimmen. Deshalb gleichbreite Schrift, umbrechend
-   und ohne Kürzung. */
+/* The log is not an extra here but the actual result: what the dongle
+   *really* answered decides whether the assumptions about the PIDs are
+   correct. Hence monospaced font, wrapping and without truncation. */
 pre#log {
   background: #0c1116;
   border: 1px solid var(--rand);
@@ -91,8 +90,8 @@ pre#log {
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .92em; color: var(--akzent); }
 
-/* Kacheln der laufenden Aufzeichnung. Sie werden im Fahren angesehen -
-   also gross genug für einen Blick und ohne Text, den man lesen muss. */
+/* Tiles of the running recording. They are looked at while driving -
+   so big enough for a glance and without text that has to be read. */
 .werte { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 8px; margin-top: 10px; }
 .wert { background: #0c1116; border: 1px solid var(--rand); border-radius: 10px;
@@ -101,8 +100,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 .wert .name { font-size: 10px; color: var(--gedaempft); text-transform: uppercase;
   letter-spacing: .05em; margin-top: 2px; }
 
-/* Die Prüftabellen: Wert, Erwartung, Urteil. Farbe traegt hier
-   Information - grün heisst plausibel, rot heisst nachsehen. */
+/* The check tables: value, expectation, verdict. Colour carries information
+   here - green means plausible, red means take a look. */
 table.pruef { width: 100%; border-collapse: collapse; margin-top: 10px;
   font-size: 13px; }
 table.pruef th, table.pruef td { padding: 5px 8px; text-align: left;

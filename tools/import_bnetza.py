@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Ladesäulenregister der Bundesnetzagentur einlesen.
+"""Import the charging station register of the Bundesnetzagentur.
 
-Bewusst ein Skript und kein Endpunkt: Die Datei ist über 50 MB gross, und ein
-HTTP-Aufruf, der minutenlang blockiert, ist der falsche Ort dafür. So lässt es
-sich auch in einen Cronjob hängen - der Import ist idempotent.
+Deliberately a script and not an endpoint: the file is over 50 MB, and an
+HTTP call that blocks for minutes is the wrong place for it. This also lets
+it be hooked into a cron job - the import is idempotent.
 
-Die Datei zuerst von der Ladesäulenkarte der Bundesnetzagentur herunterladen
-("Ladesäulenregister", CSV):
+First download the file from the charging station map of the
+Bundesnetzagentur ("Ladesäulenregister", CSV):
 https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/E-Mobilitaet/Ladesaeulenkarte/start.html
 
     ./tools/import_bnetza.py ladesaeulenregister.csv
 
-Im laufenden Container:
+In the running container:
 
-    docker exec -i jolt-app python tools/import_bnetza.py /pfad/zur/datei.csv
+    docker exec -i jolt-app python tools/import_bnetza.py /path/to/file.csv
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
-# per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
-# Layouts müssen funktionieren.
+# Locally the package lives under backend/app; in the Docker image (where
+# this script runs via `docker exec`) it sits directly next to tools/ as app/ -
+# both layouts must work.
 for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
     if os.path.isdir(os.path.join(_candidate, "app")):
         sys.path.insert(0, _candidate)

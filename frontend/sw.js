@@ -1,22 +1,21 @@
-/* Service Worker: das Gerüst offline halten, Daten nie.
+/* Service worker: keep the shell offline, data never.
  *
- * Zwischengespeichert werden ausschliesslich die eigenen statischen Dateien.
- * Antworten der API bleiben aussen vor - ein Ladeplan aus dem Cache wäre
- * schlimmer als gar keiner: Er sähe aus wie ein Plan, stammte aber aus einer
- * Zeit, in der der Ladestand ein anderer war.
+ * Only the own static files are cached. API responses stay out - a charging
+ * plan from the cache would be worse than none at all: it would look like a
+ * plan, but come from a time when the charge level was a different one.
  *
- * Der Nutzen ist trotzdem real: Bei einem Balken Empfang lädt die Oberfläche
- * sofort, statt auf ein Gerüst zu warten, das sich ohnehin nicht geändert hat.
+ * The benefit is real nonetheless: with one bar of reception the UI loads
+ * immediately instead of waiting for a shell that has not changed anyway.
  */
-// Bei jeder Änderung am Gerüst hochzählen: Der Name ist der einzige Hebel,
-// mit dem ein alter Cache verworfen wird (siehe "activate").
+// Count up with every change to the shell: the name is the only lever by
+// which an old cache is discarded (see "activate").
 const CACHE = "jolt-v25";
 const SCAFFOLD = [
   "/", "/static/core.js", "/static/map.js", "/static/route.js",
   "/static/tiles.js", "/static/display.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
   "/static/settings.js", "/static/app.js",
-  // Die OBD2-Diagnoseseite: Bluetooth braucht kein Netz, und
-  // eine Tiefgarage ist genau der Ort, an dem man sie aufruft.
+  // The OBD2 diagnostics page: Bluetooth needs no network, and an
+  // underground car park is exactly the place where one opens it.
   "/obd", "/static/ble-plugin.js", "/static/obd-ble-native.js",
   "/static/readings.js", "/static/obd-core.js", "/static/obd.js", "/static/obd.css",
   "/manifest.json",
@@ -39,14 +38,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
-  if (url.origin !== self.location.origin) return;   // Kartenkacheln
-  if (url.pathname.startsWith("/api/")) return;      // nie zwischenspeichern
+  if (url.origin !== self.location.origin) return;   // map tiles
+  if (url.pathname.startsWith("/api/")) return;      // never cache
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Erfolgreiche Antworten aktualisieren den Cache, damit nach einem
-        // Update nicht die alte Version festhängt.
+        // Successful responses update the cache, so that the old version does
+        // not get stuck after an update.
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE).then((cache) => cache.put(event.request, copy));
@@ -57,27 +56,27 @@ self.addEventListener("fetch", (event) => {
         .then((hit) => hit || caches.match("/"))));
 });
 
-/* ---------- Benachrichtigungen ----------
+/* ---------- Notifications ----------
  *
- * Der Service Worker läuft auch, wenn die Seite geschlossen und der Bildschirm
- * aus ist - das ist der ganze Grund, warum eine Planänderung über den
- * Push-Dienst geht und nicht über die offene WebSocket-Verbindung.
+ * The service worker also runs when the page is closed and the screen is
+ * off - that is the whole reason why a plan change goes via the push service
+ * and not via the open WebSocket connection.
  */
 self.addEventListener("push", (event) => {
   let records = { title: "jolt", text: "Der Ladeplan hat sich geändert.", url: "/" };
   try {
     if (event.data) records = Object.assign(records, event.data.json());
   } catch (e) {
-    // Eine Nutzlast, die kein JSON ist, kommt nicht von jolt. Die Vorgabe
-    // anzuzeigen ist besser, als die Meldung ganz zu verschlucken.
+    // A payload that is not JSON does not come from jolt. Showing the default
+    // is better than swallowing the message entirely.
   }
 
   event.waitUntil(self.registration.showNotification(records.title, {
     body: records.text,
     icon: "/static/icon.svg",
     badge: "/static/icon.svg",
-    // Gleicher tag: Eine neue Planänderung ersetzt die alte, statt sich
-    // daneben zu legen. Am Steuer zählt der aktuelle Plan, nicht die Historie.
+    // Same tag: a new plan change replaces the old one instead of lying next
+    // to it. At the wheel the current plan counts, not the history.
     day: "jolt-plan",
     renotify: true,
     data: { url: records.url || "/" },
@@ -88,9 +87,9 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const destination = (event.notification.data && event.notification.data.url) || "/";
 
-  // Ein bereits offenes Fenster in den Vordergrund holen, statt ein zweites
-  // zu öffnen: Sonst stehen nach drei Meldungen drei jolt-Tabs offen, und in
-  // keinem läuft die Live-Verbindung, die man gerade braucht.
+  // Bring an already open window to the foreground instead of opening a
+  // second one: otherwise after three messages three jolt tabs are open, and
+  // none of them runs the live connection that is needed right now.
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true })
       .then((timeframe) => {

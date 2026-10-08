@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Prüft die Übersetzung fremder Messformate - `live/quellen/`.
+"""Checks the translation of foreign measurement formats - `live/sources/`.
 
-Der Punkt dieser Schicht ist, dass sie kein Netz kennt: Ein Übersetzer
-bekommt ein geparstes Objekt und gibt einen `Rohpunkt` zurück. Deshalb lässt
-sich hier vollständig prüfen, was sonst nur im fahrenden Auto aufgefallen
-wäre - und ein neues Format lässt sich anhand einer aufgezeichneten Antwort
-einbauen, ohne dass jemand losfahren muss.
+The point of this layer is that it knows no network: a translator gets a
+parsed object and returns a `RawPoint`. That is why everything can be
+checked completely here that would otherwise only have shown up in the
+moving car - and a new format can be added from a recorded response
+without anyone having to go for a drive.
 
-Geprüft wird vor allem das, was schiefgeht. Eine Meldung, die stimmt, ist
-der langweilige Fall; interessant sind das fehlende Feld, die Zahl in der
-falschen Einheit und der Zeitstempel aus dem Jahr 1970. Ein Übersetzer, der
-die durchlässt, verlagert den Fehler nur - er landet dann als 500er im Log
-oder, schlimmer, als stiller Unsinn im Energieprofil.
+Mainly what goes wrong is checked. A message that is correct is the boring
+case; what is interesting is the missing field, the number in the wrong
+unit and the timestamp from the year 1970. A translator that lets those
+through merely shifts the error - it then ends up as a 500 in the log or,
+worse, as silent nonsense in the energy profile.
 
-Ohne Netz, ohne Postgres, ohne API-Schlüssel:
+Without network, without Postgres, without API key:
 
     ./tools/check_sources.py
 """
@@ -33,7 +33,7 @@ verify = Check()
 
 
 def raises(source, records: dict, text: str, expected_in_reason: str = "") -> None:
-    """Die Meldung muss abgelehnt werden - und der Grund muss etwas sagen."""
+    """The message must be rejected - and the reason must say something."""
     try:
         result = source.normalize(records)
     except SourcesError as failure:
@@ -44,15 +44,15 @@ def raises(source, records: dict, text: str, expected_in_reason: str = "") -> No
         verify(True, text)
         return
     except Exception as failure:      # noqa: BLE001
-        # Eine andere Ausnahme ist kein Erfolg: Sie kommt als 500er heraus
-        # statt als Satz, der sagt, was der Logger falsch schickt.
+        # Another exception is not a success: it comes out as a 500 instead of as a
+        # sentence that says what the logger is sending wrong.
         verify(False, text, f"{type(failure).__name__} statt SourcesError: {failure}")
         return
     verify(False, text, f"wurde angenommen: {result}")
 
 
 # ---------------------------------------------------------------------------
-# Die Registry
+# The registry
 # ---------------------------------------------------------------------------
 
 def part_registry():
@@ -75,7 +75,7 @@ def part_registry():
 
 
 # ---------------------------------------------------------------------------
-# jolts eigenes Format
+# jolt's own format
 # ---------------------------------------------------------------------------
 
 def part_jolt():
@@ -98,9 +98,9 @@ def part_jolt():
     raises(q, {"lon": 11.58, "soc": 62.5}, "ohne Breitengrad wird abgelehnt", "lat")
     raises(q, {"lat": 48.13, "lon": 11.58}, "ohne Ladestand wird abgelehnt", "soc")
 
-    # Aussentemperatur 0 °C und "keine Aussentemperatur" sind zwei
-    # verschiedene Aussagen. Sie zu verwechseln heisst im Winter, die Heizung
-    # nicht zu rechnen - und die ist der grösste Einzelposten der Kälte.
+    # An outside temperature of 0 °C and "no outside temperature" are two
+    # different statements. Confusing them means, in winter, not counting the
+    # heating - and that is the largest single item of the cold.
     point = q.normalize({"lat": 48.13, "lon": 11.58, "soc": 62.5,
                              "outside_temp_c": 0.0})
     verify(point.outside_temp_c == 0.0,
@@ -112,14 +112,14 @@ def part_jolt():
 
 
 # ---------------------------------------------------------------------------
-# Das Format von Iternio/ABRP
+# The Iternio/ABRP format
 # ---------------------------------------------------------------------------
 
 def part_abrp():
     print("\nTelemetrieformat von Iternio (ABRP)")
     q = sources.find("abrp")
 
-    # So sieht eine Meldung aus, wie sie an /1/tlm/send geht.
+    # This is what a message looks like as it goes to /1/tlm/send.
     tlm = {"utc": 1787654321, "soc": 57.0, "lat": 45.19, "lon": 0.72,
            "speed": 104.5, "ext_temp": 21.0, "is_charging": 0,
            "soh": 98.0, "power": -34.2, "car_model": "volkswagen:id_buzz:22:77"}
@@ -134,27 +134,27 @@ def part_abrp():
     verify(point.timestamp is not None and point.timestamp.year == 2026,
            "der Zeitstempel wird gelesen", str(point.timestamp))
 
-    # Felder, die jolt nicht braucht, dürfen nicht stören - das Format hat
-    # zwei Dutzend davon, und es kommen welche dazu.
+    # Fields that jolt does not need must not interfere - the format has two
+    # dozen of them, and more are added.
     verify(q.normalize({**tlm, "completely_fresh_field": 42}).soc == 57.0,
            "unbekannte Felder werden übergangen statt abgelehnt")
 
-    # Dieselbe Nutzlast, drei Verpackungen: gesendet (`tlm`), abgeholt
-    # (`result`), von Hand weitergereicht (nackt).
+    # The same payload, three wrappings: sent (`tlm`), fetched (`result`),
+    # passed on by hand (bare).
     verify(q.normalize({"tlm": tlm}).soc == 57.0,
            "die Sende-Hülle tlm wird ausgepackt")
     response = {"status": "ok", "result": tlm}
     verify(q.normalize(response).soc == 57.0,
            "und die Antwort-Hülle result ebenso")
 
-    # Millisekunden statt Sekunden ist der häufigste Fehler an dieser Stelle
-    # und fällt sonst erst auf, wenn der Zeitfaktor Unsinn ergibt.
+    # Milliseconds instead of seconds is the most common error at this point
+    # and would otherwise only be noticed when the time factor yields nonsense.
     in_ms = q.normalize({**tlm, "utc": 1787654321000})
     verify(in_ms.timestamp == point.timestamp,
            "ein Zeitstempel in Millisekunden ergibt dieselbe Zeit wie in "
            "Sekunden", f"{in_ms.timestamp} gegen {point.timestamp}")
 
-    # Eine ungestellte Uhr - der Klassiker beim Kleinstrechner ohne Netz.
+    # An unset clock - the classic with a tiny logger without network.
     raises(q, {**tlm, "utc": 0}, "ein Zeitstempel aus 1970 wird abgelehnt", "Uhr")
 
     raises(q, {**tlm, "soc": 137.0}, "ein Ladestand über 100 % wird abgelehnt",
@@ -171,18 +171,18 @@ def part_abrp():
     del missing["soc"]
     raises(q, missing, "ohne Ladestand wird abgelehnt", "soc")
 
-    # Ohne Zeitstempel ist die Meldung trotzdem brauchbar: Dann gilt der
-    # Zeitpunkt des Eintreffens, und für einen Logger, der laufend sendet,
-    # ist das nahezu dasselbe.
+    # Without a timestamp the message is still usable: the time of arrival
+    # then applies, and for a logger that sends continuously this is nearly
+    # the same.
     without_time = dict(tlm)
     del without_time["utc"]
     verify(q.normalize(without_time).timestamp is None,
            "ohne Zeitstempel bleibt die Zeit offen, statt die Meldung zu "
            "verwerfen")
 
-    # Ein Anteil statt Prozentpunkten wird bewusst NICHT umgerechnet: 0,4 ist
-    # als "40 %" gemeint oder als "0,4 %", und bei fast leerem Akku zu raten
-    # ist genau da falsch, wo es zählt.
+    # A fraction instead of percentage points is deliberately NOT converted:
+    # 0.4 is meant either as "40 %" or as "0.4 %", and guessing at an almost
+    # empty battery is wrong exactly where it counts.
     tight = q.normalize({**tlm, "soc": 0.4})
     verify(tight.soc == 0.4,
            "ein Ladestand unter 1 wird als Prozentpunkt genommen und nicht "

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-/* Prueft die native Bluetooth-Bruecke ohne iPhone.
+/* Checks the native Bluetooth bridge without an iPhone.
  *
- * frontend/obd-ble-native.js bildet fuer obd-core.js die Gestalt von Web
- * Bluetooth nach, beantwortet sie aber ueber das Capacitor-Plugin. Diese
- * Datei laesst sich nur am Auto vollstaendig pruefen - aber genau das ist
- * der Grund fuer diese Pruefung: Alles, was sich *vorher* feststellen
- * laesst, soll auch vorher auffallen und nicht erst an der Ladesaeule.
+ * frontend/obd-ble-native.js mimics the shape of Web Bluetooth for obd-core.js,
+ * but answers it through the Capacitor plugin. This file can only be fully
+ * verified in the car - but that is exactly the reason for this check:
+ * everything that can be established *beforehand* should also show up
+ * beforehand, not only at the charging station.
  *
- * Geprueft wird der Weg, den eine Runde am Auto nimmt:
- *   anschliessen -> Dienste suchen -> Charakteristik waehlen ->
- *   Benachrichtigungen abonnieren -> Befehl schreiben -> Antwort einsammeln
+ * What is checked is the path one round in the car takes:
+ *   connect -> find services -> pick characteristic ->
+ *   subscribe to notifications -> write command -> collect response
  *
- * Dazu kommt der Rueckfall: Ohne Capacitor muss der Kern unveraendert das
- * echte navigator.bluetooth nehmen, sonst waere die Weboberflaeche in
- * Bluefy kaputt - und die ist bis auf Weiteres der Alltagsweg.
+ * On top of that comes the fallback: without Capacitor the core must use the
+ * real navigator.bluetooth unchanged, otherwise the web UI would be broken in
+ * Bluefy - and that is the everyday route until further notice.
  */
 "use strict";
 
@@ -33,11 +33,11 @@ function verify(planApply, text) {
   }
 }
 
-/* Eine frische Browserumgebung je Fall.
+/* A fresh browser environment per case.
  *
- * Die beiden Dateien sind Sofortfunktionen, die sich an `window` haengen;
- * zweimal in denselben Kontext geladen, teilten sich die Faelle ihren
- * Zustand - besonders die gemerkte Geraetekennung und die Verbindung. */
+ * The two files are immediately invoked functions that attach themselves to
+ * `window`; loaded twice into the same context, the cases would share their
+ * state - especially the remembered device ID and the connection. */
 function environment(extra) {
   const storage = {};
   const timeframe = {
@@ -59,12 +59,12 @@ function environment(extra) {
   return timeframe;
 }
 
-/* ---------- Ein Dongle, der sich wie einer benimmt ---------- */
+/* ---------- A dongle that behaves like one ---------- */
 
-/* Antwortet auf jeden Befehl mit "OK>" - ausser auf ATZ, da meldet sich ein
- * ELM327 mit seiner Fassung. Wichtiger als der Inhalt ist die Gestalt: Die
- * Antwort kommt in zwei Haeppchen, so wie BLE sie liefert, und erst das
- * '>' schliesst sie ab. Genau daran haengt die Rahmenlogik im Kern. */
+/* Answers every command with "OK>" - except ATZ, where an ELM327 reports its
+ * version. More important than the content is the shape: the response
+ * arrives in two chunks, just as BLE delivers it, and only the '>'
+ * terminates it. The framing logic in the core depends on exactly that. */
 function wrongPlugin(trace_log) {
   const SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb";
   const CHAR = "0000fff1-0000-1000-8000-00805f9b34fb";
@@ -104,7 +104,7 @@ function wrongPlugin(trace_log) {
         trace_log.push("write:" + JSON.stringify(text));
         const response = text.startsWith("ATZ") ? "ELM327 v2.3"
           : text.startsWith("ATRV") ? "12.6V" : "OK";
-        // In zwei Haeppchen, wie BLE sie liefert.
+        // In two chunks, as BLE delivers it.
         setTimeout(() => {
           report(asDataView(response.slice(0, 3)));
           report(asDataView(response.slice(3) + "\r>"));
@@ -122,7 +122,7 @@ function asDataView(text) {
   return new DataView(field.buffer, field.byteOffset, field.byteLength);
 }
 
-/* ---------- Die Faelle ---------- */
+/* ---------- The cases ---------- */
 
 async function nativePath() {
   console.log("Nativ: der Weg einer Runde am Auto");
@@ -147,9 +147,9 @@ async function nativePath() {
   verify(response === "ELM327 v2.3",
          `die zweigeteilte Antwort wurde zusammengesetzt (kam: ${JSON.stringify(response)})`);
 
-  // ATRV misst der ELM-Chip selbst und fasst den CAN-Bus nicht an. Darauf
-  // haengt, ob jolt am abgeschlossenen Auto die Spannung lesen darf, ohne die
-  // Alarmanlage zu wecken - es darf also genau dieser eine Befehl hinausgehen.
+  // ATRV is measured by the ELM chip itself and does not touch the CAN bus. On
+  // that depends whether jolt may read the voltage on a locked car without
+  // waking the alarm system - so exactly this one command may go out.
   const earlier = trace_log.length;
   const volt = await f.joltObd.voltage();
   const sent = trace_log.slice(earlier).filter((z) => z.startsWith("write:"));
@@ -158,15 +158,15 @@ async function nativePath() {
          "und es geht nur ATRV hinaus - nichts, was den Bus weckt",
          JSON.stringify(sent));
 
-  // Die Kennung muss den Neustart ueberdauern, sonst kommt bei jeder Fahrt
-  // der Auswahldialog.
+  // The ID must survive a restart, otherwise the selection dialog appears
+  // on every trip.
   verify(f.joltBleNative.ident() === "AA-BB-CC",
          "die Geraetekennung ist gemerkt");
 
   const second = environment({ joltBlePlugin: wrongPlugin(trace_log) });
-  // Frische Umgebung, aber derselbe Speicher existiert dort nicht - deshalb
-  // wird hier nur geprueft, dass getDevices ohne Kennung leer bleibt statt
-  // zu scheitern.
+  // Fresh environment, but the same storage does not exist there - so this
+  // only checks that getDevices stays empty without an ID instead of
+  // failing.
   const without = await second.joltBleNative.bluetooth.getDevices();
   verify(Array.isArray(without) && without.length === 0,
          "ohne gemerkte Kennung liefert getDevices eine leere Liste");

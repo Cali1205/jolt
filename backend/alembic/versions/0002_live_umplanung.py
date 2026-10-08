@@ -1,12 +1,12 @@
-"""Live-Umplanung: Zeitfaktor, gespeicherter Plan, Abweg-Zeitstempel.
+"""Live replanning: time factor, stored plan, off-route timestamp.
 
-Stufe 3 braucht drei Dinge, die die Sitzung bisher nicht mitschrieb:
+Stage 3 needs three things the session did not record so far:
 
-- `zeitfaktor` - der Verbrauchsfaktor allein sieht einen Stau nicht.
-- `plan` - der aktuell gueltige Ladeplan, um Aenderungen ueberhaupt als
-  Aenderung erkennen zu koennen.
-- `abweg_seit` - "mehr als 500 m fuer mehr als eine Minute" braucht einen
-  Zeitstempel, sonst ist jede ungenaue GPS-Messung eine Neuplanung.
+- `zeitfaktor` - the consumption factor alone does not see a traffic jam.
+- `plan` - the currently valid charging plan, so that changes can be
+  recognised as changes at all.
+- `abweg_seit` - "more than 500 m for more than a minute" needs a
+  timestamp, otherwise every inaccurate GPS reading is a replan.
 
 Revision ID: 0002
 Revises: 0001
@@ -22,8 +22,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # batch_alter_table, damit die Revision auch auf SQLite laeuft: Dort gibt
-    # es kein ALTER TABLE ADD COLUMN mit Default, die Tabelle wird kopiert.
+    # batch_alter_table, so that the revision also runs on SQLite: there is
+    # no ALTER TABLE ADD COLUMN with a default; the table is copied.
     with op.batch_alter_table('live_sitzungen', schema=None) as batch_op:
         batch_op.add_column(sa.Column('zeitfaktor', sa.Float(), nullable=False,
                                       server_default='1.0'))

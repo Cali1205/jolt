@@ -1,19 +1,19 @@
-"""Fahrzeuge: Strompreise je Anbieter.
+"""Vehicles: electricity prices per provider.
 
-Der Optimierer minimierte bisher ausschliesslich Zeit. Der Wunsch nach einem
-bestimmten Anbieter war deshalb nur als Zeitgutschrift auszudrücken - eine
-Vorliebe, als Minuten verkleidet. Damit liess sich der Handel, um den es
-wirklich geht, gar nicht formulieren: laenger laden, dafuer billiger.
+The optimizer used to minimise time only. The wish for a particular provider
+could therefore only be expressed as a time credit - a preference disguised
+as minutes. That made it impossible to formulate the trade-off that is
+really at stake: charge longer, but cheaper.
 
-Preise kann jolt nicht wissen. Sie haengen am Vertrag des Fahrers, nicht am
-Ladepunkt: Dieselbe Ionity-Saeule kostet mit Passport-Abo die Haelfte von
-dem, was sie ad hoc kostet. Deshalb stehen sie am Fahrzeug und werden vom
-Nutzer gepflegt.
+jolt cannot know prices. They depend on the driver's contract, not on the
+charge point: the same Ionity charger costs half as much with a Passport
+subscription as it does ad hoc. That is why they live on the vehicle and are
+maintained by the user.
 
-`strompreise` ist eine Liste von {muster, eur_kwh}; das Muster wird wie bei
-den bevorzugten Betreibern als Teilzeichenkette verglichen ("Ionity" trifft
-"Ionity GmbH"). `strompreis_eur_kwh` gilt fuer alles, was auf kein Muster
-passt.
+`strompreise` is a list of {muster, eur_kwh}; as with the preferred
+operators, the pattern is compared as a substring ("Ionity" matches
+"Ionity GmbH"). `strompreis_eur_kwh` applies to everything that matches no
+pattern.
 
 Revision ID: 0012
 Revises: 0011

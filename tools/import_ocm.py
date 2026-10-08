@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Ladepunkte von Open Charge Map holen.
+"""Fetch charging points from Open Charge Map.
 
-Ergänzung zum amtlichen deutschen Register - vor allem für Fahrten über die
-Grenze. Braucht einen kostenlosen Schlüssel in OCM_API_KEY:
+A complement to the official German register - mainly for trips across the
+border. Needs a free key in OCM_API_KEY:
 https://openchargemap.org/site/profile/applications
 
-    ./tools/import_ocm.py                 # Deutschland, 2000 Einträge
-    ./tools/import_ocm.py AT,CH 5000 50   # Länder, Anzahl je Land, Mindestleistung kW
+    ./tools/import_ocm.py                 # Germany, 2000 entries
+    ./tools/import_ocm.py AT,CH 5000 50   # countries, count per country, minimum power kW
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
-# per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
-# Layouts müssen funktionieren.
+# Locally the package lives under backend/app; in the Docker image (where
+# this script runs via `docker exec`) it sits directly next to tools/ as app/ -
+# both layouts must work.
 for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
     if os.path.isdir(os.path.join(_candidate, "app")):
         sys.path.insert(0, _candidate)

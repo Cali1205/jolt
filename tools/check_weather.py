@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Prüft das Wetter entlang der Route - `energie/weather.py` - ohne Netz.
+"""Checks the weather along the route - `energy/weather.py` - without network.
 
-Die Frage, um die es geht: Für welche **Stunde** wird das Wetter geholt?
-Bisher galt immer jetzt. Mit einer Abfahrtszeit morgen früh um sechs wäre das
-das Nachmittagswetter von heute - bei Kälte der grösste Einzelposten des
-Verbrauchs falsch. Jetzt gilt an jedem Stützpunkt die Stunde, in der man dort
-ankommt: Abfahrt plus Anteil der Fahrzeit.
+The question at stake: for which **hour** is the weather fetched?
+Until now it was always now. With a departure time tomorrow morning at six
+that would be this afternoon's weather - in the cold the largest single
+item of consumption would be wrong. Now at each support point the hour
+applies in which one arrives there: departure plus a share of the travel
+time.
 
-Die Open-Meteo-Antwort ist nachgebaut; Temperatur = Stundenindex, damit sich
-aus dem Ergebnis ablesen lässt, welche Stunde gewählt wurde.
+The Open-Meteo response is reconstructed; temperature = hour index, so that
+the result shows which hour was chosen.
 
     ./tools/check_weather.py
 """
@@ -28,11 +29,11 @@ from app.energy.model import Environment               # noqa: E402
 
 verify = Check()
 
-# Eine Strecke von Süd nach Nord: 11 Punkte [lon, lat]; sechs Stützpunkte
-# fallen auf Index 0, 2, 4, 6, 8, 10.
+# A route from south to north: 11 points [lon, lat]; six support points
+# fall on index 0, 2, 4, 6, 8, 10.
 POINTS = [[9.0, 48.0 + i * 0.5] for i in range(11)]
 START = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) \
-    - timedelta(hours=datetime.now(timezone.utc).hour)         # heute 00:00 UTC
+    - timedelta(hours=datetime.now(timezone.utc).hour)         # today 00:00 UTC
 
 
 def hrs(count=384):
@@ -41,7 +42,7 @@ def hrs(count=384):
 
 
 def response_forecast(places=6, count=384, offset=0.0):
-    """Je Ort: Temperatur = Stundenindex (+ Versatz je Ort), Wind = 5, Richtung 90."""
+    """Per location: temperature = hour index (+ offset per location), wind = 5, direction 90."""
     entries = [{"hourly": {
         "time": hrs(count),
         "temperature_2m": [i + offset * o for i in range(count)],
@@ -85,7 +86,7 @@ def with_weather(response, fn):
 
 
 def temperatures(fetch):
-    """Die Temperatur an den sechs Stützpunkten (Index 0, 2, ... 10)."""
+    """The temperature at the six support points (index 0, 2, ... 10)."""
     return [fetch(POINTS[i][1], POINTS[i][0]).temp_c for i in range(0, 11, 2)]
 
 
@@ -105,7 +106,7 @@ def main() -> int:
 
     verify.section("Abfahrt morgen früh")
     tomorrow_6 = (START + timedelta(days=1, hours=6)).replace(tzinfo=timezone.utc)
-    # 12 Stunden Fahrzeit, sechs Stützpunkte: Ankunft nach 0, 2.4, 4.8, 7.2, 9.6, 12 h.
+    # 12 hours of travel time, six support points: arrival after 0, 2.4, 4.8, 7.2, 9.6, 12 h.
     fetch, calls = with_weather(Response(response_forecast()),
                                lambda: weather.along_route(POINTS, departure=tomorrow_6,
                                                             duration_s=12 * 3600))
@@ -113,7 +114,7 @@ def main() -> int:
     verify("hourly" in p and "current" not in p and p["timezone"] == "UTC"
            and p["forecast_days"] == 16,
            "die stündliche Vorhersage in UTC, 16 Tage", str(p))
-    basis = 24 + 6                         # Index von morgen 06:00
+    basis = 24 + 6                         # index of tomorrow 06:00
     expected = [basis + 0, basis + 2, basis + 5, basis + 7, basis + 10, basis + 12]
     verify(temperatures(fetch) == expected,
            "jeder Stützpunkt bekommt die Stunde seiner Ankunft: Abfahrt plus "
@@ -168,7 +169,7 @@ def main() -> int:
                                                           departure=tomorrow_6, duration_s=3600))
         verify(fetch(48.0, 9.0).temp_c == -3.0,
                f"{name}: Die Route wird trotzdem gerechnet, mit der Vorgabe")
-    broken = [{"hourly": {"time": hrs(10)}} for _ in range(6)]       # Werte fehlen
+    broken = [{"hourly": {"time": hrs(10)}} for _ in range(6)]       # values missing
     fetch, _ = with_weather(Response(broken),
                          lambda: weather.along_route(POINTS, preset=fallback,
                                                       departure=tomorrow_6, duration_s=3600))
@@ -177,7 +178,7 @@ def main() -> int:
            "zu verwerfen")
     gap = response_forecast()
     for e in gap:
-        e["hourly"]["temperature_2m"][basis] = None          # Open-Meteo kennt Lücken
+        e["hourly"]["temperature_2m"][basis] = None          # Open-Meteo has gaps
     fetch, _ = with_weather(Response(gap),
                          lambda: weather.along_route(POINTS, departure=tomorrow_6, duration_s=0))
     verify(fetch(POINTS[0][1], POINTS[0][0]).temp_c == 15.0,

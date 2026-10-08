@@ -1,11 +1,11 @@
-"""Fahrten: Zuladung je Fahrt.
+"""Trips: payload per trip.
 
-Die Zuladung stand bisher nur am Fahrzeug. Sie ist aber eine Eigenschaft der
-Fahrt: dieselbe Strecke einmal zu zweit und einmal voll beladen sind zwei
-verschiedene Energiebilanzen, besonders am Berg.
+The payload used to live only on the vehicle. But it is a property of the
+trip: the same route driven once with two people and once fully loaded gives
+two different energy balances, especially on hills.
 
-NULL heisst "es galt das Fahrzeugprofil" - Fahrten aus der Zeit vor diesem
-Feld behaupten so nicht rückwirkend eine Zuladung von null Kilogramm.
+NULL means "the vehicle profile applied" - trips from before this field
+thus do not retroactively claim a payload of zero kilograms.
 
 Revision ID: 0006
 Revises: 0005

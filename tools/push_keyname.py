@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Ein VAPID-Schlüsselpaar für die Benachrichtigungen erzeugen.
+"""Generate a VAPID key pair for the notifications.
 
-Einmal ausführen, die drei Zeilen in die `.env` übernehmen, jolt neu starten.
+Run once, copy the three lines into the `.env`, restart jolt.
 
     ./tools/push_keyname.py
 
-Der **private** Schlüssel gehört ausschliesslich auf den Server. Wer ihn hat,
-kann Benachrichtigungen im Namen dieser Installation verschicken - an die
-Geräte, die sich hier angemeldet haben. Er gehört deshalb nicht ins Repo, nicht
-in ein Backup, das andere lesen können, und nicht in eine Chatnachricht.
+The **private** key belongs exclusively on the server. Whoever has it can
+send notifications in the name of this installation - to the devices that
+have registered here. It therefore does not belong in the repo, not in a
+backup that others can read, and not in a chat message.
 
-Der **öffentliche** Schlüssel ist dafür da, verteilt zu werden: Der Browser
-braucht ihn, um ein Abo anzulegen.
+The **public** key is meant to be distributed: the browser needs it to
+create a subscription.
 
-Achtung beim Wechsel: Neue Schlüssel machen alle bestehenden Abos ungültig.
-Die Geräte müssen sich dann einmal neu anmelden - jolt räumt die toten Abos
-beim nächsten Versand von selbst weg.
+Caution when changing: new keys invalidate all existing subscriptions.
+The devices then have to register once again - jolt clears away the dead
+subscriptions by itself on the next send.
 """
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Lokal liegt das Paket unter backend/app; im Docker-Image (wo dieses Skript
-# per `docker exec` läuft) liegt es direkt neben tools/ als app/ - beide
-# Layouts müssen funktionieren.
+# Locally the package lives under backend/app; in the Docker image (where
+# this script runs via `docker exec`) it sits directly next to tools/ as app/ -
+# both layouts must work.
 for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")):
     if os.path.isdir(os.path.join(_candidate, "app")):
         sys.path.insert(0, _candidate)

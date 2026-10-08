@@ -1,24 +1,25 @@
-"""Live-Punkte: Rohwerte der Quelle mitschreiben.
+"""Live points: store the raw values of the source.
 
-`LivePunkt` führt genau das, womit die Nachführung rechnet: Position,
-Ladestand, Tempo, Aussentemperatur. Ein OBD2-Logger liefert aber mehr -
-Packspannung, Strom, Kilometerstand, Innentemperatur - und vor allem
-liefert er den **unverrechneten** Wert, aus dem der Ladestand entstand.
+`LivePunkt` holds exactly what the tracking calculates with: position,
+state of charge, speed, outside temperature. An OBD2 logger delivers more,
+though - pack voltage, current, odometer, interior temperature - and above
+all it delivers the **unprocessed** value from which the state of charge
+was derived.
 
-Das ist kein Sammeltrieb, es löst ein konkretes Problem. Der Ladestand des
-ID.Buzz kommt als einzelnes Byte, aus dem sich zwei Zahlen ergeben: der
-Brutto-Wert der Batterie und der, den die Anzeige zeigt. Die Umrechnung
-zwischen beiden ist dokumentiert, aber für die ID.3 - beim ID.Buzz liegt sie
-um gut einen Prozentpunkt daneben, und zwar nicht konstant. Um sie zu
-berichtigen, braucht es Messpunkte mit dem Rohwert **und** dem, was das
-Display in derselben Minute zeigte. Wer das nicht mitschreibt, muss dafür
-ein zweites Mal losfahren.
+This is not hoarding, it solves a concrete problem. The ID.Buzz state of
+charge arrives as a single byte from which two numbers result: the gross
+value of the battery and the one the display shows. The conversion between
+the two is documented, but for the ID.3 - for the ID.Buzz it is off by a
+good percentage point, and not by a constant amount. To correct it, you need
+measurement points with the raw value **and** what the display showed in the
+same minute. Whoever does not record this has to drive out a second time for
+it.
 
-Bewusst JSON und keine Spalten je Messgrösse: Welche Werte eine Quelle
-liefert, steht nicht fest und wird sich ändern. Eine Spalte je Grösse hiesse
-eine Migration je Datenkennung, die jemand interessant findet. Gerechnet
-wird mit diesen Werten nicht - dafür sind die getippten Felder da; hier
-liegt, was man später auswerten können will.
+Deliberately JSON and not one column per measured quantity: which values a
+source delivers is not fixed and will change. One column per quantity would
+mean one migration per data identifier that someone finds interesting.
+These values are not used for calculation - that is what the typed fields
+are for; this is where what you want to be able to analyse later is kept.
 
 Revision ID: 0009
 Revises: 0008

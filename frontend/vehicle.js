@@ -1,10 +1,10 @@
-/* Fahrzeugprofile pflegen: Physik-Parameter und Ladekurve.
+/* Maintain vehicle profiles: physics parameters and charging curve.
  *
- * Die Felder sind bewusst physikalisch und nicht "Verbrauch in kWh/100 km".
- * Nur so lässt sich beantworten, was 130 statt 110 km/h kosten oder was ein
- * Pass verbraucht. Damit das niemanden am ersten Tag abschreckt, gibt es
- * Vorlagen - und danach zieht der Korrekturfaktor die Werte ohnehin an das
- * eigene Auto heran.
+ * The fields are deliberately physical and not "consumption in kWh/100 km".
+ * Only this way can one answer what 130 instead of 110 km/h costs or what a
+ * pass consumes. So that this does not put anyone off on the first day, there
+ * are templates - and after that the correction factor pulls the values
+ * towards one's own car anyway.
  */
 window.joltVehicle = (function () {
   "use strict";
@@ -93,7 +93,7 @@ window.joltVehicle = (function () {
     return records;
   }
 
-  /* ---------- Ladekurve ---------- */
+  /* ---------- Charging curve ---------- */
 
   function curveRow(soc, kw) {
     const row = document.createElement("tr");
@@ -109,11 +109,11 @@ window.joltVehicle = (function () {
     return row;
   }
 
-  /* ---------- Strompreise ---------- */
+  /* ---------- Electricity prices ---------- */
 
-  /* Dieselbe Bauart wie die Ladekurve: eine Zeile je Eintrag, frei zu
-   * ergänzen. Zwei bis drei Anbieter deckt jeder ab, der eine Ladekarte
-   * hat - mehr Bedienung braucht es nicht. */
+  /* Same design as the charging curve: one row per entry, freely extendable.
+   * Two or three providers cover anyone who has a charging card - no more
+   * operation is needed. */
   function priceRow(pattern, eurKwh) {
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -167,7 +167,7 @@ window.joltVehicle = (function () {
     return pairs.sort((a, b) => a[0] - b[0]);
   }
 
-  /* ---------- Laden und Speichern ---------- */
+  /* ---------- Loading and saving ---------- */
 
   async function load() {
     try {
@@ -184,9 +184,9 @@ window.joltVehicle = (function () {
       selection.innerHTML = K.state.vehicles
         .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
       if (earlier) selection.value = earlier;
-      // Die Wahl fuers Aufzeichnen ueberlebt den Neustart: Wer im Auto
-      // sitzt, will sie einmal treffen und nie wieder. Dieselbe Ueberlegung
-      // wie auf der /obd-Seite.
+      // The choice for recording survives the restart: whoever sits in the
+      // car wants to make it once and never again. Same consideration as on
+      // the /obd page.
       if (id === "aufz-fahrzeug" && !earlier) {
         try {
           const remembered = localStorage.getItem("jolt-aufz-fahrzeug");
@@ -194,7 +194,7 @@ window.joltVehicle = (function () {
               (f) => String(f.id) === remembered)) {
             selection.value = remembered;
           }
-        } catch (e) { /* ohne Speicher eben ohne Gedaechtnis */ }
+        } catch (e) { /* without storage, simply without memory */ }
         selection.addEventListener("change", () => {
           try { localStorage.setItem("jolt-aufz-fahrzeug", selection.value); }
           catch (e) {}
@@ -204,7 +204,7 @@ window.joltVehicle = (function () {
         });
       }
     }
-    // CarPlay zeigt am Start-Knopf, mit welchem Fahrzeug aufgezeichnet wird.
+    // CarPlay shows on the start button which vehicle is recorded with.
     if (window.joltTrips && window.joltTrips.reportVehicle) {
       window.joltTrips.reportVehicle();
     }
@@ -233,10 +233,10 @@ window.joltVehicle = (function () {
     showLogger(vehicle);
   }
 
-  /* ---------- Logger im Auto ---------- */
+  /* ---------- Logger in the car ---------- */
 
-  /* Das Token steht nur in der Antwort, die es erzeugt - danach kennt es die
-   * Oberfläche nicht mehr. Angezeigt wird sonst also nur, *ob* eines gilt. */
+  /* The token only appears in the response that creates it - afterwards the
+   * UI no longer knows it. So otherwise only *whether* one is valid is shown. */
   function showLogger(vehicle) {
     const as_of = document.getElementById("logger-stand");
     const box = document.getElementById("logger-token");
@@ -274,9 +274,8 @@ window.joltVehicle = (function () {
     }
     await load();
     const box = document.getElementById("logger-token");
-    // textContent und nicht innerHTML: Das Token ist zwar selbst erzeugt und
-    // urlsafe, aber ein Geheimnis gehört grundsätzlich nicht durch einen
-    // HTML-Parser.
+    // textContent and not innerHTML: the token is self-generated and
+    // urlsafe, but a secret does not belong in an HTML parser on principle.
     box.textContent = response.logger_token;
     box.hidden = false;
     K.report("Token erzeugt – jetzt notieren, es wird nur einmal gezeigt.",
@@ -314,9 +313,9 @@ window.joltVehicle = (function () {
     records.electricity_price_eur_kwh = std_default ? Number(std_default.value) : 0.59;
     if (!records.name) { K.report("Das Fahrzeug braucht einen Namen.", "fehler"); return; }
 
-    // Jeder Ladestand darf nur einmal vorkommen - die Datenbank erzwingt das,
-    // aber erst nach einem fehlgeschlagenen Speichern zu erfahren, welcher
-    // Ladestand doppelt war, ist unnötig umständlich.
+    // Every charge level may only occur once - the database enforces that,
+    // but finding out only after a failed save which charge level was a
+    // duplicate is needlessly cumbersome.
     const seen = new Set();
     for (const [soc] of records.charge_curve) {
       if (seen.has(soc)) {

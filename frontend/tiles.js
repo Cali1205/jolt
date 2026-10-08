@@ -1,33 +1,33 @@
-/* Die Kacheln der CarPlay-Übersicht, gezeichnet in der Oberfläche.
+/* The tiles of the CarPlay overview, drawn in the UI.
  *
- * CarPlay zeichnet für eine Kachel nur ein Bild und einen Titel - alles
- * andere muss ins Bild. Bisher hat Swift die Bilder gezeichnet
- * (JoltCarPlaySceneDelegate.kachelBild). Hier entstehen sie stattdessen im
- * Canvas und gehen als PNG im Anzeigemodell mit:
+ * For a tile CarPlay draws only an image and a title - everything
+ * else has to go into the image. Until now Swift drew the images
+ * (JoltCarPlaySceneDelegate.tileImage). Here they are created in the
+ * canvas instead and travel as PNG in the display model:
  *
- *  - Man sieht sie, bevor man ins Auto steigt: Die Einstellungen zeigen jede
- *    Kachel in jedem Stil mit Probewerten, im Browser genauso wie in der App.
- *  - Eine Änderung am Aussehen ist eine Änderung an dieser Datei. Die
- *    Oberfläche kommt vom Server (server.url), ein neuer App-Bau ist dafür
- *    nicht nötig.
- *  - Fehlt dem Telefon das Bild (ältere App, anderer Stil), zeichnet Swift
- *    wie bisher selbst.
+ *  - You can see them before getting in the car: the settings show each
+ *    tile in each style with sample values, in the browser as in the app.
+ *  - A change to the look is a change to this file. The UI comes from the
+ *    server (server.url), so a new app build is not
+ *    needed.
+ *  - If the phone lacks the image (older app, other style), Swift draws
+ *    it itself as before.
  *
- * Zwei Stile, beide dunkel und mit eigenem Grund, damit sie bei Tag und Nacht
- * gleich aussehen (CarPlay färbt nur den Titel unter der Kachel um):
+ * Two styles, both dark and with their own background, so they look the
+ * same by day and night (CarPlay recolours only the title under the tile):
  *
- *   "a"  Instrument   Runde Anzeigen mit Skala: Ladestand und Rekuperation
- *                     als Zeiger-Bogen, Verbrauch als Balken über einer
- *                     Mittellinie, Ankunft mit Pfeil, Reserve mit Reichweiten-
- *                     leiste.
- *   "b"  Telemetrie   Zahlen links, Segmentleisten wie bei einem Rennwagen:
- *                     Ladestand als LED-Reihe, Ankunft als Abweichung von
- *                     Null, Stopps als Streckenband, Verläufe als Fläche.
+ *   "a"  Instrument   Round gauges with a scale: charge level and recuperation
+ *                     as a pointer arc, consumption as a bar above a
+ *                     centre line, arrival with an arrow, reserve with a range
+ *                     bar.
+ *   "b"  Telemetrie   Numbers on the left, segment bars as in a race car:
+ *                     charge level as a row of LEDs, arrival as deviation from
+ *                     zero, stops as a route band, trends as an area.
  *
- * Gezeichnet wird in einem Quadrat von 120 Einheiten; die Pixelzahl kommt aus
- * `massstab` (2 = 240 Pixel). Nichts hier berührt das DOM ausser dem
- * Canvas, den der Aufrufer liefert - die Zeichenfunktionen lassen sich mit
- * einem Aufzeichner statt eines Canvas prüfen (tools/check_tiles.js).
+ * Drawing happens in a square of 120 units; the pixel count comes from
+ * `zoom_scale` (2 = 240 pixels). Nothing here touches the DOM except the
+ * canvas supplied by the caller - the drawing functions can be checked with
+ * a recorder instead of a canvas (tools/check_tiles.js).
  */
 window.joltTiles = (function () {
   "use strict";
@@ -44,22 +44,22 @@ window.joltTiles = (function () {
   const NUMBER = '"SF Mono", ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace';
   const TEXT = '-apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif';
 
-  /* ---------- Was welche Farbe heisst ---------- */
+  /* ---------- What each colour means ---------- */
 
-  /* Ladestand: unter 20 % ist es Zeit zu handeln, unter 10 % dringend. */
+  /* Charge level: below 20 % it is time to act, below 10 % urgent. */
   function colorSoc(p) {
     return p >= 35 ? COLOR.good : (p >= 20 ? COLOR.warn : COLOR.bad);
   }
-  /* Ankunft: Minuten gegenüber dem Plan. */
+  /* Arrival: minutes relative to the plan. */
   function colorArrival(min) {
     return min <= 2 ? COLOR.good : (min <= 15 ? COLOR.warn : COLOR.bad);
   }
-  /* Reserve: Kilometer bis zum Ladestand, den der Plan nicht unterschreiten will. */
+  /* Reserve: kilometres to the charge level the plan does not want to fall below. */
   function colorReserve(km) {
     return km >= 100 ? COLOR.good : (km >= 40 ? COLOR.warn : COLOR.bad);
   }
 
-  /* ---------- Zeichenhilfen ---------- */
+  /* ---------- Drawing helpers ---------- */
 
   function rounded(c, x, y, w, h, r) {
     c.beginPath();
@@ -92,7 +92,7 @@ window.joltTiles = (function () {
     c.fillText(s, x, y);
   }
 
-  /* Eine Zahl so gross wie möglich, ohne `breite` zu überschreiten. */
+  /* A number as large as possible without exceeding `extent`. */
   function numberFitting(c, s, x, y, startSize, extent, colour, orientation) {
     let g = startSize;
     do {
@@ -109,7 +109,7 @@ window.joltTiles = (function () {
   }
   function withoutGlow(c) { c.shadowBlur = 0; c.shadowColor = "transparent"; }
 
-  /* Ein Bogen von `von` nach `bis` (Bogenmass, im Uhrzeigersinn). */
+  /* An arc from `begin` to `upto` (radians, clockwise). */
   function arc_len(c, mx, my, r, begin, upto, extent, colour, cap) {
     c.beginPath();
     c.arc(mx, my, r, begin, upto);
@@ -131,7 +131,7 @@ window.joltTiles = (function () {
               { orientation: "center", typeface: NUMBER });
   }
 
-  /* Verlauf als Linie mit Fläche darunter. `reihe` in beliebiger Einheit. */
+  /* Trend as a line with an area below. `series` in any unit. */
   function history(c, series, x, y, b, h, colour, options) {
     const o = options || {};
     const low = o.low !== undefined ? o.low : Math.min(...series);
@@ -171,16 +171,16 @@ window.joltTiles = (function () {
     c.fillStyle = COLOR.text; c.fill();
   }
 
-  /* ---------- Stil A: Instrument ---------- */
+  /* ---------- Style A: instrument ---------- */
 
-  const START = Math.PI * 0.75;          // 135 Grad: links unten
-  const SPAN = Math.PI * 1.5;          // 270 Grad
+  const START = Math.PI * 0.75;          // 135 degrees: bottom left
+  const SPAN = Math.PI * 1.5;          // 270 degrees
 
-  /* Zeigerbogen mit Skala: Ladestand und Rekuperation. */
+  /* Pointer arc with scale: charge level and recuperation. */
   function pointerA(c, val, colour, unit, aux_line) {
     reason(c);
     const mx = PAGE / 2, my = 61, r = 44;
-    // Skala: elf Striche, alle 10 %.
+    // Scale: eleven ticks, every 10 %.
     for (let i = 0; i <= 10; i++) {
       const w = START + (SPAN * i) / 10;
       const large = i % 5 === 0;
@@ -197,7 +197,7 @@ window.joltTiles = (function () {
       glow(c, colour, 9);
       arc_len(c, mx, my, r, START, START + SPAN * share, 9, colour);
       withoutGlow(c);
-      // Zeigerkopf: heller Punkt am Ende des Bogens.
+      // Pointer head: bright dot at the end of the arc.
       const w = START + SPAN * share;
       c.beginPath(); c.arc(mx + Math.cos(w) * r, my + Math.sin(w) * r, 2.6, 0, Math.PI * 2);
       c.fillStyle = COLOR.text; c.fill();
@@ -228,7 +228,7 @@ window.joltTiles = (function () {
     const peak = Math.max(...real, avg * 1.15, 1);
     const n = vals.length, gap = 4;
     const bb = (b - gap * (n - 1)) / n;
-    // Grundlinie und Mittellinie.
+    // Baseline and centre line.
     c.strokeStyle = COLOR.muted; c.lineWidth = 1;
     c.beginPath(); c.moveTo(x0, y0 + h + 0.5); c.lineTo(x0 + b, y0 + h + 0.5); c.stroke();
     vals.forEach((w, i) => {
@@ -265,7 +265,7 @@ window.joltTiles = (function () {
     const colour = colorArrival(d.min);
     const pastPlan = Math.abs(d.min) < 1;
     const later = d.min > 0;
-    // Symbol: Pfeil nach oben (später) oder unten (früher), Haken bei "nach Plan".
+    // Symbol: arrow up (later) or down (earlier), check mark for "nach Plan".
     const mx = PAGE / 2;
     c.lineWidth = 4.5; c.lineCap = "round"; c.lineJoin = "round"; c.strokeStyle = colour;
     glow(c, colour, 9);
@@ -294,7 +294,7 @@ window.joltTiles = (function () {
     numberFitting(c, String(Math.round(d.km)), PAGE / 2, 54, 38, 90, COLOR.text, "center");
     write_out(c, "km bis Reserve", PAGE / 2, 72, 12, COLOR.muted,
               { orientation: "center", weight: 600 });
-    // Reichweitenleiste: 0 bis 300 km.
+    // Range bar: 0 to 300 km.
     const x = 14, y = 87, b = PAGE - 28, h = 10;
     rounded(c, x, y, b, h, 4.5); c.fillStyle = COLOR.track; c.fill();
     const share = Math.max(0.02, Math.min(1, d.km / 300));
@@ -310,7 +310,7 @@ window.joltTiles = (function () {
   function stopsA(c, d) {
     reason(c);
     numberFitting(c, String(d.count), PAGE / 2, 56, 46, 60, COLOR.text, "center");
-    // Punkte: ein Punkt je Stopp, der nächste hell.
+    // Dots: one dot per stop, the next one bright.
     const n = Math.min(d.count, 8), spacing = 14;
     const x0 = PAGE / 2 - ((n - 1) * spacing) / 2;
     for (let i = 0; i < n; i++) {
@@ -325,9 +325,9 @@ window.joltTiles = (function () {
     }
   }
 
-  /* ---------- Stil B: Telemetrie ---------- */
+  /* ---------- Style B: telemetry ---------- */
 
-  /* Die senkrechte Statusleiste links: Farbe sagt, wie es steht. */
+  /* The vertical status bar on the left: colour says how things stand. */
   function stripe(c, colour) {
     glow(c, colour, 6);
     rounded(c, 7, 14, 4, PAGE - 28, 2);
@@ -335,7 +335,7 @@ window.joltTiles = (function () {
     withoutGlow(c);
   }
 
-  /* LED-Leiste: `n` Segmente, `gefuellt` davon leuchten. */
+  /* LED bar: `n` segments, `share` of them lit. */
   function segmente(c, x, y, b, h, n, share, colorFn) {
     const gap = 1.8, sb = (b - gap * (n - 1)) / n;
     const active = Math.round(Math.max(0, Math.min(1, share)) * n);
@@ -350,7 +350,7 @@ window.joltTiles = (function () {
     }
   }
 
-  /* Zahl links, Einheit klein daneben auf derselben Grundlinie. */
+  /* Number on the left, unit small beside it on the same baseline. */
   function numberLeft(c, num, unit, y, startSize, extent) {
     c.font = `700 ${startSize}px ${NUMBER}`;
     let g = startSize;
@@ -370,7 +370,7 @@ window.joltTiles = (function () {
     stripe(c, colour);
     numberLeft(c, String(Math.round(val)), unit, 56, 44, 92);
     segmente(c, 17, 70, PAGE - 31, 17, 16, val / 100, () => colour);
-    // Skala unter der Leiste.
+    // Scale below the bar.
     const brands = gauge || ["0", "50", "100"];
     brands.forEach((m, i) => {
       const x = 17 + ((PAGE - 31) * i) / (brands.length - 1);
@@ -385,19 +385,19 @@ window.joltTiles = (function () {
     reason(c);
     stripe(c, colour);
     numberLeft(c, String(Math.round(d.val)), "%", 56, 44, 92);
-    // Verlauf: Pfeil für den Trend gegenüber der Reihe.
+    // Trend: arrow for the trend relative to the series.
     if (d.series && d.series.length >= 2) {
       const diff = d.series[d.series.length - 1] - d.series[0];
       if (Math.abs(diff) >= 0.5) {
         const uphill = diff > 0;
         c.beginPath();
-        // Spitze oben bei steigendem, unten bei fallendem Ladestand.
+        // Tip up for rising, down for falling charge level.
         c.moveTo(PAGE - 20, uphill ? 21 : 31); c.lineTo(PAGE - 13, uphill ? 31 : 21); c.lineTo(PAGE - 27, uphill ? 31 : 21);
         c.closePath();
         c.fillStyle = uphill ? COLOR.good : COLOR.warn; c.fill();
       }
     }
-    // Segmentleiste mit Farbverlauf nach Füllstand: unten rot, mitte gelb, oben grün.
+    // Segment bar with gradient by fill level: red bottom, yellow middle, green top.
     segmente(c, 17, 70, PAGE - 31, 17, 20, d.val / 100, (t) => colorSoc(t * 100));
     ["0", "50", "100"].forEach((m, i) => {
       write_out(c, m, 17 + ((PAGE - 31) * i) / 2, 108, 11.5, COLOR.muted,
@@ -460,7 +460,7 @@ window.joltTiles = (function () {
     const sign = d.min > 0 ? "+" : (d.min < 0 ? "−" : "");
     numberLeft(c, pastPlan ? "Plan" : `${sign}${Math.abs(d.min) < 60 ? Math.abs(d.min) : d.text}`,
               pastPlan || Math.abs(d.min) >= 60 ? "" : "min", 56, 42, 92);
-    // Abweichung von Null: Mitte = Plan, rechts = später, links = früher.
+    // Deviation from zero: centre = plan, right = later, left = earlier.
     const x = 17, y = 70, b = PAGE - 31, h = 14, middle = x + b / 2;
     rounded(c, x, y, b, h, 3); c.fillStyle = COLOR.track; c.fill();
     const zone = 30;
@@ -482,7 +482,7 @@ window.joltTiles = (function () {
     reason(c);
     stripe(c, colour);
     numberLeft(c, String(Math.round(d.km)), "km", 56, 44, 92);
-    // Lineal: Teilstriche alle 50 km bis 300, eine Marke an der Reichweite.
+    // Ruler: ticks every 50 km up to 300, a mark at the range.
     const x = 17, y = 68, b = PAGE - 31;
     c.strokeStyle = COLOR.cells; c.lineWidth = 1;
     c.beginPath(); c.moveTo(x, y + 12.5); c.lineTo(x + b, y + 12.5); c.stroke();
@@ -503,7 +503,7 @@ window.joltTiles = (function () {
     reason(c);
     stripe(c, COLOR.accent);
     numberLeft(c, String(d.count), d.count === 1 ? "Stopp" : "Stopps", 56, 44, 92);
-    // Streckenband: Start links, Ziel rechts, ein Punkt je Stopp.
+    // Route band: start left, destination right, one dot per stop.
     const x = 17, y = 82, b = PAGE - 31;
     c.strokeStyle = COLOR.cells; c.lineWidth = 3; c.lineCap = "round";
     c.beginPath(); c.moveTo(x, y); c.lineTo(x + b, y); c.stroke();
@@ -522,7 +522,7 @@ window.joltTiles = (function () {
     }
   }
 
-  /* ---------- Zuordnung ---------- */
+  /* ---------- Mapping ---------- */
 
   const SLOTS = ["soc", "arrival", "reserve", "consumption", "aux", "regen", "stops"];
 
@@ -553,8 +553,8 @@ window.joltTiles = (function () {
     { id: "b", name: "B – Telemetrie" },
   ];
 
-  /* Aus dem Anzeigemodell die Werte je Kachel - oder null, wenn dort etwas
-   * fehlt. Es wird nichts ersetzt: Eine Kachel ohne Wert bleibt leer. */
+  /* From the display model the values per tile - or null if something is
+   * missing there. Nothing is substituted: a tile without a value stays empty. */
   function records(m, series_list) {
     const r = series_list || {};
     const origin_of = {};
@@ -588,7 +588,7 @@ window.joltTiles = (function () {
     return origin_of;
   }
 
-  /* Eine Kachel auf einen vorbereiteten 2D-Kontext zeichnen. */
+  /* Draw a tile onto a prepared 2D context. */
   function draw(look, slot, d, c) {
     const table = DRAWER[look];
     c.save();
@@ -598,8 +598,8 @@ window.joltTiles = (function () {
     } finally { c.restore(); }
   }
 
-  /* Eine Kachel als PNG (Base64 ohne Kopf).
-   * `erzeuger(pixel)` liefert einen Canvas der Kantenlänge `pixel`. */
+  /* A tile as PNG (Base64 without header).
+   * `generator(pixel)` returns a canvas with edge length `pixel`. */
   function tilePng(look, slot, d, generator, zoom_scale) {
     const ms = zoom_scale || 2;
     const canvas = generator(PAGE * ms);
@@ -616,10 +616,10 @@ window.joltTiles = (function () {
     return k;
   }
 
-  /* Alle sieben Kacheln eines Stils. Eine Kachel ohne Wert wird als leere
-   * gezeichnet (gestrichelter Rahmen, Strich): Sie soll zum Stil passen, nicht
-   * wie ein Fremdkörper aus Swift aussehen. Feste Plätze - ein fehlender Wert
-   * lässt die übrigen nicht nachrücken. */
+  /* All seven tiles of a style. A tile without a value is drawn as an empty
+   * one (dashed frame, dash): it should match the style and not
+   * look like a foreign body from Swift. Fixed places - a missing value
+   * does not make the others move up. */
   function pictures(look, m, series_list, generator) {
     if (!DRAWER[look]) return null;
     const every = records(m, series_list);
@@ -630,7 +630,7 @@ window.joltTiles = (function () {
     return origin_of;
   }
 
-  /* Probewerte für die Vorschau in den Einstellungen und für Prüfungen. */
+  /* Sample values for the preview in the settings and for checks. */
   function probe() {
     return {
       m: {

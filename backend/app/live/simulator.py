@@ -1,19 +1,19 @@
-"""Eine Fahrt abspielen, ohne zu fahren.
+"""Play back a trip without driving.
 
-Ohne den Simulator liesse sich die Live-Kette erst prüfen, wenn ein Auto,
-ein Datenlieferant und eine echte Langstrecke zusammenkommen. Damit wäre
-genau der Teil ungetestet, um den es in diesem Projekt geht.
+Without the simulator, the live chain could only be verified once a car, a
+data supplier and a real long-distance drive come together. That would leave
+exactly the part untested that this project is about.
 
-Der Simulator läuft die geplante Route ab und meldet Ladestände, die um
-`mehrverbrauch` vom Plan abweichen. Mit 1.0 folgt er dem Plan exakt, mit 1.2
-verbraucht er zwanzig Prozent mehr - und genau dann muss die Nachführung
-anschlagen und die Reserve vorziehen. Das ist der Prüfstein.
+The simulator walks along the planned route and reports charge levels that
+deviate from the plan by `extra_consumption`. With 1.0 it follows the plan
+exactly, with 1.2 it uses twenty percent more - and that is precisely when the
+tracking has to kick in and bring the reserve forward. That is the acid test.
 
-`zeitfaktor` macht dasselbe mit der Uhr: 1.4 heisst "vierzig Prozent länger
-unterwegs als geplant", also Stau. Dafür trägt jeder Messpunkt eine
-**simulierte** Zeit. Ohne die wäre der Zeitfaktor hier nicht zu prüfen - der
-Simulator spielt Stunden in Sekunden ab, und gegen die echte Uhr gemessen
-wäre jede Fahrt absurd schnell.
+`time_factor` does the same with the clock: 1.4 means "forty percent longer
+on the road than planned", i.e. a traffic jam. For that, every sample carries
+a **simulated** time. Without it the time factor could not be tested here -
+the simulator plays hours back in seconds, and measured against the real
+clock every trip would be absurdly fast.
 """
 import asyncio
 import logging
@@ -31,10 +31,10 @@ STEP_KM = 5.0
 def steps(trip: models.Trip, extra_consumption: float = 1.0,
              step_km: float = STEP_KM,
              time_factor: float = 1.0) -> list[dict]:
-    """Die Messpunkte einer simulierten Fahrt.
+    """The samples of a simulated trip.
 
-    Reine Funktion ohne Datenbank und ohne Warten - damit sie sich in einem
-    Prüfskript direkt durchrechnen lässt.
+    Pure function without a database and without waiting - so that it can be
+    worked through directly in a check script.
     """
     profile = trip.energy_profile or []
     if not profile:
@@ -53,13 +53,13 @@ def steps(trip: models.Trip, extra_consumption: float = 1.0,
             "speed_kmh": entry.get("speed_kmh"),
             "outside_temp_c": trip.outside_temp_c,
             "km": round(km, 1),
-            # Minuten seit Abfahrt, wie sie *im Auto* vergangen wären.
+            # Minutes since departure, as they would have passed *in the car*.
             "mins": round((entry.get("mins") or 0.0) * time_factor, 3)})
-        # Bei null ist Schluss. Ein simuliertes Auto, das mit leerem Akku
-        # weiterfährt und dabei brav 0 % meldet, würde genau den Fall
-        # verschleiern, den die Simulation sichtbar machen soll: dass es
-        # vorher hätte laden müssen. Wer mehr verbraucht, kommt kürzer -
-        # und das muss man an der Zahl der Messpunkte sehen.
+        # At zero it is over. A simulated car that keeps driving on an empty
+        # battery while dutifully reporting 0 % would hide exactly the case
+        # the simulation is meant to expose: that it should have charged
+        # earlier. Whoever uses more gets less far - and that has to be
+        # visible in the number of samples.
         if soc <= 0:
             break
         km += step_km
@@ -70,11 +70,11 @@ def steps(trip: models.Trip, extra_consumption: float = 1.0,
 async def replay(db_factory, session_id: int, extra_consumption: float = 1.0,
                     tick_s: float = 1.0, step_km: float = STEP_KM,
                     time_factor: float = 1.0) -> None:
-    """Die Simulation als Hintergrundaufgabe.
+    """The simulation as a background task.
 
-    Jeder Schritt bekommt eine eigene Datenbanksitzung: Die Aufgabe läuft
-    minutenlang, und eine über die ganze Zeit offen gehaltene Verbindung
-    wäre genau die, die beim ersten Netzhänger stirbt.
+    Each step gets its own database session: the task runs for minutes, and a
+    connection held open the whole time would be exactly the one that dies at
+    the first network hiccup.
     """
     db = db_factory()
     try:
@@ -85,9 +85,9 @@ async def replay(db_factory, session_id: int, extra_consumption: float = 1.0,
     finally:
         db.close()
 
-    # Der Nullpunkt der simulierten Uhr. Die Messpunkte tragen ihre Zeit
-    # relativ dazu, damit die Nachführung eine plausible Fahrt sieht und
-    # nicht sechshundert Kilometer in vier Sekunden.
+    # The zero point of the simulated clock. The samples carry their time
+    # relative to it, so that the tracking sees a plausible trip and not six
+    # hundred kilometres in four seconds.
     onset = datetime.utcnow()
 
     for sample in points:
@@ -101,15 +101,15 @@ async def replay(db_factory, session_id: int, extra_consumption: float = 1.0,
                 sample.get("speed_kmh"), sample.get("outside_temp_c"),
                 timestamp=onset + timedelta(minutes=sample.get("mins") or 0.0))
         except Exception as failure:      # noqa: BLE001
-            log.warning("Simulation abgebrochen: %s", failure)
+            log.warning("Simulation aborted: %s", failure)
             return
         finally:
             db.close()
 
         await channel.send(session_id, {"kind": "zustand", "simulated": True,
                                         **live_session.state_as_dict(state)})
-        # Auch die Simulation benachrichtigt - sonst liesse sich die Kette bis
-        # aufs Telefon nie durchspielen, ohne wirklich zu fahren.
+        # The simulation notifies, too - otherwise the chain could never be
+        # played through all the way to the phone without actually driving.
         if state.plan_changed:
             push.send_background(db_factory, "jolt – Ladeplan geändert",
                                     state.change)

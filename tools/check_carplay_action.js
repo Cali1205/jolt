@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Prueft den Start und das Beenden der Aufzeichnung aus CarPlay
+// Checks starting and stopping the recording from CarPlay
 // (frontend/trips.js: carplayAktion).
 //
-// Die CarPlay-Liste sendet ein Ereignis ("carplayAktion": starten oder
-// beenden) und bekommt das Ergebnis zurueck. Im Auto sieht niemand die
-// Meldungen der Oberflaeche - ein Start, der still scheitert, waere dort ein
-// Knopf, der nichts tut. Geprueft wird deshalb vor allem: Kommt immer eine
-// Antwort, und nennt sie bei einem Fehler den Grund?
+// The CarPlay list sends an event ("carplayAktion": start or
+// stop) and gets the result back. In the car nobody sees the
+// messages of the UI - a start that fails silently would be a
+// button that does nothing there. So the main thing checked is: does an
+// answer always come, and does it name the reason on an error?
 //
 //     node tools/check_carplay_action.js
 const fs = require("fs");

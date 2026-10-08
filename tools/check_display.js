@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Prueft das Anzeigemodell (frontend/display.js): den Zustand der Fahrt als
-// wenige Zahlen und Texte fuer eine Live Activity, ein Widget oder eine
-// CarPlay-Vorlage - ohne Swift, ohne Mac, ohne Apple.
+// Checks the display model (frontend/display.js): the state of the trip as
+// a few numbers and texts for a Live Activity, a widget or a
+// CarPlay template - without Swift, without a Mac, without Apple.
 //
-// Geprueft wird vor allem, was in einem Auto schaden koennte: ein erfundenes
-// Feld (ein Ladestopp bei einer Aufzeichnung ohne Plan), ein falscher Abstand
-// (die Reserve liegt als Position auf der Route, nicht als Entfernung), und
-// ein Sender, der oefter meldet, als Apple es erlaubt.
+// Mainly checked is what could do harm in a car: an invented
+// field (a charging stop on a recording without a plan), a wrong distance
+// (the reserve is a position on the route, not a distance), and
+// a sender that reports more often than Apple allows.
 //
 //     node tools/check_display.js
 const fs = require("fs");
@@ -32,7 +32,7 @@ const A = timeframe.joltDisplay;
 
 const NOW = 1_800_000_000_000;
 
-// Ein Zustand, wie ihn /api/live/{id} liefert: geplante Fahrt, unterwegs.
+// A state as /api/live/{id} returns it: planned trip, under way.
 const planned = {
   km_on_route: 100.0, lat: 48.5, lon: 9.1,
   actual_soc: 72.1, soc_reported: true, soc_source: "gemessen", plan_soc: 73.0,
@@ -127,7 +127,7 @@ verify(withoutSource.soc.source === "gerechnet",
 console.log("\nSender: drosseln");
 function build(opt) {
   const t = { now_ts: NOW, planned: [], sent: [] };
-  // Die Abstaende des Tests stehen fest, unabhaengig vom Vorgabewert der App.
+  // The test's distances are fixed, independent of the app's default.
   const s = A.sender({
     spacingMs: 10000,
     now_ts: () => t.now_ts,
@@ -230,9 +230,9 @@ verify(ok && A.MIN_SPACING_MS === 15000,
        "melden, beenden und setTarget laufen ohne Ziel durch; 15 s Mindestabstand");
 
 console.log("\nVerlauf: 1, 5, 30 und 60 Minuten");
-/* Eine Fahrt mit 70 km/h und 15 kWh/100 km: 1,1667 km und 0,175 kWh je
- * Minute, ein Punkt alle zwölf Sekunden, 70 Minuten lang. Danach stimmt jedes
- * Fenster auf die Nachkommastelle, und der Test sagt, wo die Rechnung abweicht. */
+/* A trip at 70 km/h and 15 kWh/100 km: 1.1667 km and 0.175 kWh per
+ * minute, one point every twelve seconds, 70 minutes long. Then every
+ * window matches to the decimal place, and the test says where the calculation deviates. */
 function trip(mins, options) {
   const o = { kwh100: 15, kmh: 70, ...(options || {}) };
   const track = [];
@@ -245,8 +245,8 @@ function trip(mins, options) {
     km += dkm;
     const dkwh = dkm * o.kwh100 / 100;
     net += dkwh;
-    disch += dkwh * 1.2;     // 20 % mehr entnommen ...
-    chg += dkwh * 0.2;      // ... und ein Sechstel davon zurueckgespeist
+    disch += dkwh * 1.2;     // 20 % more drawn ...
+    chg += dkwh * 0.2;      // ... and a sixth of that fed back
   }
   return track;
 }
@@ -267,7 +267,7 @@ verify(v.regen && v.regen.percent === 17 && v.regen.mins >= 55,
        "Rekuperation: ein Sechstel der entnommenen Energie kam zurueck (17 %)",
        JSON.stringify(v.regen));
 
-// Der Verbrauch aendert sich: die kurzen Fenster folgen schneller, die langen glaetten.
+// The consumption changes: the short windows follow faster, the long ones smooth.
 const expensiveThenCheap = (() => {
   const a = trip(50, { kwh100: 25 }).filter((p) => p.timestamp < NOW - 10 * 60000);
   const b = trip(10, { kwh100: 10 });
@@ -280,7 +280,7 @@ verify(v.timeframe[0].kwh100 < 11 && v.timeframe[1].kwh100 < 11
        "kurze Fenster zeigen den Umschwung (10), lange glaetten ihn (um 20)",
        JSON.stringify(v.timeframe.map((f) => f.kwh100)));
 
-// Ehrlichkeit: kein Fenster ohne Spur dahinter.
+// Honesty: no window without a trace behind it.
 v = as_of({ track: trip(12) }).history;
 verify(v.timeframe[0].kwh100 !== null && v.timeframe[1].kwh100 !== null
        && v.timeframe[2].kwh100 === null && v.timeframe[3].kwh100 === null,
@@ -289,15 +289,15 @@ verify(v.timeframe[0].kwh100 !== null && v.timeframe[1].kwh100 !== null
 verify(v.timeframe[2].text === "–" && v.timeframe[3].kwText === "–",
        "und der Text ist ein Strich, keine Null");
 
-// Stand: Energie ohne Strecke - kWh/100 geht nicht, kW schon.
+// Standing: energy without distance - kWh/100 is not possible, kW is.
 const standing = trip(10, { kmh: 0 });
-standing.forEach((p, i) => { p.net = 50 + i * 0.004; });   // 1,2 kW
+standing.forEach((p, i) => { p.net = 50 + i * 0.004; });   // 1.2 kW
 v = as_of({ track: standing }).history;
 verify(v.timeframe[0].kwh100 === null && v.timeframe[0].kw !== null && Math.abs(v.timeframe[1].kw - 1.2) < 0.1,
        "im Stand: kein kWh/100 (keine Strecke), aber die Leistung (1,2 kW)",
        JSON.stringify(v.timeframe.slice(0, 2)));
 
-// Spur steht (Dongle weg): kein "Jetzt".
+// Trace is there (dongle gone): no "Jetzt".
 const old = trip(70).filter((p) => p.timestamp < NOW - 2 * 60000);
 verify(as_of({ track: old }).history === null,
        "ist der letzte Punkt zwei Minuten alt, steht kein Verlauf da - kein altes Jetzt");
@@ -430,14 +430,14 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
     const k2 = { window: f, document: f.document, console: { log() {} }, Date, JSON, Math, Number, setTimeout,
                  clearTimeout, Promise };
     vm.createContext(k2);
-    // Der gemerkte Stil wird beim Laden gelesen: erst vorbereiten, dann laden.
+    // The remembered style is read on load: prepare first, then load.
     if (beforehand) beforehand(storage);
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "frontend", "tiles.js"), "utf8"), k2);
     vm.runInContext(source, k2);
     return { A2: f.joltDisplay, aufrufe2, f };
   }
 
-  // Reihen
+  // Rows
   const { A2 } = pageWithTiles();
   let r = null;
   const using = (soc, aux, regen) => ({ soc: soc === null ? null : { percent: soc },
@@ -460,12 +460,12 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
          && A2.seriesListExcerpt(A2.seriesListAppend(null, null, NOW)).aux === null,
          "fehlende Werte stoeren nicht");
 
-  // Stil
+  // Style
   verify(A2.look() === "klassisch", "ohne Wahl gilt 'klassisch' - bisheriges Verhalten");
   verify(A2.setStyle("quatsch") === false && A2.look() === "klassisch",
          "ein unbekannter Stil wird abgelehnt");
 
-  // Senden in der App
+  // Sending in the app
   let s1 = pageWithTiles();
   let gesendet1 = JSON.parse(JSON.stringify(s1.A2.withImages(m, NOW)));
   verify(gesendet1.look === "klassisch" && gesendet1.tileImages === undefined,
@@ -480,9 +480,9 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
   const s2 = pageWithTiles((sp) => { sp["jolt-carplay-stil"] = "b"; });
   verify(s2.A2.look() === "b", "nach einem Neuladen gilt die gemerkte Wahl");
 
-  // Beim Wechsel wird gleich neu gesendet
+  // On a switch, it is sent again right away
   const s3 = pageWithTiles();
-  s3.A2.report(planned);                       // geht als erstes hinaus
+  s3.A2.report(planned);                       // goes out first
   const earlier = s3.aufrufe2.length;
   s3.A2.setStyle("b");
   verify(s3.aufrufe2.length === earlier + 1 && JSON.parse(s3.aufrufe2[earlier][1].json).stil === "b",

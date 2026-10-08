@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Prüft die Live-Umplanung - Stufe 3.
+"""Checks live replanning - stage 3.
 
-Zwei Teile, und der zweite ist der wichtige:
+Two parts, and the second is the important one:
 
-1. Die **Auslöser** aus Abschnitt 2.3 des Konzepts, einzeln und ohne
-   Datenbank. Jeder muss über seiner Schwelle greifen und darunter schweigen.
-   Ein Auslöser, der immer feuert, ist so nutzlos wie einer, der es nie tut.
-2. Die **Umplanung** selbst, über die ganze Kette: Fahrt rechnen, Ladepunkte
-   entlang der Strecke anlegen, Live-Sitzung starten, mit Mehrverbrauch und
-   mit Stau abspielen - und nachsehen, ob der Plan sich ändert, ob er dabei
-   gültig bleibt und ob er sich *nicht* bei jeder Messung ändert.
+1. The **triggers** from section 2.3 of the concept, one by one and without
+   a database. Each must fire above its threshold and stay quiet below it.
+   A trigger that always fires is as useless as one that never does.
+2. The **replanning** itself, across the whole chain: compute a trip, create
+   charge points along the route, start a live session, replay it with excess
+   consumption and with traffic - and check whether the plan changes, whether
+   it stays valid in the process, and whether it does *not* change on every
+   measurement.
 
-Ohne Netz, ohne Postgres, ohne API-Schlüssel:
+No network, no Postgres, no API keys:
 
     ./tools/check_replanning.py
 """
@@ -45,10 +46,10 @@ class VehicleStubB:
 
 
 def trigger(**deviations):
-    """`_examine_replanning` mit lauter unauffälligen Vorgaben aufrufen.
+    """Call `_examine_replanning` with entirely unremarkable defaults.
 
-    So steht in jedem Testfall nur die eine Grösse, um die es geht - und man
-    sieht sofort, welche den Auslöser bewegt hat.
+    That way each test case contains only the one quantity it is about - and
+    you see at once which one moved the trigger.
     """
     vals = dict(vehicle=VehicleStubB(), deviation=0.0, spacing_m=10.0,
                  detour_since=None, now_ts=datetime(2026, 1, 1, 12, 0),
@@ -59,7 +60,7 @@ def trigger(**deviations):
 
 
 # ---------------------------------------------------------------------------
-# Teil 1: die Auslöser
+# Part 1: the triggers
 # ---------------------------------------------------------------------------
 
 def part_trigger():
@@ -76,7 +77,7 @@ def part_trigger():
     verify(required and urgent,
            "Prognose unter der Reserve: sofort neu planen", reason)
 
-    # Der nächste Stopp ist als belegt gemeldet.
+    # The next stop has been reported as occupied.
     stop = {"id": 4242, "name": "Rasthof Nord", "km_on_route": 200.0,
              "planned_soc": 15.0, "expected_soc": 15.0}
     availability.REPORTS.report(4242)
@@ -92,13 +93,13 @@ def part_trigger():
     verify(not required,
            "nach der Freigabe greift derselbe Stopp nicht mehr", reason)
 
-    # Ankunfts-SoC am nächsten Stopp: die Schwelle sind 5 Prozentpunkte.
+    # Arrival SoC at the next stop: the threshold is 5 percentage points.
     required, reason, _ = trigger(upcoming=stop, arrival_soc=9.0)
     verify(required, "6 pp weniger am nächsten Stopp: neu planen", reason)
     required, reason, _ = trigger(upcoming=stop, arrival_soc=12.0)
     verify(not required, "3 pp weniger bleiben unter der Schwelle", reason)
 
-    # Abweg braucht Dauer, nicht nur Abstand.
+    # A detour needs duration, not just distance.
     now_ts = datetime(2026, 1, 1, 12, 0)
     required, reason, _ = trigger(spacing_m=900.0, detour_since=now_ts, now_ts=now_ts)
     verify(not required,
@@ -108,20 +109,20 @@ def part_trigger():
     verify(required and urgent,
            "90 Sekunden neben der Route dagegen schon", reason)
 
-    # Stau.
+    # Traffic jam.
     required, reason, _ = trigger(shift=14.0)
     verify(required, "14 min spätere Ankunft: neu planen", reason)
     required, reason, _ = trigger(shift=6.0)
     verify(not required, "6 min bleiben unter der Schwelle", reason)
 
-    # Ohne Plan bleibt die Abweichung hier die beste verfügbare Aussage.
+    # Without a plan, the deviation is the best available statement here.
     required, reason, _ = trigger(deviation=-7.0)
     verify(required, "ohne Plan zählt die Abweichung an der aktuellen Position",
            reason)
 
 
 class PointStub:
-    """Ein Messpunkt, so viel davon wie `_charge_pauses_minutes` anfasst."""
+    """A measurement point, as much of it as `_charge_pauses_minutes` touches."""
 
     NULL = datetime(2026, 1, 1, 8, 0)
 
@@ -132,21 +133,21 @@ class PointStub:
 
 
 def part_charge_pauses():
-    """Was von der verstrichenen Zeit eine Ladepause war - und was nicht.
+    """How much of the elapsed time was a charging pause - and how much not.
 
-    Das Energieprofil führt ausschliesslich Fahrzeit; die Ladezeit steht im
-    Plan. Wer die Wanduhr ungefiltert dagegen hält, hat nach dem ersten
-    Ladestopp eine Verspätung in Höhe der Ladedauer - dauerhaft, denn
-    aufgeholt wird sie nie.
+    The energy profile contains driving time only; the charging time is in
+    the plan. Anyone who holds the wall clock against it unfiltered has a
+    delay equal to the charging duration after the first charging stop -
+    permanently, because it is never made up.
     """
     print("\nLadepause von Verspätung unterscheiden")
 
-    # 100 km/h, 0,1 Prozentpunkte je Kilometer.
+    # 100 km/h, 0.1 percentage points per kilometer.
     profile = [{"km": k, "mins": k * 0.6, "soc": 80 - k * 0.1}
               for k in range(0, 401, 10)]
 
-    # Der Logger sendet während des Ladens weiter: dreissig Minuten am selben
-    # Ort, der Ladestand steigt.
+    # The logger keeps transmitting while charging: thirty minutes at the same
+    # place, the charge level rises.
     charging = [PointStub(150.0, 30.0, 90.0), PointStub(150.0, 45.0, 100.0),
              PointStub(150.0, 60.0, 110.0), PointStub(150.0, 70.0, 120.0),
              PointStub(160.0, 68.0, 126.0)]
@@ -155,25 +156,25 @@ def part_charge_pauses():
            "dreissig Minuten an der Säule werden als Ladepause erkannt",
            f"{measured:.1f} min")
 
-    # Derselbe Ladestopp, aber der Logger hat geschlafen und meldet sich erst
-    # zwanzig Kilometer später wieder. Auch dann darf nur die Standzeit
-    # zählen, nicht die Fahrzeit für die zwanzig Kilometer.
+    # The same charging stop, but the logger slept and only reports again
+    # twenty kilometers later. Even then only the standstill time may count,
+    # not the driving time for the twenty kilometers.
     slept = [PointStub(150.0, 30.0, 90.0), PointStub(170.0, 65.0, 132.0)]
     measured = live_session._charge_pauses_minutes(slept, profile)
     verify(abs(measured - 30.0) < 0.1,
            "auch wenn der Logger die Pause verschlafen hat",
            f"{measured:.1f} min")
 
-    # Rekuperation auf langer Talfahrt hebt den Ladestand ebenfalls - kostet
-    # aber keine zusätzliche Zeit, also auch keine Gutschrift.
+    # Regeneration on a long descent also raises the charge level - but costs
+    # no additional time, so no credit either.
     downhill = [PointStub(150.0, 30.0, 90.0), PointStub(160.0, 31.0, 96.0)]
     measured = live_session._charge_pauses_minutes(downhill, profile)
     verify(measured < 0.5,
            "Rekuperation bergab ist keine Ladepause - das Auto fährt ja",
            f"{measured:.1f} min")
 
-    # Mittagessen: eine Dreiviertelstunde Stillstand ohne Ladung. Die
-    # verschiebt die Ankunft wirklich und muss stehen bleiben.
+    # Lunch: three quarters of an hour standing still without charging. That
+    # really shifts the arrival and has to stay.
     pause = [PointStub(150.0, 30.0, 90.0), PointStub(150.0, 29.8, 135.0)]
     measured = live_session._charge_pauses_minutes(pause, profile)
     verify(measured < 0.5,
@@ -182,7 +183,7 @@ def part_charge_pauses():
 
 
 # ---------------------------------------------------------------------------
-# Teil 2: Rest-Strecke
+# Part 2: remaining distance
 # ---------------------------------------------------------------------------
 
 def part_remaining_distance():
@@ -207,8 +208,8 @@ def part_remaining_distance():
     verify(scaled.km[-1] == rest.km[-1],
            "die Strecke bleibt, was sie ist - gefahren wird nicht weniger")
 
-    # Geometrie und Profil müssen denselben Nullpunkt bekommen, sonst ist
-    # jede Etappenrechnung um diesen Versatz falsch.
+    # Geometry and profile must get the same zero point, otherwise every leg
+    # calculation is off by that offset.
     geo = [[9.0 + i * 0.01, 53.0, 0.0] for i in range(200)]
     segment, km0 = replanning.rest_from(geo, 40.0)
     measured = 0.0
@@ -243,21 +244,20 @@ class TripStub:
 
 
 def recompute_part_speed():
-    """Die Reststrecke mit dem gemessenen Tempo neu rechnen statt skalieren.
+    """Recompute the remaining distance with the measured speed instead of scaling.
 
-    Das Tempo wurde bisher **geraten**: Der Regler in der Planen-Ansicht
-    steht auf 120 %, und niemand weiss, ob das stimmt. Gleichzeitig schrieb
-    die PWA die gemessene Geschwindigkeit in eine Spalte, die nie jemand las.
+    The speed used to be **guessed**: the slider in the planning view is set
+    to 120 %, and nobody knows whether that is right. Meanwhile the PWA wrote
+    the measured speed into a column that nobody ever read.
 
-    Warum dafür nicht ein Faktor genügt, ist der ganze Punkt: Der
-    Luftwiderstand geht mit v², der Rollwiderstand nahezu linear, die
-    Nebenverbraucher gar nicht mit dem Tempo, sondern mit der Zeit - und die
-    sinkt, wenn man schneller fährt. Ein pauschaler Aufschlag trifft keinen
-    dieser drei.
+    Why a single factor does not suffice is the whole point: air drag goes
+    with v², rolling resistance nearly linearly, and the auxiliary consumers
+    not with speed at all but with time - which decreases when you drive
+    faster. A flat surcharge hits none of these three.
     """
     print("\nReststrecke mit gemessenem Tempo neu rechnen")
 
-    # Zweihundert Kilometer eben, hundert km/h nach Plan, zehn Grad.
+    # Two hundred kilometers of flat road, a hundred km/h as planned, ten degrees.
     rest = []
     for i in range(41):
         km = i * 5.0
@@ -286,9 +286,9 @@ def recompute_part_speed():
            "und weniger Zeit - beides zugleich, das kann kein Energiefaktor",
            f"{fast.mins[-1]:.0f} gegen {past_plan.mins[-1]:.0f} min")
 
-    # Die Schranke nach oben ist der reine v²-Anteil. Läge der Zuwachs
-    # darüber, wäre mehr als der Luftwiderstand skaliert worden; läge er bei
-    # null, wäre das Tempo gar nicht angekommen.
+    # The upper bound is the pure v² share. If the increase were above it,
+    # more than just the air drag would have been scaled; if it were zero,
+    # the speed would not have arrived at all.
     gain = fast.kwh[-1] / past_plan.kwh[-1]
     verify(1.02 < gain < 1.44,
            "der Mehrverbrauch liegt zwischen spürbar und dem reinen "
@@ -300,8 +300,8 @@ def recompute_part_speed():
            "langsamer fahren dreht beides um",
            f"{slow.kwh[-1]:.1f} kWh in {slow.mins[-1]:.0f} min")
 
-    # Fahrten aus der Zeit vor diesen Profilfeldern müssen aufs Skalieren
-    # zurückfallen und nicht abstürzen.
+    # Trips from before these profile fields existed must fall back to
+    # scaling and not crash.
     without_city = [{k: v for k, v in e.items() if k not in ("lat", "lon")}
                 for e in rest]
     verify(replanning.remaining_profile_physics(trip, without_city, 1.2, environment) is None,
@@ -340,18 +340,18 @@ def part_plan_comparison():
 
 
 # ---------------------------------------------------------------------------
-# Teil 3: die ganze Kette
+# Part 3: the whole chain
 # ---------------------------------------------------------------------------
 
 def prepare_trip(client) -> dict:
-    """Eine Fahrt rechnen und Ladepunkte entlang der Route anlegen."""
+    """Compute a trip and create charge points along the route."""
     vehicles = client.get("/api/fahrzeuge").json()
     route = client.post("/api/route", json={
         "vehicle_id": vehicles[0]["id"],
         "start": {"lat": 53.5511, "lon": 9.9937, "text": "Hamburg"},
         "destination": {"lat": 48.1351, "lon": 11.5820, "text": "München"},
-        # Der Demo-Adapter kennt keine drei unterschiedlichen Vorgaben - hier
-        # reicht deshalb die erste (einzige) Variante.
+        # The demo adapter does not know three different presets - so the
+        # first (only) variant is enough here.
         "start_soc": 80.0}).json()["variants"][0]
 
     geo = route["geometry"]
@@ -396,15 +396,15 @@ def part_chain():
            f"{len(start_plan.get('stops') or [])}")
 
     print("\nMehrverbrauch führt zu einem neuen Plan")
-    # Abgespielt wird von Hand statt über /simulieren: Die eingebaute
-    # Simulation läuft als Hintergrundaufgabe, und ein Prüfskript, das auf
-    # eine solche wartet, prüft irgendwann die Wartezeit statt die Sache.
+    # Replayed by hand instead of via /simulieren: the built-in simulation
+    # runs as a background task, and a check script that waits for one ends
+    # up checking the waiting time instead of the thing itself.
     #
-    # Bis km 100 und nicht weiter: Der Simulator lädt unterwegs nicht nach -
-    # er spielt das Energieprofil ab. Wer ihn weiter laufen lässt, prüft ein
-    # Auto, das den eigenen Plan ignoriert hat und irgendwann zwischen zwei
-    # Ladepunkten steht; dessen Ladeplan ist zu Recht keiner mehr. Genau
-    # dieser Fall kommt gleich darunter eigens dran.
+    # Up to km 100 and no further: the simulator does not recharge along the
+    # way - it replays the energy profile. Letting it run on means checking a
+    # car that ignored its own plan and ends up somewhere between two charge
+    # points; its charging plan rightly no longer is one. This very case
+    # gets its own check right below.
     _replay(client, session_id, trip_id, extra_consumption=1.3, time_factor=1.0,
                until_km=100.0)
 
@@ -464,13 +464,14 @@ def part_chain():
     _replay(client, sitzung3, trip_id, extra_consumption=1.0, time_factor=1.0,
                until_km=20.0)
 
-    # Gemeldet wird der Stopp, der **jetzt** gilt - nicht der aus dem
-    # Startplan. Bis km 20 ist meist schon einmal umgeplant, und dann steht
-    # dort ein anderer. Vorher stand hier `start3["plan"]["stopps"][0]`, und
-    # der Fall prüfte unbemerkt nichts mehr: Der gemeldete Stopp war gar
-    # nicht der nächste, der Auslöser griff zu Recht nicht, und die Prüfung
-    # "der belegte Stopp steht nicht mehr im Plan" bestand aus dem falschen
-    # Grund - er fehlte, weil längst umgeplant war.
+    # What gets reported is the stop that applies **now** - not the one from
+    # the start plan. By km 20 the plan has usually been replanned once, and
+    # then a different stop is there. This used to be
+    # `start3["plan"]["stopps"][0]`, and the case silently stopped checking
+    # anything: the reported stop was not the next one at all, the trigger
+    # rightly did not fire, and the check "the occupied stop is no longer in
+    # the plan" passed for the wrong reason - it was missing because the plan
+    # had long since been replanned.
     ongoing = client.get(f"/api/live/{sitzung3}").json().get("plan") or {}
     earlier = (ongoing.get("stops") or [None])[0]
     verify(earlier is not None,
@@ -512,14 +513,14 @@ def part_chain():
 
 
 def _start_without_point(client, content):
-    """Eine Aufzeichnung starten, **ohne** den Startpunkt, den der Server anlegt.
+    """Start a recording **without** the start point that the server creates.
 
-    Der Server nimmt den Startladestand als ersten Messpunkt auf (`Zeit =
-    jetzt`). Die Tests unten bauen ihre Fahrt dagegen aus rueckdatierten
-    Messpunkten: Der Startpunkt laege dann hinter allen anderen, mit der
-    Startposition am Ende der Strecke - in der Wirklichkeit ist er der
-    fruehste. Sie pruefen auch etwas anderes (Aufraeumen, Kilometerstand,
-    Lernen); der Startpunkt selbst steht in check_backend.py.
+    The server records the starting charge level as the first measurement
+    point (`time = now`). The tests below, however, build their trip from
+    backdated measurement points: the start point would then lie after all
+    the others, with the start position at the end of the route - in reality
+    it is the earliest. They also check something else (cleanup, odometer,
+    learning); the start point itself is covered in check_backend.py.
     """
     response = client.post("/api/live/aufzeichnung", json=content)
     if response.status_code == 200:
@@ -534,11 +535,11 @@ def _start_without_point(client, content):
 
 
 def _create_trip(client, vehicle, name, minutes_her, charges=False):
-    """Eine Aufzeichnung mit Messpunkten, deren letzter `minutes_her` alt ist.
+    """A recording with measurement points, the last of which is `minutes_her` old.
 
-    Achtung beim Lesen: `/api/live/aufzeichnung` beendet beim Start **alle**
-    anderen laufenden Sitzungen. Zwei Sitzungen nebeneinander aufzubauen geht
-    deshalb nicht - jeder Fall wird einzeln geprüft.
+    Note when reading: `/api/live/aufzeichnung` ends **all** other running
+    sessions on start. Building two sessions side by side is therefore not
+    possible - each case is checked individually.
     """
     response = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
@@ -548,8 +549,8 @@ def _create_trip(client, vehicle, name, minutes_her, charges=False):
         session = db.get(models.LiveSession, response["session_id"])
         onset = datetime.utcnow() - timedelta(minutes=minutes_her + 40)
         for i in range(41):
-            # Beim Laden steht das Auto und der Ladestand steigt; sonst fährt
-            # es und der Ladestand fällt.
+            # While charging the car stands still and the charge level rises;
+            # otherwise it drives and the charge level falls.
             soc = (65.0 + i * 0.6) if charges else (90.0 - i * 0.25)
             live_session.record_sample(
                 db, session, 48.0 + (0.0 if charges else i * 0.009), 11.0,
@@ -560,15 +561,15 @@ def _create_trip(client, vehicle, name, minutes_her, charges=False):
 
 
 def part_orphaned_trip():
-    """Vergessene Fahrten beendet jolt selbst - aber nicht die Ladepause.
+    """jolt ends forgotten trips by itself - but not a charging pause.
 
-    Für eine geplante Fahrt ist das Vergessen halb so schlimm: Die Messpunkte
-    liegen in der Datenbank. Für eine **Aufzeichnung** ist es der
-    Totalverlust - Strecke und Energieprofil entstehen erst beim Beenden aus
-    den Messpunkten.
+    For a planned trip, forgetting is only half as bad: the measurement
+    points are in the database. For a **recording** it is a total loss -
+    route and energy profile are only built from the measurement points when
+    it ends.
 
-    Der teurere Fehler ist aber der umgekehrte: eine Fahrt abschneiden, die
-    nur gerade lädt. Die zweite Hälfte wäre unwiederbringlich weg.
+    The more expensive mistake is the opposite one, though: cutting off a
+    trip that is merely charging. The second half would be irretrievably lost.
     """
     from app.live import cleanup as _a
     globals()["cleanup"] = _a
@@ -577,7 +578,7 @@ def part_orphaned_trip():
     print("\nVergessene Fahrt selbst beenden")
     vehicle = client.get("/api/fahrzeuge").json()[0]
 
-    # 1. Seit Stunden still, zuletzt gefahren - die wird beendet.
+    # 1. Silent for hours, last driving - this one gets ended.
     still_id, ended_at = _create_trip(client, vehicle, "Vergessen", 200)
     hit = next((b for b in ended_at if b["session_id"] == still_id), None)
     verify(hit is not None,
@@ -595,9 +596,9 @@ def part_orphaned_trip():
     verify(client.get(f"/api/live/{still_id}").json()["running"] is False,
            "die Sitzung ist danach beendet")
 
-    # 2. Genauso lange still, aber zuletzt wurde geladen. Eine Ladepause kann
-    #    eine Stunde dauern, das Telefon liegt derweil gesperrt im Auto - und
-    #    danach geht die Fahrt weiter.
+    # 2. Silent just as long, but charging was the last thing. A charging
+    #    pause can take an hour, the phone lies locked in the car meanwhile -
+    #    and then the trip continues.
     charge_id, ended_at = _create_trip(client, vehicle, "Ladepause", 200,
                                       charges=True)
     verify(charge_id not in [b["session_id"] for b in ended_at],
@@ -607,14 +608,14 @@ def part_orphaned_trip():
     verify(client.get(f"/api/live/{charge_id}").json()["running"] is True,
            "sie läuft weiter")
 
-    # 3. Aber auch die Ladepause ist irgendwann vorbei.
+    # 3. But even the charging pause is over at some point.
     long_id, ended_at = _create_trip(client, vehicle, "Lange Pause", 400,
                                        charges=True)
     verify(long_id in [b["session_id"] for b in ended_at],
            "nach sieben Stunden wird auch sie beendet - sonst bliebe sie "
            "ewig offen", str(ended_at))
 
-    # 4. Eine Sitzung, die gerade eben gemeldet hat, bleibt unangetastet.
+    # 4. A session that has just reported stays untouched.
     fresh_id, ended_at = _create_trip(client, vehicle, "Läuft noch", 0)
     verify(fresh_id not in [b["session_id"] for b in ended_at],
            "eine, die gerade gemeldet hat, bleibt in Ruhe - Aufräumen darf "
@@ -622,14 +623,14 @@ def part_orphaned_trip():
 
 
 def part_measured_capacity():
-    """Die vom Auto gemeldete Kapazitaet schlaegt die Prospektangabe.
+    """The capacity reported by the car beats the brochure figure.
 
-    An dieser Zahl haengt **jede** Umrechnung zwischen Ladestand und
-    Kilowattstunden: der gemessene Verbrauch, der daraus gelernte
-    Korrekturfaktor, die Ladehuebe im Plan, die Restreichweite. Im Profil
-    steht, was der Hersteller fuer ein neues Fahrzeug angibt; am Fahrzeug
-    gemessen wurden 73,8 statt 77 kWh - vier Prozent, die sonst
-    durchgaengig in dieselbe Richtung falsch liegen.
+    **Every** conversion between charge level and kilowatt hours depends on
+    this number: the measured consumption, the correction factor learned
+    from it, the charge swings in the plan, the remaining range. The profile
+    holds what the manufacturer states for a new vehicle; what was measured
+    on the vehicle was 73.8 instead of 77 kWh - four percent that would
+    otherwise be wrong throughout, in the same direction.
     """
     from app.energy.model import VehicleValues
 
@@ -667,7 +668,7 @@ def part_measured_capacity():
         verify(VehicleValues.from_model(fz).battery_net_kwh == measured,
                "auch im Verbrauchsmodell - damit zieht die ganze Kette mit")
 
-        # Unsinn darf nicht durchschlagen.
+        # Nonsense must not get through.
         live_session.record_sample(
             db, session, 48.01, 11.0, soc=89.5,
             raw_values={"soc_raw": 224, "battery_kwh": profile_kwh * 3})
@@ -688,16 +689,17 @@ def part_measured_capacity():
 
 
 def part_odometer_distance():
-    """Der Kilometerstand des Autos bestimmt die Strecke, nicht das GPS.
+    """The car's odometer determines the distance, not the GPS.
 
-    Die Strecke einer Aufzeichnung entsteht aus den Messpunkten. Kommen die
-    nur alle dreissig Sekunden, liegen bei Landstrassentempo vierhundert
-    Meter dazwischen - und die Luftlinie schneidet jede Kurve ab. Bei einer
-    Funkloch-Luecke fehlt gleich ein ganzes Stueck. Beides macht die Strecke
-    zu kurz, und weil der Verbrauch in kWh **pro hundert Kilometer** gerechnet
-    wird, wandert der Fehler direkt in den Korrekturfaktor des Fahrzeugs.
+    The distance of a recording is built from the measurement points. If
+    they only arrive every thirty seconds, there are four hundred meters
+    between them at country-road speed - and the straight line cuts off every
+    curve. With a dead-zone gap, a whole stretch is missing. Both make the
+    distance too short, and because consumption is calculated in kWh **per
+    hundred kilometers**, the error goes straight into the vehicle's
+    correction factor.
 
-    Der Zaehler im Auto kennt weder Kurven noch Funkloecher.
+    The counter in the car knows neither curves nor dead zones.
     """
     import math
 
@@ -715,18 +717,18 @@ def part_odometer_distance():
         try:
             session = db.get(models.LiveSession, start["session_id"])
             onset = datetime.utcnow() - timedelta(minutes=60)
-            # Eine Serpentinenstrasse, grob abgetastet: Die Messpunkte liegen
-            # so weit auseinander, dass die Luftlinie die Kurven abschneidet -
-            # genau wie bei dreissig Sekunden Meldeabstand.
+            # A winding road, sampled coarsely: the measurement points are so
+            # far apart that the straight line cuts off the curves - just like
+            # with a thirty-second reporting interval.
             for i in range(60):
                 lat = 48.0 + i * 0.004
                 lon = 11.0 + 0.02 * math.sin(i * 1.1)
                 raw = {"soc_raw": 200}
                 if with_counter:
-                    # Der Zaehler laeuft mit der *wirklichen* Strecke. Die
-                    # Luftlinien zwischen den Messpunkten ergeben rund
-                    # 1,1 km je Schritt; gefahren wurden 1,55 - die Kurven
-                    # dazwischen, die kein Messpunkt gesehen hat.
+                    # The counter runs with the *actual* distance. The straight
+                    # lines between the measurement points add up to about
+                    # 1.1 km per step; 1.55 were driven - the curves in
+                    # between, which no measurement point saw.
                     raw["odometer_km"] = 59500 + round(i * 1.55)
                 live_session.record_sample(
                     db, session, lat, lon, soc=90.0 - i * 0.4,
@@ -753,13 +755,13 @@ def part_odometer_distance():
            "kommen zurück",
            f"{without.get('distance_km')} km → {using.get('distance_km')} km")
 
-    # Der Zaehler muss auch zum Zaehlerstand passen.
+    # The counter must also match the odometer reading.
     odo = (using.get("odometer") or {}).get("odometer_km")
     verify(odo and abs((using.get("distance_km") or 0) - odo) < 1.5,
            "die gebaute Strecke trifft den Zählerstand",
            f"{using.get('distance_km')} km gegen {odo} km laut Zähler")
 
-    # Unsinnige Werte duerfen nicht durchschlagen.
+    # Nonsensical values must not get through.
     factor, reason = uphill.odometer_factor(
         [SimpleNamespace(raw_values={"odometer_km": 1000}),
          SimpleNamespace(raw_values={"odometer_km": 1900})], gps_km=10.0)
@@ -775,17 +777,18 @@ def part_odometer_distance():
 
 
 def part_charge_plan_one_path():
-    """`/ladeplan` und die Umplanung rechnen ueber denselben Weg.
+    """`/ladeplan` and replanning compute via the same path.
 
-    Beide bauten den Ladeplan vorher vollstaendig fuer sich: dieselbe
-    Uebersetzung von Korridor-Kandidaten in Ladeoptionen (byteweise dieselben
-    elf Zeilen) und derselbe Aufruf des Optimierers mit dreizehn Argumenten.
-    Zweimal gepflegt heisst frueher oder later einmal vergessen - beim zuletzt
-    ergaenzten `km_offset` ist genau das passiert.
+    Both used to build the charging plan completely on their own: the same
+    translation of corridor candidates into charging options (byte for byte
+    the same eleven lines) and the same call of the optimizer with thirteen
+    arguments. Maintaining it twice means that sooner or later something is
+    forgotten - that is exactly what happened with the most recently added
+    `km_offset`.
 
-    Geprueft wird die Eigenschaft, auf die es ankommt: Eine Planung ab km 0
-    mit dem Start-Ladestand ist derselbe Vorgang wie eine Umplanung ohne
-    zurueckgelegte Strecke, also muss auch dasselbe herauskommen.
+    What gets checked is the property that matters: planning from km 0 with
+    the starting charge level is the same operation as replanning with no
+    distance covered, so the same result has to come out.
     """
     from app.live import replanning as _u
 
@@ -828,7 +831,7 @@ def part_charge_plan_one_path():
     verify(a == b, "und die Stopps selbst sind dieselben - Standort, "
            "Kilometer und Abfahrts-Ladestand", f"{a[:2]} vs {b[:2]}")
 
-    # Die Felder, die die Oberflaeche liest, muessen weiter da sein.
+    # The fields that the UI reads must still be there.
     missing = [f for f in ("feasible", "reason", "stop_count", "stops",
                          "total_minutes", "charge_time_minutes",
                          "detour_time_minutes", "holding_cost_minutes",
@@ -841,21 +844,21 @@ def part_charge_plan_one_path():
 
 
 def part_charging_distorted_not():
-    """Ein Ladestopp darf weder das Lernen noch die Abweichung verderben.
+    """A charging stop must spoil neither the learning nor the deviation.
 
-    Beide Groessen verglichen den Ladestand gegen ein Energieprofil, das
-    **keine Ladestopps kennt**: Es rechnet vom Start an ununterbrochen
-    herunter und geht auf einer Langstrecke tief ins Negative. Wer unterwegs
-    laedt, liegt danach weit ueber diesem Profil - und das schlug in beide
-    Richtungen durch:
+    Both quantities compared the charge level against an energy profile that
+    **knows no charging stops**: it counts down uninterrupted from the start
+    and goes deep into the negative on a long trip. Anyone who charges along
+    the way ends up far above this profile - and that affected both in
+    different directions:
 
-    * Die Kalibrierung nahm `erster.soc - letzter.soc`. Nachgeladene
-      Prozentpunkte fehlten in dieser Differenz, der gelernte Faktor fiel zu
-      niedrig aus, und weil er in den Plausibilitaetsgrenzen blieb, fiel es
-      nicht auf. Das Fahrzeug lernte bei jeder Fahrt mit Ladestopp, es sei
-      sparsamer als es ist.
-    * Die Abweichung verglich direkt gegen das Profil und meldete nach dem
-      ersten Ladestopp dreistellige Prozentpunkte.
+    * The calibration took `first.soc - last.soc`. Percentage points added by
+      charging were missing from this difference, the learned factor came out
+      too low, and because it stayed within the plausibility limits, nobody
+      noticed. On every trip with a charging stop the vehicle learned that it
+      is more economical than it is.
+    * The deviation compared directly against the profile and reported
+      three-digit percentage points after the first charging stop.
     """
     from app.energy import calibration
 
@@ -866,15 +869,15 @@ def part_charging_distorted_not():
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 80.0, "name": "Mit Ladestopp"}).json()
 
-    # Erst fahren, dann laden, dann weiterfahren - und zwar so, dass beide
-    # Fahrtstuecke denselben Verbrauch je Kilometer haben.
+    # First drive, then charge, then drive on - in such a way that both
+    # driving sections have the same consumption per kilometer.
     db = SessionLocal()
     try:
         session = db.get(models.LiveSession, start["session_id"])
         onset = datetime.utcnow() - timedelta(minutes=150)
         soc, lat = 80.0, 48.0
         for i in range(51):
-            if 25 <= i < 35:                 # Ladepause, das Auto steht
+            if 25 <= i < 35:                 # charging pause, the car stands
                 soc = min(80.0, soc + 2.5)
             else:
                 lat += 0.030
@@ -888,8 +891,8 @@ def part_charging_distorted_not():
     end = client.post(f"/api/live/{start['session_id']}/ende").json()
     learned = end.get("learned")
 
-    # Was der naive Weg geliefert haette - aus denselben Punkten gerechnet,
-    # damit der Prüffall sich nicht an ausgerechneten Zahlen festmacht.
+    # What the naive way would have delivered - computed from the same
+    # points, so that the test case does not hang on pre-computed numbers.
     db = SessionLocal()
     try:
         session = db.get(models.LiveSession, start["session_id"])
@@ -921,10 +924,10 @@ def part_charging_distorted_not():
                "naive Weg (Anfang minus Ende) läge deutlich darunter",
                f"gelernt={learned['raw_factor']} naiv={naiv}")
 
-    # Und die Abweichung waehrend der Fahrt.
+    # And the deviation during the trip.
     state = client.post(f"/api/live/{start['session_id']}/punkt",
                           json={"lat": 48.5, "lon": 11.0, "soc": 50.0})
-    # Die Sitzung ist beendet; eine zweite fuer die Abweichung.
+    # The session has ended; a second one for the deviation.
     start2 = _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
         "soc": 80.0, "name": "Abweichung"}).json()
@@ -940,12 +943,13 @@ def part_charging_distorted_not():
 
 
 def part_gap_kilometers():
-    """Die Begründung einer Umplanung nennt Kilometer der ganzen Fahrt.
+    """The reason given for a replan names kilometers of the whole trip.
 
-    Der Optimierer rechnet unterwegs auf der **Reststrecke**, die bei null
-    beginnt. Die Stopps werden hinterher zurueckgerechnet, der Begruendungs-
-    satz aber nicht - er nannte Kilometer, die es auf der Strecke nicht gibt.
-    In einem Probelauf stand bei km 137 die Meldung "zwischen km 0 und km 44".
+    On the road the optimizer calculates on the **remaining distance**, which
+    starts at zero. The stops are converted back afterwards, but the
+    explanatory sentence was not - it named kilometers that do not exist on
+    the route. In a trial run, at km 137 the message read "zwischen km 0 und
+    km 44" (between km 0 and km 44).
     """
     from app.charging import optimizer
 
@@ -958,7 +962,7 @@ def part_gap_kilometers():
         battery_net_kwh = 50.0
         reserve_soc = 10.0
 
-    # Ein einziger Ladepunkt weit hinten - von vorn nicht erreichbar.
+    # A single charge point far ahead - not reachable from the front.
     options = [optimizer.ChargeOption(
         id=1, km_on_route=180.0, detour_minutes=1.0, max_kw=150.0,
         point_count=4, name="Weit weg", operator="X", city="", lat=0.0,
@@ -975,15 +979,14 @@ def part_gap_kilometers():
 
 
 def part_state_coordinate():
-    """Der Zustand muss sagen, **wo** gemessen wurde.
+    """The state must say **where** it was measured.
 
-    Ohne das rechnete die Oberflaeche die Position aus dem geplanten Profil
-    zurueck. Bei einer Aufzeichnung gibt es das nicht - es entsteht erst beim
-    Abschliessen -, und die Rueckrechnung lieferte stumm (0, 0): Karte im
-    Golf von Guinea, gefahrene Spur aus einem einzigen Punkt, und die
-    Verlaufskurve, die ihre x-Achse entlang dieser Spur misst, ein
-    senkrechter Strich. Ausgerechnet bei der Betriebsart, in der die Kurve
-    das Einzige ist, was es zu sehen gibt.
+    Without that, the UI computed the position back from the planned
+    profile. A recording has none - it only comes into being on completion -
+    and the back-calculation silently returned (0, 0): map in the Gulf of
+    Guinea, driven track made of a single point, and the history curve, which
+    measures its x axis along that track, a vertical line. Of all things in
+    the operating mode where the curve is the only thing to see.
     """
     client = TestClient(app)
     print("\nZustand trägt die Koordinate")
@@ -1007,13 +1010,12 @@ def part_state_coordinate():
 
 
 def part_import_lengths():
-    """Ein zu langes Feld darf nicht den ganzen Import kosten.
+    """A field that is too long must not cost the entire import.
 
-    Passiert ist genau das: OCM liefert fuer Standorte mit mehreren
-    Postleitzahlen eine Semikolon-Liste, und eine davon hat einen Lauf
-    abgebrochen. Die Spalte wurde daraufhin verbreitert - was denselben
-    Fehler nur hinausschiebt, denn der naechste Standort hat eine
-    Postleitzahl mehr.
+    That is exactly what happened: for locations with several postal codes,
+    OCM delivers a semicolon-separated list, and one of them aborted a run.
+    The column was then widened - which only postpones the same error,
+    because the next location has one more postal code.
     """
     from app.charging import chargers_import
 
@@ -1045,13 +1047,12 @@ def part_import_lengths():
 
 
 def part_altitude_source():
-    """Geglättete GPS-Höhen - und eine ehrliche Auskunft, woher sie stammen.
+    """Smoothed GPS altitudes - and an honest statement of where they come from.
 
-    Das Verbrauchsmodell summiert die *positiven* Höhenunterschiede auf.
-    Diese Gleichrichtung macht aus mittelwertfreiem Rauschen einen
-    systematischen Zuschlag, der sich linear über die Punkte aufaddiert -
-    aus einer Fahrt durch die Ebene wird eine Alpenetappe, und die geht
-    ungebremst in den Korrekturfaktor.
+    The consumption model sums up the *positive* elevation differences. This
+    rectification turns zero-mean noise into a systematic surcharge that
+    accumulates linearly over the points - a drive across flat land becomes an
+    Alpine stage, and it goes unchecked into the correction factor.
     """
     import random
 
@@ -1063,8 +1064,8 @@ def part_altitude_source():
     def gradient(elevations):
         return sum(max(0.0, b - a) for a, b in zip(elevations, elevations[1:]))
 
-    # Eine Fahrt geradeaus durch die Ebene, rund 800 Punkte im Abstand von
-    # etwa 25 m. Die wahre Steigung ist null.
+    # A drive straight ahead across flat land, about 800 points roughly 25 m
+    # apart. The true climb is zero.
     distance = [[11.0 + i * 0.00032, 48.0] for i in range(800)]
     spacing = _haversine(48.0, distance[0][0], 48.0, distance[1][0])
     verify(15.0 < spacing < 40.0,
@@ -1084,8 +1085,8 @@ def part_altitude_source():
            "geglättet bleibt davon weniger als ein Fünftel",
            f"{raw_gradient:.0f} m → {smooth_gradient:.0f} m")
 
-    # Aber ein echter Hügel muss stehen bleiben - eine Glättung, die auch
-    # das Gelände wegnimmt, wäre nur eine umständliche Art, flach zu rechnen.
+    # But a real hill has to remain - smoothing that also removes the terrain
+    # would just be a roundabout way of calculating flat.
     high = 300.0
     mountain = [high * (i / 400.0 if i < 400 else (800 - i) / 400.0)
             for i in range(800)]
@@ -1094,9 +1095,9 @@ def part_altitude_source():
            "ein echter Anstieg über 10 km übersteht die Glättung",
            f"{gradient(mountain_smooth):.0f} von {high:.0f} m")
 
-    # Und die Auskunft muss stimmen. Ohne ORS-Schlüssel liefert das
-    # Demo-Routing bewusst keine Höhen; dann ist die Quelle "gps" - und
-    # nicht, wie vorher, immer "karte".
+    # And the statement must be correct. Without an ORS key the demo routing
+    # deliberately returns no altitudes; then the source is "gps" - and not,
+    # as before, always "karte" (map).
     _, source = uphill.complete_elevations(distance, noisy)
     verify(source == "gps",
            "fällt die Kartenabfrage aus, heisst die Quelle auch 'gps'", source)
@@ -1107,17 +1108,17 @@ def part_altitude_source():
 
 
 def part_superseded_trip():
-    """Eine neue Aufzeichnung loest die alte ab - aber verschluckt sie nicht.
+    """A new recording supersedes the old one - but does not swallow it.
 
-    `/api/live/aufzeichnung` beendet laufende Sitzungen desselben Fahrzeugs.
-    Das ist richtig; nur wurde dabei bloss `laeuft = False` gesetzt. Fuer eine
-    Aufzeichnung war das der Totalverlust: Strecke und Energieprofil entstehen
-    erst beim Abschliessen aus den Messpunkten, und mit `laeuft = False` sieht
-    auch das Aufraeumen sie nie wieder.
+    `/api/live/aufzeichnung` ends running sessions of the same vehicle. That
+    is right; but all it did was set `laeuft = False`. For a recording that
+    was a total loss: route and energy profile are only built from the
+    measurement points on completion, and with `laeuft = False` even the
+    cleanup never sees it again.
 
-    Der Fall ist nicht konstruiert - er ist der wahrscheinlichste ueberhaupt.
-    Wer das Beenden vergessen hat, merkt es beim naechsten Losfahren, und
-    genau dieser Griff loeschte dann die Fahrt, die er retten wollte.
+    The case is not contrived - it is the most likely one of all. Whoever
+    forgot to end the trip notices at the next departure, and precisely that
+    action would then delete the trip it was meant to rescue.
     """
     client = TestClient(app)
     print("\nAbgelöste Aufzeichnung")
@@ -1137,7 +1138,7 @@ def part_superseded_trip():
     finally:
         db.close()
 
-    # Und jetzt faehrt jemand los, ohne die alte Fahrt beendet zu haben.
+    # And now someone sets off without having ended the old trip.
     _start_without_point(client, {
         "vehicle_id": vehicle["id"], "lat": 49.0, "lon": 9.0,
         "soc": 80.0, "name": "Die neue"})
@@ -1159,9 +1160,9 @@ def part_superseded_trip():
 
 
 def part_attachments():
-    """Fahrradträger und Dachbox - Zuschlag auf den Luftwiderstand.
+    """Bike rack and roof box - surcharge on the air drag.
 
-    Zwei Dinge müssen gelten, und das zweite ist das wichtigere.
+    Two things must hold, and the second is the more important one.
     """
     print("\nAussen am Auto: Fahrradträger und Dachbox")
 
@@ -1197,7 +1198,7 @@ def part_attachments():
            "die Stirnfläche bleibt, was sie ist - sie ist eine Abmessung des "
            "Autos und ändert sich nicht, wenn hinten Räder hängen")
 
-    # Und die Wirkung muss beim Verbrauch ankommen, mit v².
+    # And the effect must show up in consumption, with v².
     profile = [{"km": k, "lat": 48.0 + k * 0.009, "lon": 11.0, "elevation": 100.0,
                "speed_kmh": 120.0, "mins": k * 0.5, "soc": 80 - k * 0.1,
                "kwh": k * 0.2} for k in range(0, 201, 5)]
@@ -1208,7 +1209,7 @@ def part_attachments():
            "mit Träger braucht dieselbe Strecke spürbar mehr Energie",
            f"{b.kwh[-1]:.1f} gegen {a.kwh[-1]:.1f} kWh")
 
-    # Die Zuladung wirkt weiter unabhängig davon.
+    # The payload continues to act independently of that.
     heavy = VehicleValues.from_trip(TripStub2(1.0, payload=500.0))
     verify(abs(heavy.mass_kg - 3050.0) < 1e-9,
            "die Zuladung der Fahrt zählt unabhängig vom Anbau",
@@ -1216,13 +1217,12 @@ def part_attachments():
 
 
 def part_recording():
-    """Eine gefahrene Strecke ohne Planung - und was daraus entsteht.
+    """A driven route without planning - and what comes out of it.
 
-    Der umgekehrte Weg zur geplanten Fahrt: losfahren, mitschreiben, und die
-    Strecke hinterher aus den Messpunkten bauen. Gedacht für die
-    Kalibrierung, wo eine bekannte kurze Strecke die sauberste Messung ist -
-    und wo eine Route vorher zu planen umständlich genug wäre, dass man es
-    bleiben lässt.
+    The reverse of the planned trip: set off, record, and build the route
+    afterwards from the measurement points. Intended for calibration, where a
+    known short route is the cleanest measurement - and where planning a
+    route beforehand would be cumbersome enough that one would skip it.
     """
     client = TestClient(app)
     print("\nFahrt aufzeichnen statt planen")
@@ -1241,8 +1241,8 @@ def part_recording():
     verify(state["running"] is True,
            "und läuft, obwohl es weder Strecke noch Plan gibt")
 
-    # Sechzig Kilometer nach Norden, eine Stunde lang, 12 Prozentpunkte
-    # Verbrauch. Bei 0,009 Grad je Punkt sind das rund einen Kilometer.
+    # Sixty kilometers north, for one hour, 12 percentage points of
+    # consumption. At 0.009 degrees per point that is about one kilometer.
     db = SessionLocal()
     try:
         session = db.get(models.LiveSession, session_id)
@@ -1274,21 +1274,22 @@ def part_recording():
            "die Fahrt hat hinterher ein Energieprofil",
            f"{len(trip.get('profile') or [])} Stützstellen")
 
-    # Der Zweck der ganzen Betriebsart: Aus der Aufzeichnung muss sich der
-    # Korrekturfaktor lernen lassen. Ohne Kilometerstand und Sollwert an den
-    # Messpunkten findet die Kalibrierung nichts - und beides steht erst
-    # fest, seit die Strecke gebaut wurde.
+    # The purpose of the whole operating mode: the correction factor must be
+    # learnable from the recording. Without odometer and target value on the
+    # measurement points, the calibration finds nothing - and both are only
+    # fixed once the route has been built.
     verify(end.get("learned") is not None,
            "und jolt lernt daraus einen Korrekturfaktor - genau dafür ist "
            "die Aufzeichnung da", str(end.get("learned")))
 
 
 def part_chain_with_charge_stop():
-    """Die ganze Kette, aber diesmal wird unterwegs wirklich geladen.
+    """The whole chain, but this time charging actually happens along the way.
 
-    Der Simulator lädt nie - sein Ladestand fällt monoton bis null. Damit
-    bleibt der Normalfall jeder echten Langstrecke ungeprüft: anhalten,
-    laden, weiterfahren. Genau dort lag der Fehler, den dieser Teil festhält.
+    The simulator never charges - its charge level falls monotonically to
+    zero. That leaves the normal case of every real long trip unchecked:
+    stop, charge, drive on. That is exactly where the bug lay that this part
+    pins down.
     """
     client = TestClient(app)
     route = prepare_trip(client)
@@ -1316,9 +1317,9 @@ def part_chain_with_charge_stop():
                 timestamp=onset + timedelta(minutes=mins))
             return live_session.state_as_dict(state)
 
-        # Erster Abschnitt: exakt nach Plan, damit keine andere Abweichung die
-        # Aussage verwässert. Der Ladestand ist der des Profils, die Uhr die
-        # des Profils.
+        # First section: exactly as planned, so that no other deviation dilutes
+        # the statement. The charge level is the profile's, the clock is the
+        # profile's.
         pause_km = min(150.0, total_km / 3)
         last = None
         km = 0.0
@@ -1331,8 +1332,8 @@ def part_chain_with_charge_stop():
         verify(prior_pause is not None and abs(prior_pause) < 5.0,
                "vor der Pause liegt die Fahrt in der Zeit", f"{prior_pause} min")
 
-        # Der Ladestopp: dreissig Minuten am selben Ort, der Ladestand steigt
-        # um 45 Prozentpunkte.
+        # The charging stop: thirty minutes at the same place, the charge level
+        # rises by 45 percentage points.
         entry = _profile_at(profile, pause_km)
         soc_arrival = entry["soc"]
         clock = entry.get("mins") or 0.0
@@ -1348,9 +1349,9 @@ def part_chain_with_charge_stop():
                f"{past_pause} min (ohne Abzug wären es rund "
                f"{CHARGE_DURATION_MIN:.0f})")
 
-        # Weiterfahren. Der Ladestand liegt jetzt um den Ladehub über dem
-        # Profil, die Uhr um die Ladedauer dahinter - beides muss die
-        # Nachführung auseinanderhalten können.
+        # Driving on. The charge level is now above the profile by the charge
+        # swing, the clock behind it by the charging duration - the tracking
+        # must be able to tell the two apart.
         km = pause_km + 10.0
         far = min(total_km, pause_km + 150.0)
         while km <= far:
@@ -1374,15 +1375,15 @@ def part_chain_with_charge_stop():
 
 
 def part_position_without_charge_level():
-    """Position dauernd, Ladestand gelegentlich.
+    """Position all the time, charge level occasionally.
 
-    Der Normalfall, solange das Auto seinen Ladestand nicht selbst meldet:
-    Das Telefon liefert die Position im Sekundentakt, der Ladestand wird an
-    der Säule eingetippt. Dazwischen muss jolt ihn aus dem Energieprofil
-    hochrechnen - und darf dabei vor allem eines nicht: die eigene Schätzung
-    für eine Messung halten. Täte es das, käme der Verbrauchsfaktor immer auf
-    1,0 heraus und behauptete, die Prognose stimme - umso überzeugter, je
-    länger niemand nachgesehen hat.
+    The normal case as long as the car does not report its charge level
+    itself: the phone delivers the position every second, the charge level
+    is typed in at the charger. In between, jolt has to extrapolate it from
+    the energy profile - and above all must not take its own estimate for a
+    measurement. If it did, the consumption factor would always come out at
+    1.0 and claim the forecast is right - the more convinced, the longer
+    nobody has checked.
     """
     client = TestClient(app)
     route = prepare_trip(client)
@@ -1406,7 +1407,7 @@ def part_position_without_charge_level():
                 timestamp=onset + timedelta(minutes=entry.get("mins") or 0.0))
             return live_session.state_as_dict(state)
 
-        # Ein Anker beim Losfahren, danach nur noch Position.
+        # An anchor at departure, after that position only.
         report(0.0, soc=_profile_at(profile, 0.0)["soc"])
         last = None
         for km in range(10, 101, 10):
@@ -1424,25 +1425,25 @@ def part_position_without_charge_level():
                "sonst misst das Modell sich an sich selbst",
                f"×{last['consumption_factor']}")
 
-        # Das ist der eigentliche Gewinn: Ohne diese Punkte gäbe es unterwegs
-        # weder Zeitfaktor noch Ankunftsprognose.
+        # This is the real gain: without these points there would be neither a
+        # time factor nor an arrival forecast on the road.
         verify(last["arrival_shift_min"] is not None,
                "die Ankunftsprognose kommt allein aus Positionsmeldungen "
                "zustande", str(last["arrival_shift_min"]))
 
-        # Jetzt der Anker an der Säule: acht Prozentpunkte weniger als gedacht.
+        # Now the anchor at the charger: eight percentage points less than expected.
         soc_start = _profile_at(profile, 0.0)["soc"]
         anchor = report(100.0, soc=plan_100 - 8.0)
         verify(anchor["soc_reported"] is True,
                "ein eingetippter Ladestand ist eine Meldung, keine Schätzung")
 
-        # Und zwar auf den richtigen Wert. Die Zahl ist hier der ganze Punkt:
-        # Die acht Prozentpunkte sind über hundert Kilometer entstanden, nicht
-        # über die letzten zwanzig. Wer die Schätzungen dazwischen für
-        # Messungen hält, misst die Abweichung gegen die kurze Basis des
-        # gleitenden Fensters und kommt auf ×2,08 statt ×1,23 - er verdoppelt
-        # den gemessenen Mehrverbrauch und plant den Rest der Fahrt danach.
-        # Eine Schranke wie "grösser als 1" fiele darauf herein.
+        # And on the right value. The number is the whole point here: the
+        # eight percentage points accumulated over a hundred kilometers, not
+        # over the last twenty. Anyone who takes the estimates in between for
+        # measurements measures the deviation against the short base of the
+        # sliding window and arrives at ×2.08 instead of ×1.23 - doubling the
+        # measured excess consumption and planning the rest of the trip on
+        # it. A bound like "greater than 1" would fall for that.
         expected = ((soc_start - (plan_100 - 8.0))
                     / (soc_start - plan_100))
         verify(abs(anchor["consumption_factor"] - expected) < 0.03,
@@ -1450,7 +1451,7 @@ def part_position_without_charge_level():
                "Ladestand, nicht gegen die eigene Schätzung",
                f"×{anchor['consumption_factor']} statt ×{expected:.3f}")
 
-        # Und ab da rechnet die Schätzung mit dem neuen Faktor weiter.
+        # And from there on the estimate continues with the new factor.
         onward = None
         for km in range(110, 161, 10):
             onward = report(float(km))
@@ -1466,12 +1467,12 @@ def part_position_without_charge_level():
 
 
 def part_speed_in_the_chain():
-    """Kommt das gemessene Tempo in der laufenden Fahrt tatsächlich an?
+    """Does the measured speed actually arrive in the running trip?
 
-    Die Physik dafür steht in `recompute_part_speed`. Hier geht es nur um
-    die Verdrahtung: Solange niemand einen Ladestand gemeldet hat, gibt es
-    keinen Verbrauchsfaktor - und dann muss der Plan auf dem gemessenen Tempo
-    beruhen statt auf dem Reglerwert von vor der Abfahrt.
+    The physics for that is in `recompute_part_speed`. This is only about
+    the wiring: as long as nobody has reported a charge level, there is no
+    consumption factor - and then the plan has to be based on the measured
+    speed rather than on the slider value from before departure.
     """
     client = TestClient(app)
     route = prepare_trip(client)
@@ -1490,9 +1491,9 @@ def part_speed_in_the_chain():
         session = db.get(models.LiveSession, session_id)
         profile = session.trip.energy_profile or []
         onset = datetime(2026, 1, 1, 8, 0)
-        # Achtzehn Prozent schneller als geplant: Die Uhr läuft langsamer als
-        # das Profil vorsah. Der Ladestand bleibt unbekannt - genau der Fall,
-        # für den das gemessene Tempo gedacht ist.
+        # Eighteen percent faster than planned: the clock runs slower than the
+        # profile anticipated. The charge level stays unknown - exactly the
+        # case the measured speed is meant for.
         FASTER = 0.82
         for km in range(0, 141, 10):
             entry = _profile_at(profile, float(km))
@@ -1516,7 +1517,7 @@ def part_speed_in_the_chain():
 
 
 def _measure(client, session_id, trip_id, km, extra_consumption, time_factor):
-    """Einen einzelnen Messpunkt bei Kilometer `km` melden."""
+    """Report a single measurement point at kilometer `km`."""
     trip = client.get(f"/api/fahrten/{trip_id}").json()
     profile = trip["profile"]
     entry = _profile_at(profile, km)
@@ -1528,10 +1529,10 @@ def _measure(client, session_id, trip_id, km, extra_consumption, time_factor):
 
 def _replay(client, session_id, trip_id, extra_consumption, time_factor,
                until_km=None, step_km=10.0):
-    """Die Fahrt von Hand abspielen - deterministisch und ohne Warten.
+    """Replay the trip by hand - deterministic and without waiting.
 
-    Der eingebaute Simulator läuft asynchron; für ein Prüfskript ist eine
-    Schleife, deren Ende feststeht, die bessere Wahl.
+    The built-in simulator runs asynchronously; for a check script a loop
+    whose end is fixed is the better choice.
     """
     db = SessionLocal()
     try:

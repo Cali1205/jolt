@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Prüft den Ladestopp-Optimierer an Fällen, deren Ergebnis man vorher kennt.
+"""Checks the charging-stop optimizer against cases whose result is known beforehand.
 
-Kein Testframework, keine Netzverbindung, keine Datenbank - `python3
-tools/check_optimizer.py` genügt.
+No test framework, no network connection, no database - `python3
+tools/check_optimizer.py` is enough.
 
-Der Prüfstein ist bewusst nicht die Selbstauskunft des Optimierers, sondern ein
-zweiter, unabhängiger Nachrechner: Er fährt den fertigen Plan Kilometer für
-Kilometer ab und schaut, ob der Ladestand irgendwo unter die Reserve fällt.
-Ein Planer, der sich selbst bestätigt, prüft nichts.
+The yardstick is deliberately not the optimizer's own report but a second,
+independent re-calculator: it drives the finished plan kilometre by
+kilometre and checks whether the state of charge falls below the reserve
+anywhere. A planner that confirms itself checks nothing.
 
-Geprüft wird ausserdem gegen die beiden Fälle, an denen ein gieriger Planer
-laut Konzept systematisch scheitert - eine lange Lücke ohne Schnelllader und
-die Wahl zwischen einer nahen schwachen und einer weiteren starken Säule.
+It is also checked against the two cases on which, according to the concept,
+a greedy planner systematically fails - a long gap without a fast charger
+and the choice between a near, weak charger and a farther, strong one.
 
     ./tools/check_optimizer.py
 """
@@ -29,9 +29,9 @@ from app.charging import optimizer  # noqa: E402
 
 verify = Check()
 
-# Eine Kurve mit deutlichem Knick: volle Leistung bis 40 %, danach fällt sie
-# steil ab. Genau daran muss sich zeigen, ob der Optimierer die Ladehübe in
-# den steilen Teil legt.
+# A curve with a pronounced knee: full power up to 40 %, then it drops off
+# steeply. This is exactly where it must show whether the optimizer places the
+# charge window in the steep part.
 CURVE = [(0, 110), (10, 120), (30, 120), (50, 90), (70, 60), (80, 45),
          (90, 28), (100, 8)]
 
@@ -41,16 +41,16 @@ def section(title: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Werkzeug
+# Tools
 # ---------------------------------------------------------------------------
 
 def profile_build(km_total: float, kwh_per_km: float = 0.18,
                  speed_kmh: float = 120.0, kwh_at=None):
-    """Ein synthetisches Streckenprofil, ein Stützpunkt je Kilometer.
+    """A synthetic route profile, one support point per kilometre.
 
-    `kwh_at` erlaubt einen beliebigen Verlauf der kumulierten Energie - so
-    lässt sich ein Pass bauen, bei dem die Bilanz am Ende harmlos aussieht und
-    unterwegs trotzdem nichts mehr im Akku ist.
+    `kwh_at` allows an arbitrary course of the cumulative energy - this
+    lets us build a pass where the balance looks harmless at the end and
+    yet there is nothing left in the battery along the way.
     """
     km = [float(i) for i in range(int(km_total) + 1)]
     kwh = [kwh_at(k) for k in km] if kwh_at else [k * kwh_per_km for k in km]
@@ -67,12 +67,12 @@ def chargers(kms, max_kw=150.0, detour=5.0, point_count=4, from_id=1):
 
 
 def recompute(plan, profile, fz, start_soc: float) -> dict:
-    """Den fertigen Plan unabhängig nachfahren.
+    """Re-drive the finished plan independently.
 
-    Der eigentliche Test: Der Optimierer behauptet Ankunfts- und Abfahrtswerte;
-    hier wird nachgesehen, ob sie zum Streckenprofil passen und ob der
-    Ladestand zwischen den Stopps irgendwo unter die Reserve rutscht - auch
-    dort, wo gar kein Stopp geplant ist.
+    The actual test: the optimizer claims arrival and departure values;
+    here we check whether they fit the route profile and whether the
+    state of charge slips below the reserve anywhere between the stops -
+    even where no stop is planned at all.
     """
     soc_per_kwh = 100.0 / fz.battery_net_kwh
     soc = start_soc
@@ -104,7 +104,7 @@ def recompute(plan, profile, fz, start_soc: float) -> dict:
 
 
 def examine_plan(plan, profile, fz, start_soc, target_soc, name: str) -> dict:
-    """Die Prüfungen, die für jeden machbaren Plan gelten müssen."""
+    """The checks that must hold for every feasible plan."""
     facts = recompute(plan, profile, fz, start_soc)
     verify(facts["lowest_soc"] >= fz.reserve_soc - 0.5,
            f"{name}: der Ladestand fällt nirgends unter die Reserve",
@@ -126,12 +126,12 @@ def examine_plan(plan, profile, fz, start_soc, target_soc, name: str) -> dict:
            f"der Lademenge",
            f"{plan.holding_cost_minutes:.1f} min bei {len(plan.stops)} Stopps")
 
-    # Kein Stopp, der sich nicht lohnt. Ein Halt kostet allein an Fixkosten
-    # rund vier Minuten; wer dafür zwei Prozentpunkte lädt, hätte dieselbe
-    # Energie am nächsten Stopp in weniger Zeit bekommen. Solche Stopps
-    # entstanden, als die Nachoptimierung die Ladehübe auf das gerade noch
-    # Nötige herunterschliff - der Suche waren sie verboten, dem
-    # Nachoptimierer nicht.
+    # No stop that is not worth it. A stop costs about four minutes in fixed
+    # costs alone; anyone who charges two percentage points for that could have
+    # got the same energy at the next stop in less time. Such stops arose when
+    # the post-optimization ground the charge window down to just what was
+    # needed - the search was forbidden from producing them, the post-optimizer
+    # was not.
     hills = [s.departure_soc - s.arrival_soc for s in plan.stops]
     verify(all(h >= optimizer.MIN_CHARGE_SWING - 0.5 for h in hills),
            f"{name}: an keinem Stopp wird weniger als der Mindesthub geladen",
@@ -141,7 +141,7 @@ def examine_plan(plan, profile, fz, start_soc, target_soc, name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Die Fälle
+# The cases
 # ---------------------------------------------------------------------------
 
 def case_short_distance():
@@ -170,8 +170,8 @@ def case_long_distance():
            f"{len(plan.stops)} geplant")
     examine_plan(plan, profile, fz, 90.0, 20.0, "Langstrecke")
 
-    # Der Zeitgewinn aus Abschnitt 2.4: lieber zweimal kurz in den steilen
-    # Teil der Kurve als einmal lang bis 90 %.
+    # The time gain from section 2.4: better two short visits to the steep part
+    # of the curve than one long one up to 90 %.
     highest_departure = max(s.departure_soc for s in plan.stops)
     verify(highest_departure <= 80.0,
            "kein Stopp lädt in den flachen Teil der Kurve, solange Säulen dicht stehen",
@@ -203,9 +203,9 @@ def fill_case_gap_earlier():
     section("Lange Lücke ohne Schnelllader - vorher volltanken")
     fz = VehicleValues(battery_net_kwh=60.0, reserve_soc=10.0)
     profile = profile_build(700)
-    # Nach km 260 kommt bis km 540 nichts mehr. Wer dort nur so weit lädt, wie
-    # es sich gerade lohnt, steht in der Lücke - genau der Fall, an dem ein
-    # gieriger Planer scheitert.
+    # After km 260 there is nothing until km 540. Anyone who only charges there
+    # as far as is just worthwhile is stranded in the gap - exactly the case on
+    # which a greedy planner fails.
     options = chargers([100, 180, 260, 540, 620])
     plan = optimizer.schedule(profile, options, fz, CURVE, start_soc=90.0,
                              target_soc=15.0, max_vehicle_kw=150.0)
@@ -226,8 +226,8 @@ def case_pass():
     fz = VehicleValues(battery_net_kwh=60.0, reserve_soc=10.0)
 
     def kwh_at(km: float) -> float:
-        # Bis km 150 hinauf auf 40 kWh, dann holt die Rekuperation bis km 300
-        # zehn kWh zurück. Am Ziel stehen 30 kWh - das sähe machbar aus.
+        # Up to 40 kWh by km 150, then recuperation brings ten kWh back by km 300.
+        # At the destination 30 kWh remain - that looks feasible.
         if km <= 150.0:
             return km / 150.0 * 40.0
         return 40.0 - (km - 150.0) / 150.0 * 10.0
@@ -281,9 +281,9 @@ def case_preferred_operator():
     section("Bevorzugter Anbieter - kein Ausschluss, nur ein Vorteil")
     fz = VehicleValues(battery_net_kwh=60.0, reserve_soc=10.0)
     profile = profile_build(450)
-    # Zwei Standorte an derselben Stelle der Route (z.B. zwei Ladeparks an
-    # derselben Abfahrt), der bevorzugte mit drei Minuten mehr Umweg - weniger
-    # als der Bonus von vier Minuten, aber genug, um ohne Vorgabe zu verlieren.
+    # Two locations at the same point of the route (e.g. two charging parks at
+    # the same exit), the preferred one with a three-minute-longer detour - less
+    # than the bonus of four minutes, but enough to lose without a preference.
     options = [
         optimizer.ChargeOption(id=1, km_on_route=220.0, detour_minutes=4.0,
                               max_kw=150.0, point_count=1, name="fremd",
@@ -305,8 +305,8 @@ def case_preferred_operator():
            "mit Vorgabe gleicht der Bonus den grösseren Umweg aus",
            f"gewählt: {[s.option.id for s in using.stops]}")
 
-    # Ein Standort mit 30 Minuten Umweg ist auch als bevorzugter Anbieter kein
-    # Schnäppchen - der Bonus wiegt den Umweg auf, macht ihn aber nie gratis.
+    # A location with a 30-minute detour is no bargain even as a preferred
+    # provider - the bonus offsets the detour but never makes it free.
     far = [optimizer.ChargeOption(id=3, km_on_route=210.0, detour_minutes=30.0,
                                   max_kw=300.0, point_count=8,
                                   name="weit, aber bevorzugt",
@@ -323,11 +323,11 @@ def case_preferred_operator():
 
 def case_preference_survives_thinning():
     section("Bevorzugter Anbieter übersteht die Ausdünnung eines dichten Abschnitts")
-    # Vier Standorte im selben Streckenabschnitt (bei 450 km Gesamtstrecke ist
-    # die Abschnittsbreite hier 22,5 km, alle vier liegen darin). Sortiert
-    # nach Leistung landet der bevorzugte Standort auf Platz vier - und wäre
-    # ohne Sonderbehandlung aus dem Abschnitt geflogen, bevor der
-    # Betreiber-Bonus in _nachfolger() je zum Zug käme.
+    # Four locations in the same route section (with 450 km total distance the
+    # section width here is 22.5 km, all four lie within it). Sorted by power,
+    # the preferred location ends up in fourth place - and without special
+    # treatment it would have been dropped from the section before the operator
+    # bonus in _nachfolger() ever got its turn.
     options = [
         optimizer.ChargeOption(id=1, km_on_route=205.0, detour_minutes=5.0,
                               max_kw=300.0, name="stark 1"),
@@ -412,8 +412,8 @@ def case_alternative():
         check_km = detour_alt["km_on_route"] > stop.option.km_on_route
         demand = (profile.val(profile.kwh, detour_alt["km_on_route"])
                   - profile.val(profile.kwh, stop.option.km_on_route)) * soc_per_kwh
-        # Ohne Nachladen erreichbar heisst: mit dem Ladestand bei Ankunft, und
-        # dabei darf höchstens die halbe Reserve angebrochen werden.
+        # Reachable without recharging means: with the state of charge on arrival,
+        # and at most half of the reserve may be dipped into.
         if not check_km or stop.arrival_soc - demand < fz.reserve_soc / 2.0 - 0.5:
             consistent = False
     verify(consistent,
@@ -422,12 +422,12 @@ def case_alternative():
 
 def case_density_chargers():
     section("Dichte Säulen und hoher Verbrauch - keine Alibi-Stopps")
-    # Der Fall, in dem der Mindestladehub gebraucht wird: viele erreichbare
-    # Säulen, hoher Verbrauch, und darunter grosse Ladeparks mit kräftigem
-    # Redundanzbonus. Solange der Bonus Umweg *und* Ladezeit aufwiegen durfte
-    # und die Nachoptimierung den Mindesthub nicht kannte, entstand hier ein
-    # Halt über fünf Prozentpunkte in anderthalb Minuten - rechnerisch billig,
-    # in Wirklichkeit ein Umweg für nichts.
+    # The case in which the minimum charge increment is needed: many reachable
+    # chargers, high consumption, and below them large charging parks with a
+    # strong redundancy bonus. As long as the bonus was allowed to offset detour
+    # *and* charging time, and the post-optimization did not know the minimum
+    # increment, this produced a stop of five percentage points in one and a half
+    # minutes - cheap on paper, in reality a detour for nothing.
     fz = VehicleValues(battery_net_kwh=60.0, reserve_soc=10.0)
     profile = profile_build(577, kwh_per_km=0.257)
     pattern = [(150, 4), (300, 8), (350, 12), (150, 6)]
@@ -441,12 +441,12 @@ def case_density_chargers():
     plan = optimizer.schedule(profile, options, fz, CURVE, start_soc=65.0,
                              target_soc=20.0, max_vehicle_kw=350.0)
     verify(plan.feasible, "feasible", plan.reason)
-    # Hier stand "mindestens sechs Stopps" - und diese Erwartung war selbst
-    # ein Symptom. Ohne Fixkosten je Halt plante der Optimierer diese Strecke
-    # mit **zehn** Stopps, sechs davon drei bis vier Minuten lang, und war
-    # damit real neunundvierzig Minuten langsamer als die vier Halte, die
-    # jetzt herauskommen. Die Strecke braucht viel Energie, nicht viele Halte:
-    # 577 km bei 0,257 kWh/km sind knapp 150 kWh in einen 60-kWh-Akku.
+    # Here it used to say "mindestens sechs Stopps" (at least six stops) - and
+    # this expectation was itself a symptom. Without fixed costs per stop the
+    # optimizer planned this route with **ten** stops, six of them three to four
+    # minutes long, and was thus really forty-nine minutes slower than the four
+    # stops that come out now. The route needs a lot of energy, not many stops:
+    # 577 km at 0.257 kWh/km is almost 150 kWh into a 60 kWh battery.
     verify(len(plan.stops) >= 3, "die Strecke braucht mehrere Stopps",
            f"{len(plan.stops)}")
     examine_plan(plan, profile, fz, 65.0, 20.0, "Dichte Säulen")
@@ -459,13 +459,12 @@ def case_density_chargers():
 
 def case_fragmentation():
     section("Fixkosten je Halt - wenige lange statt vieler kurzer Stopps")
-    # Der Fehler, den dieser Fall festhält: Die Zielfunktion zählte Ladezeit
-    # und Umweg, aber nichts, was an der blossen *Anzahl* der Stopps hängt.
-    # Weil ein Akku bei 10 % viel schneller lädt als bei 60 %, ist es unter
-    # dieser Annahme immer günstiger, dieselbe Energie auf viele kurze Halte
-    # bei niedrigem Ladestand zu verteilen. Auf einer echten Fahrt
-    # (Le Gurp - Montalivet, 662 km) kamen so vier Stopps heraus, drei davon
-    # unter vier Minuten.
+    # The error this case captures: the objective function counted charging time
+    # and detour, but nothing that depends on the mere *number* of stops.
+    # Because a battery charges much faster at 10 % than at 60 %, under this
+    # assumption it is always cheaper to spread the same energy over many short
+    # stops at a low state of charge. On a real trip (Le Gurp - Montalivet,
+    # 662 km) this produced four stops, three of them under four minutes.
     fz = VehicleValues(battery_net_kwh=77.0, reserve_soc=10.0)
     profile = profile_build(660, kwh_per_km=0.21)
     options = chargers(range(60, 660, 40), max_kw=300.0, detour=4.0,
@@ -483,11 +482,11 @@ def case_fragmentation():
            f"{len(using.stops)} statt {len(without.stops)}")
 
     def actual_time(plan) -> float:
-        """Was der Plan **tatsächlich** kostet - Haltekosten inbegriffen.
+        """What the plan **actually** costs - stop costs included.
 
-        Der Massstab, an dem sich beide messen lassen müssen. Der alte Plan
-        war nie schneller, er sah nur schneller aus: Ein Teil seiner Kosten
-        stand nicht in der Rechnung.
+        The yardstick by which both have to be measured. The old plan was
+        never faster, it only looked faster: part of its costs was not in
+        the calculation.
         """
         return (plan.drive_time_minutes + plan.charge_time_minutes
                 + plan.detour_time_minutes
@@ -511,14 +510,14 @@ def case_fragmentation():
 
 def case_charge_park():
     section("Grosser Ladepark - Gutschrift wirkt auch ohne Umweg")
-    # Zwei Fehler, die zusammen dafür sorgten, dass die Bevorzugung
-    # ausgerechnet an der Autobahn nicht wirkte.
+    # Two errors that together ensured the preference had no effect
+    # precisely on the motorway.
     from app.charging.availability import redundancy_bonus
 
-    # (1) Die Gutschrift sättigte bei rund 15 Punkten. In den Daten einer
-    # Frankreich-Route bekamen Standorte mit 15, 17, 20, 28 und 30
-    # Ladepunkten alle exakt denselben Wert - die Grösse hörte genau dort
-    # auf zu zählen, wo die interessanten Parks anfangen.
+    # (1) The credit saturated at around 15 points. In the data of a France
+    # route, locations with 15, 17, 20, 28 and 30 charging points all got exactly
+    # the same value - the size stopped counting right where the interesting
+    # parks begin.
     verify(redundancy_bonus(30) > redundancy_bonus(15) + 0.3,
            "dreissig Ladepunkte zählen mehr als fünfzehn",
            f"{redundancy_bonus(30)} gegen {redundancy_bonus(15)}")
@@ -528,15 +527,15 @@ def case_charge_park():
     verify(redundancy_bonus(30, 0.0) == 0.0,
            "auf null gestellt gibt es keine Gutschrift - dann zählt die Uhr")
 
-    # (2) Der eigentliche Fehler: Die Gutschrift war am Umweg gedeckelt
-    # (`min(bonus, umweg)`). Ein Ladepark **direkt an der Route** hat keinen
-    # Umweg - also bekam er auch keine Gutschrift, obwohl genau dort die
-    # grossen Parks stehen.
+    # (2) The actual error: the credit was capped by the detour
+    # (`min(bonus, detour)`). A charging park **directly on the route** has no
+    # detour - so it got no credit either, although that is exactly where the
+    # large parks are.
     fz = VehicleValues(battery_net_kwh=77.0, reserve_soc=10.0)
     profile = profile_build(400, kwh_per_km=0.21)
-    # Zwei Standorte fast an derselben Stelle, beide ohne Umweg: einer
-    # gross, einer klein. Ohne Gutschrift entscheidet der Zufall der
-    # Kandidatenreihenfolge.
+    # Two locations almost at the same point, both without detour: one large,
+    # one small. Without a credit, the order of the candidates decides by
+    # chance.
     options = [
         optimizer.ChargeOption(id=1, km_on_route=200.0, detour_minutes=0.0,
                               max_kw=150.0, point_count=2,
@@ -559,8 +558,8 @@ def case_charge_park():
            "und auf null gestellt bleibt der Plan trotzdem gültig",
            without.reason)
 
-    # Die Gutschrift darf die Ladezeit nie aufwiegen - ein Halt kostet
-    # mindestens so viel, wie das Laden dauert.
+    # The credit must never offset the charging time - a stop costs at least
+    # as much as the charging takes.
     for_a = [options[1]]
     p2 = optimizer.schedule(profile, for_a, fz, CURVE, start_soc=90.0,
                            target_soc=20.0, max_vehicle_kw=150.0,
@@ -574,10 +573,10 @@ def case_charge_park():
 
 def case_cost():
     section("Kosten gegen Zeit - der Handel, der vorher nicht auszudrücken war")
-    # Der Optimierer minimierte ausschliesslich Zeit. Ein Anbieterwunsch war
-    # deshalb nur als Zeitgutschrift auszudrücken - eine Vorliebe, als
-    # Minuten verkleidet. Der eigentliche Handel ("länger laden, dafür
-    # billiger") liess sich damit gar nicht formulieren.
+    # The optimizer minimized time only. A provider preference could therefore
+    # only be expressed as a time credit - a preference disguised as minutes. The
+    # actual trade-off ("länger laden, dafür billiger", i.e. "charge longer, but
+    # cheaper") could not be formulated that way at all.
     from app.charging.prices import price_per_kwh
 
     verify(price_per_kwh("Ionity GmbH", [{"pattern": "Ionity", "eur_kwh": 0.39}],
@@ -589,8 +588,8 @@ def case_cost():
 
     fz = VehicleValues(battery_net_kwh=77.0, reserve_soc=10.0)
     profile = profile_build(500, kwh_per_km=0.21)
-    # Zwei gleichwertige Standorte an derselben Stelle - einer teuer, einer
-    # billig. Ohne Kosten in der Zielfunktion entscheidet der Zufall.
+    # Two equivalent locations at the same point - one expensive, one cheap.
+    # Without costs in the objective function, chance decides.
     options = [
         optimizer.ChargeOption(id=1, km_on_route=250.0, detour_minutes=0.0,
                               max_kw=150.0, point_count=8,
@@ -620,18 +619,18 @@ def case_cost():
            "werden - sonst wüsste niemand, was der Plan kostet",
            f"{ignored.cost_eur:.2f} EUR")
 
-    # Der Zeitwert muss die Richtung umdrehen können: Wer seine Stunde sehr
-    # hoch bewertet, nimmt den teureren Strom in Kauf, wenn er Zeit spart.
+    # The time value must be able to reverse the direction: anyone who values
+    # their hour very highly accepts the more expensive electricity if it saves
+    # time.
     amount_sum = sum(s.kwh_charged for s in using.stops)
     verify(amount_sum > 0 and abs(using.cost_eur - amount_sum * 0.39) < 0.05,
            "die ausgewiesenen Kosten passen zur geladenen Energie",
            f"{amount_sum:.1f} kWh, {using.cost_eur:.2f} EUR")
 
-    # Die Nachoptimierung (Schritt 4) läuft **nach** der Suche und
-    # überschreibt deren Lademengen. Kennt sie die Kosten nicht, verschiebt
-    # sie Energie von der billigen Säule zur teuren, sobald das Sekunden
-    # spart - und macht damit still zunichte, was Schritt 3 gerade
-    # optimiert hat.
+    # The post-optimization (step 4) runs **after** the search and overwrites
+    # its charge amounts. If it does not know the costs, it shifts energy from the
+    # cheap charger to the expensive one as soon as that saves seconds - and thus
+    # quietly undoes what step 3 has just optimized.
     cheap_then_expensive = [
         optimizer.ChargeOption(id=1, km_on_route=170.0, detour_minutes=0.0,
                               max_kw=150.0, point_count=8,
@@ -657,8 +656,8 @@ def case_runtime():
     section("Laufzeit")
     fz = VehicleValues(battery_net_kwh=77.0, reserve_soc=10.0)
     profile = profile_build(900)
-    # 180 Kandidaten, wie sie eine echte Korridorsuche entlang einer
-    # Langstrecke liefert. Der Optimierer dünnt sie selbst aus.
+    # 180 candidates, as a real corridor search along a long-distance route
+    # delivers. The optimizer thins them out itself.
     options = chargers(range(20, 900, 5), max_kw=150.0, point_count=4)
     begun = time.perf_counter()
     plan = optimizer.schedule(profile, options, fz, CURVE, start_soc=90.0,

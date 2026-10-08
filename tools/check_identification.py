@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Prüft die Parameteridentifikation an einer Fahrt, deren Wahrheit feststeht.
+"""Checks the parameter identification on a trip whose truth is known.
 
-Der Trick dieses Skripts: Es erzeugt eine synthetische Fahrt, deren
-Verbrauch mit **bekannten** Parametern gerechnet wurde, und verlangt, dass
-die Ausgleichsrechnung genau diese Parameter zurückgibt. Bei einer echten
-Fahrt lässt sich das nie prüfen - dort ist jede Abweichung womöglich das
-Auto und nicht der Schätzer.
+The trick of this script: it generates a synthetic trip whose consumption
+was computed with **known** parameters, and demands that the least-squares
+fit return exactly those parameters. With a real trip this can never be
+verified - there every deviation may be the car and not the estimator.
 
-Dass das nötig ist, hat die Entwicklung gezeigt: Zwei Vorzeichen- und
-Normierungsfehler ergaben Parametersätze, die plausibel aussahen und falsch
-waren (η_rekup = 1,39 - bergab käme mehr zurück als hineingesteckt wurde).
-Beide fielen erst an einer Fahrt auf, deren Antwort man vorher kannte.
+That this is necessary was shown by development: two sign and
+normalisation errors produced parameter sets that looked plausible and were
+wrong (η_rekup = 1.39 - going downhill would return more than was put in).
+Both only showed up on a trip whose answer was known beforehand.
 
     ./tools/check_identification.py
 """
@@ -21,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from examine import Check, application_provide  # noqa: E402
 
-# Reine Rechnung - keine Datenbank, kein Netz.
+# Pure computation - no database, no network.
 application_provide("identifikation", db_name=False)
 
 from app.energy import identification as ident  # noqa: E402
@@ -29,7 +28,7 @@ from app.energy.identification import Sample  # noqa: E402
 
 verify = Check()
 
-# Die Wahrheit, die zurückkommen muss.
+# The truth that has to come back.
 TRUTHY = {"f_roll": 200.0, "cw_a": 0.65, "uphill": 1.15, "downhill": 0.70,
         "p_neben": 800.0}
 MASS = 2000.0
@@ -37,15 +36,15 @@ TEMP = 15.0
 
 
 def trip_build(speeds, gradients, points_per_section=14, tick_s=12.0):
-    """Eine Fahrt aus Abschnitten mit je festem Tempo und fester Steigung.
+    """A trip made of segments, each with a fixed speed and a fixed gradient.
 
-    Die Höhe wird *linear* gesetzt und nicht aus verrauschten Kartendaten -
-    hier soll der Schätzer geprüft werden, nicht die Datenqualität.
+    The elevation is set *linearly* and not taken from noisy map data -
+    here the estimator is to be checked, not the data quality.
     """
     points, t, distance_m, elevation, discharge, charged = [], 0.0, 0.0, 300.0, 0.0, 0.0
     lat0, lon0 = 48.0, 9.0
-    # Ein Grad Breite sind rund 111,32 km - damit wird aus Metern eine
-    # Koordinate, die haversine_m wieder in dieselben Meter zurückrechnet.
+    # One degree of latitude is about 111.32 km - that turns metres into a
+    # coordinate which haversine_m converts back into the same metres.
     degree_per_m = 1.0 / 111320.0
 
     for v_kmh, climb in zip(speeds, gradients):
@@ -59,8 +58,8 @@ def trip_build(speeds, gradients, points_per_section=14, tick_s=12.0):
             force += (TRUTHY["uphill"] if climb >= 0 else TRUTHY["downhill"]) \
                 * MASS * ident.G * (climb / 100.0)
             wh = force * ds / 3600.0
-            # Auf zwei Zähler aufteilen, wie es das Fahrzeug meldet:
-            # Negativbedarf ist Rekuperation und wächst auf `geladen`.
+            # Split into two counters, as the vehicle reports it:
+            # negative demand is recuperation and accumulates into `charged`.
             if wh >= 0:
                 discharge += wh
             else:
@@ -76,17 +75,17 @@ def trip_build(speeds, gradients, points_per_section=14, tick_s=12.0):
 
 verify.section("Fenster bilden")
 
-# Genug Streuung in Tempo *und* Steigung, sonst sind die Parameter nicht
-# trennbar - genau das behauptet die Konditionsprüfung, und hier wird sie
-# beim Wort genommen.
+# Enough variation in speed *and* gradient, otherwise the parameters cannot
+# be separated - exactly what the condition-number check claims, and here it
+# is taken at its word.
 speeds = [130, 90, 60, 110, 75, 130, 100, 45, 120, 85, 65, 135, 95, 55,
          125, 105, 70, 115, 80, 140, 50, 100, 90, 60]
 gradients = [0, 2, -2, 1, -1, 0, 3, -3, 0, 1.5, -1.5, 0.5, 2.5, -2.5,
               -0.5, 1, -1, 0, 2, -2, 3, -3, 0.5, -0.5]
 points = trip_build(speeds, gradients)
 
-# Glättung aus: Die synthetische Höhe ist exakt, und Glätten würde die
-# Anstiege verkleinern - genau der Effekt, vor dem das Modul warnt.
+# Smoothing off: the synthetic elevation is exact, and smoothing would
+# shrink the climbs - exactly the effect the module warns about.
 timeframe = ident.build_timeframe(points, MASS, temp_c=TEMP, smoothing_m=0.0)
 verify(len(timeframe) >= 20, f"aus {len(points)} Punkten entstehen genug Fenster",
        f"nur {len(timeframe)}")
@@ -95,9 +94,9 @@ verify(all(f.distance_m >= ident.TIMEFRAME_M for f in timeframe),
 verify(all(f.duration_s >= ident.TIMEFRAME_S for f in timeframe),
        "jedes Fenster reisst die Mindestdauer")
 
-# Die Fenster müssen den Grossteil der Fahrt abdecken. Was an den Rändern
-# liegenbleibt, ist der Rest, der die Mindestlänge nicht mehr füllt - viel
-# mehr als ein Fenster je Abschnitt darf es nicht sein.
+# The windows must cover the bulk of the trip. What is left over at the
+# edges is the remainder that no longer fills the minimum length - there must
+# not be much more than one window per segment.
 total_m = ident.haversine_m(points[0].lat, points[0].lon,
                              points[-1].lat, points[-1].lon)
 covered = sum(f.distance_m for f in timeframe)
@@ -140,9 +139,9 @@ for v, climb in ((130, 0.0), (100, 0.0), (80, 2.0), (110, -1.0)):
 
 verify.section("Physikalisch Unmögliches wird gemeldet")
 
-# Dieselbe Fahrt, aber mit zu niedrig angesetzter Masse ausgewertet. Genau
-# der Fall, der bei der echten Fahrt vom 4.9. auftrat: η_rekup rutscht über
-# 1, weil der Steigungsterm zu klein angesetzt ist.
+# The same trip, but evaluated with too low a mass. Exactly the case that
+# occurred on the real trip of 4 Sept.: η_rekup slips above 1 because the
+# gradient term is set too small.
 to_light = ident.identifizieren(timeframe, MASS * 0.6, lam=0.0)
 verify(to_light.eta_regen > 1.0,
        "zu leicht angesetzte Masse treibt η_rekup über 1",
@@ -151,8 +150,8 @@ verify(any("η_rekup" in w for w in to_light.warnings),
        "und das wird als Warnung gemeldet",
        f"Warnungen: {to_light.warnings}")
 
-# Eine Fahrt ohne Steigungsstreuung: Die Summe muss stimmen, die Aufteilung
-# darf es nicht behaupten.
+# A trip without gradient variation: the sum must be right, the split must
+# not claim to be.
 just = ident.build_timeframe(
     trip_build([120, 118, 122, 119, 121] * 5, [0.0] * 25),
     MASS, temp_c=TEMP, smoothing_m=0.0)
@@ -165,7 +164,7 @@ verify.section("Lücken und Ladepausen fallen heraus")
 
 with_gap = list(points)
 for p in with_gap[120:]:
-    p.time_s += 3600.0          # eine Stunde Pause mitten hinein
+    p.time_s += 3600.0          # an hour of pause right in the middle
 f_gap = ident.build_timeframe(with_gap, MASS, temp_c=TEMP, smoothing_m=0.0)
 verify(all(not (f.from_s < points[120].time_s < f.until_s) for f in f_gap),
        "kein Fenster spannt über die Lücke hinweg")

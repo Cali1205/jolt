@@ -1,17 +1,17 @@
-/* Einstellungen und Dongle-Diagnose.
+/* Settings and dongle diagnostics.
  *
- * Was man selten braucht und trotzdem finden will: Konto, Benachrichtigungen,
- * Dongle, Speicher - und die Diagnose des OBD2-Dongles. Die Diagnose steht
- * hier, weil man sie ansieht, wenn etwas nicht stimmt ("warum fehlt der
- * Strom?"), nicht beim Fahren.
+ * Things you rarely need but still want to find: account, notifications,
+ * dongle, storage - and the diagnostics of the OBD2 dongle. The diagnostics
+ * live here because you look at them when something is wrong ("why is the
+ * current missing?"), not while driving.
  *
- * Alles an der Dongle-Diagnose kommt aus `joltObd.diagnose()` und
- * `joltObd.protokoll()`. Das Modul führt selbst Buch; diese Datei zeigt nur an
- * und fasst nichts an, was die Messung verändert - mit einer Ausnahme, der
- * Befehlskonsole, und die warnt, wenn gerade eine Fahrt läuft.
+ * Everything in the dongle diagnostics comes from `joltObd.diagnose()` and
+ * `joltObd.trace_log()`. The module keeps its own books; this file only shows
+ * and touches nothing that changes the measurement - with one exception, the
+ * command console, which warns when a trip is in progress.
  *
- * Aktualisiert wird nur, solange die Ansicht offen ist: Eine Tabelle, die im
- * Hintergrund jede Sekunde neu gebaut wird, kostet im Auto Akku für nichts.
+ * Updates happen only while the view is open: a table rebuilt every second in
+ * the background drains the battery in the car for nothing.
  */
 window.joltSettings = (function () {
   "use strict";
@@ -21,18 +21,18 @@ window.joltSettings = (function () {
   const el = (id) => document.getElementById(id);
 
   let clock = null;
-  let status = null;          // Antwort von /api/status, einmal je Öffnen
+  let status = null;          // response from /api/status, once per opening
 
-  /* ---------- Hilfen ---------- */
+  /* ---------- Helpers ---------- */
 
-  /* Namen von Geräten und Texte aus dem Protokoll stammen von aussen. */
+  /* Device names and texts from the log come from outside. */
   function esc(text) {
     const helper = document.createElement("div");
     helper.textContent = text === null || text === undefined ? "" : String(text);
     return helper.innerHTML;
   }
 
-  /* "vor 12 s", "vor 3 min" - für das Alter eines Werts. */
+  /* "vor 12 s", "vor 3 min" - for the age of a value. */
   function age(timestamp) {
     if (!timestamp) return "–";
     const s = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
@@ -60,7 +60,7 @@ window.joltSettings = (function () {
     return !!K.state.sessionId;
   }
 
-  /* ---------- Konto und Server ---------- */
+  /* ---------- Account and server ---------- */
 
   async function showServer() {
     const as_of = el("stand");
@@ -85,13 +85,13 @@ window.joltSettings = (function () {
 
   async function sign_out() {
     try { await K.api("/api/logout", { method: "POST" }); }
-    catch (failure) { /* Token ist ohnehin weg oder der Server nicht erreichbar */ }
+    catch (failure) { /* token is gone anyway or the server is unreachable */ }
     K.setToken("");
-    // Neu laden: Der Start prüft die Anmeldung und zeigt dann das Passwortfeld.
+    // Reload: startup checks the sign-in and then shows the password field.
     location.reload();
   }
 
-  /* ---------- Benachrichtigungen ---------- */
+  /* ---------- Notifications ---------- */
 
   async function subscription() {
     const registrierung = K.state.serviceWorker
@@ -110,7 +110,7 @@ window.joltSettings = (function () {
     let serverReady = false;
     try {
       serverReady = (await K.api("/api/push/schluessel")).configured;
-    } catch (failure) { /* unten als "nicht erreichbar" */ }
+    } catch (failure) { /* shown below as "nicht erreichbar" */ }
     rows.push(row("Server", serverReady ? "bereit"
       : "ohne VAPID-Schlüssel – Benachrichtigungen aus", serverReady ? "gut" : "warnung"));
     if (supported) {
@@ -120,7 +120,7 @@ window.joltSettings = (function () {
           default: "noch nicht gefragt" }[grant] || grant,
         grant === "granted" ? "gut" : (grant === "denied" ? "schlecht" : "")));
       let signed_in = false;
-      try { signed_in = !!(await subscription()); } catch (failure) { /* unbekannt */ }
+      try { signed_in = !!(await subscription()); } catch (failure) { /* unknown */ }
       rows.push(row("Abo", signed_in ? "angemeldet" : "keines",
         signed_in ? "gut" : ""));
       el("einst-push-aus").hidden = !signed_in;
@@ -160,11 +160,11 @@ window.joltSettings = (function () {
     }
   }
 
-  /* ---------- Dongle-Einstellungen ---------- */
+  /* ---------- Dongle settings ---------- */
 
-  /* Dieselbe Einstellung wie das Häkchen in der Live-Ansicht: Dessen
-   * Änderungs-Handler setzt Zustand und Speicher, also wird er ausgelöst,
-   * statt die Logik hier ein zweites Mal zu führen. */
+  /* Same setting as the checkbox in the live view: its change handler
+   * sets state and storage, so it is triggered instead of keeping the logic
+   * here a second time. */
   function autoAdopt() {
     const live = el("dongle-auto");
     if (!live) return;
@@ -178,13 +178,13 @@ window.joltSettings = (function () {
     el("einst-trennen").disabled = !O.linked();
   }
 
-  /* Den Dongle verbinden - erst ohne Dialog (bekanntes Gerät), dann mit.
+  /* Connect the dongle - first without a dialog (known device), then with one.
    *
-   * Nach dem Parken ist er getrennt (jolt fragt im Stand nichts, damit die
-   * Alarmanlage ruhig bleibt), und hier fehlte bisher jede Möglichkeit, ihn
-   * wieder zu verbinden - die Einstellungen verwiesen auf andere Ansichten.
-   * Wer von hier aus mithören oder einen Befehl senden wollte, stand vor
-   * "Kein Dongle verbunden". Es wird nur verbunden; gelesen wird nichts. */
+   * After parking it is disconnected (jolt asks nothing while stationary so
+   * the alarm system stays quiet), and here there was no way to reconnect it
+   * - the settings pointed to other views. Anyone who wanted to listen in or
+   * send a command from here faced "Kein Dongle verbunden". It only
+   * connects; nothing is read. */
   async function connectDongle() {
     if (!O.obtainable()) {
       throw new Error("Dieser Browser kann kein Bluetooth. In der iOS-App "
@@ -205,8 +205,8 @@ window.joltSettings = (function () {
       as_of.textContent = "Verbunden: " + (O.diagnose().connection.device || "Dongle")
         + ". Es wird nichts gelesen, solange keine Fahrt läuft.";
     } catch (failure) {
-      // Im Text und nicht als Meldung: Eine Meldung verschwindet nach sechs
-      // Sekunden, und wer sie nicht gesehen hat, weiss nicht, warum nichts geschah.
+      // In the text and not as a message: a message disappears after six
+      // seconds, and anyone who has not seen it does not know why nothing happened.
       as_of.textContent = "Nicht verbunden: " + failure.message;
     } finally {
       btn.disabled = false;
@@ -215,8 +215,8 @@ window.joltSettings = (function () {
   }
 
   function detach() {
-    // Die Live-Ansicht hält ihren eigenen Zustand (Pause, Auto-Modus); über
-    // ihren Knopf läuft das sauber, direkt am Modul bliebe sie im Glauben.
+    // The live view keeps its own state (pause, auto mode); going through
+    // its button is clean, directly on the module it would stay unaware.
     const pause = el("dongle-pause");
     if (pause && !pause.hidden) { pause.click(); return; }
     O.detach();
@@ -229,7 +229,7 @@ window.joltSettings = (function () {
     K.report("Gerät vergessen.", "hinweis");
   }
 
-  /* ---------- Diagnose: Verbindung ---------- */
+  /* ---------- Diagnostics: connection ---------- */
 
   function showConnection(d) {
     const v = d.connection;
@@ -262,11 +262,11 @@ window.joltSettings = (function () {
     el("einst-diag-kurz").textContent = short;
   }
 
-  /* ---------- Diagnose: Messwerte ---------- */
+  /* ---------- Diagnostics: readings ---------- */
 
-  /* Eine Zeile je Messgrösse der Tabelle (readings.js), samt der Werte, die
-   * aus derselben Antwort mitkommen. Die Zähler führt das Modul je
-   * Hauptwert; Mitläufer zeigen nur ihren letzten Wert. */
+  /* One row per measured quantity of the table (readings.js), with the
+   * values that come along in the same response. The module keeps counters
+   * per main value; companions only show their last value. */
   function showReadings(d) {
     const record = d.lastRecord;
     const header = "<tr><th>Messgrösse</th><th>Wert</th><th>Alter</th>"
@@ -282,7 +282,7 @@ window.joltSettings = (function () {
       const as_of = count ? count.timestamp : (record && val !== null && val !== undefined ? record.timestamp : null);
       const required = field.required ? " <small>(Pflicht)</small>" : "";
       if (!count) {
-        // Mitläufer oder noch nie gelesen.
+        // Companion or never read.
         rows.push(`<tr><td>${esc(field.title)}${required}</td><td class="still">${text}</td>`
           + `<td class="still">${age(as_of)}</td>`
           + `<td class="still">·</td><td class="still">·</td><td class="still">·</td>`
@@ -320,15 +320,15 @@ window.joltSettings = (function () {
     el("diag-runden").innerHTML = z.join("");
   }
 
-  /* ---------- Diagnose: Protokoll ---------- */
+  /* ---------- Diagnostics: log ---------- */
 
   const CONSPICUOUS = /FEHLER|Zeitüberschreitung|keine Antwort|verspätet|fehlgeschlagen|NO DATA|ERROR|UNABLE|BUS/i;
 
   function showLog() {
     const container = el("diag-protokoll");
     const rows = O.trace_log(el("diag-auffaellig").checked).slice(-250);
-    // Nur ans Ende springen, wenn man schon unten war - wer hochgescrollt hat,
-    // um etwas zu lesen, soll nicht jede Sekunde zurückgerissen werden.
+    // Only jump to the end if you were already at the bottom - someone who
+    // scrolled up to read something should not be yanked back every second.
     const bottom = container.scrollHeight - container.scrollTop - container.clientHeight < 30;
     container.innerHTML = rows.map((z) => {
       const category = CONSPICUOUS.test(z.text) ? "auff" : (z.variety === "rein" ? "rein"
@@ -340,7 +340,7 @@ window.joltSettings = (function () {
     if (bottom) container.scrollTop = container.scrollHeight;
   }
 
-  /* ---------- Diagnose: Bericht ---------- */
+  /* ---------- Diagnostics: report ---------- */
 
   function writeup() {
     const d = O.diagnose();
@@ -375,8 +375,8 @@ window.joltSettings = (function () {
       await navigator.clipboard.writeText(text);
       K.report("Bericht in die Zwischenablage kopiert.", "hinweis");
     } catch (failure) {
-      // Ohne Zwischenablage-Erlaubnis (unsicherer Kontext, ältere WebViews):
-      // in das Protokollfeld schreiben, markiert, zum Händisch-Kopieren.
+      // Without clipboard permission (insecure context, older WebViews):
+      // write into the log field, selected, for copying by hand.
       const field = el("diag-protokoll");
       field.textContent = text;
       const selection = window.getSelection();
@@ -389,7 +389,7 @@ window.joltSettings = (function () {
     }
   }
 
-  /* ---------- Diagnose: Befehl senden ---------- */
+  /* ---------- Diagnostics: send command ---------- */
 
   async function sendCommand() {
     const field = el("diag-befehl");
@@ -406,7 +406,7 @@ window.joltSettings = (function () {
     }
     el("diag-senden").disabled = true;
     try {
-      await O.cli(text);        // die Antwort steht im Protokoll
+      await O.cli(text);        // the response appears in the log
     } catch (failure) {
       K.report("Befehl: " + failure.message, "fehler");
     } finally {
@@ -416,7 +416,7 @@ window.joltSettings = (function () {
     }
   }
 
-  /* ---------- Diagnose: Mithören ---------- */
+  /* ---------- Diagnostics: listen in ---------- */
 
   let listenText = "";
 
@@ -440,7 +440,7 @@ window.joltSettings = (function () {
   async function startListen() {
     const btn = el("lausch-start");
     const destination = el("lausch-ergebnis");
-    // Jede Rückmeldung steht im Ergebnisfeld - es ist das, worauf man schaut.
+    // Every feedback appears in the result field - it is what you look at.
     destination.hidden = false;
     if (tripRunning()) {
       destination.textContent = "Eine Fahrt läuft – Mithören unterbricht die Messung. "
@@ -477,7 +477,7 @@ window.joltSettings = (function () {
     }
   }
 
-  /* ---------- Speicher ---------- */
+  /* ---------- Storage ---------- */
 
   function bufferKey() {
     const hit = [];
@@ -486,7 +486,7 @@ window.joltSettings = (function () {
         const k = localStorage.key(i);
         if (k && k.indexOf("jolt-puffer-") === 0) hit.push(k);
       }
-    } catch (failure) { /* kein Speicher */ }
+    } catch (failure) { /* no storage */ }
     return hit;
   }
 
@@ -495,7 +495,7 @@ window.joltSettings = (function () {
     let points = 0;
     for (const k of bufferKey()) {
       try { points += (JSON.parse(localStorage.getItem(k)) || []).length; }
-      catch (failure) { /* beschädigt */ }
+      catch (failure) { /* corrupted */ }
     }
     z.push(row("Wartende Messpunkte", points
       ? `${points} – noch nicht an den Server gegangen` : "keine",
@@ -517,7 +517,7 @@ window.joltSettings = (function () {
     if (!window.confirm("Die wartenden Messpunkte unwiderruflich verwerfen? "
         + "Sie sind dann für die Auswertung verloren.")) return;
     for (const k of bufferKey()) {
-      try { localStorage.removeItem(k); } catch (failure) { /* egal */ }
+      try { localStorage.removeItem(k); } catch (failure) { /* never mind */ }
     }
     showStorage();
   }
@@ -536,13 +536,13 @@ window.joltSettings = (function () {
       K.report("Cache zurücksetzen: " + failure.message, "fehler");
       return;
     }
-    // Neu laden mit frischem Gerüst; Anmeldung und Daten liegen nicht im Cache.
+    // Reload with a fresh shell; sign-in and data are not in the cache.
     location.reload();
   }
 
-  /* ---------- Aktualisieren ---------- */
+  /* ---------- Refresh ---------- */
 
-  /* Jede Sekunde, solange die Ansicht offen ist - nur das, was sich bewegt. */
+  /* Every second while the view is open - only what moves. */
   function refresh() {
     const d = O.diagnose();
     showConnection(d);
@@ -554,10 +554,10 @@ window.joltSettings = (function () {
     el("diag-fahrt-zeile").hidden = !tripRunning();
   }
 
-  /* ---------- CarPlay-Darstellung ---------- */
+  /* ---------- CarPlay display ---------- */
 
-  /* Die Kacheln beider Stile mit Probewerten - dieselben Zeichenfunktionen
-   * wie im Auto, nur ohne den Umweg über CarPlay. */
+  /* The tiles of both styles with sample values - the same drawing functions
+   * as in the car, just without the detour via CarPlay. */
   function showCarplay() {
     const tiles = window.joltTiles;
     const display = window.joltDisplay;
@@ -578,7 +578,7 @@ window.joltSettings = (function () {
     const vals = tiles.records(probe.m, probe.series_list);
     for (const look of ["a", "b"]) {
       const container = el("vorschau-" + look);
-      if (!container || container.childElementCount) continue;     // einmal genügt
+      if (!container || container.childElementCount) continue;     // once is enough
       for (const slot of tiles.SLOTS) {
         const canvas = tiles.browserCanvas(tiles.PAGE * 2);
         const c = canvas.getContext("2d");
@@ -613,7 +613,7 @@ window.joltSettings = (function () {
     if (clock) { clearInterval(clock); clock = null; }
   }
 
-  /* Von app.js gerufen, wenn die Ansicht gewechselt wird. */
+  /* Called by app.js when the view is switched. */
   function show(visible) {
     if (visible) open_it(); else close();
   }

@@ -1,13 +1,13 @@
-"""jolts eigenes Meldeformat.
+"""jolt's own reporting format.
 
-Der schlichteste Fall - und trotzdem ein Übersetzer wie jeder andere. Zwei
-Gründe, ihn nicht zu überspringen:
+The simplest case - and still a translator like any other. Two reasons not to
+skip it:
 
-Erstens hätte ein Interface mit genau einem Implementierer keine Kanten, an
-denen sich zeigt, ob es taugt. Zweitens durchläuft damit auch jolts eigene
-Meldung dieselben Prüfungen wie eine fremde. Ein Kurzbefehl auf dem Telefon
-ist ebenso gut in der Lage, `soc` als Anteil statt als Prozentpunkte zu
-schicken wie ein fremder Dienst.
+First, an interface with exactly one implementer would have no edges that
+show whether it is any good. Second, it means jolt's own message goes through
+the same checks as a foreign one. A shortcut on the phone is just as capable
+of sending `soc` as a fraction rather than as percentage points as a foreign
+service is.
 """
 from datetime import datetime
 
@@ -35,7 +35,7 @@ class JoltFormat:
             timestamp=datetime.fromisoformat(timestamp) if isinstance(timestamp, str) and timestamp
             else None,
             charges=truth(records, "charges"),
-            # Unverändert übernommen: Ein Übersetzer, der hier aufräumt,
-            # wirft genau das weg, wofür das Feld da ist.
+            # Taken over unchanged: a translator that tidies up here throws
+            # away exactly what the field is for.
             raw_values=records.get("raw_values") if isinstance(
                 records.get("raw_values"), dict) else None)

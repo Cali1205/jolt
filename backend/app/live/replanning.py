@@ -1,23 +1,25 @@
-"""Den Ladeplan während der Fahrt neu rechnen - Stufe 3.
+"""Recalculate the charging plan during the trip - stage 3.
 
-Der Optimierer aus Stufe 2 plant von einem Start mit einem Ladestand. Genau
-das liegt unterwegs auch vor: Die aktuelle Position ist der Start, der
-gemeldete Ladestand der Ladestand. Neu geplant wird deshalb nicht die ganze
-Fahrt, sondern die **Reststrecke** - und zwar mit dem, was unterwegs gemessen
-wurde statt mit dem, was vor der Abfahrt angenommen war.
+The optimizer from stage 2 plans from a start with a state of charge. That is
+exactly what is available on the road, too: the current position is the
+start, the reported state of charge is the state of charge. So it is not the
+whole trip that is replanned, but the **remaining route** - and with what was
+measured on the way rather than what was assumed before departure.
 
-Zwei Messwerte gehen dabei ein:
+Two measured values go into it:
 
-- Der **Verbrauchsfaktor** skaliert den Energiebedarf der Reststrecke. Wer
-  bisher 20 % mehr gebraucht hat, wird die nächsten hundert Kilometer kaum
-  plötzlich sparsam fahren: Tempo, Beladung und Wetter bleiben, was sie sind.
-- Der **Zeitfaktor** skaliert die Fahrzeiten. Er ist nicht dasselbe: Im Stau
-  steigt der Verbrauch je Kilometer um wenige Prozent, die Fahrzeit aber um
-  ein Vielfaches. Ohne ihn wären alle Ankunftszeiten des neuen Plans falsch.
+- The **consumption factor** scales the energy demand of the remaining route.
+  Whoever has used 20 % more so far will hardly start driving economically
+  for the next hundred kilometres: speed, load and weather remain what they
+  are.
+- The **time factor** scales the driving times. It is not the same thing: in
+  a traffic jam consumption per kilometre rises by a few percent, but the
+  driving time by a multiple. Without it, all arrival times of the new plan
+  would be wrong.
 
-Beide sind die ehrlichste verfügbare Fortschreibung - keine Vorhersage, nur
-die Annahme, dass es bleibt, wie es war. Genau deshalb wird der Plan laufend
-nachgezogen und nicht einmal perfekt gerechnet.
+Both are the most honest extrapolation available - not a forecast, just the
+assumption that things stay as they were. That is precisely why the plan is
+adjusted continuously instead of being calculated perfectly once.
 """
 import logging
 
@@ -30,8 +32,8 @@ from ..routing import corridor
 
 log = logging.getLogger("uvicorn.error")
 
-# Vorgaben für die Kandidatensuche, wenn die Sitzung noch keine mitbringt.
-# Sie entsprechen den Vorgaben der Oberfläche.
+# Defaults for the candidate search when the session does not bring any.
+# They correspond to the defaults of the UI.
 DEFAULTS = {"radius_km": 10.0, "min_kw": 50.0, "connector_type": "",
             "detour_limit_min": optimizer.DETOUR_LIMIT_MIN,
             "stop_fixed_cost_min": optimizer.STOP_FIXED_COST_MIN,
@@ -40,11 +42,11 @@ DEFAULTS = {"radius_km": 10.0, "min_kw": 50.0, "connector_type": "",
 
 
 def read_parameter(plan: dict | None) -> dict:
-    """Die Suchparameter aus einem gespeicherten Plan, sonst die Vorgaben.
+    """The search parameters from a stored plan, otherwise the defaults.
 
-    Damit wird unterwegs mit demselben Radius und derselben Mindestleistung
-    gesucht wie beim Start - ein Plan, der sich mitten in der Fahrt auch noch
-    die Auswahlkriterien ändert, wäre nicht mehr nachvollziehbar.
+    That way the search on the road uses the same radius and the same minimum
+    power as at the start - a plan that also changes its selection criteria
+    in the middle of the trip would no longer be traceable.
     """
     vals = dict(DEFAULTS)
     for keyname in vals:
@@ -54,12 +56,12 @@ def read_parameter(plan: dict | None) -> dict:
 
 
 def rest_from(geometry: list, from_km: float) -> tuple[list, float]:
-    """Die Route ab einem Kilometerstand, plus deren tatsächlichen Startwert.
+    """The route from a kilometre mark on, plus its actual start value.
 
-    Zurückgegeben wird der *Stützpunkt* vor `ab_km` und sein Kilometerstand -
-    nicht `ab_km` selbst. Nur so beziehen sich Geometrie und Profil hinterher
-    auf denselben Nullpunkt; eine Verschiebung zwischen beiden wäre ein
-    Versatz in jeder Etappenrechnung.
+    What is returned is the *support point* before `from_km` and its
+    kilometre mark - not `from_km` itself. Only that way do geometry and
+    profile afterwards refer to the same zero point; a shift between the two
+    would be an offset in every leg calculation.
     """
     if len(geometry) < 2:
         return list(geometry), 0.0
@@ -70,14 +72,14 @@ def rest_from(geometry: list, from_km: float) -> tuple[list, float]:
                           geometry[i][1], geometry[i][0]) / 1000.0
         if km >= from_km:
             return geometry[i - 1:], earlier
-    # Schon am Ziel - die letzte Kante bleibt übrig, damit es überhaupt eine
-    # Strecke gibt.
+    # Already at the destination - the last edge remains, so that there is a
+    # route at all.
     return geometry[-2:], km
 
 
 def remaining_profile(energy_profile: list, from_km: float, consumption_factor: float = 1.0,
                time_factor: float = 1.0) -> optimizer.RouteProfile:
-    """Das Streckenprofil der Reststrecke, auf null gesetzt und skaliert."""
+    """The route profile of the remaining route, zeroed and scaled."""
     rest = [e for e in energy_profile if (e.get("km") or 0.0) >= from_km]
     if len(rest) < 2:
         rest = energy_profile[-2:] if len(energy_profile) >= 2 else energy_profile
@@ -94,19 +96,18 @@ def remaining_profile(energy_profile: list, from_km: float, consumption_factor: 
 
 
 def environment_on_the_road(trip: models.Trip, points: list):
-    """Das Wetter für die Reststrecke - jetzt, nicht bei der Abfahrt.
+    """The weather for the remaining route - now, not at departure.
 
-    Auf achthundert Kilometern liegen zwischen Start und Ziel im Winter
-    regelmässig zehn Grad und ein anderer Wind, und die Vorhersage von heute
-    früh ist am Nachmittag nicht mehr die von heute früh. Die Abfrage kostet
-    einen Aufruf je Umplanung, und umgeplant wird höchstens alle zehn
-    Kilometer.
+    Over eight hundred kilometres, winter regularly puts ten degrees and a
+    different wind between start and destination, and this morning's forecast
+    is no longer this morning's forecast by the afternoon. The query costs one
+    call per replan, and replanning happens at most every ten kilometres.
 
-    Fällt sie aus, gilt die Temperatur **dieser Fahrt** und nicht die
-    Standardvorgabe von 15 °C: Eine bei -5 °C gerechnete Fahrt auf 15 °C
-    zurückzusetzen verlöre die Heizlast und machte die Reststrecke auf dem
-    Papier billiger, als sie ist - der Fehler zeigte in genau die Richtung,
-    in der er jemanden stehen lässt.
+    If it fails, the temperature of **this trip** applies and not the default
+    of 15 °C: resetting a trip calculated at -5 °C to 15 °C would lose the
+    heating load and make the remaining route cheaper on paper than it is -
+    the error would point in exactly the direction in which it leaves
+    someone stranded.
     """
     fallback = Environment()
     if trip.outside_temp_c is not None:
@@ -114,33 +115,33 @@ def environment_on_the_road(trip: models.Trip, points: list):
     try:
         return weather.along_route(points, preset=fallback)
     except Exception as failure:      # noqa: BLE001
-        log.warning("Wetter unterwegs nicht abrufbar: %s", failure)
+        log.warning("Weather on the road not retrievable: %s", failure)
         return lambda lat, lon: fallback
 
 
 def remaining_profile_physics(trip: models.Trip, rest: list, speed_factor: float,
                       environment_for) -> optimizer.RouteProfile | None:
-    """Die Reststrecke mit dem **gemessenen** Tempo neu durchrechnen.
+    """Recalculate the remaining route with the **measured** speed.
 
-    Der Unterschied zu `restprofil` ist der zwischen Skalieren und Rechnen.
-    Skalieren nimmt das Ergebnis der Planung und multipliziert es; das ist
-    richtig, solange man einen gemessenen Verbrauch hat, den man
-    fortschreiben will. Wer aber nur weiss, dass er schneller fährt als
-    angenommen, kann daraus keinen Energiefaktor machen: Der Luftwiderstand
-    geht mit v², der Rollwiderstand nahezu linear, die Nebenverbraucher gar
-    nicht mit dem Tempo, sondern mit der Zeit - und die *sinkt*, wenn man
-    schneller fährt. Ein pauschaler Aufschlag träfe keinen dieser drei.
+    The difference to `remaining_profile` is that between scaling and
+    calculating. Scaling takes the result of the planning and multiplies it;
+    that is right as long as one has a measured consumption that one wants to
+    extrapolate. But whoever only knows that they drive faster than assumed
+    cannot turn that into an energy factor: air resistance goes with v²,
+    rolling resistance almost linearly, the auxiliary loads not with speed at
+    all but with time - and that *falls* when you drive faster. A flat markup
+    would hit none of these three.
 
-    Deshalb wird hier das Modell erneut über die Reststrecke gefahren, mit
-    demselben Höhenprofil und denselben Streckengeschwindigkeiten wie bei der
-    Planung, nur um den gemessenen Faktor verschoben. Das geht, weil das
-    gespeicherte Energieprofil Position, Höhe und Tempo je Stützstelle
-    mitführt - es ist für sich allein auswertbar und braucht die
-    Routing-Antwort nicht mehr.
+    That is why the model is run over the remaining route again here, with
+    the same elevation profile and the same segment speeds as in the
+    planning, just shifted by the measured factor. This works because the
+    stored energy profile carries position, elevation and speed at each
+    support point - it can be evaluated on its own and no longer needs the
+    routing response.
 
-    Gibt None zurück, wenn das Profil dafür nicht genug hergibt (Fahrten aus
-    der Zeit vor diesen Feldern). Der Aufrufer fällt dann aufs Skalieren
-    zurück - eine schlechtere Rechnung ist besser als keine.
+    Returns None if the profile does not offer enough for that (trips from
+    the time before these fields). The caller then falls back to scaling -
+    a worse calculation is better than none.
     """
     if len(rest) < 2:
         return None
@@ -150,9 +151,9 @@ def remaining_profile_physics(trip: models.Trip, rest: list, speed_factor: float
         if lat is None or lon is None:
             return None
         points.append([lon, lat, entry.get("elevation") or 0.0])
-        # `tempo_kmh` an einer Stützstelle ist die Geschwindigkeit des
-        # Teilstücks, das *dort endet* - siehe modell.profil_rechnen. Für das
-        # Teilstück i (von i nach i+1) steht sie also am Punkt i+1.
+        # `speed_kmh` at a support point is the speed of the segment that
+        # *ends there* - see model.compute_profile. For segment i (from i to
+        # i+1) it is therefore found at point i+1.
         if i > 0:
             velocity = entry.get("speed_kmh")
             if not velocity:
@@ -161,9 +162,9 @@ def remaining_profile_physics(trip: models.Trip, rest: list, speed_factor: float
 
     fresh = model.compute_profile(
         VehicleValues.from_trip(trip), points, speed_ms,
-        # Der Ladestand ist für das Streckenprofil ohne Belang: Gebraucht
-        # werden nur die kumulierten kWh und Minuten, und der Energiebedarf
-        # einer Etappe hängt nicht davon ab, wie voll der Akku ist.
+        # The state of charge is irrelevant for the route profile: only the
+        # cumulative kWh and minutes are needed, and the energy demand of a
+        # leg does not depend on how full the battery is.
         start_soc=100.0, environment_for=environment_for, speed_factor=speed_factor)
     if len(fresh.points) < 2:
         return None
@@ -175,7 +176,7 @@ def remaining_profile_physics(trip: models.Trip, rest: list, speed_factor: float
 
 def search_options(db, geometry: list, vehicle, parameter: dict
                     ) -> list[optimizer.ChargeOption]:
-    """Die Ladeoptionen im Korridor der (Rest-)Route."""
+    """The charging options in the corridor of the (remaining) route."""
     kind = parameter.get("connector_type") or vehicle.connector_type
     candidates = corridor.seek(db, geometry,
                                  radius_km=parameter["radius_km"],
@@ -197,23 +198,22 @@ def search_options(db, geometry: list, vehicle, parameter: dict
 def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
            parameter: dict, consumption_factor: float = 1.0,
            time_factor: float = 1.0, speed_factor: float | None = None) -> dict:
-    """Ein Ladeplan für die Reststrecke ab `ab_km` mit `start_soc`.
+    """A charging plan for the remaining route from `from_km` with `start_soc`.
 
-    Die Kilometerstände im Ergebnis sind wieder auf die **ganze** Fahrt
-    bezogen, nicht auf die Reststrecke: Unterwegs will man wissen, dass der
-    Stopp bei km 412 liegt, und nicht bei km 87 der Reststrecke.
+    The kilometre marks in the result refer to the **whole** trip again, not
+    to the remaining route: on the road you want to know that the stop is at
+    km 412, and not at km 87 of the remaining route.
 
-    `tempo_faktor` schaltet vom Skalieren aufs Neurechnen um: Statt das
-    geplante Profil mit einem Energiefaktor zu multiplizieren, wird das
-    Modell mit dem gemessenen Tempo und dem aktuellen Wetter erneut über die
-    Reststrecke gefahren. Gedacht ist das für den Fall, dass noch niemand
-    einen Ladestand gemeldet hat - dann gibt es keinen Verbrauchsfaktor, und
-    die Alternative wäre, weiter mit dem Reglerwert von vor der Abfahrt zu
-    rechnen.
+    `speed_factor` switches from scaling to recalculating: instead of
+    multiplying the planned profile by an energy factor, the model is run
+    over the remaining route again with the measured speed and the current
+    weather. This is intended for the case that nobody has reported a state
+    of charge yet - then there is no consumption factor, and the alternative
+    would be to keep calculating with the slider value from before departure.
 
-    Beides zusammen wäre falsch: Ein gemessener Verbrauch enthält die Wirkung
-    des Tempos bereits. Wer zusätzlich das Tempo einrechnet, zählt es
-    doppelt. Deshalb ist es ein Entweder-oder, und der Aufrufer entscheidet.
+    Both together would be wrong: a measured consumption already contains the
+    effect of speed. Whoever factors in the speed on top counts it twice.
+    That is why it is either-or, and the caller decides.
     """
     vehicle = trip.vehicle
     geometry, km0 = rest_from(trip.geometry or [], from_km)
@@ -227,9 +227,9 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
             profile = remaining_profile_physics(trip, rest, speed_factor,
                                        environment_on_the_road(trip, geometry))
         except Exception as failure:      # noqa: BLE001
-            # Eine gescheiterte Neurechnung darf die Umplanung nicht kosten -
-            # das Skalieren darunter ist schlechter, aber es steht.
-            log.warning("Neurechnung mit gemessenem Tempo fehlgeschlagen: %s",
+            # A failed recalculation must not cost us the replan - scaling
+            # underneath is worse, but it stands.
+            log.warning("Recalculation with measured speed failed: %s",
                         failure)
         if profile is not None:
             basis = "tempo gemessen"
@@ -257,8 +257,9 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
         price_for=prices.price_function(vehicle),
         time_value_eur_h=parameter["time_value_eur_h"],
         preferred_operators=vehicle.preferred_operators or None,
-        # Damit die Begründung dieselben Kilometer nennt wie die Stopps
-        # darunter - der Optimierer rechnet auf der Reststrecke ab null.
+        # So that the rationale names the same kilometres as the stops
+        # below it - the optimizer calculates on the remaining route from
+        # zero.
         km_offset=km0)
 
     result = plan.as_dict()
@@ -268,20 +269,20 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
             stop["detour_alt"]["km_on_route"] = round(
                 stop["detour_alt"]["km_on_route"] + km0, 1)
     return {**parameter, **result, "reading_km": round(km0, 1),
-            # Worauf der Plan beruht - damit am Steuer und im Log
-            # nachvollziehbar ist, ob hier eine Messung wirkt oder noch der
-            # Regler von vor der Abfahrt.
+            # What the plan is based on - so that at the wheel and in the log
+            # it is traceable whether a measurement is at work here or still
+            # the slider from before departure.
             "basis": basis,
             "speed_factor": speed_factor}
 
 
 def stops_same(old: dict | None, fresh: dict | None) -> bool:
-    """Beschreiben zwei Pläne dieselben Stopps?
+    """Do two plans describe the same stops?
 
-    Verglichen werden Standort und Abfahrts-Ladestand, nicht die Ladezeit auf
-    die Nachkommastelle: Dass sich eine Standzeit um vierzig Sekunden
-    verschiebt, ist keine Änderung, über die jemand am Steuer unterrichtet
-    werden will. Ein anderer Standort oder ein spürbar anderer Ladehub schon.
+    What is compared is location and departure state of charge, not the
+    charging time to the decimal place: a standing time shifting by forty
+    seconds is not a change anyone at the wheel wants to be informed about. A
+    different location or a noticeably different charge swing is.
     """
     if old is None or fresh is None:
         return old is fresh
@@ -301,10 +302,10 @@ def stops_same(old: dict | None, fresh: dict | None) -> bool:
 
 
 def describe_change(old: dict | None, fresh: dict) -> str:
-    """Was hat sich geändert - in einem Satz, der am Steuer trägt.
+    """What has changed - in a sentence that works at the wheel.
 
-    Kein Diff und keine Liste: Wer fährt, kann einen Satz hören oder im
-    Vorbeischauen lesen. Alles Weitere steht in der Ansicht.
+    No diff and no list: whoever is driving can hear a sentence or read it in
+    passing. Everything else is in the view.
     """
     if not fresh.get("feasible"):
         return fresh.get("reason") or "Kein Ladeplan mehr möglich."

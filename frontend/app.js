@@ -1,4 +1,4 @@
-/* Zusammenbau: Navigation, Start, Registrierung des Service Workers. */
+/* Assembly: navigation, start, registration of the service worker. */
 window.joltApp = (function () {
   "use strict";
 
@@ -12,20 +12,20 @@ window.joltApp = (function () {
       if (section) section.hidden = !active;
     }
     mapRehang(name);
-    // Die Fahrtenliste holt sich ihre Daten erst, wenn jemand hinsieht.
+    // The trips list only fetches its data when someone is looking.
     if (name === "fahrten" && window.joltTrips) window.joltTrips.show();
-    // Die Einstellungen aktualisieren sich sekündlich - aber nur, solange man
-    // sie ansieht.
+    // The settings update every second - but only while they are being
+    // looked at.
     if (window.joltSettings) window.joltSettings.show(name === "einstellungen");
   }
 
-  /* Die eine Karte wandert in die gerade sichtbare Ansicht.
+  /* The one map moves into the currently visible view.
    *
-   * Beim Planen zeigt sie die Route, unterwegs den eigenen Standort und die
-   * wandernde Reserve-Marke - und das ist unterwegs die wichtigere der
-   * beiden Ansichten. Ein zweites Canvas hiesse ein zweiter Kachel-Cache
-   * und zwei Zustände, die auseinanderlaufen; ein Verschieben im DOM behält
-   * Kontext, Cache und Zoom. */
+   * When planning it shows the route, on the road the own location and the
+   * moving reserve marker - and on the road that is the more important of
+   * the two views. A second canvas would mean a second tile cache and two
+   * states that drift apart; moving it in the DOM keeps context, cache and
+   * zoom. */
   function mapRehang(view) {
     const block = document.getElementById("karte-block");
     const holder = document.getElementById("karte-halter-" + view);
@@ -33,10 +33,10 @@ window.joltApp = (function () {
       holder.appendChild(block);
     }
     if (block) block.hidden = !holder;
-    // Im versteckten Abschnitt hatte das Canvas die Breite null. Nach dem
-    // Einblenden muss es neu vermessen werden, sonst bleibt es ein Strich.
+    // In the hidden section the canvas had width zero. After showing it, it
+    // has to be measured anew, otherwise it stays a line.
     if (window.joltMap) window.joltMap.drawNew();
-    // Dasselbe für die Verlaufskurve der Live-Ansicht.
+    // The same for the history curve of the live view.
     if (view === "live" && window.joltLive
         && window.joltLive.drawHistory) window.joltLive.drawHistory();
   }
@@ -76,21 +76,21 @@ window.joltApp = (function () {
     await window.joltVehicle.load();
 
     if ("serviceWorker" in navigator) {
-      // Die Registrierung wird festgehalten, weil das Abo für die
-      // Benachrichtigungen daran hängt (siehe live.js). Ohne sie gäbe es
-      // keinen Weg, den Push-Empfänger anzumelden.
+      // The registration is kept because the subscription for the
+      // notifications depends on it (see live.js). Without it there would be
+      // no way to register the push receiver.
       try {
         K.state.serviceWorker = await navigator.serviceWorker.register("/sw.js");
       } catch (failure) {
-        // Ohne Service Worker läuft alles weiter, nur eben ohne Offline-Gerüst
-        // und ohne Benachrichtigungen bei dunklem Bildschirm.
+        // Without a service worker everything keeps running, just without the
+        // offline shell and without notifications when the screen is dark.
         K.state.serviceWorker = null;
       }
     }
   }
 
-  /* Ein gespeichertes Token kann von einer abgelaufenen Sitzung stammen - erst
-   * ein echter, geschützter Aufruf zeigt, ob es noch gilt. */
+  /* A stored token may come from an expired session - only a real, protected
+   * call shows whether it is still valid. */
   async function signed_in() {
     if (!K.token()) return false;
     try {
@@ -101,10 +101,9 @@ window.joltApp = (function () {
     }
   }
 
-  /* Blockiert, bis die Anmeldung sitzt - alles danach setzt ein gültiges
-   * Token voraus. Nav und Inhalt bleiben bis dahin verborgen: Eine
-   * Oberfläche zu zeigen, die bei jedem Klick nur 401 zurückgibt, wäre
-   * schlimmer als gar keine. */
+  /* Blocks until the login is in place - everything after it presupposes a
+   * valid token. Nav and content stay hidden until then: showing a UI that
+   * only returns 401 on every click would be worse than none at all. */
   function sign_in() {
     for (const section of document.querySelectorAll("main > section")) {
       section.hidden = section.id !== "ansicht-login";
@@ -137,23 +136,22 @@ window.joltApp = (function () {
     });
   }
 
-  /* Die Fassung in der Kopfzeile in Ortszeit setzen.
+  /* Set the version in the header line in local time.
    *
-   * Der Server schickt Sekunden, weil er in UTC läuft und das Telefon in
-   * seiner eigenen Zone; formatiert wird deshalb hier. Zwei Zahlen, zwei
-   * Fragen: Der Code-Stand sagt, **was** läuft - steht dort nach einem
-   * Deploy noch das alte Datum, ist entweder das Image nicht neu gebaut
-   * oder die Seite kommt aus dem Cache. "seit" sagt, wann der Server
-   * zuletzt gestartet ist. */
+   * The server sends seconds because it runs in UTC and the phone in its own
+   * zone; formatting is therefore done here. Two numbers, two questions: the
+   * code version says **what** is running - if the old date is still there
+   * after a deploy, either the image was not rebuilt or the page comes from
+   * the cache. "seit" (since) says when the server last started. */
   function showAsOf() {
     const field = document.getElementById("stand");
     if (!field) return;
     const as_of = Number(field.dataset.stand);
     const start = Number(field.dataset.start);
-    if (!as_of) return;                    // Platzhalter nicht ersetzt
-    // Von Hand statt über `toLocaleString`: Das deutsche Format schiebt
-    // zwischen Datum und Uhrzeit ein Komma, und die Zeile ist zu kurz, um
-    // sich das leisten zu können.
+    if (!as_of) return;                    // placeholder not replaced
+    // By hand instead of via `toLocaleString`: the German format inserts a
+    // comma between date and time, and the line is too short to afford
+    // that.
     const two = (n) => String(n).padStart(2, "0");
     const date = (s, withDay) => {
       const d = new Date(s * 1000);

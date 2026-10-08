@@ -1,50 +1,49 @@
-"""Das Telemetrieformat von Iternio (A Better Routeplanner).
+"""The telemetry format of Iternio (A Better Routeplanner).
 
-Warum ausgerechnet dieses: Es ist das einzige, das im Umfeld der
-Elektroauto-Logger so etwas wie ein Quasi-Standard ist. Wer Live-Daten aus
-einem Auto herausbekommt, spricht mit einiger Wahrscheinlichkeit dieses
-Format - die ABRP-App selbst, ESP32-Dongles wie der WiCAN, OVMS,
-Home-Assistant-Integrationen, eine Reihe von Bastelskripten. Ein Übersetzer
-dafür ist deshalb nicht ein Adapter für einen Anbieter, sondern einer für ein
-halbes Ökosystem.
+Why this one of all: it is the only one that is something like a de-facto
+standard among electric-car loggers. Whoever gets live data out of a car is
+quite likely speaking this format - the ABRP app itself, ESP32 dongles such
+as the WiCAN, OVMS, Home Assistant integrations, a number of hobby scripts. A
+translator for it is therefore not an adapter for one vendor, but for half an
+ecosystem.
 
-Er ist absichtlich unabhängig davon, *wie* die Daten hereinkommen: Dieselben
-Felder stehen in einem POST an `/1/tlm/send` wie in der Antwort auf
-`/1/tlm/get_telemetry`. Ob jolt sie geschickt bekommt oder abholt, ist eine
-Frage des Transports und steht nicht hier.
+It is deliberately independent of *how* the data arrives: the same fields
+appear in a POST to `/1/tlm/send` as in the response to
+`/1/tlm/get_telemetry`. Whether jolt is sent them or fetches them is a matter
+of transport and does not belong here.
 
-Format (die Felder, die jolt braucht - es gibt mehr):
+Format (the fields jolt needs - there are more):
 
-    utc          Sekunden seit Epoche, Zeitpunkt der Messung
-    soc          Ladestand in Prozentpunkten, 0 bis 100
-    lat, lon     Position, Dezimalgrad
+    utc          seconds since epoch, time of the measurement
+    soc          state of charge in percentage points, 0 to 100
+    lat, lon     position, decimal degrees
     speed        km/h
-    ext_temp     Aussentemperatur in °C
+    ext_temp     outside temperature in °C
     is_charging  0/1
 """
 from datetime import datetime, timezone
 
 from . import (SourcesError, RawPoint, limits, required, truth, num)
 
-# Ab diesem Rohwert ist `utc` in Millisekunden gemeint und nicht in Sekunden.
-# Sekunden erreichen diese Grösse erst im Jahr 5138; Millisekunden liegen
-# heute darüber. Die Verwechslung ist der häufigste Fehler an dieser Stelle,
-# und sie fällt ohne Korrektur erst auf, wenn der Zeitfaktor Unsinn ergibt.
+# From this raw value on, `utc` means milliseconds and not seconds. Seconds
+# only reach this magnitude in the year 5138; milliseconds are above it today.
+# Mixing the two up is the most common error at this spot, and without
+# correction it only shows when the time factor turns out nonsensical.
 MILLISECONDS_FROM = 1e11
 
-# Ein Zeitstempel ausserhalb dieser Spanne ist keine Messung, sondern eine
-# ungestellte Uhr - meist 1970, wenn ein Kleinstrechner ohne Netz startet.
+# A timestamp outside this range is not a measurement but an unset clock -
+# usually 1970, when a microcontroller without network starts up.
 EARLIEST = datetime(2020, 1, 1)
 LATEST = datetime(2100, 1, 1)
 
 
 def _unpack(records: dict) -> dict:
-    """Die Nutzlast aus ihrer Hülle holen.
+    """Get the payload out of its envelope.
 
-    Beim Senden steht sie unter `tlm`, beim Abholen unter `result` - und wer
-    einen mitgeschnittenen Datensatz von Hand weiterreicht, hat sie meist
-    schon ausgepackt. Alle drei Fälle sind dasselbe Format in einer anderen
-    Verpackung, und daran soll niemand scheitern.
+    When sending it sits under `tlm`, when fetching under `result` - and
+    whoever passes on a recorded dataset by hand has usually already
+    unpacked it. All three cases are the same format in different packaging,
+    and nobody should fail on that.
     """
     for shell in ("result", "tlm"):
         inneres = records.get(shell)
@@ -61,9 +60,9 @@ def _time(raw: float | None) -> datetime | None:
         read = datetime.fromtimestamp(seconds, tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         raise SourcesError(f"Zeitstempel unbrauchbar: {raw!r}")
-    # Ohne Zeitzone weiter, weil jolt durchgehend mit naiver UTC rechnet
-    # (`datetime.utcnow()`); ein Punkt mit Zeitzone unter lauter Punkten ohne
-    # liesse jeden Vergleich mit einer TypeError-Ausnahme scheitern.
+    # Continue without time zone, because jolt consistently works with naive
+    # UTC (`datetime.utcnow()`); one point with a time zone among points
+    # without would make every comparison fail with a TypeError.
     without_zone = read.replace(tzinfo=None)
     if not EARLIEST <= without_zone <= LATEST:
         raise SourcesError(
@@ -78,10 +77,10 @@ class AbrpFormat:
     def normalize(self, records: dict) -> RawPoint:
         payload = _unpack(records)
 
-        # Bewusst keine Umrechnung eines Anteils (0 bis 1) auf Prozentpunkte:
-        # Ein `soc` von 0,4 ist als "40 %" gemeint oder als "0,4 %", und beides
-        # kommt vor. Zu raten hiesse, ausgerechnet bei fast leerem Akku zu
-        # raten - dort, wo eine falsche Zahl den Fahrer stehen lässt.
+        # Deliberately no conversion of a fraction (0 to 1) to percentage
+        # points: a `soc` of 0.4 is meant either as "40 %" or as "0.4 %", and
+        # both occur. Guessing would mean guessing precisely when the battery
+        # is almost empty - where a wrong number leaves the driver stranded.
         soc = limits(required(payload, "soc"), 0, 100, "Ladestand")
 
         return RawPoint(

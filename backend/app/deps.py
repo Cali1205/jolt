@@ -1,12 +1,12 @@
-"""Zugang: ein Passwort, ein Token je Gerät.
+"""Access: one password, one token per device.
 
-Bewusst keine Nutzerverwaltung. jolt ist selbstgehostet für die eigenen
-Fahrzeuge - es gibt keine zweite Rolle, die etwas anderes dürfte, und eine
-Rechteverwaltung ohne zweite Rolle ist nur Code, der schiefgehen kann.
+Deliberately no user management. jolt is self-hosted for one's own vehicles -
+there is no second role that would be allowed to do something different, and
+permission management without a second role is just code that can go wrong.
 
-Ist `APP_PASSWORT` leer, ist der Zugang offen. Das ist eine bewusste Option
-für den Betrieb in einem Netz, in das ohnehin niemand sonst hineinkommt -
-aber es steht beim Start im Log, damit es niemand versehentlich so lässt.
+If `APP_PASSWORT` is empty, access is open. That is a deliberate option for
+running in a network that nobody else can get into anyway - but it is written
+to the log at startup, so that nobody leaves it that way by accident.
 """
 import logging
 import os
@@ -22,11 +22,11 @@ from fastapi import Depends
 
 log = logging.getLogger("uvicorn.error")
 
-# Abgelaufen heisst "lange nicht benutzt", nicht "lange her angemeldet". Ein
-# Telefon, das bei jeder Fahrt dabei ist, bleibt damit angemeldet - und genau
-# darauf verlässt sich, wer unterwegs nicht erst ein Passwort tippen will.
+# Expired means "not used for a long time", not "logged in long ago". A phone
+# that comes along on every trip thus stays logged in - and that is exactly
+# what someone relies on who does not want to type a password on the road.
 SESSION_MAX_AGE = timedelta(days=180)
-# So oft höchstens wird "zuletzt gesehen" fortgeschrieben.
+# At most this often is "last seen" updated.
 SESSION_TOUCH = timedelta(hours=1)
 
 
@@ -38,12 +38,12 @@ def examine_password(user_input: str) -> bool:
     expected = os.environ.get("APP_PASSWORT", "").strip()
     if not expected:
         return True
-    # compare_digest statt ==, damit die Laufzeit nichts über das Passwort
-    # verrät. Bei einem Heimserver ist das Paranoia mit vernachlässigbaren
-    # Kosten - aber es ist die richtige Gewohnheit.
-    # Bytes, nicht Strings: compare_digest wirft bei Nicht-ASCII in str einen
-    # TypeError. Ein Passwort mit Umlaut machte den Login zum 500er - und ein
-    # so eingerichtetes APP_PASSWORT hätte nie angenommen werden können.
+    # compare_digest instead of ==, so that the running time reveals nothing
+    # about the password. On a home server this is paranoia with negligible
+    # cost - but it is the right habit.
+    # Bytes, not strings: compare_digest raises a TypeError for non-ASCII in
+    # str. A password with an umlaut turned the login into a 500 - and an
+    # APP_PASSWORT set up like that could never have been accepted.
     return secrets.compare_digest((user_input or "").encode("utf-8"),
                                   expected.encode("utf-8"))
 
@@ -56,11 +56,11 @@ def create_session(db: Session, device: str = "") -> str:
 
 
 def examine_session(x_token: str, db: Session) -> models.AuthSession:
-    """Den Token einer Anmeldung prüfen und die Sitzung fortschreiben.
+    """Check the token of a login and update the session.
 
-    Eigene Funktion, weil zwei Wege hineinführen: die Dependency für HTTP
-    (Header `X-Token`) und der WebSocket, der keine Header setzen kann und
-    den Token deshalb als erste Nachricht schickt.
+    A function of its own, because two paths lead in: the dependency for HTTP
+    (header `X-Token`) and the WebSocket, which cannot set headers and
+    therefore sends the token as its first message.
     """
     if not x_token:
         raise HTTPException(401, "Nicht angemeldet.")
@@ -83,14 +83,14 @@ def examine_session(x_token: str, db: Session) -> models.AuthSession:
 
 def current_session(x_token: str = Header(default=""),
                      db: Session = Depends(get_db)) -> models.AuthSession | None:
-    """Dependency für alles, was Zugang braucht."""
+    """Dependency for everything that needs access."""
     if not password_set():
         return None
     return examine_session(x_token, db)
 
 
 def token_valid(x_token: str) -> bool:
-    """Für den WebSocket: ist dieser Token angemeldet? Ohne Ausnahme."""
+    """For the WebSocket: is this token logged in? Without exception."""
     if not password_set():
         return True
     db = SessionLocal()
@@ -105,5 +105,5 @@ def token_valid(x_token: str) -> bool:
 
 def at_start_warn() -> None:
     if not password_set():
-        log.warning("APP_PASSWORT ist leer - jolt ist ohne Anmeldung "
-                    "erreichbar. Nur im eigenen Netz vertretbar.")
+        log.warning("APP_PASSWORT is empty - jolt is reachable without "
+                    "login. Only acceptable on your own network.")

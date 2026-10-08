@@ -1,35 +1,35 @@
-/* Web Bluetooth gegen einen ELM327-Dongle.
+/* Web Bluetooth against an ELM327 dongle.
  *
- * Der Dongle ist eine serielle Schnittstelle in BLE-Verkleidung: Man schreibt
- * ASCII-Befehle auf eine Charakteristik und bekommt die Antwort als
- * Notifications auf einer zweiten zurück, abgeschlossen von einem '>' als
- * Eingabeaufforderung. Mehr Protokoll gibt es nicht.
+ * The dongle is a serial interface in BLE disguise: one writes ASCII
+ * commands to one characteristic and gets the response back as
+ * notifications on a second one, terminated by a '>' as the prompt. There
+ * is no more protocol than that.
  *
- * Diese Seite rät bewusst wenig und zeigt viel: Jeder Befehl und jede Antwort
- * stehen im Protokoll. Ob die Annahmen über die PIDs des ID.Buzz stimmen,
- * entscheidet sich an dem, was das Auto zurückschickt - nicht an dem, was
- * hier steht.
+ * This page deliberately guesses little and shows a lot: every command
+ * and every response is in the log. Whether the assumptions about the
+ * ID.Buzz PIDs are correct is decided by what the car sends back - not by
+ * what is written here.
  */
 (function () {
   "use strict";
 
-  /* Welchen GATT-Dienst ein ELM327-Klon anbietet, ist nicht genormt. Web
-   * Bluetooth verlangt aber, dass man alle Dienste, die man anfassen will,
-   * **vorher** anmeldet - man kann nicht erst verbinden und dann nachsehen.
-   * Deshalb die Liste der gebräuchlichen; der Vgate iCar Pro nutzt nach
-   * verbreiteter Auskunft 0xFFF0, die anderen kosten nichts.
+  /* Which GATT service an ELM327 clone offers is not standardized. Web
+   * Bluetooth, however, requires that all services one wants to touch be
+   * registered **beforehand** - one cannot connect first and look
+   * afterwards. Hence the list of the common ones; the Vgate iCar Pro uses
+   * 0xFFF0 according to common accounts, the others cost nothing.
    *
-   * Ausgeschrieben als 128-bit-UUID und nicht als Kurzform `0xfff0`: Die
-   * Spezifikation erlaubt beides, aber Bluefy reicht die Optionen an eine
-   * native Schicht weiter, und die stolperte über die Zahl - `RequestDevice:
-   * Request payload could not be parsed`, noch bevor ein Geräte-Dialog
-   * erschien. An der ausgeschriebenen Form gibt es nichts zu deuten, und
-   * Chrome nimmt sie ebenso. */
+   * Written out as a 128-bit UUID and not in the short form `0xfff0`: the
+   * specification allows both, but Bluefy passes the options on to a native
+   * layer, and that stumbled over the number - `RequestDevice: Request
+   * payload could not be parsed`, before a device dialog even appeared. The
+   * written-out form leaves nothing to interpret, and Chrome accepts it
+   * just as well. */
   const el = (id) => document.getElementById(id);
-  const O = window.joltObd;   // Verbindung, ELM327, Messwerte
+  const O = window.joltObd;   // connection, ELM327, readings
   let lastSoc = null;
 
-  /* ---------- Protokoll ---------- */
+  /* ---------- Log ---------- */
 
   function log(text, variety) {
     const timestamp = new Date().toLocaleTimeString("de-DE");
@@ -48,14 +48,14 @@
     for (const id of ["init", "soc", "senden", "melden", "fahrt-start", "pruefen"]) el(id).disabled = !at;
   }
 
-  /* ---------- Ladestand ---------- */
+  /* ---------- Charge level ---------- */
 
   async function readSoc() {
     el("soc-wert").textContent = "…";
     try {
-      // Adresse und Filter stehen seit dem Handshake; sie hier erneut zu
-      // setzen würde ATCP17 und ATCAF1 nicht wiederholen und damit gerade
-      // das zerstören, worauf es ankommt.
+      // Address and filters have been in place since the handshake; setting
+      // them again here would not repeat ATCP17 and ATCAF1 and would thereby
+      // destroy exactly what matters.
       const response = await O.command("22028C");
       const val = O.socFromResponse(response);
       if (val === null) {
@@ -66,9 +66,8 @@
         return;
       }
       lastSoc = Math.round(val.hmi * 10) / 10;
-      // Beide Zahlen anzeigen: Die grosse ist die, die im Auto steht und die
-      // jolt bekommt; die kleine daneben macht nachvollziehbar, woraus sie
-      // entstanden ist.
+      // Show both numbers: the big one is what is in the car and what jolt
+      // gets; the small one next to it makes it traceable what it came from.
       el("soc-wert").textContent = lastSoc + " %";
       el("soc-herkunft").textContent =
         `Rohwert 0x${val.raw.toString(16).toUpperCase()} = ${val.raw}`
@@ -82,17 +81,17 @@
   }
 
 
-  /* ---------- Der übliche Weg: alles in einem Zug ---------- */
+  /* ---------- The usual way: everything in one go ---------- */
 
-  /* Ein Knopf statt fünf. Vollautomatisch geht es nicht - `requestDevice`
-   * verlangt zwingend eine Nutzergeste, eine Seite darf sich beim Laden
-   * nicht von selbst mit einem Gerät verbinden. Aber eine Geste genügt für
-   * die ganze Kette, und das ist der Unterschied zwischen "im Auto machbar"
-   * und "im Auto zu umständlich".
+  /* One button instead of five. Fully automatic is not possible -
+   * `requestDevice` strictly requires a user gesture, a page may not
+   * connect to a device by itself on load. But one gesture suffices for
+   * the whole chain, and that is the difference between "doable in the car"
+   * and "too cumbersome in the car".
    *
-   * Die Fahrt wird hier gleich mit angelegt: Ohne laufende Sitzung nimmt
-   * jolt die Messpunkte zwar entgegen, legt sie aber nirgends ab - und
-   * das merkt man erst hinterher. */
+   * The trip is created here right away: without a running session, jolt
+   * does accept the measurement points but stores them nowhere - and one
+   * only notices afterwards. */
   function goAsOf(text, variety) {
     const k = el("los-stand");
     k.textContent = text;
@@ -100,27 +99,27 @@
   }
 
   function joltToken() {
-    // Dieselbe Anmeldung wie die Haupt-App: Wer sich dort angemeldet hat,
-    // muss es hier nicht noch einmal tun.
+    // The same login as the main app: whoever logged in there does not have
+    // to do it again here.
     try { return localStorage.getItem("jolt-token") || ""; }
     catch (e) { return ""; }
   }
 
-  /* Wie schnell das Auto sein muss, damit es als "fährt" gilt. Zehn km/h
-   * liegen sicher über GPS-Rauschen und über dem Rangieren auf dem Hof, und
-   * sicher unter allem, was eine Fahrt ist. */
+  /* How fast the car has to be to count as "driving". Ten km/h is safely
+   * above GPS noise and above shunting in the yard, and safely below
+   * anything that is a trip. */
   const DRIVES_FROM_KMH = 10;
-  // Zwei Messungen hintereinander, damit ein einzelner Ausreisser keine
-  // Fahrt anlegt.
+  // Two measurements in a row, so that a single outlier does not create a
+  // trip.
   const DRIVES_ROUNDS = 2;
   let moved = 0;
 
-  /* Ein Name, den niemand tippen muss.
+  /* A name nobody has to type.
    *
-   * Das Namensfeld war ein Handgriff zu viel: Wer im Auto sitzt, tippt
-   * nichts. Datum und Uhrzeit sind ohnehin die Angabe, nach der man später
-   * sucht - und Start und Ziel trägt jolt beim Abschliessen selbst nach,
-   * aus dem ersten und letzten Messpunkt. */
+   * The name field was one step too many: whoever sits in the car does not
+   * type. Date and time are the detail one searches by later anyway - and
+   * jolt fills in start and destination itself when finishing, from the
+   * first and last measurement point. */
   function tripName() {
     const own = el("fahrt-name").value.trim();
     if (own) return own;
@@ -144,31 +143,31 @@
         throw new Error("Handshake unvollständig – siehe Protokoll");
       }
 
-      // Erst prüfen, ob überhaupt etwas ankommt. Eine Aufzeichnung zu
-      // starten, die dann nur Positionen ohne Ladestand sammelt, wäre eine
-      // verlorene Fahrt - und das fiele erst am Ziel auf.
+      // First check whether anything arrives at all. Starting a recording that
+      // then collects only positions without a charge level would be a lost
+      // trip - and that would only be noticed at the destination.
       goAsOf("Ladestand lesen …");
       const probe = O.socFromResponse(await O.command("22028C"));
       if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
       el("soc-wert").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
       if (el("automatik").checked) {
-        // Dieselbe Prüfung wie beim Start von Hand. Ohne sie liefe die
-        // Schleife los und scheiterte bei jedem Anlegen der Fahrt an einem
-        // 401 - sichtbar nur im Protokoll, während oben "Bereit" steht.
+        // The same check as with the manual start. Without it the loop would
+        // start and fail with a 401 on every creation of the trip - visible only
+        // in the log, while "Bereit" is shown above.
         if (!el("token").value.trim() && !joltToken()) {
           throw new Error("Erst in jolt anmelden oder ein Logger-Token "
                           + "eintragen");
         }
-        // Nicht sofort anlegen: Wer im Stand verbindet, bekäme sonst eine
-        // Fahrt, die an der Auffahrt beginnt und eine halbe Stunde
-        // Parkplatz enthält. Die Seite wartet, bis sich etwas bewegt.
+        // Do not create it immediately: whoever connects while standing would
+        // otherwise get a trip that begins at the driveway and contains half an
+        // hour of parking. The page waits until something moves.
         goAsOf("Bereit – wartet, bis das Auto fährt.", "gut");
         running = true;
         moved = 0;
-        // `runde` steuert, welche selten gelesenen Messwerte drankommen
-        // (`satzLesen`). Ohne Rücksetzen zählt die zweite Fahrt einer
-        // Sitzung dort weiter, wo die erste aufhörte.
+        // `lap` controls which rarely read values are due (`readRecord`).
+        // Without resetting, the second trip of a session continues counting
+        // where the first one stopped.
         lap = 0;
         el("fahrt-start").hidden = true;
         el("fahrt-stop").hidden = false;
@@ -188,8 +187,9 @@
     }
   }
 
-  /* Die Fahrt in jolt anlegen. Getrennt vom Verbinden, weil sie bei
-   * eingeschalteter Automatik erst entsteht, wenn das Auto losfährt. */
+  /* Create the trip in jolt. Separate from connecting, because with the
+   * automatic mode switched on it only comes into being once the car
+   * drives off. */
   async function createTrip(soc) {
     goAsOf("Fahrt anlegen …");
     const wo = await city();
@@ -213,16 +213,16 @@
     return trip;
   }
 
-  /* Welches Fahrzeug - gefragt, nicht geraten.
+  /* Which vehicle - asked, not guessed.
    *
-   * Hier stand `fahrzeuge[0]`. Die Liste kommt nach ID sortiert, und die
-   * erste ist das beim ersten Start angelegte "Allgemeine E-Auto" - nicht
-   * das, in dem man sitzt. Die Aufzeichnung wäre dem falschen Fahrzeug
-   * zugeschrieben worden, und schlimmer: Die Kalibrierung hätte den
-   * Korrekturfaktor eines Autos verstellt, mit dem niemand gefahren ist.
+   * `fahrzeuge[0]` used to stand here. The list comes sorted by ID, and the
+   * first one is the "Allgemeine E-Auto" created on first start - not the
+   * one you are sitting in. The recording would have been attributed to the
+   * wrong vehicle, and worse: the calibration would have shifted the
+   * correction factor of a car nobody drove.
    *
-   * Die Wahl bleibt im Browser stehen. Wer im Auto sitzt, will sie einmal
-   * treffen und nie wieder. */
+   * The choice stays in the browser. Whoever sits in the car wants to make
+   * it once and never again. */
   async function vehiclesCharging() {
     const selection = el("fahrzeug-wahl-obd");
     if (!selection) return;
@@ -257,22 +257,21 @@
     return Number(selection.value);
   }
 
-  /* ---------- Aufzeichnung ---------- */
+  /* ---------- Recording ---------- */
 
   let running = false;
   let lap = 0;
   let wake_lock = null;   // WakeLockSentinel
-  let sessionId = null;    // gesetzt, wenn diese Seite die Fahrt anlegte
+  let sessionId = null;    // set when this page created the trip
 
-  /* Den Bildschirm wach halten. Ohne das schaltet iOS ihn nach einer Minute
-   * aus, und mit dem Bildschirm schläft der Seiteninhalt - die Verbindung
-   * übersteht zwar den Sperrbildschirm, die Schleife aber nicht.
+  /* Keep the screen awake. Without it iOS switches it off after a minute,
+   * and with the screen the page content sleeps - the connection survives
+   * the lock screen, but the loop does not.
    *
-   * Die Sperre geht verloren, wenn die Seite in den Hintergrund gerät, und
-   * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
-   * geholt. Kennt der Browser die Schnittstelle nicht, läuft die
-   * Aufzeichnung trotzdem - dann muss man den Bildschirm eben in den
-   * Einstellungen an lassen. */
+   * The lock is lost when the page goes to the background and does not come
+   * back by itself; that is why it is re-acquired on return. If the browser
+   * does not know the interface, the recording runs anyway - then one has
+   * to keep the screen on via the settings. */
   async function screenAwakeHold() {
     if (!("wakeLock" in navigator)) {
       log("Dieser Browser kennt keine Bildschirmsperre-Verhinderung. "
@@ -312,17 +311,16 @@
 
     if (typeof wo.elevation_m === "number") raw.elevation_m = Math.round(wo.elevation_m);
 
-    /* Automatik: warten, bis das Auto wirklich fährt.
+    /* Automatic: wait until the car is really driving.
      *
-     * Gemessen wird am Tempo des Fahrzeugs, nicht am GPS - das Auto weiss
-     * es genauer und liefert es ohnehin mit. Fehlt der Wert, gilt das GPS
-     * als Rückfall; fehlt auch das, wird nicht gewartet, sondern gleich
-     * aufgezeichnet. Eine Automatik, die mangels Messwert gar nichts tut,
-     * wäre die schlechteste Sorte Automatik.
+     * Measurement is by the vehicle's speed, not by GPS - the car knows it
+     * more precisely and delivers it anyway. If the value is missing, GPS
+     * serves as fallback; if that is missing too, there is no waiting and
+     * recording starts right away. An automatic that does nothing for lack
+     * of a measurement would be the worst kind of automatic.
      *
-     * Zwei Runden hintereinander, damit ein einzelner Ausreisser keine
-     * Fahrt anlegt - und keine Fahrt entsteht, während das Auto auf dem Hof
-     * rangiert. */
+     * Two rounds in a row, so that a single outlier does not create a trip -
+     * and no trip comes into being while the car shunts in the yard. */
     if (!sessionId && el("automatik").checked && !el("token").value.trim()) {
       const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh
         : (typeof wo.speed_kmh === "number" && !Number.isNaN(wo.speed_kmh)
@@ -343,8 +341,8 @@
       try {
         await createTrip(soc);
       } catch (failure) {
-        // Nicht aufgeben: Die nächste Runde versucht es erneut. Ein
-        // Funkloch beim Losfahren ist der Normalfall, nicht die Ausnahme.
+        // Do not give up: the next round tries again. A dead spot when driving
+        // off is the normal case, not the exception.
         log("Fahrt anlegen: " + failure.message + " - nächste Runde erneut");
         moved = 0;
         return { soc, raw, waits: true,
@@ -357,35 +355,34 @@
       soc: Math.round(soc.hmi * 10) / 10,
       raw_values: raw,
     };
-    // Was das Auto selbst misst, schlägt jede Vorhersage: Die
-    // Aussentemperatur ging bisher aus Open-Meteo ins Verbrauchsmodell.
+    // What the car measures itself beats any forecast: the outside
+    // temperature used to go into the consumption model from Open-Meteo.
     if (typeof raw.speed_kmh === "number") payload.speed_kmh = raw.speed_kmh;
     if (typeof raw.outside_temp_c === "number") {
       payload.outside_temp_c = raw.outside_temp_c;
     }
 
-    /* Zwei Wege hinein, und welcher gilt, hängt daran, wer die Fahrt
-     * angelegt hat. Hat diese Seite es getan, kennt sie die Sitzung und
-     * meldet direkt dorthin. Läuft die Fahrt dagegen in der jolt-App auf
-     * einem anderen Gerät, weiss diese Seite die Sitzung nicht - dann
-     * weist sie sich mit dem Logger-Token des Fahrzeugs aus, und jolt
-     * sucht die laufende Sitzung selbst. */
+    /* Two ways in, and which one applies depends on who created the trip. If
+     * this page did, it knows the session and reports directly to it. If the
+     * trip runs in the jolt app on another device, this page does not know
+     * the session - then it identifies itself with the vehicle's logger
+     * token, and jolt looks for the running session itself. */
     const destination = sessionId
       ? `/api/live/${sessionId}/punkt`
       : "/api/live/melden";
     if (!sessionId) payload.token = el("token").value.trim();
 
-    // `/punkt` verlangt die Anmeldung; `/melden` weist sich mit dem
-    // Logger-Token im Rumpf aus und braucht den Header nicht, schadet er
-    // aber auch nicht.
+    // `/punkt` requires login; `/melden` identifies itself with the logger
+    // token in the body and does not need the header, but it does no harm
+    // either.
     const response = await fetch(destination, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
       body: JSON.stringify(payload),
     });
     const records = await response.json().catch(() => ({}));
-    // Der Sitzungsweg antwortet mit dem Zustand und kennt kein
-    // "aufgenommen" - wenn er 200 gibt, ist der Punkt drin.
+    // The session route answers with the state and knows no "aufgenommen" -
+    // if it gives 200, the point is in.
     if (sessionId && response.ok) records.recorded = true;
     return { soc, raw, records, status: response.status };
   }
@@ -396,9 +393,9 @@
       try {
         const result = await aRound();
         if (result && result.waits) {
-          // Im Wartezustand wird gemessen, aber nichts gemeldet. Angezeigt
-          // wird trotzdem, was gelesen wurde - sonst sähe die Seite aus,
-          // als täte sie nichts.
+          // In the waiting state measurements are taken but nothing is reported.
+          // What was read is displayed anyway - otherwise the page would look as
+          // if it did nothing.
           tiles([
             ["Ladestand", Math.round(result.soc.hmi * 10) / 10 + " %"],
             ["Zustand", "wartet auf Fahrt"],
@@ -428,9 +425,9 @@
               + ` → jolt ${records.recorded ? "ok" : (records.reason || "?")}`);
         }
       } catch (failure) {
-        // Ein Aussetzer beendet die Fahrt nicht. Tunnel, Funkloch, ein
-        // Steuergerät das gerade nicht mag - das nächste Mal klappt es
-        // wieder, und eine abgebrochene Aufzeichnung merkt man erst hinterher.
+        // A dropout does not end the trip. Tunnel, dead spot, a control unit that
+        // just does not feel like it - next time it works again, and an aborted
+        // recording is only noticed afterwards.
         stand2("Aussetzer: " + failure.message, "schlecht");
         log("Runde übersprungen: " + failure.message);
       }
@@ -462,9 +459,9 @@
 
   async function endTrip() {
     running = false;
-    // Die Fahrt in jolt abschliessen, wenn diese Seite sie angelegt hat.
-    // Ohne das bleibt die Aufzeichnung offen, und aus den Messpunkten
-    // entsteht nie eine Strecke - der ganze Zweck wäre verfehlt.
+    // Finish the trip in jolt if this page created it. Without it the
+    // recording stays open, and the measurement points never turn into a
+    // route - the whole purpose would be missed.
     if (sessionId) {
       try {
         const response = await fetch(`/api/live/${sessionId}/ende`, {
@@ -499,17 +496,17 @@
     log("Aufzeichnung beendet.");
   }
 
-  /* ---------- Werte prüfen, ohne zu fahren ---------- */
+  /* ---------- Check values without driving ---------- */
 
-  /* Was plausibel waere. Zwei Sorten Pruefung:
+  /* What would be plausible. Two kinds of check:
    *
-   *  - **Bereich**: Liegt der Wert dort, wo er physikalisch liegen muss?
-   *    Faengt Formelfehler ab - eine Akkukapazitaet von 3 kWh oder 8000.
-   *  - **Kreuzvergleich**: Passen zwei unabhaengig gelesene Werte
-   *    zueinander? Das ist der schaerfere Test. Entladezaehler geteilt
-   *    durch Kilometerstand muss den Lebensdauerverbrauch ergeben - trifft
-   *    er 15 bis 35 kWh/100 km, stimmen **beide** Formeln, und zwar ohne
-   *    dass man je gefahren waere.
+   *  - **Range**: Is the value where it physically must be? Catches
+   *    formula errors - a battery capacity of 3 kWh or 8000.
+   *  - **Cross-comparison**: Do two independently read values fit
+   *    together? That is the sharper test. Discharge counter divided by
+   *    odometer must give the lifetime consumption - if it hits 15 to 35
+   *    kWh/100 km, **both** formulas are right, without ever having
+   *    driven.
    */
   const RANGES = {
     soc_raw: [0, 255, "Rohwert, geteilt durch 2,5 ergibt Prozent"],
@@ -527,11 +524,11 @@
                + "den Jahren"],
     range_km: [0, 999, "mit der Anzeige im Auto vergleichen"],
     batterie_c: [-40, 80, "nach dem Stehen nahe der Aussentemperatur"],
-    /* Lebensdauerzaehler. Die Schranke war [1, 999999] und liess damit
-     * 482 961 kWh durch - genau den Wert, den die fehlende
-     * Vorzeichenbehandlung erzeugte. Eine Schranke, die den Fehler nicht
-     * faengt, den sie fangen soll, ist keine. 100 000 kWh entsprechen bei
-     * 20 kWh/100 km einer halben Million Kilometer. */
+    /* Lifetime counter. The bound used to be [1, 999999] and thereby let
+     * 482 961 kWh through - exactly the value that the missing sign handling
+     * produced. A bound that does not catch the error it is supposed to
+     * catch is none. 100 000 kWh correspond to half a million kilometres at
+     * 20 kWh/100 km. */
     discharge_kwh: [100, 100000, "Lebensdauerzähler"],
     charged_kwh: [100, 100000, "Lebensdauerzähler"],
   };
@@ -554,7 +551,7 @@
         if (!O.linked()) throw new Error("keine Verbindung zum Dongle");
         if (!(await O.handshake())) throw new Error("Handshake unvollständig");
       }
-      // Runde 0 - damit auch die selten gelesenen Werte drankommen.
+      // Round 0 - so that the rarely read values are included too.
       const raw = await O.readRecord(0);
       const fields = O.FIELDS;
       const empty = new Set(raw._empty || []);
@@ -580,20 +577,19 @@
           inside ? (b[2] || "") : `erwartet ${b[0]} bis ${b[1]}`));
       }
 
-      /* Der Kreuzvergleich. Er braucht keine Fahrt und prueft zwei Formeln
-       * auf einmal: Wenn Entladezaehler und Kilometerstand zusammen einen
-       * sinnvollen Lebensdauerverbrauch ergeben, koennen beide kaum falsch
-       * sein - ein Fehler in einer der beiden Byte-Lagen wuerde das
-       * Ergebnis um Zehnerpotenzen verschieben. */
+      /* The cross-comparison. It needs no trip and checks two formulas at
+       * once: if discharge counter and odometer together give a sensible
+       * lifetime consumption, both can hardly be wrong - an error in either
+       * of the two byte positions would shift the result by orders of
+       * magnitude. */
       if (typeof raw.discharge_kwh === "number"
           && typeof raw.odometer_km === "number" && raw.odometer_km > 100) {
         const net = raw.discharge_kwh
           - (typeof raw.charged_kwh === "number" ? raw.charged_kwh : 0);
         const je100 = raw.discharge_kwh / raw.odometer_km * 100;
         const inside = je100 >= 12 && je100 <= 40;
-        // Mitzaehlen. Vorher stand er zwar rot in der Tabelle, aber die
-        // Zeile darueber meldete trotzdem "0 auffaellig" - und die liest
-        // man zuerst.
+        // Count it as well. Before, it showed red in the table, but the line
+        // above still reported "0 auffaellig" - and that is the one read first.
         if (inside) good += 1; else bad += 1;
         rows.push(check_row(
           "<strong>Kreuzvergleich</strong>",
@@ -620,17 +616,16 @@
     }
   }
 
-  /* ---------- Klimakompressor eingrenzen ---------- */
+  /* ---------- Narrowing down the A/C compressor ---------- */
 
-  /* Die Antwort auf 220800 traegt vier 16-Bit-Zahlen, und keine der drei
-   * Quellen (spot2000, WiCAN, codingABI) nennt eine Umrechnung. Raten
-   * waere hier besonders verlockend und besonders falsch - vier Kandidaten,
-   * alle im plausiblen Wattbereich.
+  /* The response to 220800 carries four 16-bit numbers, and none of the
+   * three sources (spot2000, WiCAN, codingABI) names a conversion.
+   * Guessing would be especially tempting and especially wrong here - four
+   * candidates, all in the plausible watt range.
    *
-   * Eine Differenzmessung entscheidet es ohne jede Annahme: zweimal lesen,
-   * einmal mit laufendem Kompressor und einmal ohne. Was sich um
-   * Hunderte aendert, ist die Leistung; was gleich bleibt, ist etwas
-   * anderes. */
+   * A difference measurement decides it without any assumption: read
+   * twice, once with the compressor running and once without. What changes
+   * by hundreds is the power; what stays the same is something else. */
   let climateA = null;
 
   async function readClimate() {
@@ -650,17 +645,16 @@
     return bytes;
   }
 
-  /* Beide Messungen nebeneinander.
+  /* Both measurements side by side.
    *
-   * Die erste Fassung schob ein Zwei-Byte-Fenster **byteweise** durch die
-   * Antwort und zeigte damit lauter ueberlappende Scheinwerte: "Byte 1-2 =
-   * 9408" neben "Byte 2-3 = 49188", wobei nur der erste eine Groesse ist.
-   * Eine Mehrbyte-Zahl faengt nicht an jedem Byte an.
+   * The first version slid a two-byte window **byte by byte** through the
+   * response and thereby showed nothing but overlapping phantom values:
+   * "byte 1-2 = 9408" next to "byte 2-3 = 49188", of which only the first
+   * is a quantity. A multi-byte number does not start at every byte.
    *
-   * Jetzt beides getrennt: erst jedes Byte einzeln, dann die
-   * **ausgerichteten** Paare ab Byte 1 - so, wie das Steuergeraet sie
-   * meint. Was sich in beiden Spalten deutlich unterscheidet, ist der
-   * Kandidat. */
+   * Now both separately: first every byte on its own, then the **aligned**
+   * pairs from byte 1 - the way the control unit means them. What differs
+   * clearly in both columns is the candidate. */
   function showClimate() {
     const destination = el("klima-ergebnis");
     if (!climateA || !climateA.b) { destination.innerHTML = ""; return; }
@@ -704,21 +698,20 @@
             + "beiden Messungen im selben Zustand?"}</p>`;
   }
 
-  /* ---------- An jolt melden ---------- */
+  /* ---------- Report to jolt ---------- */
 
   function city() {
     return new Promise((fulfil, reject) => {
       if (!navigator.geolocation) { reject(new Error("kein GPS")); return; }
       navigator.geolocation.getCurrentPosition(
-        // Die GPS-Höhe wird mitgeschrieben, obwohl sie für die Steigung zu
-        // ungenau ist (sie streut um zehn bis zwanzig Meter). Sie kostet
-        // nichts und ist der Rückfall, wenn beim Abschliessen keine
-        // Kartendaten zu bekommen sind.
-        // `speed` kommt in m/s und ist oft null (kalter Fix, Standlauf).
-        // Ohne diese Umrechnung war der GPS-Rueckfall der Bewegungserkennung
-        // weiter unten toter Code: `wo.tempo_kmh` gab es schlicht nicht, und
-        // ohne Tempo vom Auto legte die Automatik die Fahrt sofort an -
-        // mitsamt dem Parkplatz davor.
+        // The GPS elevation is recorded along, although it is too imprecise for
+        // the gradient (it scatters by ten to twenty metres). It costs nothing
+        // and is the fallback if no map data can be obtained on finishing.
+        // `speed` comes in m/s and is often null (cold fix, standstill).
+        // Without this conversion the GPS fallback of the movement detection
+        // further below was dead code: `wo.speed_kmh` simply did not exist, and
+        // without speed from the car the automatic created the trip immediately -
+        // parking lot included.
         (p) => fulfil({ lat: p.coords.latitude, lon: p.coords.longitude,
                            elevation_m: p.coords.altitude,
                            speed_kmh: typeof p.coords.speed === "number"
@@ -747,22 +740,20 @@
     }
   }
 
-  /* ---------- Aufbau ---------- */
+  /* ---------- Setup ---------- */
 
-  // `O.verfuegbar()` statt `navigator.bluetooth`: In der iOS-App gibt es die
-  // Web-API nicht, wohl aber Bluetooth - es kommt dort ueber CoreBluetooth
-  // (siehe obd-ble-native.js). Wer hier direkt auf die Web-API prueft,
-  // erklaert die Seite ausgerechnet dort fuer untauglich, wo sie am besten
-  // funktioniert.
+  // `O.obtainable()` instead of `navigator.bluetooth`: in the iOS app the
+  // Web API does not exist, but Bluetooth does - there it comes via
+  // CoreBluetooth (see obd-ble-native.js). Whoever checks the Web API
+  // directly here declares the page unusable precisely where it works best.
   if (!O.obtainable()) {
     el("untauglich").hidden = false;
     el("verbinden").disabled = true;
   }
 
-  /* Fehler in readings.js gehoeren auf die Seite, nicht nur in die
-   * Konsole. Ein vertippter Adressname sieht am Auto aus wie ein
-   * schweigendes Steuergeraet - und danach sucht man an der falschen
-   * Stelle. */
+  /* Errors in readings.js belong on the page, not only in the console. A
+   * mistyped address name looks like a silent control unit at the car -
+   * and then one searches in the wrong place. */
   if (O.TABLE_ERROR && O.TABLE_ERROR.length) {
     const box = el("untauglich");
     box.hidden = false;
@@ -771,8 +762,8 @@
       + O.TABLE_ERROR.map((t) => t.replace(/[<&]/g, "")).join("</li><li>")
       + "</li></ul>";
   }
-  // Der Baustein meldet alles hierher, und ein Abriss ist während einer
-  // Aufzeichnung ein Grund zum Wiederverbinden - sonst nicht.
+  // The module reports everything here, and a dropout during a recording
+  // is a reason to reconnect - otherwise not.
   O.set_up(log, () => { if (running) O.reconnect(1, () => running); });
   el("verbinden").addEventListener("click", async () => {
     as_of("verbinde …");
@@ -784,13 +775,12 @@
     if (await O.handshake()) log("Handshake durch.");
   });
   el("soc").addEventListener("click", readSoc);
-  /* Der Knopf sperrt sich, solange die Reihe laeuft.
+  /* The button locks itself while the series is running.
    *
-   * Eine Mehrrahmen-Antwort braucht ueber eine Sekunde. Wer in der Zeit noch
-   * einmal tippt, startet eine zweite Reihe, und die faellt dem ersten
-   * Befehl in den Ruecken: "es laeuft noch ein Befehl". Im Protokoll sah es
-   * danach aus, als haette das Steuergeraet nicht geantwortet - dabei war es
-   * die Oberflaeche. */
+   * A multi-frame response takes over a second. Whoever taps again in that
+   * time starts a second series, and it stabs the first command in the
+   * back: "es läuft noch ein Befehl". In the log it then looked as if the
+   * control unit had not answered - when it was the UI. */
   el("senden").addEventListener("click", async () => {
     const btn = el("senden");
     btn.disabled = true;
@@ -840,9 +830,9 @@
     }
   });
   el("log-leeren").addEventListener("click", () => { el("log").textContent = ""; });
-  /* Auf dem Telefon ist das Markieren in einem Kasten mit Bildlauf fummelig,
-   * und ein Bildschirmfoto verliert genau das, worauf es ankommt: die
-   * Hex-Antworten Zeichen für Zeichen. */
+  /* On the phone, selecting inside a scrolling box is fiddly, and a
+   * screenshot loses exactly what matters: the hex responses character by
+   * character. */
   el("los").addEventListener("click", start_driving);
   el("fahrt-start").addEventListener("click", startTrip);
   el("fahrt-stop").addEventListener("click", endTrip);
@@ -856,8 +846,8 @@
       el("log-kopieren").textContent = "kopiert";
       setTimeout(() => { el("log-kopieren").textContent = "Protokoll kopieren"; }, 2000);
     } catch (failure) {
-      // Ohne Zwischenablage (älterer Browser, fehlende Erlaubnis) bleibt das
-      // Markieren von Hand - dann wenigstens alles auf einmal auswählen.
+      // Without clipboard (older browser, missing permission) selecting by hand
+      // remains - then at least select everything at once.
       const zone = document.createRange();
       zone.selectNodeContents(el("log"));
       const selection = window.getSelection();

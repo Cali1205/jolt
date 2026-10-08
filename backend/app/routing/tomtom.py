@@ -1,26 +1,25 @@
-"""TomTom als Berater: Vorschläge und Verkehr - nie als Quelle der gespeicherten Route.
+"""TomTom as an advisor: suggestions and traffic - never as the source of the stored route.
 
-**Was TomTom hier tut, und was nicht.** OpenRouteService bleibt die Quelle jeder
-Route, die jolt speichert (Geometrie **mit Höhe**, Tempo je Teilstück - beides
-braucht das Verbrauchsmodell, und TomTom liefert keines von beiden). TomTom
-beantwortet zwei Fragen, die OpenRouteService nicht beantworten kann:
+**What TomTom does here, and what it does not.** OpenRouteService remains the
+source of every route that jolt stores (geometry **with elevation**, speed per
+segment - the consumption model needs both, and TomTom delivers neither).
+TomTom answers two questions that OpenRouteService cannot:
 
-1. *Welche Wege gibt es noch?* `maxAlternatives` liefert bis zu fünf, ohne
-   Längengrenze - OpenRouteService lehnt Alternativen ab 100 km ab.
-2. *Was kostet der Verkehr?* Jede Route hat ihre eigene Verzögerung, aus dem
-   Live-Verkehr. OpenRouteService kennt keinen.
+1. *Which other routes are there?* `maxAlternatives` returns up to five,
+   without a length limit - OpenRouteService rejects alternatives from 100 km.
+2. *What does traffic cost?* Every route has its own delay, from live
+   traffic. OpenRouteService has none.
 
-**Warum nichts davon gespeichert wird.** Die TomTom-Bedingungen (Klausel 11.4)
-erlauben Ergebnisse nur kurzzeitig im Zwischenspeicher und verbieten abgeleitete
-Datenbanken. Deshalb gilt hier: Aus einem Vorschlag werden *Zwischenpunkte*
-gewählt, die das Routing von OpenRouteService abfährt - gespeichert wird dessen
-Strasse, nicht die von TomTom. Die Verzögerung geht als Zahl in die Antwort an
-den Browser und von dort nirgends hin. Diese Datei schreibt weder in eine
-Datenbank noch in eine Datei, und sie loggt keine Koordinaten.
+**Why none of it is stored.** The TomTom terms (clause 11.4) allow results
+only in a short-term cache and prohibit derived databases. So here: from a
+suggestion, *waypoints* are chosen that the OpenRouteService routing drives
+through - what is stored is its road, not TomTom's. The delay goes into the
+response to the browser as a number and from there nowhere. This file writes
+neither to a database nor to a file, and it does not log coordinates.
 
-**Der Schlüssel steht in der Adresse.** TomTom nimmt ihn nur als Parameter, und
-`requests` hängt die Adresse an jede Ausnahme. Deshalb wird nie `str(fehler)`
-weitergegeben, sondern nur der Typ - sonst stünde der Schlüssel im Log.
+**The key is in the URL.** TomTom takes it only as a parameter, and
+`requests` attaches the URL to every exception. So `str(fehler)` (error) is
+never passed on, only the type - otherwise the key would end up in the log.
 """
 import logging
 import os
@@ -33,54 +32,55 @@ log = logging.getLogger("uvicorn.error")
 
 BASIS = "https://api.tomtom.com/routing/1/calculateRoute"
 
-# Eine Antwort mit Geometrie ist für 600 km rund zweieinhalb Megabyte gross.
+# A response with geometry is about two and a half megabytes for 600 km.
 TIMEOUT_GEOMETRY_S = 40
 TIMEOUT_SUMMARY_S = 20
 
-# Eine Abfahrt in den nächsten Minuten ist "jetzt": Dann gilt der Live-Verkehr,
-# und `departAt` bleibt weg.
+# A departure within the next few minutes is "now": live traffic applies,
+# and `departAt` is omitted.
 NOW_TOLERANCE = timedelta(minutes=5)
 
 MAX_ALTERNATIVEN = 5
-# Wie viele der nicht überholten Vorschläge höchstens nachgefahren werden. Jeder
-# kostet eine Anfrage beim Routing von OpenRouteService.
+# How many of the non-overtaken suggestions are followed up at most. Each
+# costs one request to the OpenRouteService routing.
 MAX_FOLLOW = 3
 
 
 class TomTomError(RuntimeError):
-    """TomTom hat nicht geantwortet oder abgelehnt - mit einem Grund für das Log.
+    """TomTom did not respond or refused - with a reason for the log.
 
-    Die Planung läuft ohne TomTom weiter; dieser Fehler bricht nichts ab.
+    Planning continues without TomTom; this error does not abort anything.
     """
 
 
 @dataclass
 class Suggestion:
-    """Ein Weg, wie TomTom ihn sieht. Nur Zahlen und Punkte, nichts Gespeichertes."""
+    """A route as TomTom sees it. Only numbers and points, nothing stored."""
     points: list = field(default_factory=list)   # [(lat, lon), ...]
     distance_m: float = 0.0
-    time_s: float = 0.0              # mit Verkehr: live, oder zeitabhängig prognostiziert
-    without_traffic_s: float = 0.0      # bei freiem Fluss
-    traffic_s: float = 0.0           # Unterschied der beiden
+    time_s: float = 0.0              # with traffic: live, or forecast time-dependently
+    without_traffic_s: float = 0.0      # in free flow
+    traffic_s: float = 0.0           # difference between the two
 
 
 @dataclass
 class Traffic:
-    """Was der Verkehr auf einer bestimmten Strecke kostet - als Zahlen.
+    """What traffic costs on a specific route - as numbers.
 
-    `verzoegerung_s` ist der **ganze** Verkehrseinfluss: Zeit mit Verkehr
-    minus Zeit bei freiem Fluss. Nicht `trafficDelayInSeconds`: Das Feld meint
-    laut Dokumentation die Verzögerung nach *Echtzeit*-Verkehrsinformation und
-    taugt deshalb für eine spätere Abfahrt nicht. Gemessen am 5.10.2026,
-    Reutlingen - Hamburg: Für Freitag 16 Uhr stand dort +6,5 min, obwohl die
-    zeitabhängige Prognose 28 Minuten über dem freien Fluss liegt; in 90 Tagen
-    stand 0,0. Die Differenz der beiden Reisezeiten ist in beiden Fällen
-    richtig und für "jetzt" die vollständigere Zahl (+21 gegen +12,9 min).
+    `delay_s` (delay) is the **entire** traffic influence: time with
+    traffic minus time in free flow. Not `trafficDelayInSeconds`: according
+    to the documentation, that field means the delay based on *real-time*
+    traffic information and is therefore unsuitable for a later departure.
+    Measured on 5 Oct 2026, Reutlingen - Hamburg: for Friday 4 pm it showed
+    +6.5 min, although the time-dependent forecast is 28 minutes above free
+    flow; in 90 days it showed 0.0. The difference of the two travel times
+    is correct in both cases and, for "now", the more complete figure (+21
+    versus +12.9 min).
     """
     delay_s: float
     time_s: float
     without_traffic_s: float
-    forecast: bool = False       # zeitabhängig prognostiziert statt live
+    forecast: bool = False       # forecast time-dependently instead of live
 
 
 def keyname() -> str:
@@ -92,7 +92,7 @@ def obtainable() -> bool:
 
 
 def _departure(departure: datetime | None) -> datetime | None:
-    """Die Abfahrt, wenn sie später als in ein paar Minuten liegt - sonst None."""
+    """The departure if it is later than a few minutes from now - otherwise None."""
     if departure is None:
         return None
     if departure.tzinfo is None:
@@ -103,9 +103,9 @@ def _departure(departure: datetime | None) -> datetime | None:
 
 
 def _departure_parameter(departure: datetime | None) -> dict:
-    """`departAt` für TomTom: RFC 3339 in UTC. Ohne Zeitzone nähme TomTom die
-    des Startpunkts an - das hiesse, eine Uhrzeit des Browsers anders zu
-    lesen, als sie gemeint war."""
+    """`departAt` for TomTom: RFC 3339 in UTC. Without a time zone TomTom
+    would assume that of the start point - which would mean reading a
+    browser time differently from how it was meant."""
     later = _departure(departure)
     if later is None:
         return {}
@@ -125,7 +125,7 @@ def _query(places: str, timeout: int, **parameter) -> dict:
                     "computeTravelTimeFor": "all", "routeType": "fastest",
                     "travelMode": "car", **parameter})
     except requests.RequestException as failure:
-        # Nur der Typ: `str(fehler)` enthielte die Adresse samt Schlüssel.
+        # Only the type: `str(fehler)` would contain the URL including the key.
         raise TomTomError(f"TomTom nicht erreichbar ({type(failure).__name__})") from None
     if response.status_code in (401, 403):
         raise TomTomError("TOMTOM_API_KEY wird abgelehnt - Schlüssel prüfen.")
@@ -145,9 +145,9 @@ def _number(summary: dict, name: str) -> float:
 
 
 def read_suggestions(records: dict) -> list[Suggestion]:
-    """Die Wege aus einer calculateRoute-Antwort. Fehlerhafte Einträge fallen
-    heraus, statt alles zu verwerfen: Eine Route ohne Punkte oder ohne Länge
-    ist für jolt keine."""
+    """The routes from a calculateRoute response. Faulty entries are dropped
+    instead of discarding everything: a route without points or without
+    length is not a route for jolt."""
     origin_of = []
     for route in records.get("routes") or []:
         z = route.get("summary") or {}
@@ -168,11 +168,11 @@ def read_suggestions(records: dict) -> list[Suggestion]:
 def alternativen(start: tuple[float, float], destination: tuple[float, float],
                  maximal: int = MAX_ALTERNATIVEN,
                  departure: datetime | None = None) -> list[Suggestion]:
-    """Die beste Route und bis zu `maximal` Alternativen, mit Geometrie.
+    """The best route and up to `maximal` (maximum) alternatives, with geometry.
 
-    Mit `abfahrt` rechnet TomTom zeitabhängig: Freitag um vier ist eine
-    andere Strasse die schnellste als Sonntag um drei (gemessen: 723 km statt
-    712 km auf Reutlingen - Hamburg).
+    With `abfahrt` (departure) TomTom calculates time-dependently: on Friday
+    at four a different road is the fastest than on Sunday at three
+    (measured: 723 km instead of 712 km on Reutlingen - Hamburg).
     """
     records = _query(_places(start, destination), TIMEOUT_GEOMETRY_S,
                       maxAlternatives=max(0, min(maximal, MAX_ALTERNATIVEN)),
@@ -183,12 +183,12 @@ def alternativen(start: tuple[float, float], destination: tuple[float, float],
 def traffic(start: tuple[float, float], destination: tuple[float, float],
             between: list[tuple[float, float]],
             departure: datetime | None = None) -> Traffic | None:
-    """Was der Verkehr auf dem Weg durch `zwischen` gerade kostet.
+    """What traffic currently costs on the way through `zwischen` (waypoints).
 
-    Nur die Zusammenfassung - ein Kilobyte statt zweieinhalb Megabyte. Die
-    Zwischenpunkte zwingen TomTom auf dieselbe Strasse, die jolt fährt; ohne
-    sie rechnete TomTom für *seinen* Weg, und die Zahl hätte mit der Route
-    nichts zu tun.
+    Only the summary - one kilobyte instead of two and a half megabytes. The
+    waypoints force TomTom onto the same road jolt drives; without them
+    TomTom would calculate for *its own* route, and the number would have
+    nothing to do with the route.
     """
     records = _query(_places(start, destination, between), TIMEOUT_SUMMARY_S,
                       routeRepresentation="summaryOnly", **_departure_parameter(departure))
@@ -205,13 +205,13 @@ def traffic(start: tuple[float, float], destination: tuple[float, float],
 
 
 def not_overtaken(suggestions: list[Suggestion]) -> list[Suggestion]:
-    """Die Vorschläge, die keiner der anderen sowohl kürzer als auch schneller
-    übertrifft - nach Zeit sortiert, höchstens `MAX_NACHFAHREN`.
+    """The suggestions that none of the others beats by being both shorter
+    and faster - sorted by time, at most `MAX_FOLLOW` (max follow).
 
-    Alles andere kann keinen Ladeplan haben, der es rettet: Mehr Strecke heisst
-    mehr Energie, mehr Zeit heisst mehr Zeit. Das spart die Anfragen beim
-    Routing, die sonst für aussichtslose Wege gestellt würden - bei vier von
-    fünf Strecken, an denen das gemessen wurde, war das jede Alternative.
+    Everything else cannot have a charging plan that saves it: more distance
+    means more energy, more time means more time. This saves the routing
+    requests that would otherwise be made for hopeless routes - on four out
+    of five routes where this was measured, that was every alternative.
     """
     left = [v for v in suggestions
               if not any(a is not v and a.distance_m <= v.distance_m

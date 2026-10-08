@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Prueft die Verkehrskachel der gewaehlten Route (frontend/route.js).
+// Checks the traffic tile of the chosen route (frontend/route.js).
 //
-// Der Verkehr kommt von TomTom und wird nicht gespeichert: Er steht nur in der
-// Antwort der letzten Planung. Die Kachel muss ihn deshalb dort suchen, ueber
-// die Fahrt-ID - und darf bei einer Fahrt, zu der keine Planung vorliegt,
-// nichts zeigen. Ein Verkehr von gestern waere schlimmer als keiner.
+// Traffic comes from TomTom and is not stored: it exists only in the
+// response of the last planning. The tile must therefore look for it there, via
+// the trip ID - and must show nothing for a trip with no planning
+// available. Traffic from yesterday would be worse than none.
 //
 //     node tools/check_route_display.js
 const fs = require("fs");

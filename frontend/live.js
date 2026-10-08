@@ -1,96 +1,98 @@
-/* Die Live-Ansicht: Ist gegen Soll, während gefahren wird.
+/* The live view: actual versus plan, while driving.
  *
- * Zwei Wege herein: der eigene Standort des Telefons (GPS), oder der
- * Simulator im Server. Der Ladestand ist in dieser Stufe noch nicht aus dem
- * Auto zu haben - er kommt aus der Simulation oder wird fortgeschrieben.
- * Wenn der OBD2-Logger anschliesst, ändert sich an dieser Ansicht nichts,
- * nur die Quelle der Messpunkte.
+ * Two ways in: the phone's own location (GPS), or the simulator in the
+ * server. At this stage the state of charge cannot yet be had from the
+ * car - it comes from the simulation or is extrapolated.
+ * Once the OBD2 logger connects, nothing about this view changes,
+ * only the source of the measurement points.
  */
 window.joltLive = (function () {
   "use strict";
 
   const K = window.jolt;
   let socket = null;       // WebSocket
-  let plan = null;            // der aktuell gültige Ladeplan
-  let awake = null;           // watchPosition-Kennung, oder "nativ"
-  let nativeAwakeId = null;   // Kennung des Hintergrund-Standorts der App
-  let nativeRun = 0;         // zählt Starts, damit ein später Rückruf weiss, ob er noch gilt
+  let plan = null;            // the currently valid charging plan
+  let awake = null;           // watchPosition id, or "nativ" (native)
+  let nativeAwakeId = null;   // id of the app's background location watcher
+  let nativeRun = 0;         // counts starts, so a late callback knows whether it still applies
   let locationErrorReported = false;
-  let latestReport = 0;      // Zeitpunkt der letzten Positionsmeldung
-  let dongle = false;         // liest der OBD2-Dongle mit?
+  let latestReport = 0;      // time of the last position report
+  let dongle = false;         // is the OBD2 dongle reading along?
   let lap = 0;
-  // Die gefahrene Spur einer Aufzeichnung, [[lon, lat], ...].
+  // The driven track of a recording, [[lon, lat], ...].
   let track = [];
-  // Die entlang dieser Spur zurückgelegte Strecke. Sie wird **fortlaufend**
-  // mitgeführt und an jedem Verlaufspunkt festgehalten, statt sie beim
-  // Zeichnen aus der Spur nachzurechnen: Spur und Verlauf wachsen unter
-  // verschiedenen Bedingungen (die Spur bei jeder neuen Position, der
-  // Verlauf bei jedem neuen Ladestand), also gehört `spur[i]` nicht zu
-  // `verlauf[i]`. Beim Aufzeichnen mit Dongle ist der Unterschied gewaltig -
-  // der Ladestand ändert sich alle paar Minuten, die Position im Sekundentakt.
+  // The distance covered along this track. It is carried **continuously**
+  // and pinned to each history point, instead of being recomputed from the
+  // track at draw time: track and history grow under different conditions
+  // (the track with every new position, the history with every new state of
+  // charge), so `spur[i]` does not belong to `verlauf[i]`. When recording
+  // with a dongle the difference is huge - the state of charge changes every
+  // few minutes, the position every second.
   let drivenKm = 0;
-  // Der gemessene Verlauf: [{km, soc, gemeldet}, ...] für die Kurve.
+  // The measured history: [{km, soc, reported}, ...] for the curve.
   let history = [];
-  // Die zuletzt aus dem Auto gelesenen Werte. Der Server schickt sie nicht
-  // zurück - er speichert sie nur -, also hält die Anzeige sie selbst.
+  // The values most recently read from the car. The server does not send
+  // them back - it only stores them -, so the display keeps them itself.
   let latestRawValues = null;
-  let latestRawValuesTime = 0;   // wann der letzte vollständige Satz ankam
-  /* Der letzte bekannte Wert je Messgrösse, mit seinem Zeitpunkt.
+  let latestRawValuesTime = 0;   // when the last complete set arrived
+  /* The last known value per measured quantity, with its timestamp.
    *
-   * Die Tabelle zeigte nur, was in **dieser** Runde ankam - und wurde damit
-   * löchrig: Der DC/DC-Strom wird nur jede zehnte Runde gelesen und stand
-   * neun von zehn Runden leer, und ein Wert, der einmal ausfällt,
-   * verschwand mitsamt seiner Zeile.
+   * The table only showed what arrived in **this** round - and so became
+   * patchy: the DC/DC current is only read every tenth round and was empty
+   * nine rounds out of ten, and a value that dropped out once
+   * vanished together with its row.
    *
-   * Ein alter Wert ist aber fast immer nützlicher als gar keiner. Der
-   * Kilometerstand von vor dreissig Sekunden stimmt noch; die Innentemperatur
-   * von vor zwei Minuten auch. Was fehlt, ist nicht der Wert, sondern die
-   * Angabe, wie alt er ist - und die steht jetzt daneben. */
-  let valuesAsOf = {};          // name -> {wert, zeit}
-  // Anfang der Fahrt für den laufenden Verbrauch: {soc, km} aus der ersten
-  // Runde, in der beides zugleich vorlag.
+   * An old value is almost always more useful than none at all. The
+   * odometer reading from thirty seconds ago is still right; the interior
+   * temperature from two minutes ago too. What is missing is not the value
+   * but the indication of how old it is - and that now sits next to it. */
+  let valuesAsOf = {};          // name -> {value, time}
+  // Start of the trip for the running consumption: {soc, km} from the first
+  // round in which both were available at the same time.
   let consumptionStart = null;
-  // Ob wegen der Stille schon gewarnt wurde. Einmal genügt: Eine Meldung,
-  // die alle zwölf Sekunden kommt, schaltet man ab.
+  // Whether a warning about the silence has already been given. Once is
+  // enough: a message that comes every twelve seconds gets switched off.
   let quietReported = false;
-  /* Messpunkte für den Verbrauchsplot: [{zeit, kw, km, soc}, ...].
+  /* Measurement points for the consumption plot: [{time, kw, km, soc}, ...].
    *
-   * Roh gesammelt und erst beim Zeichnen zu Abschnitten verrechnet - so
-   * lässt sich die Abschnittsbreite ändern, ohne die Messung zu verlieren. */
+   * Collected raw and only combined into sections at draw time - this way
+   * the section width can be changed without losing the measurement. */
   let consumption_track = [];
-  let neverCome = new Set();  // Kennungen, die dieses Auto nicht beantwortet
-  /* Die Leistung der Nebenverbraucher, wenn das Steuergerät sie nicht sagt.
+  let neverCome = new Set();  // ids this car does not answer
+  /* The power of the auxiliary consumers, when the control unit does not
+   * report it.
    *
-   * Es gibt sie als fertige Zahl (DID 0364, "HV auxiliary consumer power"),
-   * und die ist jeder Rechnung überlegen. Antwortet dieses Steuergerät
-   * nicht, bleibt die Näherung: Im Fahren enthält die Packleistung Antrieb
-   * **und** Nebenverbraucher, und den Antrieb zu modellieren brauchte die
-   * Steigung, die während einer Aufzeichnung niemand kennt. Steht das Auto
-   * aber und lädt nicht, dann ist die Packleistung die der Nebenverbraucher.
+   * It exists as a ready-made number (DID 0364, "HV auxiliary consumer
+   * power"), and that beats any calculation. If this control unit does not
+   * answer, the approximation remains: while driving, the pack power
+   * contains propulsion **and** auxiliary consumers, and modelling the
+   * propulsion would need the gradient, which nobody knows during a
+   * recording. But if the car is standing and not charging, the pack power
+   * is that of the auxiliary consumers.
    *
-   * Weil dieser Rückfall nur so lange gilt, wie sich an der Heizung nichts
-   * ändert, wird er mit seinem Alter angezeigt - anders als der gemessene
-   * Wert, der immer von jetzt ist. */
-  let aux_load = null;   // {kw, zeit}
+   * Because this fallback only holds as long as nothing changes about the
+   * heating, it is shown with its age - unlike the measured value,
+   * which is always from right now. */
+  let aux_load = null;   // {kw, time}
 
-  /* Wie oft die Position gemeldet wird.
+  /* How often the position is reported.
    *
-   * Hier standen dreissig Sekunden, mit der Begründung, die Nachführung
-   * mittle ohnehin über Kilometer. Für die **Nachführung** stimmt das; für
-   * die **Aufzeichnung** nicht, und die war damals noch nicht gebaut. Dort
-   * ist jeder Messpunkt ein Stützpunkt der Strecke, die hinterher aus ihnen
-   * entsteht - bei Landstrassentempo lagen vierhundert Meter dazwischen, und
-   * die Luftlinie schneidet jede Kurve ab. Die erste echte Testfahrt hat
-   * genau das gezeigt.
+   * This used to be thirty seconds, on the grounds that the tracking
+   * averages over kilometres anyway. That holds for the **tracking**; for
+   * the **recording** it does not, and the recording had not been built
+   * back then. There every measurement point is a support point of the
+   * route that is later built from them - at country-road speed there were
+   * four hundred metres between them, and the straight line cuts off every
+   * bend. The first real test drive showed exactly that.
    *
-   * Zwölf Sekunden sind rund hundertsechzig Meter und bringen die Kurven
-   * zurück, ohne dass Akku und Mobilfunk spürbar mehr kosten: Eine Meldung
-   * ist ein kleines JSON, und das GPS läuft ohnehin.
+   * Twelve seconds is roughly a hundred and sixty metres and brings the
+   * bends back, without battery and mobile data costing noticeably more:
+   * a report is a small JSON, and the GPS is running anyway.
    *
-   * Für die Länge der Strecke ist der Kilometerstand des Fahrzeugs die
-   * bessere Quelle (siehe `live/aufzeichnung.odometer_faktor`) - dichtere
-   * Punkte braucht es trotzdem, denn sie tragen den **Verlauf**: Höhenprofil,
-   * Tempo je Teilstück, und die Karte. */
+   * For the length of the route the vehicle's odometer is the better
+   * source (see `live/aufzeichnung.odometer_factor`) - denser points are
+   * still needed, because they carry the **history**: elevation profile,
+   * speed per segment, and the map. */
   const REPORT_INTERVAL_MS = 12000;
 
   function showConnection(text, colour) {
@@ -103,16 +105,16 @@ window.joltLive = (function () {
   async function launch() {
     const trip = K.state.trip;
     if (!trip) { K.report("Erst eine Route rechnen.", "fehler"); return; }
-    // Zuerst der Dongle, dann die Sitzung - siehe dongleAnbieten(). Wer
-    // keinen auswählt, fährt ohne: Die Fahrt startet in jedem Fall.
+    // First the dongle, then the session - see dongleOffer(). Whoever
+    // picks none drives without: the trip starts in any case.
     const withDongle = await dongleOffer();
     try {
-      // Mit denselben Filtern wie in der Planen-Ansicht: Ein Ladeplan, der
-      // unterwegs plötzlich andere Säulen zulässt als beim Planen, wäre
-      // nicht mehr nachvollziehbar.
-      // Auch der Aufwand je Halt geht mit: Ein Plan, der unterwegs plötzlich
-      // nach einem anderen Massstab umgeplant wird als beim Losfahren, wäre
-      // nicht mehr nachvollziehbar.
+      // With the same filters as in the planning view: a charging plan that
+      // suddenly allows other chargers on the road than when planning would
+      // no longer be comprehensible.
+      // The effort per stop goes along too: a plan that is suddenly
+      // re-planned on the road by a different yardstick than when setting
+      // off would no longer be comprehensible.
       const holding_cost = document.getElementById("haltekosten");
       const response = await K.api(`/api/live/start/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
@@ -125,21 +127,21 @@ window.joltLive = (function () {
         { method: "POST" });
       K.state.sessionId = response.session_id;
       K.sessionRemember(response.session_id);
-      // Wer die Fahrt startet, sitzt im Auto: Es darf gelesen werden, bis
-      // das Telefon sagt, dass das Auto steht.
+      // Whoever starts the trip is sitting in the car: reading is allowed
+      // until the phone says the car is standing.
       drivingStateStart("faehrt");
       document.getElementById("live-leer").hidden = true;
       document.getElementById("live-inhalt").hidden = false;
       plan = response.plan || null;
       drawPlan();
-      // Beim Losfahren ist der Startladestand der beste bekannte Wert - besser
-      // jedenfalls als eine feste Zahl, die mit diesem Auto nichts zu tun hat.
+      // At departure the starting state of charge is the best known value -
+      // better at any rate than a fixed number that has nothing to do with this car.
       socFieldPrefill(trip.start_soc);
       link(response.session_id);
       positionTrace();
       window.joltApp.showView("live");
-      // Einmal beim Start fragen, wo die Frage etwas bedeutet - und nicht
-      // beim ersten geänderten Plan, wo sie im Weg steht.
+      // Ask once at the start, where the question means something - and not
+      // at the first changed plan, where it gets in the way.
       notificationsSetUp();
       showDongle();
       K.report(withDongle
@@ -152,18 +154,18 @@ window.joltLive = (function () {
     }
   }
 
-  /* Die Verbindung nach einem Abriss wieder aufbauen.
+  /* Re-establish the connection after a drop.
    *
-   * Ein WebSocket überlebt keinen Tunnel und keinen Wechsel von WLAN auf
-   * Mobilfunk. Ohne Wiederaufbau blieb die Live-Ansicht danach für den Rest
-   * der Fahrt stehen: Die Messpunkte gingen weiter hinaus (der POST ist ein
-   * eigener Weg), aber zurück kam nichts mehr - also keine Abweichung, keine
-   * Ankunftsprognose und vor allem keine Meldung über einen geänderten
-   * Plan. Genau die Lage, in der man sie braucht.
+   * A WebSocket does not survive a tunnel or a switch from Wi-Fi to
+   * mobile data. Without reconnecting, the live view stayed frozen for the
+   * rest of the trip: the measurement points still went out (the POST is a
+   * separate path), but nothing came back - so no deviation, no arrival
+   * forecast and above all no message about a changed plan. Exactly the
+   * situation in which you need them.
    *
-   * Wachsende Abstände wie beim Dongle: Ein Tunnel dauert Sekunden, ein
-   * Funkloch auf dem Land Minuten. Beendet die Fahrt, hört es auf -
-   * `K.zustand.sitzungId` ist die Bedingung, und `beenden()` löscht sie. */
+   * Growing intervals as with the dongle: a tunnel lasts seconds, a
+   * dead spot in the countryside minutes. When the trip ends, it stops -
+   * `K.zustand.sessionId` is the condition, and `beenden()` clears it. */
   let reconnectClock = null;
 
   function reconnectAgain(sessionId, attempt) {
@@ -180,20 +182,20 @@ window.joltLive = (function () {
 
   function link(sessionId, attempt = 1) {
     if (socket) {
-      // Den alten Zuhörer abhängen, bevor geschlossen wird: Sonst löst
-      // dieses Schliessen selbst einen Wiederaufbau aus.
+      // Detach the old listener before closing: otherwise this very close
+      // triggers a reconnect itself.
       try { socket.onclose = null; socket.close(); } catch (e) {}
     }
     const schema = location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(`${schema}://${location.host}/api/live/${sessionId}/ws`);
 
-    // Ein Browser kann beim WebSocket keine Header setzen; der Token geht
-    // deshalb als erste Nachricht. Erst die Antwort "bereit" heisst, dass der
-    // Server ihn angenommen hat - vorher gilt die Verbindung nicht als
-    // stehend, und die Wartezeit bleibt, wie sie ist.
+    // A browser cannot set headers on a WebSocket; the token therefore goes
+    // as the first message. Only the reply "bereit" ("ready") means the
+    // server has accepted it - before that the connection does not count as
+    // established, and the wait time stays as it is.
     socket.onopen = () => {
       try { socket.send(JSON.stringify({ token: K.token() })); }
-      catch (e) { /* onclose baut neu auf */ }
+      catch (e) { /* onclose reconnects */ }
     };
     socket.onclose = () => {
       if (K.state.sessionId === sessionId) reconnectAgain(sessionId, attempt + 1);
@@ -205,7 +207,7 @@ window.joltLive = (function () {
       try { records = JSON.parse(msg.data); } catch (e) { return; }
       if (records.kind === "bereit") {
         showConnection("verbunden", "#57c98a");
-        attempt = 0;   // eine stehende Verbindung setzt die Wartezeit zurück
+        attempt = 0;   // an established connection resets the wait time
         return;
       }
       if (records.kind === "ende") {
@@ -217,9 +219,9 @@ window.joltLive = (function () {
   }
 
   function showState(z) {
-    // Das Anzeigemodell für alles ausserhalb dieser Oberfläche (CarPlay,
-    // Widget): wenige Zahlen, gedrosselt. Ein Fehler dort darf die Anzeige
-    // hier nie mitreissen.
+    // The display model for everything outside this UI (CarPlay,
+    // widget): a few numbers, throttled. An error there must never drag
+    // the display here down with it.
     try {
       if (window.joltDisplay) {
         window.joltDisplay.report(z, { track: consumption_track, vals: valuesAsOf,
@@ -230,18 +232,18 @@ window.joltLive = (function () {
     const trip = K.state.trip;
     const reserve = trip ? trip.vehicle.reserve_soc : 10;
 
-    // Ein neu gerechneter Plan kommt am Zustand mit. Nur wenn er sich
-    // wirklich unterscheidet, wird darauf hingewiesen - ein Plan, der sich
-    // alle dreissig Sekunden meldet, ist kein Plan.
+    // A newly computed plan arrives with the state. Only if it really
+    // differs is it pointed out - a plan that announces itself
+    // every thirty seconds is no plan.
     if (z.plan) {
       plan = z.plan;
       drawPlan();
       if (z.plan_changed) reportChange(z.change);
     }
 
-    // Der zuletzt bekannte Ladestand als Vorschlag fürs nächste Melden: Am
-    // Ladepunkt ist der neue Wert höher, unterwegs niedriger - in beiden
-    // Fällen ist der letzte Wert der kürzere Weg als eine feste Zahl.
+    // The last known state of charge as a suggestion for the next report: at
+    // a charge point the new value is higher, on the road lower - in both
+    // cases the last value is a shorter way than a fixed number.
     socFieldPrefill(z.actual_soc);
 
     const deviationVariety = z.deviation_pp === null ? ""
@@ -251,22 +253,22 @@ window.joltLive = (function () {
       : (z.forecast_soc_at_target < reserve ? "schlecht"
         : (z.forecast_soc_at_target < reserve + 10 ? "warnung" : "gut"));
 
-    /* Die Antwort zuerst, und die Antwort ist nicht der Ladestand.
+    /* The answer first, and the answer is not the state of charge.
      *
-     * Der Ladestand ist eine Eingabe - die Frage im Auto lautet "reicht
-     * es?", und die beantwortet der Ankunftswert. Solange ein Ladeplan
-     * steht, ist der nächste Stopp die nähere und damit dringlichere
-     * Antwort; ohne Plan zählt das Ziel. */
+     * The state of charge is an input - the question in the car is "will
+     * it be enough?", and the arrival value answers it. As long as a
+     * charging plan exists, the next stop is the nearer and therefore more
+     * urgent answer; without a plan the destination counts. */
     showResponse(z, reserve);
 
-    /* Darunter nur das, was eine Entscheidung ändert. Ladestand und
-     * Abweichung stehen bewusst hier und nicht oben: Sie sind Beleg, nicht
-     * Antwort - man liest sie, wenn man der grossen Zahl nachgehen will. */
+    /* Below it only what changes a decision. State of charge and
+     * deviation deliberately sit here and not above: they are evidence, not
+     * the answer - you read them when you want to follow up the big number. */
     document.getElementById("live-werte").innerHTML = [
-      // Eine Nachkommastelle: Der Dongle liefert den Ladestand in Schritten
-      // von 0,4 Prozentpunkten (ein Byte durch 2,5). Auf ganze Prozent
-      // gerundet steht die Zahl minutenlang still, obwohl sie sich bewegt -
-      // und gerade die Bewegung will man sehen.
+      // One decimal place: the dongle delivers the state of charge in steps
+      // of 0.4 percentage points (one byte divided by 2.5). Rounded to whole
+      // percent the number stands still for minutes although it is moving -
+      // and the movement is exactly what you want to see.
       K.valueTile(z.soc_source === "zuletzt" ? "Ladestand (zuletzt gemessen)"
                    : (z.soc_reported === false ? "Ladestand (gerechnet)" : "Ladestand"),
         K.num(z.actual_soc, 1) + " %"),
@@ -274,9 +276,9 @@ window.joltLive = (function () {
         (z.deviation_pp === null ? "–"
           : (z.deviation_pp > 0 ? "+" : "") + K.num(z.deviation_pp, 1) + " pp"),
         deviationVariety),
-      // Die Ankunftszeit ist die zweite Grösse, die sich unterwegs
-      // verschiebt - und die einzige, die ein Stau bewegt, ohne den
-      // Verbrauch anzufassen.
+      // The arrival time is the second quantity that shifts on the road -
+      // and the only one that a traffic jam moves without touching
+      // the consumption.
       K.valueTile("Ankunft",
         (z.arrival_shift_min === null ? "–"
           : (Math.abs(z.arrival_shift_min) < 1 ? "nach Plan"
@@ -286,13 +288,13 @@ window.joltLive = (function () {
       K.valueTile("Noch", K.num(z.remaining_km) + " km"),
     ].join("");
 
-    /* Jeder Messpunkt kommt **zweimal** hier an: einmal als Antwort auf den
-     * eigenen POST, einmal über den WebSocket, der ihn an alle Zuschauer
-     * zurückspiegelt - und der eigene Browser ist einer davon. Ohne diese
-     * Prüfung stünde jeder Punkt doppelt im Verlauf und in der Spur; über
-     * eine Langstrecke wären das tausend Einträge zu viel. */
-    // Position und Strecke **vor** dem Verlauf: Der Verlaufspunkt soll
-    // wissen, wie weit gefahren wurde, als er entstand.
+    /* Every measurement point arrives here **twice**: once as the reply to
+     * our own POST, once via the WebSocket, which mirrors it back to all
+     * viewers - and our own browser is one of them. Without this
+     * check every point would appear twice in the history and in the track;
+     * over a long distance that would be a thousand entries too many. */
+    // Position and distance **before** the history: the history point should
+    // know how far had been driven when it came into being.
     const city = measurement_site(z);
     if (city) {
       const most_recent = track[track.length - 1];
@@ -302,18 +304,19 @@ window.joltLive = (function () {
       }
     }
 
-    // Den letzten Verbrauchspunkt mit der jetzt bekannten GPS-Strecke
-    // versehen. Er entstand beim Auslesen des Dongles, also bevor die
-    // Position durch war.
+    // Give the last consumption point the GPS distance that is now known.
+    // It came into being when the dongle was read, i.e. before the
+    // position was through.
     const lastV = consumption_track[consumption_track.length - 1];
     if (lastV && lastV.gps === null) lastV.gps = drivenKm;
 
     const previous = history[history.length - 1];
-    // Auch die gefahrene Strecke zählt beim Vergleich: Bei einer
-    // Aufzeichnung ist `km_auf_route` für jeden Punkt null (es gibt noch
-    // keine Route), und ohne diesen Teil galt jeder Punkt mit unverändertem
-    // Ladestand als Dublette. Beim Aufzeichnen mit Dongle sind das fast
-    // alle - der Ladestand ändert sich alle paar Minuten.
+    // The driven distance counts in the comparison too: in a
+    // recording `km_on_route` is null for every point (there is no
+    // route yet), and without this part every point with an unchanged
+    // state of charge counted as a duplicate. When recording with a
+    // dongle that is almost all of them - the state of charge changes
+    // every few minutes.
     const actualNew = z.actual_soc !== null && z.actual_soc !== undefined
       && !(previous && previous.km === (z.km_on_route || 0)
            && previous.driven_km === drivenKm
@@ -336,29 +339,29 @@ window.joltLive = (function () {
     hint.textContent = z.reason || "im Plan";
     hint.style.color = z.replanning_required ? "#e8804f" : "";
 
-    // Die Reserve-Marke wandert mit: Das ist die eigentliche Aussage der
-    // Live-Funktion - nicht "du verbrauchst mehr", sondern "es reicht jetzt
-    // nur noch bis dorthin".
-    /* Die Karte auch **ohne** geplante Route bedienen.
+    // The reserve marker moves along: that is the actual message of the
+    // live function - not "you are using more", but "it is now only enough
+    // as far as there".
+    /* Serve the map **without** a planned route too.
      *
-     * Hier stand `if (fahrt && ...)`, und `K.zustand.fahrt` ist nur gesetzt,
-     * wenn vorher eine Route gerechnet wurde. Bei einer Aufzeichnung gibt es
-     * keine - also wurde der ganze Block übersprungen und die Karte blieb
-     * leer, obwohl die Position längst hereinkam. Die eigene Position hat
-     * mit dem Vorhandensein einer Route nichts zu tun.
+     * This used to be `if (fahrt && ...)`, and `K.zustand.fahrt` is only set
+     * if a route was computed beforehand. A recording has
+     * none - so the whole block was skipped and the map stayed
+     * empty although the position had long been coming in. The own position
+     * has nothing to do with whether a route exists.
      */
     if (window.joltMap) {
       const here = city || [z_lon(z), z_lat(z)];
       const marker = [{ lat: here[1], lon: here[0], kind: "auto", text: "hier" }];
-      // Bei einer Aufzeichnung ist die gefahrene Spur das, was es zu sehen
-      // gibt: Sie wächst mit und zeigt, dass wirklich mitgeschrieben wird.
-      // Gefüllt wird sie weiter oben, zusammen mit der Strecke.
+      // In a recording the driven track is what there is to see:
+      // it grows along and shows that data is really being written.
+      // It is filled further up, together with the distance.
       if (!trip) {
         window.joltMap.setRoute(track);
-        // Die Karte folgt der Spur von selbst (map.js), bis jemand sie
-        // anfasst - dann bleibt sie, wo sie ist. Frueher wurde nur der erste
-        // Punkt zentriert, und die wachsende Strecke musste man von Hand
-        // verfolgen.
+        // The map follows the track by itself (map.js) until someone
+        // touches it - then it stays where it is. Earlier only the first
+        // point was centred, and the growing route had to be followed
+        // by hand.
       }
       if (trip && z.reserve_at_km !== null && trip.profile) {
         const hit = trip.profile.find((p) => p.km >= z.reserve_at_km);
@@ -376,7 +379,7 @@ window.joltLive = (function () {
   }
 
 
-  /* ---------- Die Antwort ---------- */
+  /* ---------- The answer ---------- */
 
   function showResponse(z, reserve) {
     const box = document.getElementById("live-antwort");
@@ -400,8 +403,8 @@ window.joltLive = (function () {
       box.className = "";
       return;
     }
-    // Ein negativer Wert ist keine Aussage über den Akku, sondern darüber,
-    // dass es so nicht reicht. Genau das gehört dann da zu stehen.
+    // A negative value is not a statement about the battery but about the
+    // fact that it will not be enough. That is exactly what belongs there.
     if (val < 0) {
       num.textContent = "reicht nicht";
       variety = "schlecht";
@@ -413,10 +416,10 @@ window.joltLive = (function () {
     box.className = variety;
   }
 
-  /* Luftlinie zwischen zwei [lon, lat] in Kilometern. Für eine gefahrene
-   * Spur mit Punkten alle dreissig Sekunden ist der Unterschied zur
-   * Strassenlänge vernachlässigbar - und für die Achse einer Kurve zählt
-   * ohnehin nur, dass sie monoton wächst. */
+  /* Straight-line distance between two [lon, lat] in kilometres. For a driven
+   * track with points every thirty seconds the difference from the
+   * road length is negligible - and for the axis of a curve all that
+   * matters is that it grows monotonically. */
   function spacingKm(a, b) {
     if (!a || !b) return 0;
     const R = 6371, r = Math.PI / 180;
@@ -426,20 +429,20 @@ window.joltLive = (function () {
     return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
   }
 
-  /* ---------- Der Verlauf ---------- */
+  /* ---------- The history ---------- */
 
-  /* Soll und Ist über die Strecke, in einem Bild.
+  /* Plan and actual over the distance, in one picture.
    *
-   * Das ist jolts These als Zeichnung: Ein Plan, der bei Abfahrt gerechnet
-   * wurde, ist nach achtzig Kilometern falsch - und zwei Kurven, die
-   * auseinanderlaufen, sagen das in einem Blick, während eine Kachel mit
-   * "-6 pp" erst gelesen und eingeordnet werden will. Vor allem sagt die
-   * Kurve, ob es besser oder schlechter wird; eine Momentaufnahme kann das
-   * grundsätzlich nicht.
+   * This is jolt's thesis as a drawing: a plan computed at departure
+   * is wrong after eighty kilometres - and two curves that
+   * diverge say so at a glance, whereas a tile showing
+   * "-6 pp" first has to be read and put in context. Above all the
+   * curve says whether things are getting better or worse; a snapshot
+   * fundamentally cannot.
    *
-   * Gezeichnet wird auch ohne Plan: Bei einer Aufzeichnung gibt es keine
-   * Soll-Kurve, aber die gemessene ist dann erst recht das, was man sehen
-   * will.
+   * It is drawn without a plan too: in a recording there is no
+   * planned curve, but the measured one is then all the more what you
+   * want to see.
    */
   function drawHistory() {
     const canvas = document.getElementById("live-verlauf");
@@ -457,25 +460,25 @@ window.joltLive = (function () {
     const profile = (trip && trip.profile) || [];
     const reserve = trip ? trip.vehicle.reserve_soc : 10;
 
-    // Der Massstab richtet sich nach dem, was es gibt: mit Plan nach der
-    // ganzen Strecke, ohne Plan nach dem, was schon gefahren wurde.
-    /* Ohne Plan gibt es kein `km_auf_route` - es kommt aus der Projektion
-     * auf die Route, und eine Aufzeichnung hat keine. Es steht deshalb
-     * für **jeden** Punkt auf null, und die Kurve fiel zu einem senkrechten
-     * Strich am linken Rand zusammen. Ausgerechnet dort, wo sie das
-     * Einzige ist, was es zu sehen gibt.
+    // The scale depends on what there is: with a plan on the whole
+    // route, without a plan on what has been driven so far.
+    /* Without a plan there is no `km_on_route` - it comes from the projection
+     * onto the route, and a recording has none. It is therefore null
+     * for **every** point, and the curve collapsed into a vertical
+     * line at the left edge. Of all places exactly where it is the
+     * only thing there is to see.
      *
-     * Gemessen wird dann entlang der gefahrenen Spur: Für Punkt i die
-     * Summe der Abstände bis dorthin. Das ist die Strecke, die wirklich
-     * zurückgelegt wurde, und damit die richtige Achse. */
-    /* Hier stand eine Schleife, die die Strecke beim Zeichnen aus der Spur
-     * nachrechnete - `abstandKm(spur[i-1], spur[i])` für jeden Verlaufs-
-     * punkt i. Das setzte voraus, dass `spur[i]` zu `verlauf[i]` gehört,
-     * und das tut es nicht: Die Spur wächst bei jeder neuen Position, der
-     * Verlauf bei jedem neuen Ladestand. Beim Aufzeichnen mit Dongle war
-     * der Verlauf um ein Vielfaches kürzer, und die Kurve rückte dadurch
-     * an den linken Rand - genau der Fehler, den diese Schleife beheben
-     * sollte. Jetzt trägt jeder Verlaufspunkt seine Strecke selbst. */
+     * Measuring then happens along the driven track: for point i the
+     * sum of the distances up to there. That is the distance really
+     * covered, and therefore the right axis. */
+    /* There used to be a loop here that recomputed the distance at draw time
+     * from the track - `spacingKm(spur[i-1], spur[i])` for every history
+     * point i. That presupposed that `spur[i]` belongs to `verlauf[i]`,
+     * and it does not: the track grows with every new position, the
+     * history with every new state of charge. When recording with a dongle
+     * the history was many times shorter, and the curve moved
+     * to the left edge as a result - exactly the error this loop
+     * was meant to fix. Now each history point carries its own distance. */
     const ownKm = !profile.length;
     const distanceFrom = (v) => ownKm ? (v.driven_km || 0) : v.km;
     const maxKm = profile.length
@@ -486,8 +489,8 @@ window.joltLive = (function () {
     const y = (soc) => bottom - (Math.max(0, Math.min(100, soc)) / 100)
       * (bottom - upper);
 
-    // Höhenprofil im Hintergrund. Es erklärt die Knicke in beiden Kurven -
-    // ohne diese Erklärung wirken sie wie Messfehler.
+    // Elevation profile in the background. It explains the kinks in both curves -
+    // without this explanation they look like measurement errors.
     if (profile.length > 1) {
       let maxElevation = 1;
       for (const p of profile) maxElevation = Math.max(maxElevation, p.elevation || 0);
@@ -502,8 +505,8 @@ window.joltLive = (function () {
       pen.fill();
     }
 
-    // Die Reserve als Linie, nicht als Zahl: Man sieht sofort, wo die
-    // gemessene Kurve auf sie zuläuft.
+    // The reserve as a line, not a number: you see at once where the
+    // measured curve is heading towards it.
     pen.beginPath();
     pen.setLineDash([4, 4]);
     pen.moveTo(left_side, y(reserve));
@@ -516,7 +519,7 @@ window.joltLive = (function () {
     pen.font = "10px system-ui, sans-serif";
     pen.fillText("Reserve", left_side + 2, y(reserve) - 3);
 
-    // Geplante Kurve: gedämpft, sie ist der Bezug und nicht die Nachricht.
+    // Planned curve: muted, it is the reference and not the message.
     if (profile.length > 1) {
       pen.beginPath();
       profile.forEach((p, i) => {
@@ -528,8 +531,8 @@ window.joltLive = (function () {
       pen.stroke();
     }
 
-    // Die Ladestopps als Marken - sie erklären die Sprünge, die gleich
-    // kommen, und zeigen, wie weit der nächste noch weg ist.
+    // The charging stops as markers - they explain the jumps that are
+    // about to come, and show how far away the next one still is.
     for (const stop of (plan && plan.stops) || []) {
       const px = x(stop.km_on_route);
       pen.beginPath();
@@ -540,7 +543,7 @@ window.joltLive = (function () {
       pen.stroke();
     }
 
-    // Die gemessene Kurve. Sie ist die Nachricht, also kräftig.
+    // The measured curve. It is the message, so make it strong.
     if (history.length > 1) {
       pen.beginPath();
       history.forEach((v, i) => {
@@ -553,8 +556,8 @@ window.joltLive = (function () {
       pen.stroke();
     }
 
-    // Wo das Auto gerade ist. Ein gerechneter Ladestand bekommt einen
-    // hohlen Punkt - man soll ihm ansehen, dass er nicht gemessen ist.
+    // Where the car is right now. A computed state of charge gets a
+    // hollow dot - you should be able to see that it is not measured.
     const now_ts = history[history.length - 1];
     if (now_ts) {
       pen.beginPath();
@@ -570,7 +573,7 @@ window.joltLive = (function () {
                    elevation - 4);
   }
 
-  /* ---------- Der Ladeplan unterwegs ---------- */
+  /* ---------- The charging plan on the road ---------- */
 
   function drawPlan() {
     const lst = document.getElementById("live-plan");
@@ -611,8 +614,8 @@ window.joltLive = (function () {
     });
   }
 
-  /* Eine Änderung am Plan ist der einzige Anlass, jemanden am Steuer zu
-   * stören - deshalb hier und sonst nirgends eine Benachrichtigung. */
+  /* A change to the plan is the only reason to disturb someone at the
+   * wheel - hence a notification here and nowhere else. */
   function reportChange(text) {
     const box = document.getElementById("live-aenderung");
     if (box) {
@@ -623,33 +626,33 @@ window.joltLive = (function () {
   }
 
   function notify(text) {
-    // Ohne erteilte Erlaubnis wird nicht gefragt und nicht benachrichtigt:
-    // Wer die Ansicht offen hat, sieht die Meldung ohnehin. Gefragt wird
-    // einmal beim Start der Fahrt, wo die Frage auch etwas bedeutet.
+    // Without granted permission we neither ask nor notify:
+    // whoever has the view open sees the message anyway. We ask
+    // once at the start of the trip, where the question also means something.
     try {
       if (!("Notification" in window) || Notification.permission !== "granted") {
         return;
       }
       new Notification("jolt – Ladeplan geändert", { body: text, day: "jolt-plan" });
-    } catch (e) { /* je nach Browser und Kontext nicht erlaubt - dann eben nicht */ }
+    } catch (e) { /* depending on browser and context not allowed - then so be it */ }
   }
 
-  /* ---------- Benachrichtigungen aufs Telefon ---------- */
+  /* ---------- Notifications to the phone ---------- */
 
-  /* Beim Start der Fahrt einmal fragen und das Gerät anmelden.
+  /* Ask once at the start of the trip and register the device.
    *
-   * Der Weg über den Push-Dienst ist der einzige, der ein Telefon mit dunklem
-   * Bildschirm erreicht: Die WebSocket-Verbindung schläft dann mit. Deshalb
-   * hier ein echtes Abo und nicht nur die Erlaubnis für die Notification-API.
+   * The route via the push service is the only one that reaches a phone with
+   * a dark screen: the WebSocket connection goes to sleep with it. Hence
+   * a real subscription here and not just the permission for the Notification API.
    *
-   * Scheitert irgendein Schritt, läuft die Fahrt trotzdem - dann eben nur mit
-   * der Meldung in der offenen Ansicht. */
+   * If any step fails, the trip runs anyway - then just with
+   * the message in the open view. */
   async function notificationsSetUp() {
     try {
       if (!("Notification" in window) || !("PushManager" in window)) return;
 
       const keyname = await K.api("/api/push/schluessel");
-      if (!keyname.configured) return;   // kein VAPID-Schlüssel am Server
+      if (!keyname.configured) return;   // no VAPID key on the server
 
       if (Notification.permission === "default") {
         await Notification.requestPermission();
@@ -660,8 +663,8 @@ window.joltLive = (function () {
         || (navigator.serviceWorker && await navigator.serviceWorker.ready);
       if (!registrierung || !registrierung.pushManager) return;
 
-      // Ein bestehendes Abo weiterverwenden. Ein neues anzulegen gäbe
-      // denselben Endpunkt zurück, kostet aber einen Umweg.
+      // Reuse an existing subscription. Creating a new one would return
+      // the same endpoint, but costs a detour.
       let subscription = await registrierung.pushManager.getSubscription();
       if (!subscription) {
         subscription = await registrierung.pushManager.subscribe({
@@ -678,14 +681,14 @@ window.joltLive = (function () {
         device: navigator.userAgent.slice(0, 120),
       }});
     } catch (failure) {
-      // Bewusst nur ins Log: Wer gerade losfährt, will keine Fehlermeldung
-      // über eine Nebenfunktion lesen.
+      // Deliberately only to the log: whoever is just setting off does not want to read an error
+      // message about a side function.
       if (window.console) console.warn("Benachrichtigungen:", failure.message);
     }
   }
 
-  /* Der öffentliche Schlüssel kommt als base64url und muss als Uint8Array
-   * übergeben werden - der Browser nimmt die Zeichenkette nicht an. */
+  /* The public key arrives as base64url and must be passed as a
+   * Uint8Array - the browser does not accept the string. */
   function keyAsBytes(text) {
     const filled = (text + "=".repeat((4 - text.length % 4) % 4))
       .replace(/-/g, "+").replace(/_/g, "/");
@@ -695,23 +698,23 @@ window.joltLive = (function () {
     return bytes;
   }
 
-  /* Die Namen kommen aus fremden Datenquellen und landen in innerHTML. */
+  /* The names come from third-party data sources and end up in innerHTML. */
   function sanitize(text) {
     const helper = document.createElement("div");
     helper.textContent = text || "";
     return helper.innerHTML;
   }
 
-  /* Wo der Messpunkt lag - [lon, lat], oder null.
+  /* Where the measurement point was - [lon, lat], or null.
    *
-   * Der Server schickt die Koordinate mit. Vorher tat er das nicht, und die
-   * Ansicht rechnete sie aus dem *geplanten* Profil zurück (`z_lat`/`z_lon`
-   * darunter). Bei einer Aufzeichnung gibt es dieses Profil nicht - es
-   * entsteht erst beim Abschliessen -, und die Rückrechnung lieferte stumm
-   * (0, 0): Karte im Golf von Guinea, Spur aus einem einzigen Punkt.
+   * The server sends the coordinate along. Before, it did not, and the
+   * view computed it back from the *planned* profile (`z_lat`/`z_lon`
+   * below). In a recording there is no such profile - it only
+   * comes into being on completion -, and the back-computation silently
+   * returned (0, 0): map in the Gulf of Guinea, track of a single point.
    *
-   * Der Rückfall bleibt für Sitzungen, die noch von einer älteren Fassung
-   * bedient werden - dort ist er richtig, weil es dann eine Route gibt. */
+   * The fallback remains for sessions that are still served by an older
+   * version - there it is correct, because then there is a route. */
   function measurement_site(z) {
     if (typeof z.lat === "number" && typeof z.lon === "number"
         && (z.lat !== 0 || z.lon !== 0)) {
@@ -721,8 +724,8 @@ window.joltLive = (function () {
     return (lat === 0 && lon === 0) ? null : [lon, lat];
   }
 
-  /* Der Rückfall: über das Profil hängt an jedem Kilometerstand eine
-   * Position. Gilt nur für geplante Fahrten. */
+  /* The fallback: via the profile, every odometer reading has a
+   * position attached. Only applies to planned trips. */
   function z_lat(z) { return pointAtKm(z.km_on_route).lat; }
   function z_lon(z) { return pointAtKm(z.km_on_route).lon; }
 
@@ -747,28 +750,28 @@ window.joltLive = (function () {
     }
   }
 
-  /* ---------- Ladestand von Hand ---------- */
+  /* ---------- State of charge by hand ---------- */
 
-  /* ---------- Position laufend melden ---------- */
+  /* ---------- Reporting the position continuously ---------- */
 
-  /* Ohne diese Meldungen bekommt jolt zwischen zwei eingetippten Ladeständen
-   * überhaupt nichts - keine Position, keine Zeit. Dann steht der Zeitfaktor
-   * die ganze Fahrt auf 1,0, die Ankunftsprognose auf dem Stand der Abfahrt,
-   * und ein Umweg fällt erst auf, wenn jemand von sich aus etwas eintippt.
+  /* Without these reports jolt gets absolutely nothing between two
+   * typed-in states of charge - no position, no time. Then the time factor
+   * stays at 1.0 for the whole trip, the arrival forecast at its state at departure,
+   * and a detour is only noticed when someone types something in of their own accord.
    *
-   * Der Ladestand wird bewusst *nicht* mitgeschickt: Er ist unbekannt, und
-   * den letzten bekannten Wert erneut zu senden hiesse, eine Messung zu
-   * erfinden - der Verbrauchsfaktor läse daraus, das Auto habe seither nichts
-   * verbraucht. Was zwischen zwei Meldungen gilt, rechnet der Server aus dem
-   * Energieprofil hoch. */
+   * The state of charge is deliberately *not* sent along: it is unknown, and
+   * re-sending the last known value would mean inventing a measurement -
+   * the consumption factor would read from it that the car has used nothing
+   * since. What holds between two reports, the server extrapolates from the
+   * energy profile. */
   function locationInput(coords, timeMs) {
-    // Vor der Drosselung: Der Zustand will jeden Fix sehen, nicht jeden
-    // zwölften.
+    // Before the throttling: the state machine wants to see every fix, not every
+    // twelfth.
     examineDrivingState(coords, timeMs);
     const now_ts = Date.now();
-    // Nicht jede GPS-Aktualisierung melden: Das Gerät liefert im
-    // Sekundentakt, und die Nachführung mittelt ohnehin über Kilometer.
-    // Häufiger zu senden kostet Akku und Mobilfunk, ohne etwas zu sagen.
+    // Do not report every GPS update: the device delivers every
+    // second, and the tracking averages over kilometres anyway.
+    // Sending more often costs battery and mobile data without saying anything.
     if (now_ts - latestReport < REPORT_INTERVAL_MS) return;
     latestReport = now_ts;
     reportPosition(coords, timeMs);
@@ -786,33 +789,33 @@ window.joltLive = (function () {
     screenAwakeHold();
     awake = navigator.geolocation.watchPosition(
       (pos) => locationInput(pos.coords, pos.timestamp),
-      // Ein GPS-Fehler unterwegs ist kein Grund, den Nutzer zu behelligen -
-      // in einem Tunnel ist er der Normalfall, und die nächste Messung kommt.
+      // A GPS error on the road is no reason to bother the user -
+      // in a tunnel it is the normal case, and the next measurement comes.
       () => {},
       { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 });
   }
 
-  /* Der Standort bei gesperrtem Telefon - nur in der iOS-App.
+  /* The location with a locked phone - only in the iOS app.
    *
-   * `watchPosition` im WebView liefert nichts mehr, sobald der Bildschirm
-   * gesperrt ist: iOS friert die Seite ein, und mit ihr die Meldungen. Das
-   * Plugin dagegen läuft über `CLLocationManager` mit
-   * `allowsBackgroundLocationUpdates`; solange es Positionen liefert, hält
-   * iOS die App am Leben, und die Meldungen - samt Dongle-Lesen und
-   * Warteschlange - laufen weiter wie im Vordergrund.
+   * `watchPosition` in the WebView delivers nothing any more once the screen
+   * is locked: iOS freezes the page, and the reports with it. The
+   * plugin, by contrast, runs via `CLLocationManager` with
+   * `allowsBackgroundLocationUpdates`; as long as it delivers positions, iOS
+   * keeps the app alive, and the reports - including dongle reading and
+   * queue - carry on as in the foreground.
    *
-   * Entscheidend ist `backgroundMessage`: Ist sie gesetzt, bleibt der Watcher
-   * auch im Hintergrund aktiv, sonst nur im Vordergrund. Auf iOS sieht man
-   * dann die blaue Standortanzeige in der Statusleiste - gewollt.
+   * What matters is `backgroundMessage`: if it is set, the watcher stays
+   * active in the background too, otherwise only in the foreground. On iOS you then
+   * see the blue location indicator in the status bar - intended.
    *
-   * Im Browser gibt es das Plugin nicht, dort gilt `watchPosition`.
+   * In the browser the plugin does not exist; there `watchPosition` applies.
    *
-   * **Das Plugin muss auch wirklich eingebaut sein.** Die App lädt ihre
-   * Oberfläche zur Laufzeit vom Server; dieser Code ist also sofort da, die
-   * native Klasse dagegen erst nach einem neuen App-Bau. Auf einem älteren
-   * Stand liefert `registerPlugin` einen Stellvertreter, dessen Aufrufe mit
-   * "not implemented" scheitern - und die Fahrt hätte gar keinen Standort
-   * mehr. `isPluginAvailable` fragt nach, und sonst gilt der Browser-Weg. */
+   * **The plugin must really be built in.** The app loads its
+   * UI from the server at runtime; this code is therefore there immediately, the
+   * native class only after a new app build. On an older
+   * build `registerPlugin` returns a stand-in whose calls fail
+   * with "not implemented" - and the trip would have no location at all
+   * any more. `isPluginAvailable` checks, and otherwise the browser path applies. */
   function nativeLocation() {
     const h = window.joltBlePlugin;
     if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()
@@ -823,8 +826,8 @@ window.joltLive = (function () {
   }
 
   async function nativeTrace(plugin) {
-    // Sofort besetzen: `addWatcher` antwortet erst nach der
-    // Berechtigungsfrage, und bis dahin darf kein zweiter Start dazwischen.
+    // Claim it immediately: `addWatcher` only answers after the
+    // permission prompt, and until then no second start may slip in.
     awake = "nativ";
     const cycle = ++nativeRun;
     screenAwakeHold();
@@ -840,20 +843,20 @@ window.joltLive = (function () {
         if (!city || typeof city.latitude !== "number") return;
         locationInput({
           latitude: city.latitude, longitude: city.longitude,
-          // Das Plugin liefert null statt -1, wenn die Geschwindigkeit fehlt.
+          // The plugin delivers null instead of -1 when the speed is missing.
           speed: typeof city.speed === "number" ? city.speed : null,
           altitude: typeof city.altitude === "number" ? city.altitude : null,
         }, city.time);
       });
     } catch (failure) {
-      // Das Plugin ging nicht - dann wenigstens der Standort im Vordergrund,
-      // statt für den Rest der Fahrt gar keinen.
+      // The plugin did not work - then at least the location in the foreground,
+      // instead of none at all for the rest of the trip.
       if (cycle === nativeRun) { awake = null; webTrace(); }
       locationError(failure);
       return;
     }
-    // Beendet, während iOS noch fragte: den eben angelegten Watcher gleich
-    // wieder entfernen, sonst läuft er ohne Fahrt weiter und kostet Akku.
+    // Ended while iOS was still asking: remove the watcher just created
+    // again straight away, otherwise it keeps running without a trip and costs battery.
     if (cycle !== nativeRun || awake !== "nativ") {
       dropWatcher(plugin, id);
       return;
@@ -862,24 +865,24 @@ window.joltLive = (function () {
   }
 
   function dropWatcher(plugin, id) {
-    // Ein Promise: Eine Ablehnung fängt kein try/catch.
+    // A promise: a rejection is not caught by try/catch.
     try {
       Promise.resolve(plugin.removeWatcher({ id })).catch(() => {});
-    } catch (e) { /* schon weg */ }
+    } catch (e) { /* already gone */ }
   }
 
   function locationError(failure) {
     if (failure && failure.code === "NOT_AUTHORIZED") {
-      // Einmal sagen, nicht bei jedem Rückruf. Ohne Erlaubnis gibt es bei
-      // gesperrtem Telefon keine Messpunkte - das muss man wissen, bevor man
-      // losfährt.
+      // Say it once, not on every callback. Without permission there are no
+      // measurement points with a locked phone - you need to know that before
+      // setting off.
       if (locationErrorReported) return;
       locationErrorReported = true;
       K.report("Standort nicht erlaubt. In den iOS-Einstellungen für jolt "
         + "Standort auf „Beim Verwenden“ oder „Immer“ stellen - sonst "
         + "kommen bei gesperrtem Telefon keine Messpunkte an.", "warnung");
     }
-    // Alles andere ist wie beim Browser: ein Tunnel, die nächste Messung kommt.
+    // Everything else is as in the browser: a tunnel, the next measurement comes.
   }
 
   function positionGiveUp() {
@@ -900,37 +903,37 @@ window.joltLive = (function () {
     screenRelease();
   }
 
-  /* ---------- Der Bildschirm muss anbleiben ---------- */
+  /* ---------- The screen must stay on ---------- */
 
-  /* Ohne das schaltet iOS den Bildschirm nach einer Minute aus, und mit dem
-   * Bildschirm schläft die Seite: `watchPosition` liefert nichts mehr, die
-   * Bluetooth-Schleife steht, und beim Aufwachen fehlt das Stück dazwischen.
+  /* Without this iOS turns the screen off after a minute, and with the
+   * screen the page sleeps: `watchPosition` delivers nothing any more, the
+   * Bluetooth loop stands still, and on waking up the piece in between is missing.
    *
-   * Die Diagnoseseite unter /obd hatte das von Anfang an, diese Ansicht
-   * nicht - und aufgezeichnet wird hier. In der ersten echten Testfahrt
-   * klafft genau deshalb eine Lücke von acht Minuten mit einem einzigen
-   * Messpunkt darin.
+   * The diagnostics page under /obd had this from the start, this view
+   * did not - and recording happens here. In the first real test drive
+   * there is exactly for that reason a gap of eight minutes with a single
+   * measurement point in it.
    *
-   * Die Sperre geht verloren, sobald die Seite in den Hintergrund gerät, und
-   * kommt nicht von selbst zurück; deshalb wird sie beim Zurückkommen neu
-   * geholt. */
+   * The lock is lost as soon as the page goes to the background, and
+   * does not come back by itself; hence it is acquired again on
+   * returning. */
   let wake_lock = null;
   let keepAwakeVideo = null;
 
-  /* Auf iOS bleibt die Wake-Lock-API in einer als App vom Homescreen
-   * gestarteten Seite ("standalone", siehe manifest.json) unzuverlässig -
-   * mal wird die Sperre gar nicht erst erteilt, mal fällt sie nach kurzer
-   * Zeit von selbst weg, ohne ein "release"-Ereignis auszulösen. Ein
-   * stummes, unsichtbares Video, das in einer Dauerschleife läuft, hält den
-   * Bildschirm dagegen zuverlässig wach - dieselbe Technik, die NoSleep.js
-   * verwendet. Beide Wege laufen parallel, keiner schadet dem anderen.
+  /* On iOS the Wake Lock API remains unreliable in a page launched as an
+   * app from the home screen ("standalone", see manifest.json) -
+   * sometimes the lock is not granted at all, sometimes it drops after a short
+   * time by itself without triggering a "release" event. A
+   * silent, invisible video running in an endless loop on the other hand
+   * keeps the screen awake reliably - the same technique NoSleep.js
+   * uses. Both paths run in parallel, neither harms the other.
    *
-   * Ein leeres Canvas als Quelle (`captureStream()`) reichte nicht: iOS hat
-   * das offenbar nicht durchgehend als echte Wiedergabe gewertet, der
-   * Bildschirm ging trotzdem aus. Ein tatsächliches, wenn auch winziges
-   * Video (1 Sekunde, 2x2 Pixel, schwarz, ohne Ton - 1,5 kB) läuft
-   * zuverlässiger. Eingebettet statt als eigene Datei, damit nichts vom
-   * Netz nachgeladen werden muss, bevor die Sperre greift. */
+   * An empty canvas as the source (`captureStream()`) was not enough: iOS
+   * apparently did not consistently count that as real playback, the
+   * screen went off anyway. An actual, if tiny,
+   * video (1 second, 2x2 pixels, black, no sound - 1.5 kB) works more
+   * reliably. Embedded instead of as a separate file, so nothing has to be
+   * loaded from the network before the lock takes effect. */
   const KEEP_AWAKE_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMXbW9vdgAAAGxtdmhkAAAA"
     + "AAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAB"
     + "AAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkF0"
@@ -963,11 +966,11 @@ window.joltLive = (function () {
     + "bWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAA"
     + "ABBliIQAFf/+98nvwKbr29+B";
 
-  /* Ausserhalb des sichtbaren Bereichs positioniert (negative Koordinaten)
-   * hat es nicht gehalten - vermutlich zaehlt ein Video, das gar nicht im
-   * sichtbaren Bereich liegt, für iOS nicht als echte Wiedergabe. Jetzt
-   * steht es tatsächlich in der oberen linken Ecke, nur eben ein einzelnes,
-   * fast durchsichtiges Pixel gross - das fällt nicht auf, zählt aber. */
+  /* Positioned outside the visible area (negative coordinates)
+   * it did not hold - presumably a video that is not in the
+   * visible area at all does not count as real playback for iOS. Now
+   * it actually sits in the top left corner, just a single, almost
+   * transparent pixel in size - that goes unnoticed, but counts. */
   function fetchVideoKeepAwake() {
     if (keepAwakeVideo) return keepAwakeVideo;
     const video = document.createElement("video");
@@ -984,16 +987,16 @@ window.joltLive = (function () {
     return video;
   }
 
-  /* Beide Wege melden zurück, statt nur ins unsichtbare Konsolenprotokoll zu
-   * schreiben - am Steuer kommt niemand an die Konsole heran, und ohne eine
-   * sichtbare Rückmeldung liesse sich ein Fehlschlag nur raten statt sehen. */
-  /* In der iOS-App ist das eine Zeile, und sie hält.
+  /* Both paths report back, instead of only writing to the invisible console log -
+   * at the wheel nobody can get at the console, and without a
+   * visible response a failure could only be guessed at rather than seen. */
+  /* In the iOS app this is one line, and it holds.
    *
-   * `isIdleTimerDisabled` sagt dem System schlicht, den Sperrtimer nicht
-   * laufen zu lassen - kein Wake Lock, der widerrufen wird, kein Video, das
-   * als Wiedergabe gelten muss. Der Weg darunter bleibt trotzdem stehen:
-   * Die Oberfläche läuft weiter auch im Browser, und dort gibt es nichts
-   * Besseres als Wake Lock und den Videobehelf. */
+   * `isIdleTimerDisabled` simply tells the system not to let the lock
+   * timer run - no Wake Lock that gets revoked, no video that has to
+   * count as playback. The path below stays in place anyway:
+   * the UI also keeps running in the browser, and there is nothing
+   * better there than Wake Lock and the video workaround. */
   async function nativeAwakeHold() {
     const h = window.joltBlePlugin;
     if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()) return false;
@@ -1033,9 +1036,9 @@ window.joltLive = (function () {
   }
 
   function screenRelease() {
-    // Nach der Fahrt soll sich das Telefon wieder normal sperren. Der
-    // native Weg wird zuerst zurückgenommen; die beiden darunter schaden
-    // nicht, wenn sie gar nicht erst gegriffen haben.
+    // After the trip the phone should lock normally again. The
+    // native path is withdrawn first; the two below do no
+    // harm if they never took hold in the first place.
     const h = window.joltBlePlugin;
     if (h && h.Capacitor && h.Capacitor.isNativePlatform()) {
       h.KeepAwake.allowSleep().catch(() => {});
@@ -1049,85 +1052,85 @@ window.joltLive = (function () {
     }
   }
 
-  /* Zurück im Vordergrund: aufholen, was im Hintergrund liegengeblieben ist.
+  /* Back in the foreground: catch up on what was left lying in the background.
    *
-   * iOS friert eine Seite im Hintergrund ein. Der Abriss der
-   * Bluetooth-Verbindung wird dann zwar gemeldet, aber der Wiederaufbau
-   * hängt an einem Zeitgeber, und der läuft erst weiter, wenn die Seite
-   * wieder sichtbar ist. Ohne dieses Nachfassen bliebe der Dongle getrennt,
-   * bis der nächste Abriss kommt - und der kommt nicht mehr. */
+   * iOS freezes a page in the background. The drop of the
+   * Bluetooth connection is then reported, but the reconnect
+   * hangs on a timer, and that only continues once the page is
+   * visible again. Without this follow-up the dongle would stay disconnected
+   * until the next drop comes - and it never does. */
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !K.state.sessionId) return;
     screenAwakeHold();
-    // `donglePause` gehört mit in beide Bedingungen: An der Ladesäule ist
-    // das Auto verriegelt, und eine Verbindung, die jolt hier von selbst
-    // zurückholt, löst die Alarmanlage aus. Heute deckt `dongle` den Fall
-    // schon ab - aber diese Bedingung darf nicht davon abhängen, dass eine
-    // zweite Variable anderswo richtig gesetzt wurde.
+    // `donglePause` belongs in both conditions: at the charger the
+    // car is locked, and a connection that jolt brings back on its own
+    // here sets off the alarm. Today `dongle` already covers the case
+    // - but this condition must not depend on a
+    // second variable having been set correctly elsewhere.
     reconnectDongle();
-    // Sofort einen Punkt melden, statt bis zum nächsten Takt zu warten:
-    // Nach einer Pause im Hintergrund ist gerade der erste Punkt danach der
-    // wichtige - er schliesst die Lücke.
+    // Report a point immediately instead of waiting for the next beat:
+    // after a pause in the background the first point afterwards is
+    // the important one - it closes the gap.
     latestReport = 0;
   });
 
-  /* Wenn ein Dongle mitliest, wandert der Ladestand von hier aus mit.
+  /* When a dongle reads along, the state of charge travels from here.
    *
-   * Bewusst an dieselbe Meldung gehängt und nicht als zweite Schleife: So
-   * gehören Position und Ladestand zu **einem** Messpunkt und derselben
-   * Sekunde. Zwei Schleifen ergäben Punkte, die sich abwechseln - einer mit
-   * Position, einer mit Ladestand -, und die Nachführung müsste beides
-   * wieder zusammensuchen. */
-  /* Pausiert der Dongle gerade?
+   * Deliberately attached to the same report and not as a second loop: this way
+   * position and state of charge belong to **one** measurement point and the same
+   * second. Two loops would produce points that alternate - one with
+   * position, one with state of charge -, and the tracking would have to put
+   * both back together. */
+  /* Is the dongle paused right now?
    *
-   * An der Ladesäule wird abgeschlossen, und ein verriegeltes Auto, das
-   * weiter über CAN gefragt wird, löst die Alarmanlage aus. Ein blosses
-   * "nicht mehr lesen" genügt dabei nicht - der Wiederaufbau würde die
-   * Verbindung von selbst zurückholen. Pause heisst deshalb: trennen und
-   * nicht wieder aufbauen, bis jemand es sagt. */
+   * At the charger the car is locked, and a locked car that
+   * keeps being queried over CAN sets off the alarm. A mere
+   * "stop reading" is not enough here - the reconnect would bring the
+   * connection back by itself. Pause therefore means: disconnect and
+   * do not reconnect until someone says so. */
   let donglePause = false;
 
-  /* ---------- Wann darf der Dongle das Auto fragen? ---------- */
+  /* ---------- When may the dongle query the car? ---------- */
 
-  /* Ob das Auto verriegelt ist, lässt sich **nicht** erfahren, ohne es zu
-   * fragen - und genau das Fragen löst bei verriegeltem Auto die
-   * Alarmanlage aus. Ein Signal, das der Dongle oder das Auto von sich aus
-   * aussendet, gibt es nicht. Also wird umgekehrt gerechnet: Gelesen wird
-   * nur, wenn das Telefon etwas weiss, was bei verriegeltem Auto nicht sein
-   * kann - es bewegt sich mit Fahrtgeschwindigkeit.
+  /* Whether the car is locked cannot be found out **without** asking
+   * it - and the asking itself sets off the alarm of a locked car.
+   * There is no signal that the dongle or the car sends out on its own.
+   * So it is worked out the other way round: reading happens
+   * only if the phone knows something that cannot be the case with a locked
+   * car - it is moving at driving speed.
    *
-   *   fährt    ab 15 km/h (zwei Messungen hintereinander). Zu Fuss kommt man
-   *            nicht dorthin, und wer so schnell ist, sitzt im Auto.
-   *            Gelesen wird, und ist der Dongle weg, wird er geholt.
-   *   steht    unter 3 km/h seit zehn Sekunden. Es wird nichts mehr gefragt;
-   *            die Verbindung bleibt, ein Dongle im Leerlauf sendet nichts auf
-   *            den Bus. Ampel, Stau und Zapfsäule kosten so keinen Neuaufbau.
-   *   geparkt  das Telefon ist zu Fuss mehr als 25 m vom Halteort weg, oder
-   *            das Auto steht seit drei Minuten: Verbindung trennen, nicht
-   *            wieder aufbauen. Erst eine Fahrt holt sie zurück.
+   *   fährt    from 15 km/h (two measurements in a row). On foot you
+   *            do not get there, and whoever is that fast is in a car.
+   *            Reading happens, and if the dongle is gone it is fetched back.
+   *   steht    under 3 km/h for ten seconds. Nothing is asked any more;
+   *            the connection stays, an idling dongle sends nothing onto
+   *            the bus. Traffic lights, jams and charging pumps thus cost no rebuild.
+   *   geparkt  the phone is on foot more than 25 m from the stopping place, or
+   *            the car has been standing for three minutes: disconnect, do not
+   *            reconnect. Only a drive brings it back.
    *
-   * Die Zähler im Auto laufen über die Lebensdauer: Was während einer Pause
-   * verbraucht wurde, steckt in der Differenz der nächsten Messung. Eine
-   * Lücke im Stand kostet deshalb keinen Verbrauch, nur Einzelwerte.
+   * The counters in the car run over the lifetime: what was used during a pause
+   * is contained in the difference of the next measurement. A gap while
+   * standing therefore costs no consumption, only individual values.
    *
-   * Nicht erfassbar: Wer abschliesst, noch bevor zehn Sekunden vergangen
-   * sind, kann im ersten Moment noch eine Abfrage auslösen. Sicher wäre nur
-   * ein Signal aus dem Auto selbst. */
+   * Not detectable: whoever locks before ten seconds have passed
+   * can still trigger a query in the first moment. Only
+   * a signal from the car itself would be certain. */
   const FAST_KMH = 15;
   const STAND_KMH = 3;
   const STANDING_TIME_MS = 10000;
   const PARK_TIME_MS = 180000;
   const PATH_M = 25;
-  // Hat jemand "Dongle verbinden" von Hand getippt, will er im Stand lesen.
+  // If someone tapped "Dongle verbinden" ("connect dongle") by hand, they want to read while standing.
   const MANUAL_MS = 600000;
-  // Kein Dongle in Reichweite (Fahrrad, Bus): Nach so vielen Fehlversuchen ist
-  // Schluss, bis wieder angehalten wurde.
+  // No dongle in range (bicycle, bus): after this many failed attempts
+  // it stops until the vehicle has stopped again.
   const AGAIN_ATTEMPTS_MAX = 8;
   const AGAIN_ATTEMPTS_DRIVING = 40;
 
   let autoMode = true;
   try { autoMode = localStorage.getItem("jolt-dongle-auto") !== "0"; }
-  catch (e) { /* ohne Speicher gilt die Vorgabe */ }
+  catch (e) { /* without storage the default applies */ }
 
   let driveState = "steht";     // "faehrt" | "steht" | "geparkt"
   let standSince = null;
@@ -1140,7 +1143,7 @@ window.joltLive = (function () {
 
   function readAllowed() {
     if (donglePause) return false;
-    // Beim Mithören (Einstellungen) darf nichts gefragt werden.
+    // While listening in (settings) nothing may be queried.
     if (window.joltObd && window.joltObd.listens && window.joltObd.listens()) return false;
     if (!autoMode) return true;
     return driveState === "faehrt" || Date.now() < manualUntil;
@@ -1161,8 +1164,8 @@ window.joltLive = (function () {
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
-  /* Die Geschwindigkeit aus dem Fix - oder aus zwei Fixes, wenn das Gerät
-   * keine liefert (im Browser auf iOS regelmässig). */
+  /* The speed from the fix - or from two fixes if the device
+   * provides none (regularly the case in the browser on iOS). */
   function speedKmh(coords, city, timeMs) {
     const prior = latestPosition;
     latestPosition = { lat: city.lat, lon: city.lon, timestamp: timeMs };
@@ -1199,29 +1202,29 @@ window.joltLive = (function () {
       if (as_of >= PARK_TIME_MS) statePark("Das Auto steht seit drei Minuten");
       else if (as_of >= STANDING_TIME_MS && driveState === "faehrt") driveState = "steht";
     } else if (standCity && distanceM(standCity, city) > PATH_M) {
-      // Langsam und weit vom Halteort: Man ist ausgestiegen und geht.
+      // Slow and far from the stopping place: you got out and are walking.
       statePark("Du bist vom Auto weggegangen");
     }
   }
 
-  /* Das Auto ist aus - das merkt man an der 12-V-Spannung, ohne zu fragen.
+  /* The car is off - you can tell from the 12 V voltage, without asking.
    *
-   * `ATRV` misst der ELM-Chip selbst, es geht nichts auf den CAN-Bus (siehe
-   * `obd-core.js: spannung`). Solange das Auto an ist oder lädt, hält der
-   * DC/DC-Wandler die Spannung oben; geht es aus, fällt sie binnen
-   * Sekunden. Das passiert **vor** dem Abschliessen - man schaltet aus,
-   * steigt aus und schliesst ab - und ist damit das Signal, das die
-   * Bewegung des Telefons nicht liefern kann.
+   * `ATRV` is measured by the ELM chip itself, nothing goes onto the CAN bus (see
+   * `obd-core.js: spannung`). As long as the car is on or charging, the
+   * DC/DC converter keeps the voltage up; when it goes off it falls within
+   * seconds. That happens **before** locking - you switch off,
+   * get out and lock - and it is thus the signal that the
+   * phone's movement cannot provide.
    *
-   * Eine feste Schwelle gibt es absichtlich nicht: Wie hoch die Spannung
-   * bei laufendem Wandler liegt, ist von Auto zu Auto verschieden. Verglichen
-   * wird mit dem Mittel aus der letzten Fahrt, und zwar nur im Stand - ein
-   * Abfall während der Fahrt ist keine Parkposition. Wer nie gefahren ist,
-   * hat keine Grundlage; dann gelten die Regeln über Stand und Weg.
+   * There is deliberately no fixed threshold: how high the voltage is
+   * with the converter running differs from car to car. The comparison
+   * is against the average of the last drive, and only while standing - a
+   * drop during the drive is not a parking position. Whoever has never driven
+   * has no basis; then the rules about standing and distance apply.
    *
-   * Lädt das Auto verriegelt, bleibt die Spannung oben, und es bleibt bei
-   * diesen Regeln. Auch das ist in Ordnung: Dann ist die Abfrage gerade
-   * *nicht* das Problem, solange nichts mehr gefragt wird. */
+   * If the car charges locked, the voltage stays up, and the
+   * rules stay as they are. That is fine too: the query is then precisely
+   * *not* the problem, as long as nothing is being asked any more. */
   const VOLTAGE_TICK_MS = 2000;
   const VOLTAGE_CASE_V = 0.7;
   const VOLTAGE_SEQUENCE = 2;
@@ -1269,14 +1272,14 @@ window.joltLive = (function () {
 
   function statePark(reason) {
     if (driveState === "geparkt") return;
-    // Erst den Zustand setzen, dann trennen: `trennen()` löst den
-    // Verbindungsabriss aus, und dessen Behandlung fragt `lesenErlaubt()`.
+    // Set the state first, then disconnect: `trennen()` triggers the
+    // connection drop, and its handling asks `readAllowed()`.
     driveState = "geparkt";
     standSince = null; standCity = null;
     asOfSeen = false;
     voltageBasis = []; voltageSequence = 0;
     if (dongle && window.joltObd) {
-      try { window.joltObd.detach(); } catch (e) { /* schon getrennt */ }
+      try { window.joltObd.detach(); } catch (e) { /* already disconnected */ }
       K.report(reason + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
         + "So löst ein abgeschlossenes Auto keinen Alarm aus.", "hinweis");
     }
@@ -1284,8 +1287,8 @@ window.joltLive = (function () {
   }
 
   function driveBegins() {
-    // Nach einem Fehlversuch ohne Dongle erst wieder, wenn angehalten wurde -
-    // sonst probierte eine Radfahrt den ganzen Weg über zu verbinden.
+    // After a failed attempt without a dongle only again once the vehicle has stopped -
+    // otherwise a bicycle ride would try to connect all the way.
     if (driveState === "geparkt" && !asOfSeen) return;
     const wasParked = driveState === "geparkt";
     driveState = "faehrt";
@@ -1297,20 +1300,20 @@ window.joltLive = (function () {
     showDongle();
   }
 
-  /* Den Dongle holen, wenn er fehlt - solange das Auto fährt, aber nicht
-   * endlos: Ist keiner in Reichweite, bleibt die Verbindung aus, und jeder
-   * weitere Versuch kostet nur Akku. */
+  /* Fetch the dongle when it is missing - as long as the car is moving, but not
+   * endlessly: if none is in range, the connection stays off, and every
+   * further attempt only costs battery. */
   function reconnectDongle() {
     if (!dongle || !readAllowed() || !window.joltObd
         || window.joltObd.linked()) return;
     let attempts = 0;
     window.joltObd.reconnect(1, () => {
       if (!K.state.sessionId || !readAllowed()) return false;
-      // Wer gerade fährt (GPS: mindestens 15 km/h), hat das Auto nicht
-      // verlassen: Nach zwei Minuten aufzugeben hiesse, bis zum nächsten Halt
-      // ohne Fahrzeugwerte zu fahren und von Hand neu zu verbinden. Dann wird
-      // gut zwölf Minuten lang weiter angeklopft (alle 20 s, kostet wenig).
-      // Im Stand - und im Bus ohne Dongle - bleibt es bei den acht Versuchen.
+      // Whoever is driving right now (GPS: at least 15 km/h) has not left
+      // the car: giving up after two minutes would mean driving until the next
+      // stop without vehicle values and reconnecting by hand. So it keeps
+      // knocking for a good twelve minutes (every 20 s, costs little).
+      // When standing - and on the bus without a dongle - it stays at eight attempts.
       const driving = latestSpeed !== null
                       && latestSpeed >= FAST_KMH;
       const bound = driving ? AGAIN_ATTEMPTS_DRIVING : AGAIN_ATTEMPTS_MAX;
@@ -1347,64 +1350,64 @@ window.joltLive = (function () {
       + "Position kommt vom Telefon.", "hinweis");
   }
 
-  /* Der Dongle, der verbunden ist und trotzdem schweigt.
+  /* The dongle that is connected and still stays silent.
    *
-   * Beide Rettungswege - das Ereignis `gattserverdisconnected` und das
-   * Nachfassen beim Zurückkommen in den Vordergrund - fragen `verbunden()`
-   * und werden nur tätig, wenn die Verbindung **weg** ist. Der häufigere
-   * Fall sieht anders aus: GATT meldet weiter "verbunden", der Dongle
-   * antwortet aber auf nichts mehr. Dann fällt jede Leserunde still in
-   * ihren `catch`, der Messpunkt geht ohne Fahrzeugwerte hinaus - und
-   * ausgelöst wird nie etwas, weil formal alles in Ordnung ist.
+   * Both rescue paths - the event `gattserverdisconnected` and the
+   * follow-up on returning to the foreground - ask `verbunden()`
+   * and only act if the connection is **gone**. The more frequent
+   * case looks different: GATT keeps reporting "connected" but the dongle
+   * no longer answers anything. Then every read round silently falls into
+   * its `catch`, the measurement point goes out without vehicle values - and
+   * nothing is ever triggered because formally everything is fine.
    *
-   * Am 2. September hat das zwei Fahrten halbiert: In Sitzung 28 kamen
-   * nach 16:45 Uhr 51 von 110 Minuten ohne einen einzigen Wert an, in
-   * Sitzung 26 die letzten 27 Minuten. Beide Male blieb die Verbindung
-   * bestehen, und beide Male hat niemand es gemerkt.
+   * On 2 September that cut two trips in half: in session 28, after
+   * 16:45, 51 of 110 minutes arrived without a single value, in
+   * session 26 the last 27 minutes. Both times the connection
+   * stayed up, and both times nobody noticed.
    *
-   * Das Gegenmittel ist, den Abriss selbst herbeizuführen: `trennen()`
-   * löst `gattserverdisconnected` aus, und daran hängt der Wiederaufbau,
-   * den es längst gibt. Bleibt das Ereignis aus, wird nachgefasst.
+   * The remedy is to bring about the drop ourselves: `trennen()`
+   * triggers `gattserverdisconnected`, and the reconnect that has long
+   * existed hangs on that. If the event does not come, we follow up.
    *
-   * An der Ladesäule gilt das alles nicht: Dort ist Schweigen gewollt, und
-   * ein verriegeltes Auto, das wieder über CAN gefragt wird, löst die
-   * Alarmanlage aus. Daher die Bedingung auf `donglePause`. */
+   * None of this applies at the charger: there silence is wanted, and
+   * a locked car that is queried over CAN again sets off the
+   * alarm. Hence the condition on `donglePause`. */
   const QUIET_RESTART_MS = 120000;
 
   function quietWatch() {
     if (!readAllowed() || !window.joltObd || !window.joltObd.linked()) return;
-    // Kam noch nie etwas, läuft die Uhr ab jetzt - sonst wartet die
-    // Überwachung auf einen Wert, der nie kommt, und greift nie ein.
+    // If nothing ever came, the clock runs from now - otherwise the
+    // monitoring waits for a value that never comes, and never steps in.
     if (!latestRawValuesTime) { latestRawValuesTime = Date.now(); return; }
     if (Date.now() - latestRawValuesTime < QUIET_RESTART_MS) return;
-    // Die Uhr sofort weiterstellen, sonst stösst die nächste Runde
-    // denselben Neuaufbau noch einmal an, während der erste läuft.
+    // Advance the clock immediately, otherwise the next round triggers
+    // the same rebuild again while the first is still running.
     latestRawValuesTime = Date.now();
     K.report("Der Dongle antwortet seit zwei Minuten nicht mehr – jolt baut "
       + "die Verbindung neu auf.", "hinweis");
-    try { window.joltObd.detach(); } catch (e) { /* schon getrennt */ }
+    try { window.joltObd.detach(); } catch (e) { /* already disconnected */ }
     setTimeout(reconnectDongle, 3000);
   }
 
-  /* Den Dongle anbieten, bevor sonst irgendetwas läuft.
+  /* Offer the dongle before anything else runs.
    *
-   * Die Reihenfolge ist nicht beliebig: `requestDevice` darf nur in
-   * unmittelbarer Folge einer Nutzergeste laufen. Wer vorher auf GPS oder
-   * eine API-Antwort wartet, hat die Geste verbraucht und bekommt ein
-   * `SecurityError`. Deshalb steht der Dongle **zuerst** - noch vor dem
-   * Anlegen der Sitzung.
+   * The order is not arbitrary: `requestDevice` may only run in
+   * immediate response to a user gesture. Whoever waits for GPS or
+   * an API response beforehand has used up the gesture and gets a
+   * `SecurityError`. That is why the dongle comes **first** - even before
+   * creating the session.
    *
-   * Kommt keiner zustande - kein Bluetooth im Browser, kein Dongle im
-   * Auto, Dialog weggetippt -, ist das kein Grund abzubrechen, sondern
-   * einer, ohne weiterzufahren: Eine Fahrt mit von Hand gemeldetem
-   * Ladestand ist besser als keine Fahrt. Entschieden wird hier nichts,
-   * die Rückgabe sagt nur, was daraus geworden ist. */
+   * If none comes about - no Bluetooth in the browser, no dongle in the
+   * car, dialog tapped away -, that is no reason to abort but
+   * one to carry on without: a trip with a state of charge reported by hand
+   * is better than no trip. Nothing is decided here,
+   * the return value only says what became of it. */
   async function dongleOffer() {
     if (!window.joltObd || !window.joltObd.obtainable()) return false;
     try {
       dongleUse();
-      // Erst ohne Dialog: Ist der Dongle schon einmal erlaubt worden,
-      // verbindet er ohne Berührung.
+      // First without a dialog: if the dongle has been allowed once,
+      // it connects without a tap.
       await window.joltObd.attach();
       if (await handshakeSafe()) return true;
     } catch (failure) {
@@ -1414,15 +1417,15 @@ window.joltLive = (function () {
     return false;
   }
 
-  /* Den Handshake schicken, im Zweifel zweimal.
+  /* Send the handshake, twice if in doubt.
    *
-   * Der ELM antwortet auf das erste ATZ nach dem Verbinden oft erst nach
-   * Sekunden, oder eine Antwort kommt zu spät und trifft den nächsten Befehl.
-   * Die Reihe läuft trotzdem weiter und konfiguriert den Dongle - nur das
-   * Urteil "unvollständig" war bisher endgültig, und mit ihm gab der Start
-   * den Dongle auf, obwohl er verbunden war und Werte lieferte. Deshalb: ein
-   * zweiter Durchlauf, und wer danach verbunden ist, wird genutzt.
-   * Gibt zurück, ob der Dongle benutzbar ist; die Gründe stehen im Protokoll. */
+   * The ELM often answers the first ATZ after connecting only after
+   * seconds, or a reply arrives too late and hits the next command.
+   * The sequence keeps running anyway and configures the dongle - only the
+   * verdict "incomplete" used to be final, and with it the start gave up
+   * the dongle although it was connected and delivering values. Hence: a
+   * second pass, and whoever is connected afterwards gets used.
+   * Returns whether the dongle is usable; the reasons are in the log. */
   async function handshakeSafe() {
     const O = window.joltObd;
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -1444,7 +1447,7 @@ window.joltLive = (function () {
         return;
       }
       donglePause = false;
-      // Wer von Hand verbindet, will lesen - auch im Stand, zehn Minuten lang.
+      // Whoever connects by hand wants to read - even while standing, for ten minutes.
       manualUntil = Date.now() + MANUAL_MS;
       if (driveState === "geparkt") driveState = "steht";
       dongleUse();
@@ -1468,17 +1471,17 @@ window.joltLive = (function () {
     if (window.joltObd) {
       window.joltObd.set_up(
         (t) => console.log("[obd]", t),
-        // Ein Abriss im Tunnel ist kein Grund aufzuhören, solange die Fahrt
-        // läuft: Der Baustein baut selbst wieder auf.
+        // A drop in a tunnel is no reason to stop as long as the trip
+        // is running: the component rebuilds the connection itself.
         () => { if (K.state.sessionId) reconnectDongle(); });
     }
   }
 
-  /* Leistung aus Spannung mal Strom. Das Vorzeichen ist **nicht** bestätigt:
-   * Der Rohwert des Stroms ist um 150000 versetzt, positiv heisst also
-   * entweder Entladen oder Laden - welches davon, zeigt die erste Messung
-   * am Fahrzeug. Deshalb wird der Betrag angezeigt und die Richtung
-   * benannt, statt eine Annahme zu treffen, die man nicht sieht. */
+  /* Power from voltage times current. The sign is **not** confirmed:
+   * the raw value of the current is offset by 150000, so positive means
+   * either discharging or charging - which of the two, the first measurement
+   * on the vehicle will show. Hence the magnitude is displayed and the direction
+   * named, instead of making an assumption you cannot see. */
   function powerKw(raw) {
     if (!raw || typeof raw.voltage_v !== "number"
         || typeof raw.current_a !== "number") return null;
@@ -1486,24 +1489,24 @@ window.joltLive = (function () {
   }
 
   function auxLoadRemember(raw) {
-    // Liegt der gemessene Wert vor, braucht es die Näherung nicht.
+    // If the measured value is available, the approximation is not needed.
     if (typeof raw.aux_load_kw === "number") return;
     const kw = powerKw(raw);
     if (kw === null) return;
     const velocity = typeof raw.speed_kmh === "number" ? raw.speed_kmh : null;
-    // Nur im Stand, und nur wenn Energie entnommen wird - beim Laden misst
-    // man den Lader, nicht die Heizung.
+    // Only while standing, and only when energy is drawn - while charging
+    // you measure the charger, not the heater.
     if (velocity !== null && velocity < 5 && kw > 0) {
       aux_load = { kw, timestamp: Date.now() };
     }
   }
 
-  /* Was das Auto misst - als **Zeile**, nicht als Kachelreihe.
+  /* What the car measures - as a **row**, not a row of tiles.
    *
-   * Sechs weitere Kacheln hätten dieselbe Grösse gehabt wie die vier
-   * darüber, und damit hätte alles gleich wichtig ausgesehen. Diese Werte
-   * braucht man aber nur gelegentlich: Man sieht hin, wenn man wissen will,
-   * *warum* der Verbrauch hoch ist - nicht, um zu erfahren, dass er es ist.
+   * Six more tiles would have been the same size as the four
+   * above, and everything would have looked equally important. But these values
+   * are only needed occasionally: you look when you want to know
+   * *why* the consumption is high - not to learn that it is.
    */
   function autoRow(z) {
     const block = document.getElementById("live-auto");
@@ -1523,10 +1526,10 @@ window.joltLive = (function () {
       ? Math.abs(kw) / velocity * 100 : null;
 
     const parts = [];
-    /* Der Verbrauch der Fahrt zuerst: Das ist die Zahl, wegen der man
-     * aufzeichnet. Die momentane Leistung darunter ist Beiwerk - und beim
-     * ID.Buzz ohnehin nicht zu haben, weil der Batteriestrom nicht
-     * antwortet. */
+    /* The consumption of the trip first: that is the number you
+     * record for. The instantaneous power below it is an extra - and on the
+     * ID.Buzz it is not available anyway, because the battery current does not
+     * answer. */
     const so_far = runningConsumption(raw, z && z.actual_soc);
     if (so_far) {
       parts.push(`<b>${K.num(so_far.kwh100, 1)}</b> kWh/100 auf `
@@ -1550,13 +1553,13 @@ window.joltLive = (function () {
       parts.push(`<b>${K.num(aux_load.kw, 1)}</b> kW Nebenverbraucher`
                  + ` (im Stand${age > 0 ? `, vor ${age} min` : ""})`);
     }
-    /* Aussentemperatur und Kilometerstand standen hier auch. Sie sind
-     * richtig und interessant, aber nicht **im Fahren** - und eine Zeile
-     * mit sechs Angaben liest man gar nicht mehr. Beide stehen in der
-     * Tabelle unter der Klappe, wo man sie sucht, wenn man sie sucht. */
+    /* Outside temperature and odometer were here too. They are
+     * right and interesting, but not **while driving** - and a row
+     * with six items is not read at all any more. Both are in the
+     * table under the flap, where you look for them if you look for them. */
 
-    // Zeile und Tabelle stehen jetzt an verschiedenen Stellen: die Zeile
-    // oben bei den Kacheln, die Tabelle unten hinter der Klappe.
+    // Row and table now sit in different places: the row
+    // up by the tiles, the table below behind the flap.
     document.getElementById("live-auto-zeile").innerHTML = parts.join(" · ");
     const flap = document.getElementById("live-roh");
     if (flap) {
@@ -1565,10 +1568,10 @@ window.joltLive = (function () {
         rawValuesTable(raw);
     }
 
-    /* Wie alt der letzte Satz ist - die Frage, die man am Steuer wirklich
-     * hat. "3 s" heisst, der Dongle antwortet; "4 min" heisst, er ist weg,
-     * und die Zahlen darunter sind Erinnerungen. Ohne diese Angabe sieht
-     * eine eingefrorene Anzeige genauso aus wie eine laufende. */
+    /* How old the last set is - the question you really have at the
+     * wheel. "3 s" means the dongle is answering; "4 min" means it is gone,
+     * and the numbers below are memories. Without this indication a frozen
+     * display looks exactly like a running one. */
     const age = latestRawValuesTime
       ? Math.round((Date.now() - latestRawValuesTime) / 1000) : null;
     const as_of = document.getElementById("live-auto-stand");
@@ -1580,17 +1583,17 @@ window.joltLive = (function () {
     } else {
       as_of.textContent = `seit ${K.duration(age / 60)} keine Antwort`;
       as_of.style.color = "#e8804f";
-      /* Einmal deutlich sagen, dass nichts mehr aus dem Auto kommt.
+      /* Say clearly, once, that nothing comes from the car any more.
        *
-       * Die blasse Zeile hinter der Klappe reicht dafür nicht. Auf einer
-       * echten Fahrt sind so zwanzig Kilometer ohne einen einzigen
-       * Fahrzeugwert aufgezeichnet worden - GPS lief weiter, der Dongle
-       * war weg, und gemerkt hat es niemand. Eine Aufzeichnung ohne
-       * Ladestand ist für das Lernen wertlos, und das erfährt man sonst
-       * erst hinterher.
+       * The pale line behind the flap is not enough for that. On a
+       * real trip some twenty kilometres were recorded without a single
+       * vehicle value - GPS kept running, the dongle
+       * was gone, and nobody noticed. A recording without
+       * state of charge is worthless for learning, and otherwise you only find
+       * that out afterwards.
        *
-       * Drei Minuten, nicht neunzig Sekunden: Ein Tunnel oder eine kurze
-       * Sperre soll nicht melden, ein abgerissener Dongle schon. */
+       * Three minutes, not ninety seconds: a tunnel or a brief
+       * lock should not report, a dropped dongle should. */
       if (!quietReported && age > 180) {
         quietReported = true;
         K.report("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
@@ -1601,42 +1604,42 @@ window.joltLive = (function () {
     }
   }
 
-  /* Alles, was das Auto liefert - als Tabelle, nicht als Satz.
+  /* Everything the car delivers - as a table, not as a sentence.
    *
-   * Die Zeile darüber beantwortet "wie läuft es gerade". Diese Tabelle
-   * beantwortet die andere Frage: "kommt überhaupt an, was ankommen soll".
-   * Dafür muss auch dastehen, was **nicht** geantwortet hat - ein fehlender
-   * Wert ist beim Einrichten die interessantere Information als ein
-   * vorhandener, und ein Zähler ("3 Werte antworten nicht") sagt nicht,
-   * welche drei.
+   * The row above answers "how is it going right now". This table
+   * answers the other question: "does what should arrive actually arrive".
+   * For that it must also show what has **not** answered - a missing
+   * value is the more interesting information when setting up than a
+   * present one, and a counter ("3 values do not answer") does not say
+   * which three.
    *
-   * Die Liste kommt aus `joltObd.FELDER`, damit eine neue Datenkennung hier
-   * von selbst auftaucht und nicht an zwei Stellen gepflegt werden muss. */
+   * The list comes from `joltObd.FELDER`, so that a new data identifier shows up
+   * here by itself and does not have to be maintained in two places. */
   function valuesRemember(raw) {
     const now_ts = Date.now();
-    // Für den Verbrauchsplot: Kilometerstand und Ladestand mit Zeitstempel.
-    // Die Leistung steht bewusst nicht dabei - siehe verbrauchsabschnitte().
+    // For the consumption plot: odometer and state of charge with a timestamp.
+    // The power is deliberately not included - see verbrauchsabschnitte().
     if (typeof raw.odometer_km === "number") {
-      /* `netto` ist der Zählerstand: entladen minus geladen. Seine
-       * Differenz über ein Stück Fahrt **ist** die verbrauchte Energie -
-       * ohne Umweg über Ladestand und Akkugrösse, und mit 0,117 Wh
-       * Auflösung statt 339. */
+      /* `netto` is the counter reading: discharged minus charged. Its
+       * difference over a stretch of driving **is** the energy used -
+       * without a detour via state of charge and battery size, and with 0.117 Wh
+       * resolution instead of 339. */
       const net = (typeof raw.discharge_kwh === "number")
         ? raw.discharge_kwh - (typeof raw.charged_kwh === "number"
                               ? raw.charged_kwh : 0)
         : null;
       consumption_track.push({
         timestamp: now_ts, km: raw.odometer_km, net,
-        // Die beiden Zähler einzeln, für die Rekuperation der Anzeige.
+        // The two counters individually, for the display of recuperation.
         disch: typeof raw.discharge_kwh === "number" ? raw.discharge_kwh : null,
         chg: typeof raw.charged_kwh === "number" ? raw.charged_kwh : null,
-        // Die GPS-Strecke wird in `zustandAnzeigen` nachgetragen, sobald
-        // die Position dieses Punktes bekannt ist.
+        // The GPS distance is filled in in `showState` as soon as
+        // the position of this point is known.
         gps: null,
         soc: typeof raw.soc_raw === "number" ? raw.soc_raw / 2.5 : null });
-      // Grosszuegig: 20 000 Punkte sind bei Zwoelf-Sekunden-Takt rund
-      // 66 Stunden. Bei 3000 waeren nach zehn Stunden die ersten Punkte
-      // herausgefallen - und mit ihnen der Anfang der Fahrt.
+      // Generous: 20,000 points at a twelve-second beat are roughly
+      // 66 hours. With 3000 the first points would have dropped out after
+      // ten hours - and with them the start of the trip.
       if (consumption_track.length > 20000) consumption_track.shift();
     }
     for (const [name, val] of Object.entries(raw)) {
@@ -1645,37 +1648,37 @@ window.joltLive = (function () {
         neverCome.delete(name);
       }
     }
-    // "Geantwortet, aber ohne brauchbaren Wert" heisst: Die Datenkennung
-    // passt für dieses Fahrzeug nicht. Das bleibt so, bis doch einmal ein
-    // Wert kommt - deshalb gemerkt und nicht je Runde neu entschieden.
+    // "Answered, but without a usable value" means: the data identifier
+    // does not fit this vehicle. That stays so until a value does come
+    // after all - hence remembered and not decided anew each round.
     for (const name of raw._empty || []) {
       if (!valuesAsOf[name]) neverCome.add(name);
     }
   }
 
-  /* Der Verbrauch der laufenden Fahrt in kWh/100 km.
+  /* The consumption of the current trip in kWh/100 km.
    *
-   * **Warum gerechnet und nicht gelesen.** Die MEB-Liste kennt keinen
-   * Parameter dafür; das Auto zeigt den Wert im Bordcomputer, gibt ihn aber
-   * nicht über die Diagnose heraus. Er entsteht hier aus zwei Grössen, die
-   * beide jede Runde ankommen:
+   * **Why computed and not read.** The MEB list has no parameter for
+   * it; the car shows the value in the on-board computer but does not release it
+   * via diagnostics. It arises here from two quantities that
+   * both arrive every round:
    *
-   *   verbrauchte kWh = (Ladestand am Anfang − jetzt) / 100 × Akku netto
-   *   gefahrene km    = Kilometerstand jetzt − am Anfang
+   *   kWh used = (state of charge at start − now) / 100 × net battery
+   *   km driven    = odometer now − at start
    *
-   * **Der Kilometerstand und nicht das GPS.** Er zählt Radumdrehungen und
-   * kennt weder abgeschnittene Kurven noch Funklöcher - für eine Grösse mit
-   * der Strecke im Nenner ist das der Unterschied zwischen brauchbar und
-   * irreführend.
+   * **The odometer and not the GPS.** It counts wheel revolutions and
+   * knows neither cut-off bends nor dead spots - for a quantity with
+   * the distance in the denominator that is the difference between usable and
+   * misleading.
    *
-   * Er löst allerdings in ganzen Kilometern auf. Unter fünf gefahrenen
-   * Kilometern kommt deshalb nichts: Bei zwei Kilometern wäre die Angabe
-   * auf ±50 % genau und damit schlimmer als keine.
+   * It does resolve in whole kilometres, though. Under five driven
+   * kilometres nothing is therefore shown: at two kilometres the figure would be
+   * accurate to ±50 % and thus worse than none.
    */
   const CONSUMPTION_FROM_KM = 5.0;
-  /* Ab wie viel Energie **hinein** bei stehendem Auto es ein Ladevorgang
-   * ist. Rekuperation gibt es nur in Fahrt; wer steht und trotzdem Energie
-   * aufnimmt, hängt am Kabel. */
+  /* From how much energy **in** while the car is standing it
+   * counts as a charging session. Recuperation exists only while driving; whoever stands and still
+   * takes in energy is on the cable. */
   const CHARGING_AS_OF_KWH = 0.05;
 
   function runningConsumption(raw, soc) {
@@ -1684,17 +1687,17 @@ window.joltLive = (function () {
     const battery = fz && (fz.capacity_kwh || fz.battery_net_kwh);
     if (consumption_track.length < 2) return null;
 
-    /* **Aufsummiert statt Anfang gegen Ende.**
+    /* **Summed up instead of start against end.**
      *
-     * Hier stand `netto - anfang.netto`, und das ist auf einer kurzen Fahrt
-     * richtig. Auf einer **langen** nicht: Der Zähler `geladen` wächst auch
-     * an der Ladesäule. Wer vierzig Kilowattstunden nachlädt, dessen
-     * Nettozähler fällt um vierzig - der angezeigte Verbrauch der Fahrt
-     * wäre danach nahe null oder negativ.
+     * Here used to be `netto - anfang.netto`, and that is right on a short trip.
+     * On a **long** one it is not: the `geladen` counter also grows
+     * at the charger. Whoever recharges forty kilowatt hours sees their
+     * net counter fall by forty - the displayed consumption of the trip
+     * would then be near zero or negative.
      *
-     * Also abschnittsweise, und Ladevorgänge fallen heraus: Energie hinein
-     * bei stehendem Auto ist keine Rekuperation, sondern das Kabel. Alles
-     * andere zählt mit, auch der Verbrauch im Stand - der ist echt.
+     * So section by section, and charging sessions drop out: energy in
+     * while the car is standing is not recuperation but the cable. Everything
+     * else counts, including the consumption while standing - that is real.
      */
     let kwh = 0, km = 0;
     for (let i = 1; i < consumption_track.length; i++) {
@@ -1706,7 +1709,7 @@ window.joltLive = (function () {
         d = (a.soc - b.soc) / 100 * battery;
       }
       if (d === null) continue;
-      if (dkm <= 0 && d < -CHARGING_AS_OF_KWH) continue;   // an der Säule
+      if (dkm <= 0 && d < -CHARGING_AS_OF_KWH) continue;   // at the charger
       kwh += d;
       km += Math.max(0, dkm);
     }
@@ -1714,41 +1717,41 @@ window.joltLive = (function () {
     return { kwh100: kwh / km * 100, kwh, km };
   }
 
-  /* ---------- Verbrauch je Zeitabschnitt ---------- */
+  /* ---------- Consumption per time section ---------- */
 
-  /* **Woher die Energie kommt, und was das fuer die Balkenbreite heisst.**
+  /* **Where the energy comes from, and what that means for the bar width.**
    *
-   * Erster Entwurf: Leistung (Spannung mal Strom) ueber die Zeit
-   * aufsummieren. Falsch - der Strom aendert sich im Sekundentakt,
-   * gemeldet wird alle zwoelf Sekunden. Fuenf Stichproben je Minute sind
-   * kein Integral, sondern eine Umfrage; auf der Landstrasse 25 % Fehler,
-   * in der Stadt 59 %.
+   * First draft: sum up power (voltage times current) over time.
+   * Wrong - the current changes every second,
+   * reporting happens every twelve seconds. Five samples per minute are
+   * not an integral but a survey; on the country road 25 % error,
+   * in the city 59 %.
    *
-   * Zweiter Entwurf: aus dem **Ladestand**. Sein Quantisierungsfehler ist
-   * absolut begrenzt (ein Schritt, 0,44 pp = 339 Wh), also relativ umso
-   * kleiner, je laenger der Abschnitt - ab fuenf Minuten ueberall unter
-   * 3 %. Aber eben erst ab fuenf Minuten.
+   * Second draft: from the **state of charge**. Its quantisation error is
+   * absolutely bounded (one step, 0.44 pp = 339 Wh), so relatively the
+   * smaller the longer the section - from five minutes on everywhere under
+   * 3 %. But only from five minutes on.
    *
-   * Jetzt: die **Energiezaehler** des Fahrzeugs. Ihre Differenz ist die
-   * verbrauchte Energie, mit 0,117 Wh Auflösung - fast dreitausendmal
-   * feiner als der Ladestand. Damit ist ein Balken je Minute keine
-   * Schaetzung mehr, sondern eine Messung (0,05 % statt 136 %).
+   * Now: the vehicle's **energy counters**. Their difference is the
+   * energy used, with 0.117 Wh resolution - almost three thousand times
+   * finer than the state of charge. With that a bar per minute is no longer an
+   * estimate but a measurement (0.05 % instead of 136 %).
    *
-   * Die Balkenbreite folgt deshalb der Quelle, und nicht dem Wunsch:
-   * eine Minute mit Zaehler, fuenf ohne.
+   * The bar width therefore follows the source, and not the wish:
+   * one minute with the counter, five without.
    */
   const SECTION_WITH_COUNTER_S = 60;
   const SECTION_FROM_SOC_S = 300;
-  /* Bei einer langen Fahrt wird die Minute zu fein.
+  /* On a long trip the minute becomes too fine.
    *
-   * Ein Balken je Minute ist auf einer halben Stunde genau richtig - auf
-   * sechs Stunden waeren es 360 Balken auf rund 340 Pixeln, also 0,9 Pixel
-   * je Balken. Das ist kein Diagramm mehr, sondern eine Textur.
+   * A bar per minute is just right over half an hour - over
+   * six hours it would be 360 bars on roughly 340 pixels, i.e. 0.9 pixels
+   * per bar. That is no longer a chart but a texture.
    *
-   * Deshalb waechst die Abschnittsbreite mit der Fahrt, aber nur auf runde
-   * Werte: zwei Minuten liest man noch als zwei Minuten, 87 Sekunden nicht.
-   * Die Genauigkeit leidet dabei nicht - mit den Zaehlern ist schon die
-   * Minute weit ueber der Aufloesungsgrenze, breiter wird nur besser. */
+   * So the section width grows with the trip, but only to round
+   * values: two minutes you still read as two minutes, 87 seconds you do not.
+   * Accuracy does not suffer - with the counters even the
+   * minute is far above the resolution limit, wider only gets better. */
   const WIDTHS_MIN = [1, 2, 5, 10, 15, 30, 60];
   const BAR_AT_MOST = 60;
 
@@ -1759,25 +1762,25 @@ window.joltLive = (function () {
     }
     return WIDTHS_MIN[WIDTHS_MIN.length - 1] * 60000;
   }
-  // Unter dieser Strecke ist kWh/100 km nicht sinnvoll - das Auto stand.
+  // Below this distance kWh/100 km makes no sense - the car was standing.
   const BAR_MIN_KM = 0.3;
 
-  /* **Die Strecke je Balken kommt aus dem GPS, die Energie aus den Zählern.**
+  /* **The distance per bar comes from the GPS, the energy from the counters.**
    *
-   * Das klingt nach einem Rückschritt - für die **Gesamtstrecke** einer
-   * Aufzeichnung ist der Kilometerstand ja gerade die bessere Quelle, weil
-   * er weder Kurven abschneidet noch Funklöcher kennt. Über eine einzelne
-   * Minute kehrt sich das um: Er löst in ganzen Kilometern auf, und eine
-   * Minute bei siebzig km/h sind 1,2 km. Gemessen wird dann 1 oder 2 -
-   * vierzig Prozent Fehler auf den Nenner. Die GPS-Spur schneidet bei einer
-   * Meldung alle zwölf Sekunden nur wenige Prozent ab.
+   * That sounds like a step backwards - for the **total distance** of a
+   * recording the odometer is precisely the better source, because
+   * it neither cuts off bends nor knows dead spots. Over a single
+   * minute this reverses: it resolves in whole kilometres, and one
+   * minute at seventy km/h is 1.2 km. What gets measured is 1 or 2 -
+   * forty percent error on the denominator. The GPS track, with a report
+   * every twelve seconds, cuts off only a few percent.
    *
-   * Aufgefallen an einer echten Fahrt: Die Kilometerspalte je Minute stand
-   * durchgehend auf 0 oder 1, und die Balken schwankten entsprechend.
+   * Noticed on a real trip: the kilometre column per minute stood
+   * constantly at 0 or 1, and the bars fluctuated accordingly.
    *
-   * Die Energie bleibt bei den Zählern - dort ist die Auflösung 0,117 Wh
-   * und damit kein Thema. Jede Grösse aus der Quelle, die sie am besten
-   * kennt. */
+   * The energy stays with the counters - there the resolution is 0.117 Wh
+   * and thus no issue. Each quantity from the source that knows
+   * it best. */
   function consumption_sections() {
     const points = consumption_track.filter((p) => typeof p.gps === "number");
     if (points.length < 2) return null;
@@ -1831,9 +1834,9 @@ window.joltLive = (function () {
     pen.clearRect(0, 0, extent, elevation);
 
     const vals = records.bar.map((b) => b.kwh100);
-    // Die Skala nach oben grosszuegig, damit ein Ausreisser die uebrigen
-    // Balken nicht platt drueckt, und mit Nulllinie: Rekuperation geht
-    // unter null, und genau das soll man sehen.
+    // The scale generous upwards, so that an outlier does not flatten the other
+    // bars, and with a zero line: recuperation goes
+    // below zero, and that is exactly what you should see.
     const upper = Math.max(40, ...vals) * 1.1;
     const bottom = Math.min(0, ...vals) * 1.1;
     const span = upper - bottom || 1;
@@ -1841,14 +1844,14 @@ window.joltLive = (function () {
     const area = elevation - footElevation - edge;
     const y = (v) => edge + (upper - v) / span * area;
 
-    /* Beschriftete Achse. Ohne sie ist ein Balkendiagramm eine Form ohne
-     * Aussage - man sieht, dass eine Minute teurer war als die andere, aber
-     * nicht, ob es um zwanzig oder um vierzig kWh/100 km geht. Und genau
-     * das ist die Zahl, die man mit dem eigenen Gefühl vergleicht.
+    /* Labelled axis. Without it a bar chart is a shape without a
+     * message - you see that one minute was more expensive than another, but
+     * not whether it is twenty or forty kWh/100 km. And that is
+     * the number you compare with your own feeling.
      *
-     * Beschriftet wird links, in die Fläche hinein: Eine eigene Spalte
-     * dafür wäre auf dem Telefon zu teuer. Drei Linien reichen - null, ein
-     * runder Wert dazwischen und das Maximum. */
+     * Labels go on the left, into the area: a separate column
+     * for it would be too expensive on the phone. Three lines suffice - zero, a
+     * round value in between and the maximum. */
     const axis = 30;
     const split = [0];
     const step = upper > 60 ? 25 : (upper > 25 ? 10 : 5);
@@ -1868,7 +1871,7 @@ window.joltLive = (function () {
       pen.textAlign = "right";
       pen.fillText(String(w), axis - 4, yy);
     }
-    // Die Einheit einmal oben links, nicht an jeden Strich.
+    // The unit once at the top left, not on every tick.
     pen.fillStyle = "#8a97a5";
     pen.textAlign = "left";
     pen.fillText("kWh/100", axis + 3, edge + 4);
@@ -1878,7 +1881,7 @@ window.joltLive = (function () {
     records.bar.forEach((bar, i) => {
       const x = axis + i * (field / records.bar.length);
       const high = y(bar.kwh100) - y(0);
-      // Farbe nach Höhe: was deutlich über dem Schnitt liegt, fällt auf.
+      // Colour by height: what lies clearly above the average stands out.
       pen.fillStyle = bar.kwh100 < 0 ? "#57c98a"
         : (bar.kwh100 > 35 ? "#e8804f" : "#ffc93c");
       pen.fillRect(x, high < 0 ? y(bar.kwh100) : y(0),
@@ -1906,8 +1909,8 @@ window.joltLive = (function () {
     const rows = fields.map((f) => {
       const as_of = valuesAsOf[f.name];
       if (!as_of) {
-        // Noch nie ein Wert. Der Grund unterscheidet sich, und der
-        // Unterschied ist beim Einrichten die eigentliche Information.
+        // Never a value yet. The reason differs, and the
+        // difference is the real information when setting up.
         const reason = neverCome.has(f.name) ? "antwortet nicht"
           : (missing.has(f.name) ? "keine Antwort" : "–");
         return `<tr class="leer"><th>${f.title}</th><td>${reason}</td></tr>`;
@@ -1915,9 +1918,9 @@ window.joltLive = (function () {
       const age = (now_ts - as_of.timestamp) / 1000;
       const num = K.num(as_of.val, f.put)
         + (f.unit ? " " + f.unit : "");
-      // Frisch heisst: in dieser Runde gekommen. Alles andere bekommt sein
-      // Alter danebengeschrieben und wird blasser, je älter es ist - so
-      // sieht man auf einen Blick, welche Zeile noch lebt.
+      // Fresh means: arrived in this round. Everything else gets its
+      // age written next to it and becomes paler the older it is - this way
+      // you can see at a glance which row is still alive.
       if (typeof raw[f.name] === "number") {
         return `<tr><th>${f.title}</th><td>${num}</td></tr>`;
       }
@@ -1928,18 +1931,18 @@ window.joltLive = (function () {
     return `<table class="rohwerte"><tbody>${rows.join("")}</tbody></table>`;
   }
 
-  /* Werte, die der Server annimmt - sonst keine.
+  /* Values the server accepts - and none else.
    *
-   * Der Server lehnt seit der Absicherung (Bug-Scan #49) Unmögliches mit 422
-   * ab: Tempo ausserhalb 0 bis 500 km/h, Aussentemperatur ausserhalb -80 bis
-   * 70 °C. Das Auto liefert dafür Anlass genug: Das Tempo-Byte steht bei
-   * "ungültig" auf 255 (in den gespeicherten Fahrten kommt das vor), und die
-   * Aussentemperatur `b0 / 2 - 50` ergibt bei 0xFF 77,5 °C. Ein solcher Wert
-   * darf nicht den Punkt kosten, zu dem er gehört - und erst recht nicht den
-   * Stapel. Hier wird er zu "nicht gemessen".
+   * Since the hardening (bug scan #49) the server rejects the impossible with 422:
+   * speed outside 0 to 500 km/h, outside temperature outside -80 to
+   * 70 °C. The car gives cause enough for that: the speed byte is at
+   * 255 for "invalid" (this occurs in the stored trips), and the
+   * outside temperature `b0 / 2 - 50` gives 77.5 °C at 0xFF. Such a value
+   * must not cost the point it belongs to - and certainly not the
+   * batch. Here it becomes "not measured".
    *
-   * 250 km/h statt 500: 255 ist der Platzhalter des Autos, und kein
-   * Fahrzeug, das jolt kennt, fährt 250. */
+   * 250 km/h instead of 500: 255 is the car's placeholder, and no
+   * vehicle that jolt knows drives 250. */
   function speedOrNull(val) {
     return (typeof val === "number" && Number.isFinite(val)
             && val >= 0 && val <= 250) ? val : null;
@@ -1954,11 +1957,11 @@ window.joltLive = (function () {
     if (!K.state.sessionId) return;
     const payload = {
       lat: coords.latitude, lon: coords.longitude,
-      // Aus dem Fix: m/s, und -1 oder null, wenn das Gerät es nicht weiss.
+      // From the fix: m/s, and -1 or null if the device does not know.
       speed_kmh: speedOrNull(typeof coords.speed === "number"
                                ? coords.speed * 3.6 : null),
-      // Wann gemessen wurde, nicht wann es ankommt - sonst wären alle
-      // nachgereichten Punkte aus einem Funkloch auf dieselbe Sekunde datiert.
+      // When it was measured, not when it arrives - otherwise all points
+      // submitted late from a dead spot would be dated to the same second.
       timestamp: new Date(timeMs || Date.now()).toISOString(),
     };
 
@@ -1966,8 +1969,8 @@ window.joltLive = (function () {
         && window.joltObd.linked()) {
       try {
         const raw = await window.joltObd.readRecord(lap++);
-        // Die 12-V-Spannung mitschreiben, solange sie frisch ist: Daran
-        // lässt sich später nachsehen, wie weit sie beim Ausschalten fällt.
+        // Record the 12 V voltage along, as long as it is fresh: that way
+        // you can later check how far it falls when switching off.
         if (latestVoltage !== null && Date.now() - latestVoltageTime < 15000) {
           raw.batt_v = latestVoltage;
         }
@@ -1982,25 +1985,25 @@ window.joltLive = (function () {
         const val = window.joltObd.socFromRaw(raw.soc_raw);
         payload.soc = Math.round(val.hmi * 10) / 10;
         payload.raw_values = raw;
-        // Was das Auto selbst misst, schlägt jede Vorhersage - wenn es
-        // plausibel ist. Ein "ungültig" (255 km/h, 77,5 °C) lässt das Tempo des
-        // GPS stehen und die Temperatur leer.
+        // What the car itself measures beats any prediction - if it is
+        // plausible. An "invalid" (255 km/h, 77.5 °C) leaves the GPS speed
+        // in place and the temperature empty.
         const autoSpeed = speedOrNull(raw.speed_kmh);
         if (autoSpeed !== null) payload.speed_kmh = autoSpeed;
         const autoTemp = temperatureOrNull(raw.outside_temp_c);
         if (autoTemp !== null) payload.outside_temp_c = autoTemp;
       } catch (failure) {
-        // Eine Runde ohne Ladestand ist immer noch eine Positionsmeldung -
-        // und die trägt Zeitfaktor und Ankunftsprognose weiter.
+        // A round without state of charge is still a position report -
+        // and that carries the time factor and arrival forecast onward.
         console.log("[obd] Runde übersprungen:", failure);
       }
       quietWatch();
     }
 
-    // Die Spannung auch ohne Fahrzeugabfrage mitgeben. Im Stand wird nichts
-    // gefragt, `ATRV` aber weiter gemessen - und gerade dort fällt sie, wenn
-    // das Auto ausgeht. Ohne diese Zeile stünde der Abfall nirgends, und die
-    // Schwelle liesse sich nicht an einer echten Fahrt prüfen.
+    // Include the voltage even without a vehicle query. While standing nothing
+    // is asked, but `ATRV` is still measured - and that is exactly where it falls when
+    // the car goes off. Without this line the drop would be recorded nowhere, and the
+    // threshold could not be checked against a real trip.
     if (!payload.raw_values && latestVoltage !== null
         && Date.now() - latestVoltageTime < 15000) {
       payload.raw_values = { batt_v: latestVoltage };
@@ -2009,29 +2012,29 @@ window.joltLive = (function () {
     bufferProcess();
   }
 
-  /* ---------- Messpunkte puffern ---------- */
+  /* ---------- Buffering measurement points ---------- */
 
-  /* Jeder Messpunkt geht zuerst in eine Warteschlange und von dort an den
-   * Server - nie direkt. Fällt das Netz aus, bleiben die Punkte liegen und
-   * gehen beim nächsten Versuch gesammelt hinaus, mit ihrer Messzeit.
+  /* Every measurement point goes into a queue first and from there to the
+   * server - never directly. If the network drops, the points stay put and
+   * go out together on the next attempt, with their measurement time.
    *
-   * Vorher verschluckte `positionMelden` den fehlgeschlagenen POST. Für eine
-   * geplante Fahrt ist das harmlos, der nächste Punkt kommt. Für eine
-   * Aufzeichnung ist es Datenverlust: Nach zwanzig Minuten ohne Netz fehlten
-   * bis zu 13 % der Strecke, und der gelernte Faktor verschob sich um bis zu
-   * 35 % - unsichtbar, in einer Zahl, die dauerhaft am Fahrzeug bleibt.
+   * Before, `reportPosition` swallowed the failed POST. For a planned
+   * trip that is harmless, the next point comes. For a recording it is
+   * data loss: after twenty minutes without network up to 13 % of the route
+   * was missing, and the learned factor shifted by up to 35 % -
+   * invisibly, in a number that stays on the vehicle permanently.
    *
-   * Es gibt immer nur **einen** Sendevorgang. Zwei gleichzeitige könnten
-   * einander überholen, und der Server bekäme neuere Punkte vor älteren.
+   * There is only ever **one** send operation. Two simultaneous ones could
+   * overtake each other, and the server would get newer points before older ones.
    *
-   * Die Warteschlange liegt auch im localStorage: Lädt iOS die Seite im
-   * Hintergrund neu, sollen die Punkte nicht mit ihr verschwinden. Das Limit
-   * schützt vor einem Speicher, der ewig wächst; dann gehen die ältesten. */
+   * The queue is also kept in localStorage: if iOS reloads the page in the
+   * background, the points should not vanish with it. The limit
+   * protects against memory that grows forever; then the oldest go. */
   const BUFFER_MAX = 2000;
   const BATCH_MAX = 100;
-  // Wie viele Punkte der nächste Stapel hat. Gleich STAPEL_MAX, ausser der
-  // Server hat gerade einen Stapel abgelehnt: dann wird halbiert, bis der
-  // eine schlechte Punkt feststeht.
+  // How many points the next batch has. Equal to BATCH_MAX, unless the
+  // server has just rejected a batch: then it is halved until the
+  // one bad point is identified.
   let batchSize = BATCH_MAX;
   let buffer = [];
   let bufferSession = null;
@@ -2039,7 +2042,7 @@ window.joltLive = (function () {
   let bufferAgain = false;
   let withoutGridReported = false;
   let supplied_later = 0;
-  let rejected = 0;              // vom Server abgelehnte Einzelpunkte
+  let rejected = 0;              // individual points rejected by the server
 
   function bufferStorage(id) { return "jolt-puffer-" + id; }
 
@@ -2050,7 +2053,7 @@ window.joltLive = (function () {
     try {
       const raw = JSON.parse(localStorage.getItem(bufferStorage(id)) || "[]");
       if (Array.isArray(raw)) buffer = raw;
-    } catch (e) { /* kein Speicher oder beschädigt: ohne weiter */ }
+    } catch (e) { /* no storage or corrupted: carry on without */ }
   }
 
   function saveBuffer() {
@@ -2061,15 +2064,15 @@ window.joltLive = (function () {
       } else {
         localStorage.removeItem(bufferStorage(bufferSession));
       }
-    } catch (e) { /* voll oder gesperrt: dann bleibt er eben im Arbeitsspeicher */ }
+    } catch (e) { /* full or blocked: then it just stays in memory */ }
   }
 
   function bufferAppend(point) {
     bufferFor(K.state.sessionId);
     buffer.push(point);
     if (buffer.length > BUFFER_MAX) buffer.splice(0, buffer.length - BUFFER_MAX);
-    // Gesichert wird nur, wenn sich etwas staut - im Normalfall steht der
-    // Punkt eine Sekunde später auf dem Server.
+    // It is only saved when something piles up - normally the
+    // point is on the server a second later.
     if (buffer.length > 1) saveBuffer();
   }
 
@@ -2092,18 +2095,18 @@ window.joltLive = (function () {
         } catch (failure) {
           const status = failure.status;
           if (status === 404 || status === 409) {
-            // Die Sitzung gibt es nicht mehr oder ist beendet: Weiter zu
-            // senden hiesse, dieselbe Ablehnung bis in alle Ewigkeit zu holen.
+            // The session no longer exists or has ended: sending on
+            // would mean fetching the same rejection for all eternity.
             buffer = [];
           } else if (status === 422) {
-            // Der Server hält den Stapel für ungültig - ein Punkt darin, etwa
-            // mit einem Zeitstempel von vor mehr als zwei Tagen. Der ganze
-            // Stapel würde nie angenommen und verstopfte alles dahinter.
+            // The server considers the batch invalid - a point in it, say
+            // with a timestamp from more than two days ago. The whole
+            // batch would never be accepted and would clog everything behind it.
             //
-            // Hier wurde früher der Stapel verworfen: wegen eines schlechten
-            // Punktes bis zu neunundneunzig gute. Jetzt wird halbiert, bis der
-            // eine Punkt feststeht; nur der fliegt raus. Das kostet bei hundert
-            // Punkten höchstens sieben weitere Anfragen.
+            // Here the batch used to be discarded: up to ninety-nine good ones
+            // because of one bad point. Now it is halved until the
+            // one point is identified; only it gets thrown out. For a hundred
+            // points that costs at most seven further requests.
             if (batch.length > 1) {
               batchSize = Math.ceil(batch.length / 2);
             } else {
@@ -2117,16 +2120,16 @@ window.joltLive = (function () {
               + "gesammelt und nachgereicht.", "hinweis");
           }
           saveBuffer();
-          // Netz weg, Server überlastet oder abgemeldet: liegen lassen, der
-          // nächste Punkt oder das Zurückkehren des Netzes versucht es erneut.
+          // Network gone, server overloaded or logged out: leave it lying, the
+          // next point or the return of the network tries again.
           if (status !== 404 && status !== 409 && status !== 422) return;
           continue;
         }
         buffer.splice(0, batch.length);
         saveBuffer();
         if (withoutGridReported) supplied_later += batch.length;
-        // Den Zustand nur zeigen, wenn der Stapel die Gegenwart erreicht hat.
-        // Mitten im Nachreichen wäre es der von vor zehn Minuten.
+        // Show the state only when the batch has reached the present.
+        // In the middle of catching up it would be the one from ten minutes ago.
         if (!buffer.length) {
           if (withoutGridReported) {
             withoutGridReported = false;
@@ -2138,11 +2141,11 @@ window.joltLive = (function () {
         }
       }
     } while (bufferAgain);
-    // Nach einer Ablehnung geht es in kleinen Stapeln weiter, bis der schlechte
-    // Punkt gefunden ist (dann ist die Grösse wieder voll) - oder bis nichts
-    // mehr wartet. Ein Wachsen nach jedem Erfolg träfe den schlechten Punkt
-    // immer wieder: Das kostete bei 13 Punkten sieben abgelehnte Anfragen
-    // statt vier.
+    // After a rejection it continues in small batches until the bad
+    // point is found (then the size is full again) - or until nothing
+    // is waiting any more. Growing after every success would hit the bad point
+    // again and again: for 13 points that cost seven rejected requests
+    // instead of four.
     batchSize = BATCH_MAX;
     if (rejected > 0) {
       K.report(`${rejected} Messpunkt${rejected === 1 ? " wurde" : "e wurden"} `
@@ -2166,8 +2169,8 @@ window.joltLive = (function () {
         (pos) => fulfil({ lat: pos.coords.latitude, lon: pos.coords.longitude,
                              speed_kmh: pos.coords.speed === null ? null
                                : pos.coords.speed * 3.6 }),
-        // Ohne Standort ist der Ladestand allein wertlos: Erst die Position
-        // sagt, mit welchem Sollwert er zu vergleichen ist.
+        // Without a location the state of charge alone is worthless: only the position
+        // says which target value it is to be compared with.
         (failure) => reject(new Error("Standort nicht verfügbar ("
           + failure.message + "). Über HTTPS oder localhost erlaubt der "
           + "Browser den Zugriff.")),
@@ -2175,10 +2178,10 @@ window.joltLive = (function () {
     });
   }
 
-  /* Den zuletzt bekannten Ladestand ins Feld schreiben - aber nie, während
-   * jemand darin tippt. Am Ladepunkt wird der Wert eingetippt, und ein Feld,
-   * das sich beim Eintippen unter den Fingern ändert, weil gerade eine
-   * Nachricht über den WebSocket kam, ist schlimmer als ein leeres. */
+  /* Write the last known state of charge into the field - but never while
+   * someone is typing in it. At the charge point the value is typed in, and a field
+   * that changes under the fingers while typing because a
+   * message just came in over the WebSocket is worse than an empty one. */
   function socFieldPrefill(val) {
     const field = document.getElementById("ist-soc");
     if (!field || document.activeElement === field) return;
@@ -2197,8 +2200,8 @@ window.joltLive = (function () {
     }
 
     btn.disabled = true;
-    // Die Tastatur weg, sonst verdeckt sie auf dem Telefon genau die Werte,
-    // wegen derer man den Ladestand gerade gemeldet hat.
+    // Dismiss the keyboard, otherwise on the phone it covers exactly the values
+    // for which the state of charge was just reported.
     field.blur();
     try {
       const city = await fetchLocation();
@@ -2206,9 +2209,9 @@ window.joltLive = (function () {
         { method: "POST", body: { lat: city.lat, lon: city.lon, soc: soc,
                                   speed_kmh: city.speed_kmh } });
       showState(state);
-      // Die Abweichung ist der Grund, warum das Eintippen sich lohnt - also
-      // gehört sie unmittelbar danach als Satz auf den Schirm und nicht nur
-      // als Kachel unter fünf anderen.
+      // The deviation is the reason typing it in is worthwhile - so
+      // it belongs on screen right afterwards as a sentence and not just
+      // as a tile among five others.
       const explanation = document.getElementById("soc-erklaerung");
       if (explanation) {
         explanation.textContent = state.deviation_pp === null
@@ -2228,8 +2231,8 @@ window.joltLive = (function () {
 
   async function finish() {
     if (!K.state.sessionId) return;
-    // Was noch in der Warteschlange liegt, gehört zur Fahrt - und nach dem
-    // Beenden nimmt der Server nichts mehr an.
+    // What is still in the queue belongs to the trip - and after
+    // ending the server accepts nothing more.
     bufferFor(K.state.sessionId);
     if (buffer.length) await bufferProcess();
     if (buffer.length) {
@@ -2240,9 +2243,9 @@ window.joltLive = (function () {
     try {
       result = await K.api(`/api/live/${K.state.sessionId}/ende`,
                              { method: "POST" });
-    } catch (failure) { /* eine bereits beendete Fahrt ist kein Problem */ }
-    // Die Fahrten-Ansicht hat die Liste zwischengespeichert; eine gerade
-    // beendete Fahrt gehört hinein.
+    } catch (failure) { /* an already ended trip is not a problem */ }
+    // The trips view has cached the list; a trip that has just
+    // ended belongs in it.
     K.state.tripsStale = true;
     positionGiveUp();
     buffer = [];
@@ -2269,7 +2272,7 @@ window.joltLive = (function () {
     K.state.sessionId = null;
     K.sessionRemember(null);
     drivingStateStart("steht");
-    // Die Fahrt ist zu Ende: Die Anzeige im Auto soll verschwinden.
+    // The trip is over: the display in the car should disappear.
     try { if (window.joltDisplay) window.joltDisplay.finish(); }
     catch (e) { console.log("[anzeige]", e && e.message); }
     plan = null;
@@ -2285,25 +2288,25 @@ window.joltLive = (function () {
     }
   }
 
-  /* Was jolt aus der Fahrt gelernt hat - und warum nicht, wenn nicht.
+  /* What jolt has learned from the trip - and why not, if not.
    *
-   * Das Backend schreibt den Korrekturfaktor des Fahrzeugs bei jedem
-   * Fahrtende fort und meldet das Ergebnis zurück; gelesen hat es bisher
-   * niemand. Für den Zweck, um den es dabei geht - kurze bekannte Strecken
-   * fahren und daraus den echten Verbrauch lernen -, ist das der einzige
-   * Rückkanal. Ohne ihn fährt man dieselbe Strecke dreimal und weiss
-   * hinterher nicht, ob überhaupt etwas angekommen ist.
+   * The backend updates the vehicle's correction factor at every
+   * end of trip and reports the result back; so far nobody has
+   * read it. For the purpose at hand - driving short known routes
+   * and learning the real consumption from them -, this is the only
+   * return channel. Without it you drive the same route three times and afterwards
+   * do not know whether anything arrived at all.
    *
-   * Auch das Ausbleiben wird gemeldet: `gelernt: null` heisst "zu kurz oder
-   * unplausibel". Eine Fahrt, die stillschweigend nichts beiträgt, sieht
-   * sonst aus wie eine, die bestätigt hat. */
-  /* Woher die Höhen kamen - und zwar nur, wenn es nicht die Karte war.
+   * The absence is reported too: `gelernt: null` means "too short or
+   * implausible". A trip that silently contributes nothing otherwise
+   * looks like one that confirmed. */
+  /* Where the elevations came from - and only if it was not the map.
    *
-   * Ein Verbrauch ohne Höhenprofil ist nicht deutbar: Ob 22 kWh/100 km am
-   * Fahrstil lagen oder an vierhundert Höhenmetern, lässt sich aus dem
-   * Verbrauch allein nicht trennen. Fällt die Kartenabfrage aus, geht die
-   * Fahrt trotzdem durch - aber dann soll man es wissen, statt die Zahl
-   * später für bare Münze zu nehmen. */
+   * A consumption without an elevation profile cannot be interpreted: whether 22 kWh/100 km
+   * was down to driving style or to four hundred metres of climb cannot be
+   * separated from the consumption alone. If the map query fails, the
+   * trip goes through anyway - but then you should know, instead of taking the number
+   * at face value later. */
   function reportElevations(built) {
     if (!built || !built.ok) return;
     if (built.elevations === "gps") {
@@ -2325,8 +2328,8 @@ window.joltLive = (function () {
     reportElevations(result.recording);
     const g = result.learned;
     if (!g && result.not_learned) {
-      // Der Zuschlag für Träger oder Box ist kein Fehler, sondern der Grund,
-      // warum diese Fahrt bewusst nicht in den Fahrzeugfaktor eingeht.
+      // The surcharge for carrier or box is not an error, but the reason
+      // why this trip deliberately does not go into the vehicle factor.
       K.report("Fahrt beendet. " + result.not_learned
         + " Die Aufzeichnung bleibt erhalten.", "hinweis");
       return;
@@ -2344,41 +2347,41 @@ window.joltLive = (function () {
       + `Planungen rechnen also ${direction}.`, "hinweis");
   }
 
-  /* Nach einem Neuladen dort weitermachen, wo es aufhörte.
+  /* After a reload, carry on where it left off.
    *
-   * Der Server weiss, ob die Sitzung noch läuft - er ist die Wahrheit, nicht
-   * der Browser. Läuft sie, wird die Ansicht wiederhergestellt und weiter
-   * gemeldet; ist sie beendet, wird die Marke stillschweigend verworfen.
+   * The server knows whether the session is still running - it is the truth, not
+   * the browser. If it runs, the view is restored and reporting
+   * continues; if it has ended, the marker is silently discarded.
    *
-   * Ohne Rückfrage: Wer versehentlich neu lädt, will nicht gefragt werden,
-   * ob er weitermachen möchte - er will, dass es weitergeht. */
-  /* Wieviel Anläufe das Fortsetzen nimmt, bevor es aufgibt.
+   * Without asking: whoever reloads by accident does not want to be asked
+   * whether they want to continue - they want it to carry on. */
+  /* How many attempts resuming takes before it gives up.
    *
-   * Der Auslöser stand früher an einem Zeitgeber von 800 ms, mit dem
-   * Kommentar "erst wenn die Fahrzeugliste steht". Eine geratene Zahl: Auf
-   * einem kalt gestarteten Telefon im französischen Funkloch ist sie zu
-   * kurz, und es gab keinen zweiten Versuch. */
+   * The trigger used to hang on a timer of 800 ms, with the
+   * comment "only when the vehicle list is up". A guessed number: on
+   * a cold-started phone in a French dead spot it is too
+   * short, and there was no second attempt. */
   const RESUME_ATTEMPTS = 6;
 
-  /* Spur, Ladestandskurve und Verbrauchsbalken aus den gespeicherten
-   * Messpunkten wieder aufbauen.
+  /* Rebuild track, state-of-charge curve and consumption bars from the stored
+   * measurement points.
    *
-   * Der Zustand kennt nur den letzten Punkt. Ohne dieses Nachladen fing
-   * nach einem Neuladen alles bei null an: leere Karte, leeres
-   * Balkendiagramm, eine Kurve ab dem aktuellen Kilometer. Die Fahrt lief
-   * weiter, sah aber aus wie neu - und wer sie für verloren hielt, plante
-   * eine neue, die dann die laufende beendete.
+   * The state only knows the last point. Without this reloading, after a reload
+   * everything started from zero: empty map, empty
+   * bar chart, a curve starting from the current kilometre. The trip kept
+   * running but looked like a new one - and whoever thought it lost planned
+   * a new one, which then ended the running one.
    *
-   * Bewusst nicht über `zustandAnzeigen()`: Das würde je Punkt die Karte
-   * neu setzen, Kacheln schreiben und Meldungen auslösen. Hier wird nur
-   * der Zustand aufgebaut, gezeichnet wird einmal am Ende. */
+   * Deliberately not via `showState()`: that would reset the map
+   * for each point, write tiles and trigger messages. Here only the
+   * state is built up, and drawing happens once at the end. */
   async function rechargeHistory(id) {
     let records;
     try {
       records = await K.api(`/api/live/${id}/punkte`);
     } catch (failure) {
-      // Kein Grund, das Fortsetzen scheitern zu lassen - die Fahrt läuft
-      // auch ohne die Vorgeschichte weiter, sie sieht nur ärmer aus.
+      // No reason to let resuming fail - the trip runs on
+      // without the history, it just looks poorer.
       console.log("[live] Verlauf nicht nachgeladen:", failure);
       return;
     }
@@ -2392,8 +2395,8 @@ window.joltLive = (function () {
 
     for (const p of points) {
       if (typeof p.lat === "number" && typeof p.lon === "number") {
-        // `spur` hält [lon, lat] - dieselbe Reihenfolge wie `messort()`,
-        // und `abstandKm` rechnet damit.
+        // `spur` holds [lon, lat] - the same order as `messort()`,
+        // and `spacingKm` computes with it.
         const city = [p.lon, p.lat];
         const most_recent = track[track.length - 1];
         if (!most_recent || most_recent[0] !== city[0] || most_recent[1] !== city[1]) {
@@ -2408,31 +2411,31 @@ window.joltLive = (function () {
           : null;
         consumption_track.push({
           timestamp: K.timeMs(p.timestamp), km: p.odometer_km, net,
-          // Die GPS-Strecke ist hier schon bekannt - anders als im Betrieb,
-          // wo sie erst mit der Position nachgetragen wird.
+          // The GPS distance is already known here - unlike in live operation,
+          // where it is filled in later together with the position.
           gps: drivenKm,
           soc: typeof p.soc_raw === "number" ? p.soc_raw / 2.5 : null });
       }
       if (p.soc !== null && p.soc !== undefined) {
         history.push({
           km: p.km_on_route || 0, driven_km: drivenKm, soc: p.soc,
-          /* Ob ein Ladestand gemeldet oder gerechnet war, steht nicht in
-           * der Datenbank. Ein Punkt mit Rohwert kam aus dem Auto, das ist
-           * sicher eine Messung; ein von Hand eingetippter Wert erscheint
-           * hier faelschlich als gerechnet. Lieber so herum: Der Fehler
-           * behauptet weniger, als er weiss. */
+          /* Whether a state of charge was reported or computed is not stored in
+           * the database. A point with a raw value came from the car, that
+           * is certainly a measurement; a value typed in by hand appears
+           * here wrongly as computed. Better this way round: the error
+           * claims less than it knows. */
           reported: p.soc_raw !== null && p.soc_raw !== undefined });
       }
     }
-    // Dieselbe Obergrenze wie im Betrieb.
+    // The same upper limit as in live operation.
     while (consumption_track.length > 20000) consumption_track.shift();
     while (track.length > 20000) track.shift();
 
     const last = points[points.length - 1];
     if (typeof last.odometer_km === "number") {
-      // Über K.zeit: UTC vom Server. Als Ortszeit gelesen wäre der Wert zwei
-      // Stunden alt, und `stilleUeberwachen` baute die Verbindung nach jedem
-      // Neuladen der Seite neu auf ("antwortet seit zwei Minuten nicht").
+      // Via K.zeit: UTC from the server. Read as local time the value would be two
+      // hours old, and `quietWatch` would rebuild the connection after every
+      // reload of the page ("antwortet seit zwei Minuten nicht" - no answer for two minutes).
       latestRawValuesTime = K.timeMs(last.timestamp);
     }
     drawHistory();
@@ -2449,16 +2452,16 @@ window.joltLive = (function () {
     try {
       state = await K.api(`/api/live/${id}`);
     } catch (failure) {
-      /* Vergessen darf jolt eine laufende Fahrt nur, wenn der Server
-       * eindeutig sagt, dass es sie nicht gibt.
+      /* jolt may only forget a running trip if the server
+       * clearly says it does not exist.
        *
-       * Vorher löschte **jeder** Fehler die gemerkte Nummer - und `api()`
-       * wirft "Server nicht erreichbar." auch dann, wenn nur das Netz weg
-       * ist. Wer die Seite im Tunnel neu lud, verlor die Fahrt endgültig:
-       * Sie lief auf dem Server weiter, aber das Telefon bot sie nie
-       * wieder an. Am 2. September ist genau das den ganzen Tag passiert -
-       * eine Reise von 654 km zerfiel in neun Fahrten, weil nach jedem
-       * Neuladen von Hand eine neue geplant werden musste. */
+       * Before, **every** error deleted the remembered number - and `api()`
+       * throws "Server nicht erreichbar." (server unreachable) even when only the network is gone.
+       * Whoever reloaded the page in a tunnel lost the trip for good:
+       * it kept running on the server, but the phone never offered it
+       * again. On 2 September exactly that happened all day -
+       * a journey of 654 km fell apart into nine trips, because after every
+       * reload a new one had to be planned by hand. */
       if (/nicht gefunden|404/i.test(failure.message)) {
         K.sessionRemember(null);
         return;
@@ -2471,36 +2474,36 @@ window.joltLive = (function () {
     if (!state || state.running === false) { K.sessionRemember(null); return; }
 
     K.state.sessionId = id;
-    // Nach einem Neuladen ist unbekannt, wo das Auto steht und ob es offen
-    // ist. Also erst fragen, wenn gefahren wird.
+    // After a reload it is unknown where the car is and whether it is
+    // unlocked. So ask only once driving happens.
     drivingStateStart("steht");
     bufferFor(id);
     if (buffer.length) bufferProcess();
-    /* Die Fahrt dazuholen. Die Live-Ansicht braucht sie fuer das
-     * Energieprofil, die Reserve-Marke und die Soll-Kurve; ohne sie zeigt
-     * sie nur die halbe Wahrheit. Bei einer Aufzeichnung gibt es sie noch
-     * nicht - dann bleibt es bei null, und die Ansicht kommt damit zurecht. */
+    /* Fetch the trip too. The live view needs it for the
+     * energy profile, the reserve marker and the planned curve; without it
+     * it shows only half the truth. For a recording it does not exist
+     * yet - then it stays null, and the view copes with that. */
     if (!K.state.trip && state.trip_id && window.joltRoute) {
       try { await window.joltRoute.tripCharging(state.trip_id); }
-      catch (failure) { /* eine Aufzeichnung hat noch keine Geometrie */ }
+      catch (failure) { /* a recording does not have any geometry yet */ }
     }
     const empty = document.getElementById("live-leer");
     const contents = document.getElementById("live-inhalt");
     if (empty) empty.hidden = true;
     if (contents) contents.hidden = false;
     if (state.plan) { plan = state.plan; drawPlan(); }
-    // Vor dem Verbinden: Kommt über den WebSocket sofort ein neuer Punkt,
-    // soll er auf den nachgeladenen Verlauf treffen und nicht auf nichts.
+    // Before connecting: if a new point comes in over the WebSocket straight away,
+    // it should meet the reloaded history and not nothing.
     await rechargeHistory(id);
     link(id);
     positionTrace();
     showDongle();
-    /* In die Live-Ansicht wechseln, wie es `starten()` auch tut.
+    /* Switch to the live view, as `starten()` also does.
      *
-     * Ohne das blieb man nach dem Neuladen in der Planen-Ansicht stehen:
-     * Die Fahrt lief zwar weiter, war aber nirgends zu sehen. Wer nicht
-     * wusste, dass er auf "Live" tippen muss, hielt sie für verloren und
-     * plante eine neue - und die beendete dann die laufende. */
+     * Without that you stayed in the planning view after the reload:
+     * the trip kept running but was not visible anywhere. Whoever did not
+     * know they had to tap "Live" thought it lost and
+     * planned a new one - and that then ended the running one. */
     if (window.joltApp) window.joltApp.showView("live");
     K.report("Die laufende Fahrt geht weiter – die Messpunkte von vorher "
       + "sind erhalten. Falls der Dongle mitlas, einmal neu verbinden.",
@@ -2508,8 +2511,8 @@ window.joltLive = (function () {
   }
 
   function set_up() {
-    // Wie bei der Karte: Im versteckten Abschnitt hat das Canvas die Breite
-    // null, und nach dem Einblenden oder Drehen muss neu gezeichnet werden.
+    // As with the map: in the hidden section the canvas has width
+    // zero, and after showing or rotating it has to be redrawn.
     window.addEventListener("resize", drawHistory);
     window.addEventListener("resize", drawConsumption);
     K.sliderCouple("mehrverbrauch", "mehrverbrauch-wert");
@@ -2519,7 +2522,7 @@ window.joltLive = (function () {
     K.at("live-beenden", "click", finish);
     K.at("soc-melden", "click", reportSoc);
     K.at("dongle-an", "click", connectDongle);
-    // Erst wenn die Fahrzeugliste steht - sonst fehlt die Akkugrösse.
+    // Only when the vehicle list is up - otherwise the battery size is missing.
     setTimeout(resumeSession, 800);
     K.at("dongle-pause", "click", donglePausieren);
     setInterval(examineVoltage, VOLTAGE_TICK_MS);
@@ -2529,13 +2532,13 @@ window.joltLive = (function () {
       autoCheckbox.addEventListener("change", () => {
         autoMode = autoCheckbox.checked;
         try { localStorage.setItem("jolt-dongle-auto", autoMode ? "1" : "0"); }
-        catch (e) { /* nur diese Sitzung */ }
+        catch (e) { /* this session only */ }
         if (autoMode) driveState = "steht";
         else reconnectDongle();
       });
     }
-    // Auf dem Telefon ist die Eingabetaste der kürzere Weg als das Zielen auf
-    // einen Knopf - `enterkeyhint="send"` beschriftet sie passend.
+    // On the phone the Enter key is a shorter way than aiming at
+    // a button - `enterkeyhint="send"` labels it appropriately.
     K.at("ist-soc", "keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); reportSoc(); }
     });

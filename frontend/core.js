@@ -1,56 +1,57 @@
-/* Gemeinsame Grundlagen: HTTP, Meldungen, Formatierung, geteilter Zustand.
+/* Common foundations: HTTP, messages, formatting, shared state.
  *
- * Kein Framework und kein Build-Schritt. Die Oberfläche hat drei Ansichten und
- * eine Handvoll Formulare - dafür ein Werkzeug zu installieren, das jährlich
- * neu konfiguriert werden will, wäre mehr Aufwand als die App selbst.
+ * No framework and no build step. The UI has three views and a handful of
+ * forms - installing a tool for that which wants to be reconfigured every
+ * year would be more effort than the app itself.
  */
 window.jolt = (function () {
   "use strict";
 
   const state = {
-    trip: null,        // eine gewählte Variante aus POST /api/route
+    trip: null,        // a chosen variant from POST /api/route
     vehicles: [],
-    sessionId: null,    // laufende Live-Sitzung
-    /* Das Fahrzeug der laufenden Aufzeichnung.
+    sessionId: null,    // running live session
+    /* The vehicle of the running recording.
      *
-     * Eine Aufzeichnung hat keine geplante Fahrt, also auch kein
-     * `zustand.fahrt.fahrzeug` - und ohne die Akkugrösse lässt sich aus
-     * einem Ladestand keine Kilowattstunde machen. */
+     * A recording has no planned trip, hence no `zustand.fahrt.fahrzeug`
+     * either - and without the battery size, a charge level cannot be turned
+     * into a kilowatt hour. */
     recVehicle: null,
-    serviceWorker: null, // Registrierung, für das Push-Abo gebraucht
-    /* Ob die Fahrtenliste neu geholt werden muss.
+    serviceWorker: null, // registration, needed for the push subscription
+    /* Whether the trips list has to be fetched anew.
      *
-     * Sie wird zwischengespeichert - wer nie auf den Reiter tippt, soll sie
-     * nicht bezahlen. Nur weiss der, der eine Fahrt anlegt, nicht, dass es
-     * eine Liste gibt, und der, der die Liste zeigt, nicht, wann eine Fahrt
-     * entsteht. Vorher riefen deshalb zwei Module `joltFahrten.veraltet()`
-     * und `trips.js` in beide zurück - zwei Zyklen für eine Marke.
+     * It is cached - whoever never taps the tab should not pay for it. But
+     * whoever creates a trip does not know that a list exists, and whoever
+     * shows the list does not know when a trip comes into being. Before, two
+     * modules therefore called `joltTrips.veraltet()` and `trips.js` back
+     * into both - two cycles for one mark.
      *
-     * Hier ist sie richtig aufgehoben: Wer eine Fahrt anlegt, setzt sie;
-     * wer die Liste zeigt, liest sie. Keiner muss vom anderen wissen. */
+     * Here it is in the right place: whoever creates a trip sets it;
+     * whoever shows the list reads it. Neither needs to know about the
+     * other. */
     tripsStale: false,
   };
 
   const TOKEN_KEY = "jolt-token";
   const SESSION_KEY = "jolt-sitzung";
 
-  /* Die laufende Sitzung überlebt ein Neuladen.
+  /* The running session survives a reload.
    *
-   * Sie stand nur im Speicher. Wer die Seite versehentlich neu lud - auf
-   * dem Telefon ein Wisch zu viel -, verlor die Verbindung zur laufenden
-   * Fahrt und begann eine neue Sitzung. Auf einer echten Langstrecke ist
-   * das viermal passiert: 623 Messpunkte, verteilt auf vier Sitzungen.
+   * It used to exist only in memory. Whoever reloaded the page by accident -
+   * one swipe too many on the phone - lost the connection to the running
+   * trip and began a new session. On a real long-distance trip this happened
+   * four times: 623 measurement points, spread over four sessions.
    *
-   * Die Punkte gehen dabei nicht verloren, sie hängen an der Fahrt. Aber
-   * alles, was **über** die Sitzung läuft, beginnt von vorn: der laufende
-   * Verbrauchsfaktor, der Zeitfaktor, die Kurve - und beim Beenden lernt
-   * jolt nur aus der letzten Sitzung statt aus der ganzen Fahrt.
+   * The points are not lost, they are attached to the trip. But everything
+   * that runs **across** the session starts over: the running consumption
+   * factor, the time factor, the curve - and when ending, jolt only learns
+   * from the last session instead of from the whole trip.
    */
   function sessionRemember(id) {
     try {
       if (id) localStorage.setItem(SESSION_KEY, String(id));
       else localStorage.removeItem(SESSION_KEY);
-    } catch (e) { /* ohne Speicher eben ohne Gedächtnis */ }
+    } catch (e) { /* without storage, simply without memory */ }
   }
 
   function rememberedSession() {
@@ -69,8 +70,8 @@ window.jolt = (function () {
     try { localStorage.setItem(TOKEN_KEY, val || ""); } catch (e) {}
   }
 
-  /* Ein einziger Ort für alle Aufrufe - damit der Token, die Fehlerbehandlung
-   * und das JSON-Auspacken nicht an zwanzig Stellen leicht verschieden sind. */
+  /* A single place for all calls - so that the token, the error handling
+   * and the JSON unpacking are not slightly different in twenty places. */
   async function api(fs_path, options) {
     const opt = Object.assign({ headers: {} }, options || {});
     opt.headers = Object.assign({ "X-Token": token() }, opt.headers);
@@ -83,13 +84,13 @@ window.jolt = (function () {
     try {
       response = await fetch(fs_path, opt);
     } catch (e) {
-      // Kein `status`: Wer puffert, unterscheidet damit "Netz weg" von
-      // "Server hat abgelehnt".
+      // No `status`: whoever buffers uses it to tell "network gone" from
+      // "server rejected".
       throw new Error("Server nicht erreichbar.");
     }
 
     let records = null;
-    try { records = await response.json(); } catch (e) { /* leere Antwort */ }
+    try { records = await response.json(); } catch (e) { /* empty response */ }
 
     if (!response.ok) {
       const reason = (records && (records.detail || records.message))
@@ -111,8 +112,8 @@ window.jolt = (function () {
     box.className = "meldung " + (variety || "hinweis");
     box.textContent = text;
     container.appendChild(box);
-    // Fehler bleiben stehen, bis der nächste Versuch läuft - eine Meldung,
-    // die nach drei Sekunden verschwindet, hat man unterwegs nie gelesen.
+    // Errors stay until the next attempt runs - a message that disappears
+    // after three seconds was never read on the road.
     if (variety !== "fehler") {
       setTimeout(() => box.remove(), 6000);
     }
@@ -146,23 +147,23 @@ window.jolt = (function () {
 
   /* ---------- Zeiten vom Server ---------- */
 
-  /* Eine Zeit vom Server als Date - oder null.
+  /* A time from the server as a Date - or null.
    *
-   * Der Server liefert UTC mit Z. Fehlt die Zone (ältere Antwort, andere
-   * Quelle), gilt UTC und **nicht** die Ortszeit: `new Date("2026-10-05T15:56:21")`
-   * liest den Text als Ortszeit des Geräts. In Sommerzeit stand dann 15:56 Uhr,
-   * wo es 17:56 war, und jeder Vergleich mit `Date.now()` lag zwei Stunden
-   * daneben - so hielt jolt nach dem Neuladen die letzten Fahrzeugwerte für
-   * zwei Stunden alt und baute die Dongle-Verbindung neu auf. */
+   * The server delivers UTC with Z. If the zone is missing (older response,
+   * other source), UTC applies and **not** local time: `new Date("2026-10-05T15:56:21")`
+   * reads the text as the device's local time. In summer time that gave
+   * 15:56 where it was 17:56, and every comparison with `Date.now()` was two
+   * hours off - that is how jolt, after a reload, took the last vehicle
+   * values to be two hours old and rebuilt the dongle connection. */
   function timestamp(text) {
     if (typeof text !== "string" || !text) return null;
-    // Nur ein Datum ohne Uhrzeit liest JavaScript ohnehin als UTC.
+    // JavaScript reads only a date without a time as UTC anyway.
     const hasZone = !text.includes("T") || /(Z|[+-]\d{2}:?\d{2})$/i.test(text);
     const d = new Date(hasZone ? text : text + "Z");
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
-  /* Dasselbe als Millisekunden - NaN, wenn es keine Zeit ist. */
+  /* The same as milliseconds - NaN if it is not a time. */
   function timeMs(text) {
     const d = timestamp(text);
     return d === null ? NaN : d.getTime();

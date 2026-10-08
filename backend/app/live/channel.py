@@ -1,16 +1,15 @@
-"""WebSocket-Verteiler für die Live-Ansicht.
+"""WebSocket distributor for the live view.
 
-Bewusst im Prozessspeicher und ohne Broker: jolt läuft als ein Container für
-einen Haushalt. Ein Redis daneben wäre ein zweites Ding, das ausfallen kann,
-für ein Problem, das es hier nicht gibt.
+Deliberately in process memory and without a broker: jolt runs as a single
+container for one household. A Redis next to it would be a second thing that
+can fail, for a problem that does not exist here.
 
-Zwei Eigenschaften sind trotzdem wichtig:
+Two properties are important nevertheless:
 
-- Mehrere Verbindungen je Sitzung. Das Telefon fährt mit, das Tablet am
-  Beifahrersitz schaut zu - beide sollen dasselbe sehen.
-- Ein Sendefehler darf die Fahrt nicht beenden. Eine Verbindung, die im
-  Funkloch abgerissen ist, wird still entfernt; die Messpunkte laufen weiter
-  in die Datenbank.
+- Multiple connections per session. The phone rides along, the tablet on the
+  passenger seat watches - both should see the same thing.
+- A send error must not end the trip. A connection that dropped in a dead
+  zone is removed silently; the samples keep flowing into the database.
 """
 import asyncio
 import logging
@@ -25,7 +24,7 @@ MAX_PER_SESSION = 10
 
 
 async def sign_in(session_id: int, websocket) -> bool:
-    """Nimmt die Verbindung auf; False, wenn die Sitzung schon voll ist."""
+    """Accept the connection; False if the session is already full."""
     async with _lock:
         open_ones = _connections.setdefault(session_id, set())
         if len(open_ones) >= MAX_PER_SESSION:
@@ -45,7 +44,7 @@ async def sign_out(session_id: int, websocket) -> None:
 
 
 async def send(session_id: int, msg: dict) -> int:
-    """Nachricht an alle Zuschauer einer Sitzung. Gibt die Anzahl zurück."""
+    """Message to all viewers of a session. Returns the number reached."""
     async with _lock:
         open_ones = list(_connections.get(session_id, ()))
 
@@ -53,8 +52,8 @@ async def send(session_id: int, msg: dict) -> int:
     for connection in open_ones:
         try:
             await connection.send_json(msg)
-        except Exception as failure:      # noqa: BLE001 - jeder Grund ist derselbe
-            log.debug("Live-Verbindung entfernt (%s).", failure)
+        except Exception as failure:      # noqa: BLE001 - every cause is the same
+            log.debug("Live connection removed (%s).", failure)
             tot.append(connection)
 
     for connection in tot:

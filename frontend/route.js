@@ -1,21 +1,21 @@
-/* Die Planen-Ansicht: Orte suchen, Route rechnen, Ergebnis zeigen. */
+/* The planning view: search places, compute the route, show the result. */
 window.joltRoute = (function () {
   "use strict";
 
   const K = window.jolt;
   const chosen = { start: null, destination: null };
-  // Was gerade auf der Karte liegt. Säulenliste und Ladeplan werden getrennt
-  // geladen, zeichnen aber in dieselbe Karte - ohne diesen gemeinsamen Stand
-  // löscht der eine die Marker des anderen.
+  // What is currently on the map. The charger list and the charging plan are
+  // loaded separately but draw into the same map - without this shared state
+  // one would delete the markers of the other.
   let latestChargers = [];
   let lastPlan = null;
-  // Die Varianten der letzten Berechnung (schnellste/kürzeste/empfohlene,
-  // ggf. zusammengelegt) - für die Wechsel-Karten und um beim Tippen auf eine
-  // Karte zu wissen, welcher fahrt_id sie entspricht.
+  // The variants of the last computation (fastest/shortest/recommended,
+  // merged where identical) - for the switch cards and to know, when a card
+  // is tapped, which trip_id it corresponds to.
   let latestVariants = [];
-  let latestDeparture = null;       // wofür der Verkehr gilt: null = jetzt
+  let latestDeparture = null;       // what the traffic applies to: null = now
 
-  /* ---------- Ortssuche ---------- */
+  /* ---------- Place search ---------- */
 
   function placeSearchSetUp(fieldId, hitId, keyname) {
     const field = document.getElementById(fieldId);
@@ -28,9 +28,9 @@ window.joltRoute = (function () {
       clearTimeout(wait);
       const text = field.value.trim();
       if (text.length < 2) { lst.innerHTML = ""; return; }
-      // Getippt wird schneller als geantwortet. Ohne diese Pause schickt
-      // jedes Zeichen eine Anfrage - beim freien ORS-Kontingent von 2500
-      // Anfragen am Tag ist das der schnellste Weg, es aufzubrauchen.
+      // Typing is faster than answering. Without this pause every character
+      // sends a request - with the free ORS quota of 2500 requests per day
+      // that is the quickest way to use it up.
       wait = setTimeout(() => seek(text, lst, field, keyname), 400);
     });
   }
@@ -61,7 +61,7 @@ window.joltRoute = (function () {
     }
   }
 
-  /* ---------- Route rechnen ---------- */
+  /* ---------- Compute route ---------- */
 
   async function compute() {
     const btn = document.getElementById("rechnen");
@@ -76,8 +76,8 @@ window.joltRoute = (function () {
     btn.disabled = true;
     btn.textContent = "rechnet …";
     try {
-      // Eine gerechnete Route wird als Fahrt abgelegt - die Liste im Reiter
-      // "Fahrten" ist damit nicht mehr aktuell.
+      // A computed route is stored as a trip - the list in the "Fahrten" tab
+      // is therefore no longer up to date.
       K.state.tripsStale = true;
       const response = await K.api("/api/route", { method: "POST", body: {
         vehicle_id: vehicleId,
@@ -92,10 +92,10 @@ window.joltRoute = (function () {
         own_trips: document.getElementById("eigene-fahrten").checked,
         tomtom: document.getElementById("tomtom").checked,
         departure: departureIso(document.getElementById("abfahrt").value),
-        // Der Regler steht ganz links auf einem negativen Wert - das ist
-        // "nicht gesetzt", und dann gilt das Fahrzeugprofil. Ein eigener
-        // Schalter daneben wäre ein zweites Bedienelement für eine Frage,
-        // die der Regler schon beantwortet.
+        // The slider sits at the far left on a negative value - that means
+        // "not set", and then the vehicle profile applies. A separate switch
+        // next to it would be a second control for a question the slider
+        // already answers.
         payload_kg: payloadValue(),
         ...trailerValues(),
         speed_max_kmh: numberOrNull("tempo-max"),
@@ -103,8 +103,8 @@ window.joltRoute = (function () {
       latestVariants = response.variants || [];
       latestDeparture = response.departure || null;
       drawVariants();
-      // Die sparsamste Variante ist jolts Grundhaltung - sie wird
-      // vorausgewählt, ein Tippen auf eine andere Karte wechselt.
+      // The most economical variant is jolt's basic stance - it is
+      // preselected, tapping another card switches.
       const suggestion = latestVariants.find(
         (v) => v.labels.includes("insgesamt schnellste")) || latestVariants[0];
       if (suggestion) await variantChoose(suggestion);
@@ -124,12 +124,12 @@ window.joltRoute = (function () {
     await chargePlanCharging();
   }
 
-  /* Eine gespeicherte Fahrt laden und zeichnen.
+  /* Load a saved trip and draw it.
    *
-   * Der Endpunkt liefert dieselbe Form wie eine frische Variante, deshalb
-   * genügt derselbe Weg wie nach dem Rechnen. Die Varianten-Karten bleiben
-   * leer: Zu einer einzeln geladenen Fahrt gibt es keine Geschwister mehr -
-   * die anderen Varianten von damals sind eigene Fahrten mit eigener ID. */
+   * The endpoint returns the same shape as a fresh variant, so the same path
+   * as after computing is enough. The variant cards stay empty: a trip
+   * loaded on its own has no siblings any more - the other variants from
+   * back then are separate trips with their own ID. */
   async function tripCharging(tripId) {
     const trip = await K.api("/api/fahrten/" + tripId);
     latestVariants = [];
@@ -140,7 +140,7 @@ window.joltRoute = (function () {
     await chargePlanCharging();
   }
 
-  /* ---------- Varianten-Karten ---------- */
+  /* ---------- Variant cards ---------- */
 
   function drawVariants() {
     const block = document.getElementById("varianten-block");
@@ -159,11 +159,11 @@ window.joltRoute = (function () {
       const labels = v.labels.map((e) =>
         `<span class="etikett ${e === "insgesamt schnellste" ? "sparsamste" : ""}">${e}</span>`
       ).join("");
-      /* Die Kennwerte zeigen, was zählt: die Zeit **inklusive Laden** und
-       * die Kosten. Vorher standen dort Fahrzeit und kWh - beides sagt
-       * nichts darüber, wann man ankommt, wenn zweimal geladen werden muss. */
-      /* Mit Verkehr, wenn TomTom ihn geliefert hat: Die Rangfolge rechnet
-       * genauso, und die Zahl am Etikett muss zu ihr passen. */
+      /* The key figures show what matters: the time **including charging** and
+       * the cost. Before, travel time and kWh were shown there - neither says
+       * when you arrive if you have to charge twice. */
+      /* With traffic, if TomTom delivered it: the ranking computes the same
+       * way, and the number on the label must match it. */
       const withTraffic = typeof v.plan_total_with_traffic_min === "number";
       const total = v.plan_feasible
         ? `${K.duration(withTraffic ? v.plan_total_with_traffic_min : v.plan_total_minutes)} `
@@ -184,8 +184,8 @@ window.joltRoute = (function () {
       });
       lst.appendChild(btn);
     }
-    /* Die Quelle nennen: Der Verkehr kommt von TomTom, und wer eine Zahl sieht,
-     * soll wissen, woher sie ist. */
+    /* Name the source: the traffic comes from TomTom, and anyone seeing a number
+     * should know where it is from. */
     if (latestVariants.some((v) => v.traffic_source)) {
       const source = document.createElement("div");
       source.className = "unter";
@@ -196,13 +196,13 @@ window.joltRoute = (function () {
     }
   }
 
-  /* Zugangsbeschränkungen sichtbar machen.
+  /* Make access restrictions visible.
    *
-   * Ein Ladepunkt kann tadellos aussehen - 300 kW, acht Säulen, kein Umweg -
-   * und trotzdem unbrauchbar sein, weil er hinter einer Schranke steht oder
-   * nur Hotelgästen offensteht. jolt kennt diese Angaben seit dem Umbau des
-   * OCM-Imports; sie zu haben und nicht zu zeigen wäre die schlechteste
-   * aller Möglichkeiten. */
+   * A charge point can look flawless - 300 kW, eight stalls, no detour -
+   * and still be unusable because it is behind a barrier or open only to
+   * hotel guests. jolt has known this data since the rework of the OCM
+   * import; having it and not showing it would be the worst of all
+   * options. */
   function accessHint(k) {
     const parts = [];
     if (k.access && !/^public$/i.test(k.access)) parts.push(sanitize(k.access));
@@ -213,24 +213,24 @@ window.joltRoute = (function () {
     return parts.length ? ` · <span style="color:var(--warnung)">${parts.join(" · ")}</span>` : "";
   }
 
-  /* ---------- Ergebnis ---------- */
+  /* ---------- Result ---------- */
 
-  /* Die Verkehrskachel der gewählten Route - oder nichts.
+  /* The traffic tile of the selected route - or nothing.
    *
-   * Die Angabe liegt nicht an der gespeicherten Fahrt (von TomTom wird nichts
-   * gespeichert), sondern nur in der Antwort der letzten Planung. Gesucht
-   * wird sie deshalb dort, über die Fahrt-ID: So erscheint sie auch bei
-   * einer einzelnen Route, wo es keine Variantenkarten gibt. Eine Fahrt aus
-   * der Liste, zu der keine Planung vorliegt, bekommt keine Kachel - ein
-   * Verkehr von gestern wäre schlimmer als keiner. */
+   * The information is not part of the stored trip (nothing is stored from
+   * TomTom), only of the response to the last planning. It is therefore
+   * looked up there, via the trip ID: that way it also appears for a single
+   * route, where there are no variant cards. A trip from the list for which
+   * no planning exists gets no tile - traffic from yesterday would be worse
+   * than none. */
   function trafficTile(trip, variants) {
     const v = (variants || []).find((x) => x.trip_id === trip.trip_id);
     if (!v || typeof v.traffic_min !== "number") return "";
     const text = v.traffic_min >= 0.5 ? "+" + K.num(v.traffic_min, 0) + " min" : "frei";
-    // Ab einer Viertelstunde fällt es auf: Das ist der Unterschied zwischen
-    // "ein bisschen Verkehr" und "eine andere Ankunftszeit".
-    // Prognose oder live: Eine Zahl für Freitag 16 Uhr ist keine Messung von
-    // jetzt, und das soll man ihr ansehen.
+    // From a quarter of an hour it stands out: that is the difference between
+    // "a bit of traffic" and "a different arrival time".
+    // Forecast or live: a number for Friday 4 pm is not a measurement from
+    // now, and that should be visible.
     const variety = v.traffic_basis === "prognose" ? "Verkehr (Prognose)" : "Verkehr";
     return K.valueTile(variety + " · " + (v.traffic_source || "TomTom"), text,
                         v.traffic_min >= 15 ? "schlecht" : "");
@@ -284,8 +284,8 @@ window.joltRoute = (function () {
                    text: "Reserve " + K.num(trip.reserve_point.km) + " km" });
     }
 
-    // Geplante Stopps zuletzt und beschriftet: Sie sollen die übrigen
-    // Ladepunkte überdecken, nicht umgekehrt.
+    // Planned stops last and labelled: they should cover the other charge
+    // points, not the other way round.
     const planned = new Set((lastPlan && lastPlan.stops || [])
       .map((s) => s.id));
     for (const s of latestChargers) {
@@ -300,7 +300,7 @@ window.joltRoute = (function () {
     window.joltMap.setMarker(lst);
   }
 
-  /* ---------- Ladestand über der Strecke ---------- */
+  /* ---------- State of charge along the route ---------- */
 
   function drawProfile(trip) {
     const canvas = document.getElementById("profil");
@@ -319,13 +319,13 @@ window.joltRoute = (function () {
     const reserve = trip.vehicle.reserve_soc;
 
     const x = (km) => (km / maxKm) * (extent - 8) + 4;
-    // Unter null wird nicht gezeichnet: Ein negativer Ladestand ist keine
-    // Aussage über den Akku, sondern über die fehlende Ladeplanung.
+    // Nothing is drawn below zero: a negative state of charge is not a
+    // statement about the battery but about the missing charging plan.
     const y = (soc) => elevation - 6 - (Math.max(0, Math.min(100, soc)) / 100)
       * (elevation - 24);
 
-    // Höhenprofil als gedämpfter Hintergrund - es erklärt die Knicke in der
-    // SoC-Kurve, und ohne diese Erklärung wirken sie wie Messfehler.
+    // Elevation profile as a muted background - it explains the kinks in the
+    // SoC curve, and without this explanation they look like measurement errors.
     let maxElevation = 1;
     for (const p of profile) maxElevation = Math.max(maxElevation, p.elevation || 0);
     pen.beginPath();
@@ -338,7 +338,7 @@ window.joltRoute = (function () {
     pen.fillStyle = "#2a333d66";
     pen.fill();
 
-    // Reservelinie
+    // Reserve line
     pen.beginPath();
     pen.moveTo(4, y(reserve));
     pen.lineTo(extent - 4, y(reserve));
@@ -348,7 +348,7 @@ window.joltRoute = (function () {
     pen.stroke();
     pen.setLineDash([]);
 
-    // Ladestand
+    // State of charge
     pen.beginPath();
     profile.forEach((p, i) => {
       const px = x(p.km), py = y(p.soc);
@@ -365,7 +365,7 @@ window.joltRoute = (function () {
       `0 – ${K.num(maxKm)} km · bis ${K.num(maxElevation)} m`;
   }
 
-  /* ---------- Ladepunkte ---------- */
+  /* ---------- Charge points ---------- */
 
   async function chargersCharging() {
     const trip = K.state.trip;
@@ -386,11 +386,11 @@ window.joltRoute = (function () {
     }
   }
 
-  /* ---------- Ladeplan ---------- */
+  /* ---------- Charging plan ---------- */
 
-  /* Was ein Halt kostet, bevor geladen wird - der Regler in der
-   * Ladeplan-Ansicht. Fehlt er (alte Oberfläche im Cache), gilt die Vorgabe
-   * des Servers, statt eine Null zu schicken und den Plan zu zersplittern. */
+  /* What a stop costs before charging begins - the slider in the
+   * charging plan view. If it is missing (old UI in the cache), the server's
+   * default applies, instead of sending a zero and fragmenting the plan. */
   function holding_cost() { return slider("haltekosten", 5); }
 
   function slider(id, preset) {
@@ -434,11 +434,11 @@ window.joltRoute = (function () {
       K.valueTile("Gesamt", K.duration(plan.total_minutes)),
       K.valueTile("davon Laden", K.duration(plan.charge_time_minutes)),
       K.valueTile("davon Umwege", K.duration(plan.detour_time_minutes)),
-      // Sichtbar machen, was die blosse Anzahl der Halte kostet - sonst ist
-      // der Regler daneben eine Zahl ohne Wirkung, die man sehen kann.
+      // Make visible what the mere number of stops costs - otherwise the slider
+      // next to it is a number without effect that you can see.
       K.valueTile("davon Halte", K.duration(plan.holding_cost_minutes)),
-      // Der zweite Massstab neben der Zeit. Ohne ihn wäre der Zeitwert-Regler
-      // eine Einstellung, deren Wirkung man nicht sieht.
+      // The second yardstick next to time. Without it the time-value slider
+      // would be a setting whose effect you cannot see.
       K.valueTile("Stromkosten", K.num(plan.cost_eur, 2) + " €"),
       K.valueTile("Stopps", String(plan.stop_count)),
       K.valueTile("Am Ziel", K.num(plan.soc_at_target) + " %",
@@ -454,15 +454,15 @@ window.joltRoute = (function () {
     lst.innerHTML = "";
     plan.stops.forEach((s, i) => {
       const entry = document.createElement("li");
-      // Der Ausweichstandort ist der Grund, warum man vor einer belegten Säule
-      // nicht neu suchen muss - er gehört sichtbar an den Stopp, nicht in ein
-      // Untermenü. Fehlt er, ist auch das eine Aussage.
+      // The fallback location is the reason you do not have to search anew in
+      // front of an occupied charger - it belongs visibly at the stop, not in a
+      // submenu. If it is missing, that too is a statement.
       //
-      // Wie dringend sie ist, hängt am Stopp selbst: Ein Ladepark mit zwölf
-      // Punkten braucht kaum einen Rückfallplan, ein einzelner Lader schon.
-      // Deshalb ist die fehlende Ausweichmöglichkeit nur dort rot, wo sie
-      // wirklich weh tut - sonst wäre die Warnung an jedem Stopp zu lesen und
-      // damit an keinem.
+      // How urgent it is depends on the stop itself: a charging park with twelve
+      // points hardly needs a fallback plan, a single charger does.
+      // That is why the missing fallback is red only where it really hurts -
+      // otherwise the warning would be read at every stop and thus at
+      // none.
       const tight = (s.point_count || 1) < 4;
       const detour_alt = s.detour_alt
         ? `<div class="unter">Ausweich: ${sanitize(s.detour_alt.name
@@ -525,9 +525,9 @@ window.joltRoute = (function () {
           await K.api(`/api/saeulen/${k.id}/belegt`,
                       { method: k.occupied_reported ? "DELETE" : "POST" });
           await chargersCharging();
-          // "Hier ist alles voll" ist die einzige Verfügbarkeitsinformation,
-          // die wirklich stimmt - sie muss den Plan ändern, nicht nur die
-          // Liste einfärben.
+          // "Everything here is full" is the only availability information that
+          // is really true - it must change the plan, not just colour the
+          // list.
           await chargePlanCharging();
         } catch (failure) { K.report(failure.message, "fehler"); }
       });
@@ -536,18 +536,18 @@ window.joltRoute = (function () {
     }
   }
 
-  /* Die Namen kommen aus fremden Datenquellen und landen in innerHTML. */
+  /* The names come from third-party data sources and end up in innerHTML. */
   function sanitize(text) {
     const helper = document.createElement("div");
     helper.textContent = text || "";
     return helper.innerHTML;
   }
 
-  /* ---------- Zuladung ---------- */
+  /* ---------- Payload ---------- */
 
-  /* Der Regler kennt einen Wert unterhalb seines Minimums als "nicht
-   * gesetzt". Das erspart einen zweiten Schalter für die Frage "eigene
-   * Zuladung oder die aus dem Profil?" - ganz links heisst Profil. */
+  /* The slider treats a value below its minimum as "not set". That saves a
+   * second switch for the question "own payload or the one from the
+   * profile?" - far left means profile. */
   function payloadValue() {
     const slider = document.getElementById("zuladung");
     if (!slider) return null;
@@ -567,9 +567,9 @@ window.joltRoute = (function () {
     refresh();
   }
 
-  /* ---------- Abfahrtszeit ---------- */
+  /* ---------- Departure time ---------- */
 
-  /* "Fr., 09.10., 16:00" in der Ortszeit des Geräts. */
+  /* "Fr., 09.10., 16:00" in the device's local time. */
   function departureText(iso) {
     const timestamp = new Date(iso);
     if (Number.isNaN(timestamp.getTime())) return iso;
@@ -578,25 +578,25 @@ window.joltRoute = (function () {
                                           minute: "2-digit" });
   }
 
-  /* Das Feld liefert Ortszeit ohne Zone ("2026-10-09T16:00"). Der Server
-   * braucht einen Zeitpunkt: `new Date` liest den Text als Ortszeit dieses
-   * Geräts, `toISOString` macht daraus UTC mit Z - und damit ist die Zone
-   * nicht mehr zu verwechseln. Leer oder unlesbar heisst "jetzt". */
+  /* The field delivers local time without a zone ("2026-10-09T16:00"). The
+   * server needs a point in time: `new Date` reads the text as this
+   * device's local time, `toISOString` turns it into UTC with Z - and thus
+   * the zone can no longer be confused. Empty or unreadable means "now". */
   function departureIso(val) {
     if (!val) return null;
     const timestamp = new Date(val);
     return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
   }
 
-  /* "2026-10-09T16:00" für `min` und `max` des Felds, in Ortszeit. */
+  /* "2026-10-09T16:00" for `min` and `max` of the field, in local time. */
   function localForField(timestamp) {
     const z = (n) => String(n).padStart(2, "0");
     return `${timestamp.getFullYear()}-${z(timestamp.getMonth() + 1)}-${z(timestamp.getDate())}`
       + `T${z(timestamp.getHours())}:${z(timestamp.getMinutes())}`;
   }
 
-  /* Vergangenheit und mehr als 60 Tage lehnt auch der Server ab; das Feld
-   * zeigt es schon beim Auswählen. */
+  /* The server also rejects the past and more than 60 days ahead; the field
+   * shows it already when selecting. */
   function departureLimits() {
     const field = document.getElementById("abfahrt");
     if (!field) return;
@@ -605,10 +605,10 @@ window.joltRoute = (function () {
     field.max = localForField(new Date(now_ts.getTime() + 60 * 24 * 3600 * 1000));
   }
 
-  /* ---------- Anhänger und Höchstgeschwindigkeit ---------- */
+  /* ---------- Trailer and maximum speed ---------- */
 
-  /* Ein leeres Feld heisst "nicht gesetzt" und geht als null hinaus - nicht
-   * als 0, das der Server als "null km/h" läse. */
+  /* An empty field means "not set" and goes out as null - not as 0, which
+   * the server would read as "zero km/h". */
   function numberOrNull(id) {
     const el = document.getElementById(id);
     if (!el || el.value === "") return null;
@@ -622,10 +622,10 @@ window.joltRoute = (function () {
     return { trailer_kg: kg, trailer_cwa_m2: numberOrNull("anhaenger-cwa") || 0 };
   }
 
-  /* Die Auswahl füllt die beiden Felder vor; sie bleiben änderbar. Wer einen
-   * Anhänger wählt und noch keine Grenze eingetragen hat, bekommt 100 km/h -
-   * die Grenze für ein Gespann in Deutschland, und das, was man sonst
-   * vergisst. */
+  /* The selection prefills the two fields; they stay editable. Anyone who
+   * picks a trailer and has not yet entered a limit gets 100 km/h - the
+   * limit for a combination in Germany, and the one thing you
+   * otherwise forget. */
   function trailerCouple() {
     const choice = document.getElementById("anhaenger");
     const fields = document.getElementById("anhaenger-werte");
@@ -649,7 +649,7 @@ window.joltRoute = (function () {
     });
   }
 
-  /* ---------- Einrichten ---------- */
+  /* ---------- Set up ---------- */
 
   function set_up() {
     placeSearchSetUp("start", "start-treffer", "start");
@@ -660,17 +660,17 @@ window.joltRoute = (function () {
     trailerCouple();
     departureLimits();
     const departureField = document.getElementById("abfahrt");
-    // Wer das Feld nach einer Stunde Pause wieder anfasst, soll nicht mit den
-    // Grenzen von vorhin arbeiten.
+    // Anyone touching the field again after an hour's break should not work
+    // with the limits from before.
     if (departureField) departureField.addEventListener("focus", departureLimits);
 
     let wait = null;
     let waitPlan = null;
     const newCharging = () => {
       clearTimeout(wait);
-      // Beide Regler wirken auf denselben Kandidatensatz - der Ladeplan muss
-      // mitziehen, sonst zeigt die Karte Stopps, die es nach der neuen
-      // Filterung gar nicht mehr gibt.
+      // Both sliders act on the same candidate set - the charging plan has to
+      // follow, otherwise the map shows stops that no longer exist after the
+      // new filtering.
       wait = setTimeout(async () => {
         await chargersCharging();
         await chargePlanCharging();
@@ -678,10 +678,10 @@ window.joltRoute = (function () {
     };
     K.sliderCouple("min-kw", "min-kw-wert", newCharging);
     K.sliderCouple("radius", "radius-wert", newCharging);
-    // Der Aufwand je Halt ändert nur die Planung, nicht die Kandidaten -
-    // deshalb ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
-    // Beide Regler ändern nur die Planung, nicht die Kandidaten - deshalb
-    // ohne saeulenLaden(), sonst flackert die Säulenliste ohne Grund.
+    // The effort per stop only changes the planning, not the candidates -
+    // hence without chargersCharging(), otherwise the list flickers for no reason.
+    // Both sliders only change the planning, not the candidates - hence
+    // without chargersCharging(), otherwise the list flickers for no reason.
     const catchUpPlan = () => {
       clearTimeout(waitPlan);
       waitPlan = setTimeout(chargePlanCharging, 350);

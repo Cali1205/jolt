@@ -1,30 +1,29 @@
-/* Das Anzeigemodell: der Zustand der Fahrt als wenige Zahlen und Texte.
+/* The display model: the state of the trip as a few numbers and texts.
  *
- * Für alles, was nicht die Oberfläche selbst ist - eine Live Activity im
- * CarPlay-Dashboard, ein Widget, eine CarPlay-Vorlage (siehe
- * konzept-ios-app.md, Abschnitt "CarPlay"). Diese Anzeigen haben Platz für
- * fünf Zeilen, nicht für ein Diagramm, und sie rechnen nichts: Sie zeigen,
- * was hier steht.
+ * For everything that is not the UI itself - a Live Activity, a CarPlay
+ * dashboard, a widget, a CarPlay template (see konzept-ios-app.md, section
+ * "CarPlay"). These displays have room for five lines, not for a chart, and
+ * they calculate nothing: they show what is stored here.
  *
- * Bewusst ohne DOM, ohne `window.jolt` und ohne Netz: Eine reine Funktion
- * `Zustand -> Modell` lässt sich ohne Swift, ohne Mac und ohne Apple prüfen
- * (tools/check_display.js). Das Swift-Plugin kommt später und ruft nur noch
- * `zielSetzen`.
+ * Deliberately without DOM, without `window.jolt` and without network: a pure
+ * function `state -> model` can be checked without Swift, without a Mac and
+ * without Apple (tools/check_display.js). The Swift plugin comes later and
+ * only calls `setTarget` (set target).
  *
- * Quelle ist der Zustand, den `GET /api/live/{id}` und der WebSocket liefern -
- * nichts, was nicht schon gerechnet wäre. Der Verkehr gehört nicht dazu: Er
- * steht nur in der Antwort der Planung und wird nicht gespeichert.
+ * The source is the state delivered by `GET /api/live/{id}` and the WebSocket -
+ * nothing that has not already been calculated. Traffic is not part of it: it
+ * only appears in the planning response and is not stored.
  */
 window.joltDisplay = (function () {
   "use strict";
 
-  // Apple erlaubt einer CarPlay-App der Kategorie "Driving task" höchstens alle
-  // zehn Sekunden eine Aktualisierung der Anzeige. Für Live Activities gelten
-  // eigene Grenzen; zehn Sekunden sind dafür ohnehin mehr als genug.
+  // Apple allows a CarPlay app of the "Driving task" category to update the
+  // display at most every ten seconds. Live Activities have their own limits;
+  // ten seconds is more than enough for them anyway.
   const MIN_SPACING_MS = 15000;
-  // Auch wenn sich nichts ändert, kommt regelmässig eine Meldung: Das Modell
-  // trägt `stand`, und eine Anzeige, die ihr Alter zeigt, darf nicht "alt"
-  // aussehen, nur weil der Ladestand gerade ruhig bleibt.
+  // Even if nothing changes, a message arrives regularly: the model carries
+  // `stand` (timestamp), and a display that shows its age must not look "old"
+  // just because the charge level happens to stay calm.
   const HEARTBEAT_MS = 60000;
 
   const MINUS = "−";
@@ -36,7 +35,7 @@ window.joltDisplay = (function () {
 
   const actual = (x) => typeof x === "number" && Number.isFinite(x);
 
-  /* "+12 min", "nach Plan", "−5 min", "+1 h 05". */
+  /* "+12 min", "nach Plan" (on schedule), "−5 min", "+1 h 05". */
   function shiftText(mins) {
     const amount = Math.round(Math.abs(mins));
     if (amount < 1) return "nach Plan";
@@ -50,32 +49,32 @@ window.joltDisplay = (function () {
     return km < 10 ? `${num(km, 1)} km` : `${num(Math.round(km))} km`;
   }
 
-  /* ---------- Was das Auto nicht anzeigt ----------
+  /* ---------- What the car does not show ----------
    *
-   * Der Bordcomputer zeigt Verbrauch seit Start und seit dem Tanken. Hier
-   * stehen Dinge, die er nicht zeigt: der Verbrauch der letzten Minute, der
-   * letzten fünf, dreissig, sechzig - und was die Nebenverbraucher ziehen.
+   * The on-board computer shows consumption since start and since refuelling.
+   * Here are things it does not show: the consumption of the last minute, the
+   * last five, thirty, sixty - and what the auxiliary consumers draw.
    *
-   * Alles kommt aus Grössen, die die Oberfläche ohnehin führt: die
-   * Verbrauchsspur (Zeit, Energiezähler, GPS-Strecke) und die letzten
-   * Messwerte. Energie aus den Zählern (0,117 Wh Auflösung), Strecke aus dem
-   * GPS - aus demselben Grund wie im Verlaufsdiagramm: der Kilometerstand
-   * löst nur in ganzen Kilometern auf und taugt nicht für eine Minute. */
+   * Everything comes from quantities the UI keeps anyway: the consumption
+   * trace (time, energy counter, GPS distance) and the latest readings.
+   * Energy from the counters (0.117 Wh resolution), distance from the GPS -
+   * for the same reason as in the history chart: the odometer only resolves
+   * in whole kilometres and is no good for a single minute. */
   const TIMEFRAME_MIN = [1, 5, 30, 60];
-  // Ein Fenster zählt nur, wenn die Spur es auch abdeckt: Wer nach zwölf
-  // Minuten Fahrt einen "30-Minuten-Schnitt" zeigt, zeigt einen
-  // Zwölf-Minuten-Schnitt unter falschem Namen.
+  // A window only counts if the trace covers it: anyone who shows a "30-minute
+  // average" after twelve minutes of driving shows a twelve-minute average
+  // under a false name.
   const TIMEFRAME_COVERAGE = 0.7;
-  // Älter als das darf der letzte Punkt nicht sein, sonst ist die Spur
-  // stehengeblieben (Dongle weg) und das "Jetzt" ein altes.
+  // The last point must not be older than this, otherwise the trace has
+  // stalled (dongle gone) and the "now" is an old one.
   const TRACK_FRESH_MS = 45000;
   const MIN_KM = 0.3;
-  // So alt darf ein gelesener Wert sein. Selten gelesene Werte (Klima) kommen
-  // nur alle paar Minuten.
+  // This is how old a read value may be. Rarely read values (climate) only
+  // arrive every few minutes.
   const VALUE_OLD_MS = 15 * 60000;
 
   const MIN_MS = 60000;
-  const BAR_NUMBER = 6;      // sechs Balken zu je fünf Minuten = die letzten dreissig
+  const BAR_NUMBER = 6;      // six bars of five minutes each = the last thirty
 
   function energyAndDistance(points, fromMs) {
     const p = points.filter((x) => x.timestamp >= fromMs && actual(x.gps) && actual(x.net));
@@ -105,8 +104,8 @@ window.joltDisplay = (function () {
                kwText: num(kw, 1) };
     });
 
-    // Die letzten dreissig Minuten in Balken zu fünf Minuten, ältester
-    // zuerst. Ein Balken ohne Strecke (Stand, Ampel) ist eine Lücke, kein Null.
+    // The last thirty minutes in bars of five minutes, oldest first. A bar
+    // without distance (standstill, traffic light) is a gap, not a zero.
     const bar = [];
     for (let i = BAR_NUMBER - 1; i >= 0; i--) {
       const upto = now_ts - i * 5 * MIN_MS;
@@ -124,9 +123,8 @@ window.joltDisplay = (function () {
     }
     const hasBar = bar.some((b) => b !== null);
 
-    // Rekuperation: wie viel von der entnommenen Energie zurückkam, über die
-    // letzte Stunde (oder so lange, wie es die Spur hergibt, mindestens fünf
-    // Minuten).
+    // Regeneration: how much of the drawn energy came back, over the last
+    // hour (or as long as the trace allows, at least five minutes).
     let regen = null;
     const r = track.filter((x) => x.timestamp >= now_ts - 60 * MIN_MS && actual(x.disch) && actual(x.chg));
     if (r.length >= 2) {
@@ -148,11 +146,11 @@ window.joltDisplay = (function () {
     return w && actual(w.val) && now_ts - w.timestamp <= VALUE_OLD_MS ? w.val : null;
   }
 
-  /* Die Nebenverbraucher: was das Auto zieht, ohne zu fahren. Der gemessene
-   * Wert (`nebenverbrauch_kw`) schlägt die Näherung aus dem Stand. Heizung
-   * (PTC) und Klimakompressor kommen dazu, wenn sie gelesen wurden: Sie sind
-   * die beiden grossen Verbraucher, die man selbst beeinflusst. Die Leistung
-   * der Heizung ist Strom mal Packspannung - eine Näherung, kein Messwert. */
+  /* The auxiliary consumers: what the car draws without driving. The measured
+   * value (`aux_load_kw`) beats the approximation from standstill.
+   * Heating (PTC) and A/C compressor are added if they were read: they are
+   * the two big consumers one can influence oneself. The heater power is
+   * current times pack voltage - an approximation, not a measurement. */
   function auxModel(vals, approximation, now_ts) {
     let kw = valueFresh(vals, "aux_load_kw", now_ts);
     let source = "gemessen";
@@ -180,12 +178,12 @@ window.joltDisplay = (function () {
     };
   }
 
-  /* Die Ladestopps der Fahrt, die noch vor einem liegen - für die CarPlay-Liste.
+  /* The charging stops of the trip that still lie ahead - for the CarPlay list.
    *
-   * Entfernung vom jetzigen Standort aus, nicht vom Start: Wer am Steuer sitzt,
-   * fragt "wie weit noch", nicht "bei welchem Kilometer". Ohne Position auf der
-   * Route gibt es keine Entfernung, und eine erfundene waere schlimmer als
-   * keine Liste. Hoechstens acht: Mehr passt in keine Vorlage. */
+   * Distance from the current location, not from the start: whoever sits at
+   * the wheel asks "how much further", not "at which kilometre". Without a
+   * position on the route there is no distance, and an invented one would be
+   * worse than no list. At most eight: more fits in no template. */
   const STOPS_MAX = 8;
 
   function stopListModel(plan, km) {
@@ -193,7 +191,7 @@ window.joltDisplay = (function () {
     const origin_of = [];
     for (const s of plan.stops) {
       if (!s || !actual(s.km_on_route)) continue;
-      if (s.km_on_route < km - 0.5) continue;          // schon vorbei
+      if (s.km_on_route < km - 0.5) continue;          // already passed
       const upto = Math.max(0, s.km_on_route - km);
       const at = actual(s.arrival_soc) ? Math.round(s.arrival_soc) : null;
       const downhill = actual(s.departure_soc) ? Math.round(s.departure_soc) : null;
@@ -212,30 +210,30 @@ window.joltDisplay = (function () {
     return origin_of.length ? origin_of : null;
   }
 
-  /* Das Modell zu einem Zustand - oder null, wenn es nichts zu zeigen gibt.
+  /* The model for a state - or null if there is nothing to show.
    *
-   * Fehlt etwas, fehlt es im Modell: kein Ladestopp bei einer Aufzeichnung,
-   * keine Ankunft ohne Plan. Nichts wird ersetzt oder geschätzt - eine
-   * Anzeige im Auto, die ein Feld erfindet, ist schlimmer als eine, die es
-   * weglässt. */
+   * If something is missing, it is missing in the model: no charging stop for
+   * a recording, no arrival without a plan. Nothing is replaced or estimated -
+   * a display in the car that invents a field is worse than one that leaves
+   * it out. */
   function model(z, now_ts, extras) {
-    // Ein Array ist in JavaScript auch ein Objekt - und kein Zustand.
+    // In JavaScript an array is also an object - and not a state.
     if (!z || typeof z !== "object" || Array.isArray(z)) return null;
     const as_of = actual(now_ts) ? now_ts : Date.now();
     const m = { version: 1, as_of,
                 soc: null, reserve: null, stop: null, arrival: null, rest: null };
 
     if (actual(z.actual_soc)) {
-      // Woher die Zahl kommt, gehört dazu: gemessen, gerechnet oder die
-      // letzte Messung. Wer sie am Steuer liest, soll wissen, was sie ist.
+      // Where the number comes from belongs with it: measured, calculated or
+      // the last measurement. Whoever reads it at the wheel should know what it is.
       const source = z.soc_source || (z.soc_reported === false ? "gerechnet" : "gemessen");
       m.soc = { percent: Math.round(z.actual_soc * 10) / 10,
                 text: `${num(Math.round(z.actual_soc))} %`, source };
     }
 
     const km = actual(z.km_on_route) ? z.km_on_route : null;
-    // `soll_soc` gibt es nur mit Plan. Ohne ihn (Aufzeichnung) sind Rest,
-    // Reserve, Stopp und Ankunft keine Zahlen, sondern Lücken.
+    // `plan_soc` (planned SoC) only exists with a plan. Without it (recording),
+    // remainder, reserve, stop and arrival are not numbers but gaps.
     const hasPlan = actual(z.plan_soc);
 
     if (hasPlan && km !== null && actual(z.reserve_at_km) && z.reserve_at_km >= km) {
@@ -246,7 +244,7 @@ window.joltDisplay = (function () {
     const s = z.next_stop;
     if (hasPlan && km !== null && s && actual(s.km_on_route) && s.km_on_route >= km) {
       const upto = s.km_on_route - km;
-      // Erwartet (mit dem gemessenen Verbrauch hochgerechnet), sonst geplant.
+      // Expected (extrapolated with the measured consumption), otherwise planned.
       const soc = actual(s.expected_soc) ? s.expected_soc
                 : (actual(s.planned_soc) ? s.planned_soc : null);
       m.stop = { name: typeof s.name === "string" && s.name ? s.name : "Ladestopp",
@@ -266,7 +264,7 @@ window.joltDisplay = (function () {
                  text: `${num(Math.round(z.remaining_km))} km` };
     }
 
-    // Eine Zeile für die kleinste Anzeige (Dynamic Island, Apple-Watch-Format):
+    // One line for the smallest display (Dynamic Island, Apple Watch format):
     // "72 % · Stopp in 41 km (18 %)".
     const parts = [];
     if (m.soc) parts.push(m.soc.text);
@@ -278,8 +276,8 @@ window.joltDisplay = (function () {
     }
     m.short = parts.length ? parts.join(" · ") : "Keine Werte";
 
-    // Verlauf und Nebenverbraucher: nur, wenn die Oberfläche sie mitgibt.
-    // Fehlt etwas, fehlt das Feld.
+    // History and auxiliary consumers: only if the UI supplies them.
+    // If something is missing, the field is missing.
     const extra = extras || {};
     m.history = historyModel(extra.track, as_of);
     m.aux = auxModel(extra.vals, extra.aux, as_of);
@@ -287,17 +285,17 @@ window.joltDisplay = (function () {
     return m;
   }
 
-  /* Der Sender: gibt Modelle an ein Ziel (das Swift-Plugin) weiter, aber nicht
-   * öfter als erlaubt und nicht, ohne dass es etwas Neues gäbe.
+  /* The sender: passes models on to a target (the Swift plugin), but not more
+   * often than allowed and not without there being something new.
    *
-   *  - höchstens alle `abstandMs`; was dazwischen kommt, wartet, und nur das
-   *    Neueste wird gesendet,
-   *  - unverändert (bis auf `stand`) wird nicht gesendet - ausser als
-   *    Herzschlag nach `herzschlagMs`,
-   *  - `beenden()` meldet `null`: Die Fahrt ist zu Ende, die Anzeige soll
-   *    verschwinden,
-   *  - ein Ziel, das fehlt oder scheitert, bricht nichts ab: Die Oberfläche
-   *    läuft weiter, auch wenn das Auto nichts davon sieht. */
+   *  - at most every `spacingMs`; whatever arrives in between waits, and only
+   *    the newest is sent,
+   *  - unchanged (apart from `stand`) is not sent - except as a heartbeat
+   *    after `heartbeatMs`,
+   *  - `beenden()` reports `null`: the trip is over, the display should
+   *    disappear,
+   *  - a target that is missing or fails aborts nothing: the UI keeps
+   *    running, even if the car sees nothing of it. */
   function sender(options) {
     const opt = options || {};
     const spacingMs = actual(opt.spacingMs) ? opt.spacingMs : MIN_SPACING_MS;
@@ -311,7 +309,7 @@ window.joltDisplay = (function () {
     let lastContent = null;
     let waiting = null;
     let clock = null;
-    let ended_at = true;           // erst die erste Meldung beginnt eine Anzeige
+    let ended_at = true;           // only the first message starts a display
     let errorReported = false;
 
     function contents(m) {
@@ -332,8 +330,8 @@ window.joltDisplay = (function () {
     }
 
     function errorRemember(f) {
-      // Einmal sagen, nicht bei jeder Meldung: Alle zehn Sekunden dieselbe
-      // Zeile füllte das Protokoll einer langen Fahrt.
+      // Say it once, not with every message: the same line every ten seconds
+      // would fill the log of a long trip.
       if (errorReported) return;
       errorReported = true;
       console.log("[anzeige] Ziel meldet einen Fehler:", f && f.message ? f.message : f);
@@ -364,7 +362,7 @@ window.joltDisplay = (function () {
           send(m);
           return;
         }
-        // Zu früh: das Neueste merken und zur erlaubten Zeit senden.
+        // Too early: remember the newest and send at the permitted time.
         waiting = m;
         if (clock === null) clock = schedule(sendWaiting, spacingMs - since);
       },
@@ -379,14 +377,14 @@ window.joltDisplay = (function () {
     };
   }
 
-  /* ---------- Verläufe für die Kacheln ----------
+  /* ---------- History for the tiles ----------
    *
-   * Die Kacheln "Ladestand", "Nebenverbraucher" und "Rekuperation" zeigen eine
-   * Linie: die letzten dreissig Minuten. Das Modell trägt nur den Wert von
-   * jetzt, also merkt sich dieser Teil die Stichproben. Eine Lücke von mehr
-   * als drei Minuten beginnt die Reihe neu - das ist eine andere Fahrt.
-   * Reine Funktion auf einem Zustand, den der Aufrufer hält: so lässt sie sich
-   * ohne Uhr prüfen. */
+   * The tiles "Ladestand", "Nebenverbraucher" and "Rekuperation" show a
+   * line: the last thirty minutes. The model only carries the value of now,
+   * so this part remembers the samples. A gap of more than three minutes
+   * starts the series anew - that is a different trip.
+   * Pure function on a state that the caller holds: this way it can be
+   * checked without a clock. */
   const SERIES_TIMEFRAME_MS = 30 * 60000;
   const SERIES_GAP_MS = 3 * 60000;
 
@@ -405,7 +403,7 @@ window.joltDisplay = (function () {
     return r;
   }
 
-  /* Die Reihen je Kachel; weniger als zwei Punkte sind keine Linie. */
+  /* The series per tile; fewer than two points are not a line. */
   function seriesListExcerpt(series_list) {
     const origin_of = {};
     for (const name of ["soc", "aux", "regen"]) {
@@ -415,10 +413,10 @@ window.joltDisplay = (function () {
     return origin_of;
   }
 
-  /* ---------- Stil der CarPlay-Kacheln ----------
+  /* ---------- Style of the CarPlay tiles ----------
    *
-   * "klassisch": Swift zeichnet wie bisher. "a" und "b": die Bilder kommen aus
-   * tiles.js und gehen im Modell mit. */
+   * "klassisch": Swift draws as before. "a" and "b": the images come from
+   * tiles.js and travel with the model. */
   const STYLE_KEY = "jolt-carplay-stil";
   const STYLES = ["klassisch", "a", "b"];
 
@@ -433,10 +431,10 @@ window.joltDisplay = (function () {
   let seriesListState = null;
   let lastModel = null;
 
-  /* Das Modell mit Stil und Kachelbildern - was das Plugin bekommt. Die
-   * Bilder stehen nicht im Modell des Senders: Der Vergleich "hat sich etwas
-   * geändert" soll nicht an Pixeln hängen, und die Live Activity trägt
-   * höchstens 4 KB (das Plugin lässt sie dort weg). */
+  /* The model with style and tile images - what the plugin receives. The
+   * images are not in the sender's model: the comparison "has something
+   * changed" should not depend on pixels, and the Live Activity carries at
+   * most 4 KB (the plugin leaves them out there). */
   function withImages(m, now_ts) {
     seriesListState = seriesListAppend(seriesListState, m, now_ts);
     const origin_of = Object.assign({}, m, { look: styleChoice });
@@ -444,8 +442,8 @@ window.joltDisplay = (function () {
       try {
         origin_of.tileImages = window.joltTiles.pictures(styleChoice, m, seriesListExcerpt(seriesListState));
       } catch (failure) {
-        // Ohne Bilder zeichnet Swift selbst - eine Kachel, die nicht gelingt,
-        // darf die Anzeige nicht kosten.
+        // Without images Swift draws itself - a tile that fails must not
+        // cost the display.
         console.log("[anzeige] Kacheln nicht gezeichnet:", failure && failure.message);
       }
     }
@@ -496,12 +494,12 @@ window.joltDisplay = (function () {
     return value;
   }
 
-  /* Das Ziel in der iOS-App: die Live Activity (plugins/jolt-anzeige).
+  /* The target in the iOS app: the Live Activity (plugins/jolt-anzeige).
    *
-   * Im Browser und in Bluefy gibt es kein solches Plugin; dort tut das Ziel
-   * nichts, und der Sender meldet nichts weiter. Das Plugin wird erst beim
-   * Senden gesucht, nicht beim Laden: ble-plugin.js steht zwar vor dieser
-   * Datei, aber was beim Laden nicht da ist, soll später nicht fehlen. */
+   * In the browser and in Bluefy there is no such plugin; there the target
+   * does nothing, and the sender reports nothing further. The plugin is only
+   * looked up when sending, not when loading: ble-plugin.js comes before this
+   * file, but what is not there at load time should not be missing later. */
   function nativeTarget(m) {
     const shell = window.joltBlePlugin;
     if (!shell || !shell.JoltAnzeige || !shell.Capacitor
@@ -516,19 +514,19 @@ window.joltDisplay = (function () {
       { json: JSON.stringify(toNative(withImages(m, Date.now()))) });
   }
 
-  /* Den Stil wählen - und die Anzeige gleich neu schicken, damit die
-   * Umstellung im Auto zu sehen ist und nicht erst nach der nächsten Meldung. */
+  /* Choose the style - and resend the display right away, so the change
+   * is visible in the car and not only after the next message. */
   function setStyle(look) {
     if (!STYLES.includes(look)) return false;
     styleChoice = look;
-    try { window.localStorage.setItem(STYLE_KEY, look); } catch (e) { /* nur diese Sitzung */ }
+    try { window.localStorage.setItem(STYLE_KEY, look); } catch (e) { /* this session only */ }
     if (lastModel) {
-      try { nativeTarget(lastModel); } catch (e) { /* kein Ziel */ }
+      try { nativeTarget(lastModel); } catch (e) { /* no target */ }
     }
     return true;
   }
 
-  /* Der Sender der Oberfläche: `live.js` meldet hier jeden Zustand an. */
+  /* The UI's sender: `live.js` reports every state here. */
   const std_default = sender({ destination: nativeTarget });
 
   return {

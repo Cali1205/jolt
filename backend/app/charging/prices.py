@@ -1,31 +1,31 @@
-"""Was eine Kilowattstunde an einem Ladepunkt kostet.
+"""What a kilowatt hour costs at a charge point.
 
-jolt kann das nicht wissen, und es steht auch in keiner der Importquellen:
-Der Preis haengt am **Vertrag des Fahrers**, nicht an der Saeule. Dieselbe
-Ionity-Saeule kostet mit Passport-Abo etwa die Haelfte von dem, was sie ad
-hoc kostet, und wer eine EnBW-Karte hat, zahlt anderswo wieder anders.
+jolt cannot know this, and none of the import sources contain it either:
+the price depends on the **driver's contract**, not on the charger. The same
+Ionity charger costs about half as much with a Passport subscription as it
+does ad hoc, and anyone with an EnBW card pays something different again
+elsewhere.
 
-Deshalb pflegt der Nutzer eine kurze Liste am Fahrzeug: ein Muster je
-Anbieter und ein Standardpreis fuer alles Uebrige. Das ist wenig Aufwand -
-man hat ein bis drei Karten - und es ist die einzige Angabe, die stimmen
-kann.
+So the user maintains a short list on the vehicle: one pattern per provider
+and a default price for everything else. That is little effort - you have
+one to three cards - and it is the only information that can be correct.
 
-Verglichen wird als Teilzeichenkette und klein geschrieben, wie bei den
-bevorzugten Betreibern: "Ionity" trifft "Ionity GmbH", ohne dass der genaue
-Wortlaut des Datensatzes bekannt sein muss.
+Matching is a lowercase substring comparison, as with the preferred
+operators: "Ionity" matches "Ionity GmbH" without needing to know the exact
+wording of the record.
 """
 
-# Was eine Kilowattstunde kostet, wenn nichts anderes bekannt ist. Grob der
-# Ad-hoc-Preis an einem Schnelllader in Deutschland - bewusst eher hoch:
-# Ein zu niedriger Standardpreis liesse unbekannte Anbieter guenstiger
-# aussehen als die, deren Preis man kennt, und genau die wuerden dann
-# bevorzugt.
+# What a kilowatt hour costs when nothing else is known. Roughly the ad-hoc
+# price at a fast charger in Germany - deliberately on the high side: a
+# default price that is too low would make unknown providers look cheaper
+# than those whose price is known, and those are exactly the ones that would
+# then be preferred.
 DEFAULT_PRICE_EUR_KWH = 0.59
 
 
 def price_per_kwh(operator: str, lst: list | None,
                  std_default: float = DEFAULT_PRICE_EUR_KWH) -> float:
-    """Der Preis fuer einen Betreiber, sonst der Standardpreis."""
+    """The price for an operator, otherwise the default price."""
     if not lst or not operator:
         return std_default
     name = operator.strip().lower()
@@ -42,11 +42,11 @@ def price_per_kwh(operator: str, lst: list | None,
 
 
 def price_function(vehicle):
-    """Eine Funktion (Ladeoption) -> EUR/kWh fuer dieses Fahrzeug.
+    """A function (charge option) -> EUR/kWh for this vehicle.
 
-    Der Optimierer soll weder das ORM noch die Preisliste kennen - er
-    bekommt eine Funktion, so wie er das Streckenprofil als Liste bekommt.
-    Das haelt ihn ohne Datenbank pruefbar.
+    The optimizer should know neither the ORM nor the price list - it gets
+    a function, just as it gets the route profile as a list. That keeps it
+    testable without a database.
     """
     lst = getattr(vehicle, "electricity_prices", None) or []
     std_default = getattr(vehicle, "electricity_price_eur_kwh", None)

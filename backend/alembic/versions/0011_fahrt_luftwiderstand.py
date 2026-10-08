@@ -1,20 +1,18 @@
-"""Fahrten: Zuschlag auf den Luftwiderstand.
+"""Trips: surcharge on the air drag.
 
-Ein Fahrradträger auf der Anhängerkupplung oder eine Dachbox gehören zur
-**Fahrt**, nicht zum Fahrzeug - wie die Zuladung. Ihre Masse liesse sich
-schon über `zuladung_kg` abbilden, aber sie ist der kleinere Posten: Bei
-Autobahntempo kostet ein Träger vor allem Luftwiderstand, und der geht mit
-dem Quadrat der Geschwindigkeit.
+A bike rack on the tow bar or a roof box belongs to the **trip**, not to the
+vehicle - like the payload. Its mass could already be modelled via
+`zuladung_kg`, but it is the smaller item: at motorway speed a rack costs
+mainly air drag, and that goes with the square of the speed.
 
-Der eigentliche Grund, ihn zu modellieren, ist aber ein anderer: Ohne ihn
-landet sein Verbrauch im **Korrekturfaktor des Fahrzeugs** - und der gilt
-dauerhaft und für alle Fahrten. Eine einzige Urlaubsfahrt mit Trägern würde
-die Alltagsplanung verbiegen. Genau davor warnt der Kommentar in
-`energie/kalibrierung.py` schon ("eine Fahrt mit unbemerkter Dachbox").
+The real reason to model it is a different one, though: without it, its
+consumption ends up in the **vehicle's correction factor** - and that
+applies permanently and to all trips. A single holiday trip with racks would
+distort everyday planning. The comment in `energie/kalibrierung.py` already
+warns against exactly this ("a trip with an unnoticed roof box").
 
-1.0 heisst "nichts dran". Der Wert multipliziert den Luftwiderstandsbeiwert;
-was er wirklich sein muss, weiss man erst nach einer aufgezeichneten Fahrt
-mit Träger.
+1.0 means "nothing attached". The value multiplies the drag coefficient;
+what it really has to be is only known after a recorded trip with a rack.
 
 Revision ID: 0011
 Revises: 0010

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Prueft die Messpunkt-Warteschlange aus frontend/live.js gegen einen Server,
-// der ausfaellt: Funkloch, Nachreichen in Stapeln, 409/422. Ohne Browser, ohne
-// Netz - live.js laeuft in Node gegen Attrappen.
+// Checks the measurement point queue from frontend/live.js against a server
+// that goes down: dead zone, resending in batches, 409/422. No browser, no
+// network - live.js runs in Node against stand-ins.
 //
 //     node tools/check_buffer.js
 const fs = require("fs");
@@ -18,11 +18,11 @@ function verify(ok, text, detail) {
 
 const storage = {};
 const reports = [];
-let grid = true;           // false = "Server nicht erreichbar"
-let nextStatus = null;     // erzwungener HTTP-Status
-let badTime = null;  // ein Stapel mit diesem Punkt wird mit 422 abgelehnt
+let grid = true;           // false = "server unreachable"
+let nextStatus = null;     // forced HTTP status
+let badTime = null;  // a batch containing this point is rejected with 422
 let rejectedRequests = 0;
-const posts = [];          // was beim Server ankam
+const posts = [];          // what arrived at the server
 
 const empty = () => new Proxy(function () { return ""; }, {
   get: (z, n) => (n === Symbol.toPrimitive ? () => "" : n === "style" ? {} : empty()),
@@ -73,14 +73,14 @@ context.window.localStorage = context.localStorage;
 vm.createContext(context);
 vm.runInContext(source, context);
 const live = timeframe.joltLive;
-// zustandAnzeigen braucht DOM - fuer den Test ohne Wirkung.
+// showState needs the DOM - without effect for the test.
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let t = Date.now() - 600000;
 async function point(pace = null) {
   t += 12000;
-  // Die Sperre gegen zu haeufige Meldungen umgehen: jede Meldung ist 12 s
-  // spaeter nach Messzeit, aber der Takt in der Funktion nutzt die Wanduhr.
+  // Get around the throttle on too frequent reports: each report is 12 s
+  // later by measurement time, but the clock in the function uses wall time.
   context.Date = Date;
   geoCallback({ coords: { latitude: 52, longitude: 10, speed: pace,
                           altitude: null }, timestamp: t });
@@ -91,8 +91,8 @@ async function point(pace = null) {
   live.positionTrace();
   timeframe.joltBlePlugin = undefined;
 
-  // Die Meldesperre (12 s Wanduhr) schlaegt im Test zu - deshalb ueber
-  // visibilitychange zuruecksetzen waere noetig; einfacher: Date.now patchen.
+  // The report throttle (12 s wall clock) kicks in during the test - resetting
+  // it via visibilitychange would be needed; simpler: patch Date.now.
   let now_ts = Date.now();
   const realNow = Date.now;
   Date.now = () => (now_ts += 13000);
@@ -157,8 +157,8 @@ async function point(pace = null) {
          "251 Punkte gehen in Stapeln zu 100", JSON.stringify(fresh));
 
   console.log("\nEin schlechter Punkt im Stapel");
-  // Der Server lehnt seit der Absicherung Unmoegliches mit 422 ab. Frueher
-  // flog dann der ganze Stapel raus - wegen eines Punktes bis zu 99 gute.
+  // Since the hardening, the server rejects impossible values with 422. It used
+  // to throw out the whole batch - up to 99 good points because of one.
   grid = false;
   const measurement_times = [];
   for (let i = 0; i < 12; i++) { await point(); measurement_times.push(new Date(t).toISOString()); }
@@ -167,7 +167,7 @@ async function point(pace = null) {
   rejectedRequests = 0;
   reports.length = 0;
   const priorBatch = posts.length;
-  await point();                       // 13 Punkte warten: Stapel mit dem schlechten
+  await point();                       // 13 points waiting: batch with the bad one
   const arrived = posts.slice(priorBatch).flatMap((x) => x.body.points.map((p) => p.timestamp));
   verify(arrived.length === 12 && !arrived.includes(badTime),
          "genau der schlechte Punkt fehlt, die zwoelf anderen sind angekommen",
@@ -181,7 +181,7 @@ async function point(pace = null) {
   verify(reports.some((m) => /1 Messpunkt wurde vom Server abgelehnt/.test(m)),
          "der Nutzer erfaehrt, dass einer verworfen wurde", JSON.stringify(reports));
   badTime = null;
-  // Danach geht es mit voller Stapelgroesse weiter.
+  // After that it continues with the full batch size.
   grid = false;
   for (let i = 0; i < 150; i++) await point();
   grid = true;
@@ -198,8 +198,8 @@ async function point(pace = null) {
   rejectedRequests = 0;
   const vor3 = posts.length;
   badTime = new Date(t).toISOString();
-  // Der Punkt ist schon im Puffer: er wird gesendet, abgelehnt, verworfen.
-  await point();                       // dieser zweite geht durch
+  // The point is already in the buffer: it is sent, rejected, discarded.
+  await point();                       // this second one goes through
   verify(rejectedRequests >= 1 && !storage["jolt-puffer-7"],
          "ein einzelner abgelehnter Punkt wird verworfen und verstopft nichts",
          String(rejectedRequests));

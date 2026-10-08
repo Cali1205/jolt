@@ -1,36 +1,35 @@
-/* Der OBD2-Dongle als Baustein - Verbindung, ELM327, Messwerte.
+/* The OBD2 dongle as a building block - connection, ELM327, readings.
  *
- * Herausgelöst aus der Diagnoseseite, weil es zwei Nutzer gibt: jene Seite
- * zum Fehlersuchen, und die jolt-Oberfläche selbst. Zwei Kopien derselben
- * ELM-Befehlsfolge wären zwei Kopien, die auseinanderlaufen - und das an
- * einer Stelle, an der jeder Unterschied wieder ein NO DATA am Fahrzeug
- * bedeutet.
+ * Extracted from the diagnostics page because there are two users: that
+ * page for troubleshooting, and the jolt UI itself. Two copies of the same
+ * ELM command sequence would be two copies that drift apart - and in a
+ * place where every difference means another NO DATA at the vehicle.
  *
- * Das Modul kennt weder Bedienelemente noch jolts API. Es verbindet, liest
- * und meldet über einen Rückruf, was es tut; was daraus wird, entscheidet
- * der Aufrufer. Deshalb dient es der Diagnoseseite und der Hauptoberfläche
- * gleichermassen.
+ * The module knows neither UI controls nor jolt's API. It connects, reads
+ * and reports what it does through a callback; what becomes of that is up
+ * to the caller. That is why it serves the diagnostics page and the main
+ * UI alike.
  *
- * `verfuegbar()` ist die Frage, an der alles hängt: Web Bluetooth gibt es
- * auf iOS nicht von Apple, sondern nur in Bluefy. In Safari meldet sich das
- * Modul schlicht als nicht verfügbar, und der Aufrufer zeichnet dann ohne
- * Dongle auf - statt eine Fehlermeldung zu zeigen, die niemand beheben kann.
+ * `obtainable()` is the question everything hangs on: Web Bluetooth does
+ * not exist on iOS from Apple, only in Bluefy. In Safari the module
+ * simply reports itself as unavailable, and the caller then records
+ * without a dongle - instead of showing an error message nobody can fix.
  */
 window.joltObd = (function () {
   "use strict";
 
-  let reporterOutside = () => {};   // Protokoll-Rückruf des Aufrufers
-  let atDropout = null;      // gerufen, wenn die Verbindung stirbt
+  let reporterOutside = () => {};   // log callback of the caller
+  let atDropout = null;      // called when the connection dies
 
-  /* ---------- Beobachten: Protokoll und Zähler ----------
+  /* ---------- Observing: log and counters ----------
    *
-   * Das Modul führt selbst Buch, statt es den Aufrufern zu überlassen. Die
-   * Einstellungen-Ansicht will auch dann ein Protokoll zeigen, wenn die
-   * Verbindung längst steht - sie wurde dann von einer anderen Ansicht
-   * aufgebaut, und deren Rückruf hat niemand für die spätere gemerkt.
+   * The module keeps its own books instead of leaving that to the callers.
+   * The settings view wants to show a log even when the connection has long
+   * been up - it was then set up by another view, and nobody kept that
+   * view's callback for the later one.
    *
-   * Rein beobachtend: Nichts davon verändert, was gesendet oder wie gelesen
-   * wird. Die Messwert-Formeln und die Befehlsfolge bleiben unangetastet. */
+   * Purely observing: none of this changes what is sent or how it is read.
+   * The reading formulas and the command sequence remain untouched. */
   const LOG_MAX = 600;
   const logRing = [];
 
@@ -39,15 +38,15 @@ window.joltObd = (function () {
     if (logRing.length > LOG_MAX) {
       logRing.splice(0, logRing.length - LOG_MAX);
     }
-    try { reporterOutside(text, variety); } catch (failure) { /* der Aufrufer irrt, nicht wir */ }
+    try { reporterOutside(text, variety); } catch (failure) { /* the caller is at fault, not us */ }
   }
 
-  let lastRecord = null;   // der zuletzt vollständig gelesene Satz
+  let lastRecord = null;   // the most recent record read completely
 
   const counter = {
     commands: { sent: 0, answered: 0, timeout: 0, delayed: 0,
                sumMs: 0, latestMs: null, lastReception: null },
-    readings: {},    // name -> { ok, leer, fehler, summeMs, letzteMs, wert, zeit }
+    readings: {},    // name -> { ok, empty, failure, sumMs, latestMs, val, timestamp }
     rounds: { n: 0, failure: 0, sumMs: 0, latestMs: null, timestamp: null },
     connection: { device: "", since: null, dropouts: 0, retries: 0 },
   };
@@ -61,30 +60,29 @@ window.joltObd = (function () {
 
   const short = (id) => `0000${id}-0000-1000-8000-00805f9b34fb`;
   const SERVICES = [
-    short("fff0"),   // Vgate, Veepeak, viele Klone
-    short("ffe0"),   // HM-10-basiert
+    short("fff0"),   // Vgate, Veepeak, many clones
+    short("ffe0"),   // HM-10 based
     short("ffe5"),
     short("fee7"),
     short("18f0"),
     "6e400001-b5a3-f393-e0a9-e50e24dcca9e",   // Nordic UART
   ];
 
-  /* Namen, unter denen sich ELM327-Dongles melden. Der Vgate iCar Pro 2S
-   * heisst `IOS-Vlink` - abgelesen am Gerät, nicht geraten.
+  /* Names under which ELM327 dongles announce themselves. The Vgate iCar
+   * Pro 2S is called `IOS-Vlink` - read off the device, not guessed.
    *
-   * `namePrefix` vergleicht **unterscheidend nach Gross- und
-   * Kleinschreibung**: `IOS-vlink` mit kleinem v trifft `IOS-Vlink` nicht,
-   * und der Dialog bliebe leer, als wäre kein Dongle da. Deshalb steht das
-   * kurze, eindeutige `IOS-` mit in der Liste - es trifft unabhängig davon,
-   * wie der Rest geschrieben ist. */
+   * `namePrefix` compares **case-sensitively**: `IOS-vlink` with a small v
+   * does not match `IOS-Vlink`, and the dialog would stay empty as if no
+   * dongle were there. That is why the short, unambiguous `IOS-` is in the
+   * list too - it matches regardless of how the rest is written. */
   const NAMES = ["IOS-Vlink", "IOS-", "Vlink", "vlink", "VLink",
                  "OBD", "Vgate", "VEEPEAK"];
 
-  /* Mehrere Anläufe, weil sich die Browser hier verschieden verhalten und
-   * ein einzelner Fehlschlag nicht sagt, woran es lag. Der letzte Anlauf
-   * kann zwar keinen Dienst lesen, beantwortet aber die Frage, ob überhaupt
-   * ein Auswahldialog erscheint - und trennt damit "der Aufruf ist kaputt"
-   * von "der Dongle wird nicht gefunden". */
+  /* Several attempts, because browsers behave differently here and a
+   * single failure does not say what caused it. The last attempt cannot
+   * read a service, but it answers the question whether a selection
+   * dialog appears at all - and thereby separates "the call is broken"
+   * from "the dongle is not found". */
 
   const VARIANTS = [
     ["alle Geräte, Dienste angemeldet",
@@ -99,64 +97,63 @@ window.joltObd = (function () {
      () => ({ acceptAllDevices: true })],
   ];
 
-  /* Der Handshake - **am Fahrzeug bestätigt** am 26.08.2026 an einem
-   * ID.Buzz mit einem Vgate iCar Pro 2S (ELM327 v2.3).
+  /* The handshake - **confirmed at the vehicle** on 26.08.2026 on an
+   * ID.Buzz with a Vgate iCar Pro 2S (ELM327 v2.3).
    *
-   * Der MEB spricht Diagnose über 29-bit-Kennungen, nicht über die kurzen
-   * 11-bit-Adressen der Abgasdiagnose. Auf 7E0/7E2/7E5/7E6 antwortete
-   * nichts, und zwar nicht weil die Steuergeräte schwiegen, sondern weil in
-   * der falschen Adressform gefragt wurde.
+   * The MEB speaks diagnostics over 29-bit identifiers, not over the short
+   * 11-bit addresses of emissions diagnostics. Nothing answered on
+   * 7E0/7E2/7E5/7E6, and not because the control units were silent, but
+   * because the question was asked in the wrong address form.
    *
-   * Die Grundlage stammt aus dem eigenen Android-Logger
-   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`). Eine Sache musste
-   * dabei berichtigt werden, und sie war der Unterschied zwischen NO DATA
-   * und einer Antwort:
+   * The basis comes from our own Android logger
+   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`). One thing had to
+   * be corrected, and it was the difference between NO DATA and an answer:
    *
-   *   Der Logger setzt `ATCP17` **und** gibt `ATSH17FC007B` die vollständige
-   *   Adresse. Das schliesst einander aus. `ATCP` setzt die oberen fünf Bit
-   *   der 29-bit-Kennung, `ATSH` liefert die unteren 24 - genau deshalb gibt
-   *   es `ATCP` überhaupt. 0x17FC007B zerlegt sich in 0x17 oben und
-   *   0xFC007B unten, und richtig heisst es deshalb `ATSHFC007B`. Der ELM
-   *   quittiert die lange Form zwar mit OK, sendet dann aber auf einer
-   *   anderen Kennung.
+   *   The logger sets `ATCP17` **and** gives `ATSH17FC007B` the full
+   *   address. These are mutually exclusive. `ATCP` sets the upper five
+   *   bits of the 29-bit identifier, `ATSH` supplies the lower 24 - which
+   *   is exactly why `ATCP` exists at all. 0x17FC007B breaks down into
+   *   0x17 on top and 0xFC007B below, so the correct command is
+   *   `ATSHFC007B`. The ELM acknowledges the long form with OK, but then
+   *   sends on a different identifier.
    *
-   * Ausserdem `ATCAF1` statt `ATCAF0`: Mit abgeschalteter Formatierung
-   * müsste das ISO-TP-Längenbyte von Hand im Befehl stehen (`0322028C`).
-   * Automatisch ist weniger fehleranfällig und beherrscht mehrteilige
-   * Antworten gleich mit.
+   * Also `ATCAF1` instead of `ATCAF0`: with formatting switched off, the
+   * ISO-TP length byte would have to be put into the command by hand
+   * (`0322028C`). Automatic is less error-prone and handles multi-part
+   * responses right away.
    *
-   * `ATH1` lässt die Absenderkennung in der Antwort stehen. Ein Byte mehr
-   * zu lesen kostet nichts und beantwortet im Zweifel die Frage, *wer*
-   * geantwortet hat - beim Suchen war das die nützlichste Zeile überhaupt.
+   * `ATH1` leaves the sender identifier in the response. One more byte to
+   * read costs nothing and, when in doubt, answers the question *who*
+   * replied - while searching, that was the most useful line of all.
    *
-   * Bestätigte Antwort auf 22028C:  17FE007B 04 62028C B4 */
-  const SEND_BMS = "FC007B";        // untere 24 Bit; obere 5 via ATCP17
-  const BMS_EMPFANGEN = "17FE007B";   // Empfangsfilter: volle Kennung
+   * Confirmed response to 22028C:  17FE007B 04 62028C B4 */
+  const SEND_BMS = "FC007B";        // lower 24 bits; upper 5 via ATCP17
+  const BMS_EMPFANGEN = "17FE007B";   // receive filter: full identifier
   const HANDSHAKE = [
     "ATZ", "ATE0", "ATL0", "ATS0", "ATH1",
     "ATSP7", "ATCP17", "ATCAF1", "ATST FF",
     `ATSH${SEND_BMS}`, `ATCRA${BMS_EMPFANGEN}`,
   ];
 
-  let write_out = null;      // Charakteristik zum Senden
-  let deviceRemembered = null;  // für das Wiederverbinden nach Abriss
+  let write_out = null;      // characteristic for sending
+  let deviceRemembered = null;  // for reconnecting after a dropout
   let buffer = "";
-  let waitOn = null;       // {erfuellen, ablehnen, uhr}
+  let waitOn = null;       // {fulfil, reject, clock}
   let latestAddress = null;
-  let notifyCurrent = null;  // aktuell abonnierte Charakteristik
-  let roundRunning = false;   // gerade wird ein Satz gelesen
-  let listenActive = false; // der Dongle hoert nur zu (lauschen())
-  let listener = null;       // nimmt die Rohdaten waehrend des Mithoerens entgegen
+  let notifyCurrent = null;  // currently subscribed characteristic
+  let roundRunning = false;   // a record is currently being read
+  let listenActive = false; // the dongle only listens (listen())
+  let listener = null;       // receives the raw data while listening in
 
-  /* Ohne diese Sperre konnten zwei Verbindungsversuche gleichzeitig laufen -
-   * etwa das automatische Wiederverbinden im Hintergrund und ein manuelles
-   * Antippen von "Dongle verbinden" zur selben Zeit. Beide bauen dieselbe
-   * GATT-Verbindung neu auf und schicken danach dieselbe Handshake-Reihe;
-   * `befehl()` lässt aber nur einen wartenden Befehl gleichzeitig zu und
-   * lehnt den zweiten mit "es läuft noch ein Befehl" ab. Die Reihe, die das
-   * trifft, gilt dann als unvollständig - obwohl beide Versuche für sich
-   * genommen funktioniert hätten. Alles, was verbindet oder den Handshake
-   * schickt, läuft deshalb nacheinander über `gesperrt()`. */
+  /* Without this lock, two connection attempts could run at the same
+   * time - for example the automatic reconnect in the background and a
+   * manual tap on "Dongle verbinden" at the same moment. Both rebuild the
+   * same GATT connection and afterwards send the same handshake series;
+   * `command()` allows only one waiting command at a time, however, and
+   * rejects the second with "es läuft noch ein Befehl". The series hit by
+   * that is then considered incomplete - although both attempts would have
+   * worked on their own. Everything that connects or sends the handshake
+   * therefore runs one after another through `locked()`. */
   let connectionLock = Promise.resolve();
 
   function locked(task) {
@@ -165,17 +162,17 @@ window.joltObd = (function () {
     return own;
   }
 
-  /* ---------- Verbinden ---------- */
+  /* ---------- Connecting ---------- */
 
-  /* Woher das Bluetooth kommt, entscheidet sich zur Laufzeit.
+  /* Where Bluetooth comes from is decided at runtime.
    *
-   * Im Browser ist es `navigator.bluetooth` - auf iOS heisst das: in
-   * Bluefy, denn Safari kennt die API nicht. In der iOS-App gibt es sie
-   * ebenso wenig, dort liefert `obd-ble-native.js` dieselbe Gestalt über
-   * CoreBluetooth nach. Alles unterhalb dieser Zeile merkt davon nichts,
-   * und das ist der Zweck: Die Messwerte, Adressblöcke und Byte-Formeln in
-   * dieser Datei sind am Fahrzeug erarbeitet und sollen nicht ein zweites
-   * Mal entstehen, nur weil der Weg zum Dongle ein anderer ist. */
+   * In the browser it is `navigator.bluetooth` - on iOS that means: in
+   * Bluefy, because Safari does not know the API. In the iOS app it does
+   * not exist either; there `obd-ble-native.js` supplies the same shape on
+   * top of CoreBluetooth. Everything below this line is unaware of that,
+   * and that is the point: the readings, address blocks and byte formulas
+   * in this file were worked out at the vehicle and should not come into
+   * being a second time just because the route to the dongle is different. */
   function bt() {
     const native = window.joltBleNative;
     if (native && native.obtainable()) return native.bluetooth;
@@ -184,10 +181,10 @@ window.joltObd = (function () {
 
   async function link() {
     try {
-      // Der Reihe nach durchprobieren, statt auf eine Form zu setzen: Welche
-      // Gestalt der Anfrage ein Browser akzeptiert, unterscheidet sich - und
-      // ein einzelner Fehlschlag sagt nicht, woran es lag. Jeder Versuch
-      // steht im Protokoll, damit der nächste nicht wieder raten muss.
+      // Try them in turn instead of betting on one shape: which shape of the
+      // request a browser accepts differs - and a single failure does not say
+      // what caused it. Every attempt is in the log so the next one does not
+      // have to guess again.
       let device = null;
       let lastError = null;
       for (const [name, build] of VARIANTS) {
@@ -198,9 +195,8 @@ window.joltObd = (function () {
         } catch (failure) {
           lastError = failure;
           report(`  ${failure.name || "Fehler"}: ${failure.message}`);
-          // Abbruch durch den Nutzer ist kein Grund weiterzuprobieren - er
-          // hat den Dialog gesehen und zugemacht. Jede weitere Variante
-          // öffnete ihn nur erneut.
+          // Cancelling by the user is no reason to keep trying - they saw the
+          // dialog and closed it. Every further variant would only open it again.
           if (failure.name === "NotFoundError"
               && /cancel|abbruch|user/i.test(failure.message)) throw failure;
         }
@@ -212,17 +208,16 @@ window.joltObd = (function () {
         report("Verbindung getrennt.");
         counter.connection.dropouts += 1;
         counter.connection.since = null;
-        // Ohne das hier hielte `verbunden_()` einen Abriss für eine
-        // bestehende Verbindung - `schreiben` wurde bisher nur beim
-        // absichtlichen `trennen()` geloescht. `anschliessen()` verlässt
-        // sich inzwischen auf `verbunden_()`, um einen unnötigen zweiten
-        // Aufbau zu vermeiden - genau das hätte nach einem echten Abriss
-        // jeden weiteren Verbindungsversuch übersprungen.
+        // Without this, `connected_()` would take a dropout for an existing
+        // connection - `write_out` used to be cleared only on the intentional
+        // `detach()`. `attach()` now relies on `connected_()` to avoid an
+        // unnecessary second setup - exactly that would have skipped every
+        // further connection attempt after a real dropout.
         write_out = null;
-        // Im Tunnel oder wenn der Dongle einschläft reisst die Verbindung
-        // ab. Während einer laufenden Aufzeichnung ist das kein Grund
-        // aufzuhören - wer dann erst eine Berührung braucht, verliert die
-        // halbe Fahrt, weil niemand am Steuer auf den Bildschirm sieht.
+        // In a tunnel, or when the dongle falls asleep, the connection drops.
+        // During a running recording that is no reason to stop - someone who
+        // needs a touch first loses half the trip, because nobody at the wheel
+        // looks at the screen.
         if (atDropout) atDropout();
       });
       await locked(() => connectionBuildUp(device));
@@ -231,20 +226,19 @@ window.joltObd = (function () {
     }
   }
 
-  /* Den GATT-Aufbau getrennt von der Geräteauswahl.
+  /* Building the GATT connection separately from device selection.
    *
-   * `requestDevice` verlangt zwingend eine Nutzergeste - eine Seite darf
-   * sich beim Laden nicht von selbst verbinden. `gatt.connect()` auf ein
-   * bereits erlaubtes Gerät dagegen nicht. Genau deshalb steht es hier für
-   * sich: Nach einem Abriss im Tunnel lässt sich damit ohne Zutun wieder
-   * aufbauen, solange das Gerät gemerkt ist. */
+   * `requestDevice` strictly requires a user gesture - a page may not
+   * connect by itself on load. `gatt.connect()` on an already permitted
+   * device does not. That is exactly why it stands here on its own: after
+   * a dropout in a tunnel it allows rebuilding without any action, as long
+   * as the device is remembered. */
   async function connectionBuildUp(device) {
     const server = await device.gatt.connect();
     counter.connection.device = device.name || "";
 
-      // Den brauchbaren Dienst suchen: einer, der eine beschreibbare und eine
-      // benachrichtigende Charakteristik hat. Bei manchen Dongles ist das
-      // dieselbe.
+      // Find the usable service: one that has a writable and a notifying
+      // characteristic. On some dongles that is the same one.
       let notify = null;
       for (const service of await server.getPrimaryServices()) {
         const chars = await service.getCharacteristics();
@@ -260,14 +254,14 @@ window.joltObd = (function () {
                         + "Protokoll - sie gehört in die Liste DIENSTE.");
       }
 
-      // Ohne das Abmelden hier bekäme ein zweiter Aufbau auf dasselbe Gerät
-      // (z.B. weil ein automatischer und ein manueller Versuch ineinander
-      // liefen) einen zweiten Listener dazu - jede Antwort käme doppelt bei
-      // `beiDaten` an und würde den Puffer durcheinanderbringen.
+      // Without unsubscribing here, a second setup on the same device (e.g.
+      // because an automatic and a manual attempt ran into each other) would
+      // add a second listener - every response would arrive twice at `atData`
+      // and mess up the buffer.
       if (notifyCurrent) {
         try {
           notifyCurrent.removeEventListener("characteristicvaluechanged", atData);
-        } catch (failure) { /* Charakteristik schon weg - nichts zu tun */ }
+        } catch (failure) { /* characteristic already gone - nothing to do */ }
       }
       await notify.startNotifications();
       notify.addEventListener("characteristicvaluechanged", atData);
@@ -277,34 +271,33 @@ window.joltObd = (function () {
   }
 
 
-  /* ---------- Wiederverbinden ---------- */
+  /* ---------- Reconnecting ---------- */
 
-  /* Nach einem Abriss ohne Zutun wieder aufbauen.
+  /* Rebuild after a dropout without any action.
    *
-   * Zwei Wege, und welcher geht, hängt am Browser: Ist das Gerät noch
-   * gemerkt, genügt `gatt.connect()` - das braucht keine Geste. Ist es das
-   * nicht (Seite neu geladen), fragt `getDevices()` nach den bereits
-   * erlaubten Geräten; auch das ohne Geste, aber nicht jeder Browser kennt
-   * es. Erst wenn beides scheitert, muss jemand tippen - und dann steht das
-   * auch gross da statt nur im Protokoll.
+   * Two ways, and which one works depends on the browser: if the device is
+   * still remembered, `gatt.connect()` suffices - that needs no gesture.
+   * If not (page reloaded), `getDevices()` asks for the already permitted
+   * devices; also without a gesture, but not every browser knows it. Only
+   * when both fail does someone have to tap - and then that is shown
+   * prominently instead of only in the log.
    */
-  /* **Solange die Fahrt läuft, wird weiter versucht.**
+  /* **As long as the trip is running, keep trying.**
    *
-   * Hier stand `grenze = 6`. Mit den wachsenden Abständen (3, 6, 12, 24, 48,
-   * 60 Sekunden) war die Serie nach rund zweieinhalb Minuten aufgebraucht,
-   * und danach versuchte es jolt **nie wieder**.
+   * There used to be `grenze = 6` here. With the growing intervals (3, 6,
+   * 12, 24, 48, 60 seconds) the series was used up after about two and a
+   * half minutes, and after that jolt **never tried again**.
    *
-   * Gemessen an einer echten Fahrt: Fünf Minuten mit der Seite im
-   * Hintergrund haben alle sechs Versuche verbraucht. Die restlichen
-   * vierzehn Minuten kamen nur noch GPS-Punkte an - zwanzig Kilometer
-   * aufgezeichnet, ohne einen einzigen Fahrzeugwert, und ohne dass jolt es
-   * noch einmal probiert hätte.
+   * Measured on a real trip: five minutes with the page in the background
+   * used up all six attempts. For the remaining fourteen minutes only GPS
+   * points arrived - twenty kilometres recorded without a single vehicle
+   * value, and without jolt ever trying once more.
    *
-   * Eine Obergrenze war für den Fall gedacht, dass der Dongle gezogen wurde.
-   * Genau dafür ist aber `weiter` da - es endet, wenn die Fahrt endet. Statt
-   * aufzugeben wird der Abstand nur gedeckelt: alle zwanzig Sekunden
-   * anklopfen kostet fast nichts und holt eine Verbindung zurück, sobald sie
-   * wieder möglich ist. */
+   * An upper limit was meant for the case that the dongle was unplugged.
+   * But that is exactly what `onward` is for - it ends when the trip
+   * ends. Instead of giving up, the interval is merely capped: knocking
+   * every twenty seconds costs almost nothing and brings a connection
+   * back as soon as it is possible again. */
   const AGAIN_MAX_DISTANCE_MS = 20000;
 
   async function reconnect(attempt = 1, onward = () => true) {
@@ -321,8 +314,8 @@ window.joltObd = (function () {
       counter.connection.retries += 1;
       await locked(async () => {
         await connectionBuildUp(device);
-        latestAddress = null;        // Adresse und Filter sind weg
-        // Was vor dem Abriss unterwegs war, kommt nicht mehr.
+        latestAddress = null;        // address and filters are gone
+        // Whatever was in flight before the dropout will no longer arrive.
         culpritResponses = 0;
         buffer = "";
         changeFailed.clear();
@@ -330,34 +323,34 @@ window.joltObd = (function () {
       });
       report("Wieder verbunden, Handshake erneuert.");
     } catch (failure) {
-      // Nur jeden zehnten Fehlversuch protokollieren, sonst füllt sich das
-      // Protokoll auf einer langen Fahrt mit derselben Zeile.
+      // Log only every tenth failed attempt, otherwise the log fills up with
+      // the same line on a long trip.
       if (attempt <= 6 || attempt % 10 === 0) {
         report(`Wiederverbinden fehlgeschlagen (Versuch ${attempt}): `
               + failure.message);
       }
-      // Wachsende Abstände bis zur Obergrenze: Ein Tunnel dauert Sekunden,
-      // ein eingeschlafener Dongle Minuten. Alle zwei Sekunden zu klopfen
-      // hilft in keinem der beiden Fälle und kostet Akku.
+      // Growing intervals up to the cap: a tunnel lasts seconds, a sleeping
+      // dongle minutes. Knocking every two seconds helps in neither case and
+      // costs battery.
       const wait = Math.min(AGAIN_MAX_DISTANCE_MS,
                               3000 * Math.pow(2, attempt - 1));
-      // `weiter` muss mitgereicht werden. Ohne das galt beim zweiten
-      // Versuch wieder die Vorgabe `() => true`, und die Kette lief nach dem
-      // Ende der Fahrt einfach weiter - sie verband einen Dongle neu, den
-      // niemand mehr braucht, und hielt die Verbindung offen.
+      // `onward` has to be passed along. Without it, the second attempt got
+      // the default `() => true` again, and the chain simply kept running
+      // after the trip ended - it reconnected a dongle nobody needs anymore
+      // and kept the connection open.
       setTimeout(() => reconnect(attempt + 1, onward), wait);
     }
   }
 
-  /* Die Verbindung absichtlich beenden.
+  /* End the connection deliberately.
    *
-   * Gebraucht an der Ladesaeule: Ein verriegeltes Fahrzeug, das weiter ueber
-   * CAN gefragt wird, loest die Alarmanlage aus. "Nicht mehr lesen" genuegt
-   * dafuer nicht - der Dongle bleibt verbunden, und schon der Handshake nach
-   * einem Abriss spricht wieder mit dem Bus.
+   * Needed at the charging post: a locked vehicle that keeps being asked
+   * over CAN triggers the alarm system. "No longer reading" is not enough
+   * for that - the dongle stays connected, and even the handshake after a
+   * dropout talks to the bus again.
    *
-   * `geraetGemerkt` bleibt stehen: Das Geraet ist weiter erlaubt, und der
-   * naechste Aufbau kommt ohne Auswahldialog aus. */
+   * `deviceRemembered` stays: the device is still permitted, and the next
+   * setup manages without a selection dialog. */
   function detach() {
     try {
       if (deviceRemembered && deviceRemembered.gatt && deviceRemembered.gatt.connected) {
@@ -375,28 +368,28 @@ window.joltObd = (function () {
     report("Verbindung absichtlich getrennt.");
   }
 
-  /* ---------- Befehle ---------- */
+  /* ---------- Commands ---------- */
 
-  /* Wie viele Antworten noch von aufgegebenen Befehlen unterwegs sind.
+  /* How many responses from abandoned commands are still in flight.
    *
-   * Ein Zeitablauf gibt den Befehl auf, aber nicht der Dongle: Der antwortet
-   * gleich darauf trotzdem. Ohne Buchführung landete diese verspätete
-   * Antwort beim **nächsten** Befehl. Falsche Zahlen kamen dabei nicht
-   * heraus - `nutzbytes` prüft, dass die Quittung zur Datenkennung passt -,
-   * aber jede Messung danach war um eins verschoben und lieferte "keine
-   * Nutzdaten". Und weil der Ladestand pflicht ist, riss das gleich die
-   * ganze Runde ab: ein einzelner langsamer Befehl kostete mehrere
-   * Messpunkte statt einen Wert. */
+   * A timeout gives up the command, but the dongle does not: it answers
+   * right afterwards anyway. Without bookkeeping, this late response
+   * landed on the **next** command. No wrong numbers came out of it -
+   * `payload_bytes` checks that the acknowledgement matches the data
+   * identifier -, but every measurement after it was shifted by one and
+   * delivered "no payload". And because the charge level is mandatory,
+   * that tore down the whole round: a single slow command cost several
+   * measurement points instead of one value. */
   let culpritResponses = 0;
 
   function atData(e) {
     const text = new TextDecoder().decode(e.target.value);
-    // Beim Mithoeren kommt ein Strom von Frames ohne Eingabeaufforderung; er
-    // gehoert dem Mithoerer, nicht der Befehl-und-Antwort-Logik.
+    // While listening in, a stream of frames arrives without a prompt; it
+    // belongs to the listener, not to the command-and-response logic.
     if (listener) { listener(text); return; }
     buffer += text;
-    // Der ELM327 schliesst jede Antwort mit '>' ab. Vorher ist sie
-    // unvollständig - BLE liefert in Häppchen von rund zwanzig Byte.
+    // The ELM327 ends every response with '>'. Before that it is
+    // incomplete - BLE delivers in chunks of around twenty bytes.
     if (!buffer.includes(">")) return;
     const response = buffer.replace(/>/g, "").replace(/\r/g, "\n").trim();
     buffer = "";
@@ -420,17 +413,17 @@ window.joltObd = (function () {
     }
   }
 
-  /* Sechs Sekunden waren zu knapp: Nach `ATSP0` sucht der ELM das Protokoll
- * selbst (`SEARCHING...`), und das dauert an einem Fahrzeug, das nicht
- * antwortet, bis zu zehn Sekunden. Die Antwort kam eine Sekunde nach dem
- * Abbruch - im Protokoll stand dann ein Zeitablauf, wo in Wirklichkeit ein
- * Befund war. */
+  /* Six seconds was too tight: after `ATSP0` the ELM searches for the
+ * protocol itself (`SEARCHING...`), and on a vehicle that does not
+ * answer that takes up to ten seconds. The answer came one second after
+ * the abort - the log then showed a timeout where in reality there was
+ * a finding. */
 function command(text, limit_ms = 15000, intern = false) {
     return new Promise((fulfil, reject) => {
       if (!write_out) { reject(new Error("nicht verbunden")); return; }
-      // Jedes Zeichen beendet das Mithoeren des ELM327. Ein Befehl von aussen
-      // (Spannungspruefung, Konsole, Leserunde) wuerde es mitten im Strom
-      // abbrechen und dessen Antwort mit Frames vermischen.
+      // Any character ends the ELM327's listening mode. A command from outside
+      // (voltage check, console, read round) would interrupt it in the middle
+      // of the stream and mix its response with frames.
       if (listenActive && !intern) {
         reject(new Error("der Dongle lauscht gerade")); return;
       }
@@ -444,19 +437,19 @@ function command(text, limit_ms = 15000, intern = false) {
         clock: setTimeout(() => {
           waitOn = null;
           counter.commands.timeout += 1;
-          // Der Dongle antwortet vielleicht doch noch. Diese eine Antwort
-          // gehört zu keinem wartenden Befehl mehr und wird verworfen.
+          // The dongle may still answer after all. This one response belongs to
+          // no waiting command anymore and is discarded.
           culpritResponses += 1;
-          // Ein Zeitablauf ist hier kein Absturz, sondern ein Befund: Der
-          // Dongle hat nicht geantwortet, und das steht im Protokoll.
+          // A timeout here is not a crash but a finding: the dongle did not
+          // answer, and that goes in the log.
           report(`(keine Antwort auf ${text} innerhalb ${limit_ms / 1000} s)`);
           reject(new Error("Zeitüberschreitung bei " + text));
         }, limit_ms),
       };
       const records = new TextEncoder().encode(text + "\r");
-      // writeValueWithoutResponse ist neuer als writeValue und fehlt in
-      // manchen Umsetzungen - deshalb auf die Methode prüfen und nicht nur
-      // auf die Eigenschaft der Charakteristik.
+      // writeValueWithoutResponse is newer than writeValue and missing in some
+      // implementations - so check for the method and not only for the
+      // property of the characteristic.
       const without_response = write_out.properties.writeWithoutResponse
         && typeof write_out.writeValueWithoutResponse === "function";
       const send = without_response
@@ -469,13 +462,13 @@ function command(text, limit_ms = 15000, intern = false) {
     });
   }
 
-  /* Weitermachen statt abbrechen. Ein Befehl ohne Antwort ist hier ein
-   * Befund und kein Grund aufzuhören - beim ersten Versuch riss ein
-   * Zeitablauf bei `0100` die Reihe ab, und ausgerechnet das darauf folgende
-   * `ATDP` lief nie. Genau der Befehl hätte gesagt, ob überhaupt ein
-   * Protokoll gefunden wurde. */
-  /* Welche Befehle der letzten Reihe gescheitert sind - damit eine Meldung
-   * "Handshake unvollständig" sagen kann, woran es lag. */
+  /* Carry on instead of aborting. A command without a response is a
+   * finding here and no reason to stop - on the first attempt a timeout at
+   * `0100` broke off the series, and the `ATDP` following it, of all
+   * commands, never ran. Exactly that command would have said whether a
+   * protocol was found at all. */
+  /* Which commands of the last series failed - so that a message
+   * "Handshake unvollständig" can say what the cause was. */
   let seriesError = [];
 
   async function series(commands) {
@@ -490,8 +483,8 @@ function command(text, limit_ms = 15000, intern = false) {
         report("FEHLER " + failure.message + " - weiter mit dem nächsten Befehl");
         everything_good = false;
         seriesError.push(`${clean}: ${failure.message}`);
-        // Eine verspätete Antwort auf den abgelaufenen Befehl darf nicht dem
-        // nächsten zugeschlagen werden.
+        // A late response to the expired command must not be attributed to the
+        // next one.
         buffer = "";
         await new Promise((w) => setTimeout(w, 300));
       }
@@ -499,36 +492,38 @@ function command(text, limit_ms = 15000, intern = false) {
     return everything_good;
   }
 
-  /* ---------- Ladestand ---------- */
+  /* ---------- Charge level ---------- */
 
-  /* Vom Rohbyte zu den beiden Ladeständen.
+  /* From the raw byte to the two charge levels.
    *
-   * Die Antwort auf 22028C sieht so aus: `17FE007B 04 62028C B4` - die
-   * Absenderkennung (wegen ATH1), das ISO-TP-Längenbyte, die Quittung
-   * `62` = `22` + `40`, die Datenkennung, dann ein einziges Nutzbyte.
+   * The response to 22028C looks like this: `17FE007B 04 62028C B4` - the
+   * sender identifier (because of ATH1), the ISO-TP length byte, the
+   * acknowledgement `62` = `22` + `40`, the data identifier, then a single
+   * payload byte.
    *
-   * Aus diesem Byte folgen **zwei** Zahlen, und die zu verwechseln ist der
-   * gefährlichste Fehler an dieser Stelle:
+   * Two numbers follow from this byte, and mixing them up is the most
+   * dangerous mistake at this spot:
    *
-   *   SoC(BMS) = Rohwert / 2,5
-   *   SoC(HMI) = SoC(BMS) * 51/46 - 6,4
+   *   SoC(BMS) = raw value / 2.5
+   *   SoC(HMI) = SoC(BMS) * 51/46 - 6.4
    *
-   * Der BMS-Wert ist der Brutto-Ladestand der Batterie. Die Anzeige im Auto
-   * zeigt ihn nicht - sie rechnet ihn auf das nutzbare Fenster um, das oben
-   * und unten einen Puffer freilässt (rechnerisch: 0 % Anzeige bei 5,8 %
-   * brutto, 100 % Anzeige bei 96 % brutto).
+   * The BMS value is the gross charge level of the battery. The display in
+   * the car does not show it - it converts it to the usable window, which
+   * leaves a buffer at the top and bottom (computationally: 0 % display at
+   * 5.8 % gross, 100 % display at 96 % gross).
    *
-   * Am Fahrzeug bestätigt: Rohwert 0xB4 = 180 ergibt 72,0 % brutto und
-   * 73,4 % Anzeige - das Auto zeigte 74 %. Mit dem Teiler 2,55, wie ihn der
-   * eigene Android-Logger verwendet, käme 71,9 % heraus und die Rechnung
-   * ginge nicht auf. Der Teiler ist 2,5.
+   * Confirmed at the vehicle: raw value 0xB4 = 180 gives 72.0 % gross and
+   * 73.4 % display - the car showed 74 %. With the divisor 2.55, as our own
+   * Android logger uses it, 71.9 % would result and the calculation would
+   * not work out. The divisor is 2.5.
    *
-   * **jolt braucht den HMI-Wert.** `reserve_soc` und `ziel_soc` sind am
-   * Anzeigewert gedacht, und der liegt hier gut anderthalb Punkte über dem
-   * Brutto-Wert. Wer den falschen meldet, setzt die Reserve zu optimistisch
-   * - und zwar genau am unteren Ende, wo es zählt. */
-  /* Aus dem Rohbyte die beiden Ladestände. Getrennt von `socAusAntwort`,
-   * weil die Aufzeichnung das Byte schon zerlegt vorliegen hat. */
+   * **jolt needs the HMI value.** `reserve_soc` and `target_soc` are meant
+   * for the display value, and that is a good one and a half points above
+   * the gross value here. Whoever reports the wrong one sets the reserve
+   * too optimistically - and exactly at the lower end, where it counts. */
+  /* From the raw byte the two charge levels. Kept separate from
+   * `socFromResponse`, because the recording already has the byte
+   * decomposed. */
   function socFromRaw(byte) {
     const bms = byte / 2.5;
     return { raw: byte, bms,
@@ -544,37 +539,38 @@ function command(text, limit_ms = 15000, intern = false) {
     return socFromRaw(parseInt(payload.slice(0, 2), 16));
   }
 
-  /* ---------- Was ausgelesen wird ---------- */
+  /* ---------- What is read out ---------- */
 
-  /* Die Messwerte stehen in `readings.js` - Datenkennung, Zieladresse,
-   * Byte-Lage und Umrechnung als Tabelle mit benannten Feldern.
+  /* The readings are in `readings.js` - data identifier, target address,
+   * byte position and conversion as a table with named fields.
    *
-   * Vorher stand hier jede Umrechnung als eigene Funktion. Das las sich
-   * gut, hiess aber: Wer eine Datenkennung ergaenzen wollte, schrieb Code
-   * mitten in den Baustein, der die Verbindung zum Auto haelt. Die
-   * Tabelle trennt beides - dort das Wissen ueber das Fahrzeug, hier der
-   * Weg zum Dongle.
+   * Previously every conversion stood here as its own function. That read
+   * well, but meant: whoever wanted to add a data identifier wrote code in
+   * the middle of the module that holds the connection to the car. The
+   * table separates the two - the knowledge about the vehicle there, the
+   * way to the dongle here.
    *
-   * Aufgeloest wird die Tabelle genau einmal, beim Laden. Was dabei
-   * auffaellt - ein Tippfehler im Adressnamen, eine fehlende Byte-Lage -
-   * landet in `TABELLE_FEHLER` und wird auf der Diagnoseseite sichtbar,
-   * statt spaeter als "keine Nutzdaten" am Auto aufzutauchen. */
+   * The table is resolved exactly once, at load time. Whatever turns up in
+   * the process - a typo in an address name, a missing byte position -
+   * ends up in `TABLE_ERROR` and becomes visible on the diagnostics page,
+   * instead of appearing later as "keine Nutzdaten" at the car. */
   const TABLE = window.joltReadings || { addresses: {}, vals: [] };
   const TABLE_ERROR = [];
 
-  /* Aus einer Tabellenzeile die Lesefunktion bauen.
+  /* Build the read function from a table row.
    *
-   * Die Reihenfolge der Rechenschritte ist die Stelle, an der eine
-   * Portierung still danebengeht, deshalb steht sie hier genau einmal und
-   * nicht zwanzigmal:
+   * The order of the calculation steps is the spot where a port silently
+   * goes wrong, so it is written down here exactly once and not twenty
+   * times:
    *
-   *     roh   = Bytes `ab` bis `ab + laenge - 1`, hoechstwertiges zuerst
-   *     roh  &= maske
-   *     wert  = (roh + vorversatz) / teiler * faktor + versatz
+   *     raw   = bytes `downhill` to `downhill + len_total - 1`
+   *             (first payload byte and length), most significant first
+   *     raw  &= mask
+   *     val   = (raw + pre_offset) / divider * factor + offset
    *
-   * `vorversatz` und `versatz` sind zwei Felder, weil beide Reihenfolgen
-   * vorkommen: Der Batteriestrom ist `(roh - 150000) / 100`, die
-   * Batterietemperatur `roh / 2 - 40`. */
+   * `pre_offset` and `offset` are two fields because both orders occur:
+   * the battery current is `(raw - 150000) / 100`, the battery temperature
+   * `raw / 2 - 40`. */
   function formula(row) {
     const downhill = row.downhill | 0;
     const len_total = row.len_total || 1;
@@ -584,31 +580,31 @@ function command(text, limit_ms = 15000, intern = false) {
     const pre_offset = row.pre_offset || 0;
 
     return (bytes) => {
-      // Reichen die Bytes nicht, bleibt die Zeile leer - eine zu kurze
-      // Antwort ist ein Befund, keine Zahl.
+      // If the bytes do not suffice, the row stays empty - a response that is
+      // too short is a finding, not a number.
       if (!bytes || bytes.length < downhill + len_total) return null;
       let raw = 0;
       for (let i = 0; i < len_total; i += 1) raw = raw * 256 + bytes[downhill + i];
       if (row.sign) {
-        // Zweierkomplement. Ohne das las sich der Entladezaehler als
-        // 4,15 Milliarden statt als -17 438 - und beides sieht als Zahl
-        // erst einmal gleich unverdaechtig aus.
+        // Two's complement. Without it the discharge counter read as 4.15
+        // billion instead of -17 438 - and both look equally unsuspicious as a
+        // number at first.
         const bound = Math.pow(2, len_total * 8 - 1);
         if (raw >= bound) raw -= bound * 2;
       }
       if (typeof row.mask === "number") raw &= row.mask;
       let val = (raw + pre_offset) / divider * factor + offset;
       if (row.amount) val = Math.abs(val);
-      // Plausibilitaetsgrenzen: Faellt der Wert heraus, stimmt die
-      // angenommene Umrechnung nicht. Dann lieber nichts als etwas
-      // Falsches, das plausibel aussieht.
+      // Plausibility bounds: if the value falls outside, the assumed
+      // conversion is wrong. Then better nothing than something wrong that
+      // looks plausible.
       if (typeof row.min === "number" && val < row.min) return null;
       if (typeof row.max === "number" && val > row.max) return null;
       return val;
     };
   }
 
-  /* Was eine Zeile mindestens braucht, damit daraus eine Abfrage wird. */
+  /* What a row needs at minimum for it to become a query. */
   function examineRow(row, addresses, actualExtra) {
     const wo = row.name || "(ohne Namen)";
     if (!row.name) TABLE_ERROR.push("Eintrag ohne `name`.");
@@ -631,8 +627,8 @@ function command(text, limit_ms = 15000, intern = false) {
     const extra = row.also || [];
     for (const w of extra) examineRow(w, TABLE.addresses || {}, true);
 
-    // `weitere` bleibt null statt leer: `auswerten` unterscheidet daran,
-    // ob ein einzelner Wert oder ein Paar zurueckkommt.
+    // `further` stays null instead of empty: `evaluate` uses it to tell
+    // whether a single value or a pair comes back.
     let further = null;
     if (extra.length) {
       further = {};
@@ -655,32 +651,32 @@ function command(text, limit_ms = 15000, intern = false) {
   });
 
   if (TABLE_ERROR.length) {
-    // Beim Laden, nicht erst beim Fahren: Ein Tippfehler in der Tabelle
-    // soll auffallen, solange noch jemand am Rechner sitzt.
+    // At load time, not only while driving: a typo in the table should stand
+    // out while someone is still sitting at the computer.
     console.warn("[obd] Fehler in readings.js:\n  "
                  + TABLE_ERROR.join("\n  "));
   }
 
 
-  /* Antwort in Nutzbytes zerlegen. Die Quittung ist `62` + die zwei Bytes
-   * der Datenkennung; alles davor ist Absenderkennung und ISO-TP-Kopf,
-   * alles danach ist Nutzlast. */
-  /* Eine Antwort, die nicht in einen CAN-Rahmen passt, wieder zusammensetzen.
+  /* Split a response into payload bytes. The acknowledgement is `62` + the
+   * two bytes of the data identifier; everything before it is sender
+   * identifier and ISO-TP header, everything after it is payload. */
+  /* Reassemble a response that does not fit into one CAN frame.
    *
-   * Ein Rahmen fasst acht Byte. Laengere Antworten schickt das Steuergeraet
-   * als ISO-TP-Folge, und der ELM327 gibt sie zeilenweise aus - mit Kopf und
-   * einem Steuerbyte je Zeile:
+   * A frame holds eight bytes. Longer responses are sent by the control
+   * unit as an ISO-TP sequence, and the ELM327 outputs them line by line -
+   * with a header and a control byte per line:
    *
-   *   000007B0 10 14 62 08 00 ..      erster Rahmen: 1L LL = Gesamtlaenge
-   *   000007B0 21 .. .. .. .. .. ..   Folgerahmen:   2N    = laufende Nummer
+   *   000007B0 10 14 62 08 00 ..      first frame:       1L LL = total length
+   *   000007B0 21 .. .. .. .. .. ..   consecutive frame: 2N    = sequence number
    *
-   * Ohne dieses Zusammensetzen las `nutzbytes` die erste Zeile und haengte
-   * Koepfe und Steuerbytes der folgenden als Nutzdaten daran - Zahlensalat.
-   * Betroffen sind unter anderem die Leistung des Klimakompressors und der
-   * Energieinhalt des Akkus.
+   * Without this reassembly, `payload_bytes` read the first line and
+   * appended headers and control bytes of the following ones as payload -
+   * a jumble of numbers. Affected, among others, are the power of the
+   * air-conditioning compressor and the energy content of the battery.
    *
-   * Gibt null zurueck, wenn es keine Mehrrahmen-Antwort ist; dann gilt der
-   * einfache Weg darunter. */
+   * Returns null if it is not a multi-frame response; then the simple
+   * path below applies. */
   function multiframe(raw) {
     const rows = raw.split("\n").map((z) => z.trim()).filter(Boolean);
     if (rows.length < 2) return null;
@@ -688,11 +684,11 @@ function command(text, limit_ms = 15000, intern = false) {
     let expected = null;
     for (const row of rows) {
       const hex = row.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
-      /* Kopf abschneiden: acht Zeichen bei 29 Bit, drei bei 11 Bit.
-       * Zu unterscheiden sind sie an der Laenge der Zeile - der Rest ist
-       * immer eine gerade Anzahl Zeichen, also entscheidet die Parität:
-       * 8 + 2n ist gerade, 3 + 2n ungerade. Das gilt auch fuer den letzten,
-       * kuerzeren Rahmen einer Folge. */
+      /* Cut off the header: eight characters at 29 bit, three at 11 bit.
+       * They can be told apart by the length of the line - the rest is
+       * always an even number of characters, so parity decides:
+       * 8 + 2n is even, 3 + 2n odd. This also holds for the last, shorter
+       * frame of a sequence. */
       const withoutHeader = (hex.length % 2) ? hex.slice(3) : hex.slice(8);
       if (withoutHeader.length < 2) continue;
       const pci = parseInt(withoutHeader.slice(0, 2), 16);
@@ -721,28 +717,27 @@ function command(text, limit_ms = 15000, intern = false) {
     return bytes;
   }
 
-  /* Adressen, deren Protokollwechsel schiefging. Einmal reicht: Wer bei
-   * jeder zwanzigsten Runde erneut umschaltet und scheitert, zahlt den
-   * Umlauf dauerhaft, ohne je einen Wert zu bekommen. */
+  /* Addresses whose protocol switch went wrong. Once is enough: whoever
+   * switches again every twentieth round and fails pays for the round trip
+   * permanently without ever getting a value. */
   const changeFailed = new Set();
 
-  /* Flusskontrolle - der fehlende Handgriff bei langen Antworten.
+  /* Flow control - the missing step for long responses.
    *
-   * Passt eine Antwort nicht in einen Rahmen, muss der Fragende ein
-   * Flow-Control-Paket zuruecksenden, bevor das Steuergeraet weiterschickt.
-   * Der ELM327 macht das selbst, aber nur, wenn er weiss, **mit welchem
-   * Kopf** - bei einer Standardadresse raet er richtig, bei den
-   * MEB-Adressen nicht.
+   * If a response does not fit into one frame, the asker has to send a
+   * flow-control packet back before the control unit continues. The ELM327
+   * does that itself, but only if it knows **with which header** - with a
+   * standard address it guesses right, with the MEB addresses it does not.
    *
-   * jolt setzte diese drei Befehle gar nicht. Damit scheiterte jede
-   * mehrteilige Antwort stumm: Der Batteriestrom (221E3D) kam in allen 77
-   * Runden der dritten Testfahrt nicht an, und der Energieinhalt des Akkus
-   * ebenso wenig. Das WiCAN-Fahrzeugprofil setzt sie vor **jeder** Abfrage;
-   * dieselbe Reihenfolge steht hier.
+   * jolt did not set these three commands at all. As a result every
+   * multi-part response failed silently: the battery current (221E3D) did
+   * not arrive in any of the 77 rounds of the third test drive, nor did the
+   * energy content of the battery. The WiCAN vehicle profile sets them
+   * before **every** query; the same order is used here.
    *
-   *   ATFCSH  Kopf des Flow-Control-Pakets
-   *   ATFCSD  dessen Inhalt: 30 = weiter, 00 = ohne Pause, 00 = ohne Abstand
-   *   ATFCSM1 diese Vorgaben benutzen statt selbst zu raten
+   *   ATFCSH  header of the flow-control packet
+   *   ATFCSD  its content: 30 = continue, 00 = no pause, 00 = no spacing
+   *   ATFCSM1 use these defaults instead of guessing on its own
    */
   async function flusskontrolle(destination) {
     if (!destination.fcsh) return;
@@ -754,11 +749,11 @@ function command(text, limit_ms = 15000, intern = false) {
   async function readReading(entry) {
     const destination = entry.address;
 
-    /* Steuergeraete auf einer 11-Bit-Kennung brauchen ein anderes Protokoll
-     * als der Rest (siehe KLIMA). Umgeschaltet wird nur fuer die Dauer
-     * dieser einen Abfrage und im `finally` wieder zurueck - der Ladestand
-     * ist Pflicht, und eine Sitzung, die im falschen Protokoll haengen
-     * bleibt, kostet jede weitere Runde. */
+    /* Control units on an 11-bit identifier need a different protocol than
+     * the rest (see CLIMATE). The switch lasts only for the duration of this
+     * one query and is reverted in the `finally` - the charge level is
+     * mandatory, and a session that gets stuck in the wrong protocol costs
+     * every further round. */
     if (destination.trace_log) {
       if (changeFailed.has(destination.sh)) return null;
       try {
@@ -773,17 +768,17 @@ function command(text, limit_ms = 15000, intern = false) {
         changeFailed.add(destination.sh);
         return null;
       } finally {
-        // Zurueck ins 29-Bit-Protokoll, und die gemerkte Adresse verwerfen:
-        // Der naechste Wert setzt ATCP, ATSH und ATCRA vollstaendig neu.
-        try { await command("ATSP7"); } catch (e) { /* siehe naechste Runde */ }
+        // Back to the 29-bit protocol, and discard the remembered address: the
+        // next value sets ATCP, ATSH and ATCRA completely anew.
+        try { await command("ATSP7"); } catch (e) { /* see next round */ }
         latestAddress = null;
       }
     }
 
     if (!latestAddress || latestAddress.sh !== destination.sh) {
-      // Die Prioritätsbits gehören dazu: Zwischen Batterie (0x17…) und
-      // Fahrzeug (0x17…FC0076) unterscheiden sich die unteren Bits, und ohne
-      // Umschalten geht die Anfrage an eine Kennung, auf der niemand hört.
+      // The priority bits belong to it: between battery (0x17…) and vehicle
+      // (0x17…FC0076) the lower bits differ, and without switching the request
+      // goes to an identifier nobody listens on.
       if (!latestAddress || latestAddress.cp !== destination.cp) {
         await command(`ATCP${destination.cp}`);
       }
@@ -802,7 +797,7 @@ function command(text, limit_ms = 15000, intern = false) {
                               || Number.isNaN(val)) ? null : val;
     const val = clean(entry.load(bytes));
     if (!entry.further) return val;
-    // Mehrere Groessen aus derselben Antwort - siehe `entladen_kwh`.
+    // Several quantities from the same response - see `discharge_kwh`.
     const further = {};
     for (const [name, lies] of Object.entries(entry.further)) {
       const w = clean(lies(bytes));
@@ -811,9 +806,9 @@ function command(text, limit_ms = 15000, intern = false) {
     return { val, further };
   }
 
-  /* Einen vollständigen Satz lesen. Fehler einzelner Grössen werden
-   * vermerkt und übergangen - eine Aufzeichnung, die wegen des
-   * Kilometerstands abbricht, hätte den Ladestand mit verloren. */
+  /* Read a complete record. Errors of single quantities are noted and
+   * skipped - a recording that aborts because of the odometer would have
+   * lost the charge level along with it. */
   async function readRecord(lap) {
     if (listenActive) throw new Error("der Dongle lauscht gerade");
     roundRunning = true;
@@ -835,23 +830,23 @@ function command(text, limit_ms = 15000, intern = false) {
     }
   }
 
-  /* Die Spannung am Diagnosestecker, in Volt - **ohne den CAN-Bus
-   * anzufassen**.
+  /* The voltage at the diagnostic connector, in volts - **without touching
+   * the CAN bus**.
    *
-   * `ATRV` ist ein Befehl an den ELM327-Chip selbst: Er misst die Spannung an
-   * Pin 16 mit seinem eigenen Wandler und antwortet, ohne einen einzigen
-   * Rahmen zu senden. Das ist der Unterschied zu allem anderen in dieser
-   * Datei - jede Datenkennung weckt das Fahrzeug, `ATRV` nicht. Deshalb darf
-   * es auch am abgeschlossenen Auto laufen.
+   * `ATRV` is a command to the ELM327 chip itself: it measures the voltage
+   * at pin 16 with its own converter and answers without sending a single
+   * frame. That is the difference to everything else in this file - every
+   * data identifier wakes the vehicle, `ATRV` does not. That is why it may
+   * also run on a locked car.
    *
-   * Es sagt etwas über den Zustand des Autos: Läuft der DC/DC-Wandler (das
-   * Auto ist an oder lädt), liegt die 12-V-Spannung deutlich über der der
-   * ruhenden Batterie. Fällt sie ab, ist das Auto ausgegangen - und zwar
-   * Sekunden bevor jemand ausgestiegen ist und abschliesst.
+   * It says something about the state of the car: if the DC/DC converter
+   * is running (the car is on or charging), the 12 V voltage is clearly
+   * above that of the resting battery. If it drops, the car has gone off -
+   * seconds before anyone has got out and locks it.
    *
-   * Während einer Leserunde und bei jedem laufenden Befehl gibt es nichts
-   * zurück statt zu warten: Die Spannung ist ein Zusatz, und `befehl()`
-   * lässt ohnehin nur einen wartenden Befehl zu. */
+   * During a read round and with any running command it returns nothing
+   * instead of waiting: the voltage is an extra, and `command()` allows
+   * only one waiting command anyway. */
   async function voltage() {
     if (!write_out || waitOn || roundRunning) return null;
     try {
@@ -891,17 +886,17 @@ function command(text, limit_ms = 15000, intern = false) {
           complete("fehler");
           throw new Error("keine Nutzdaten");
         } else {
-          /* Geantwortet, aber ohne brauchbaren Wert.
+          /* Answered, but with no usable value.
            *
-           * Das ist etwas anderes als ein Zeitablauf, und der Unterschied
-           * ist der wichtigste beim Einrichten: Ein Zeitablauf heisst
-           * "gerade nicht erreicht", ein leerer Wert heisst "diese
-           * Datenkennung stimmt für dieses Fahrzeug nicht".
+           * That is something different from a timeout, and the difference is the
+           * most important one when setting up: a timeout means "currently not
+           * reachable", an empty value means "this data identifier is not right
+           * for this vehicle".
            *
-           * Bisher fiel dieser Fall stumm durch - weder ein Wert noch ein
-           * Eintrag in `_fehlend`. In der ersten Aufzeichnung fehlten
-           * dadurch vier von dreizehn Messwerten bei allen 77 Runden, ohne
-           * dass irgendwo stand, dass sie fehlen. */
+           * Until now this case fell through silently - neither a value nor an
+           * entry in `_missing`. In the first recording, four of thirteen readings
+           * were missing in all 77 rounds as a result, without anything saying
+           * that they were missing. */
           (raw._empty = raw._empty || []).push(entry.name);
           complete("empty");
         }
@@ -919,22 +914,22 @@ function command(text, limit_ms = 15000, intern = false) {
 
 
 
-  /* ---------- Ohne Auswahldialog verbinden ---------- */
+  /* ---------- Connect without a selection dialog ---------- */
 
-  /* Der Dongle soll nicht jedes Mal ausgewählt werden müssen.
+  /* The dongle should not have to be selected every time.
    *
-   * Die Erlaubnis für ein Gerät bleibt im Browser bestehen, sobald sie
-   * einmal erteilt wurde - `getDevices()` gibt die bekannten zurück, **ohne
-   * Nutzergeste**, und `gatt.connect()` darauf braucht auch keine. Nur
-   * `requestDevice` verlangt zwingend eine, und genau deshalb ist es der
-   * zweite Weg und nicht der erste.
+   * The permission for a device persists in the browser once it has been
+   * granted - `getDevices()` returns the known ones **without a user
+   * gesture**, and `gatt.connect()` on them needs none either. Only
+   * `requestDevice` strictly requires one, and exactly that is why it is
+   * the second way and not the first.
    *
-   * Ob ein Browser `getDevices()` kennt, ist offen: Es ist neuer als der
-   * Rest von Web Bluetooth. Fehlt es, kommt der Dialog wie bisher - dann
-   * ist nichts verloren, es ist nur eine Berührung mehr.
+   * Whether a browser knows `getDevices()` is open: it is newer than the
+   * rest of Web Bluetooth. If it is missing, the dialog comes as before -
+   * then nothing is lost, it is just one more touch.
    *
-   * Zurückgegeben wird, welcher Weg gegangen wurde, damit der Aufrufer es
-   * sagen kann statt es zu verschweigen.
+   * What is returned is which way was taken, so that the caller can say so
+   * instead of keeping quiet about it.
    */
   async function connectWithoutDialog() {
     if (!bt() || !bt().getDevices) {
@@ -953,8 +948,8 @@ function command(text, limit_ms = 15000, intern = false) {
       report("Noch kein Gerät erlaubt - beim ersten Mal muss ausgewählt werden.");
       return null;
     }
-    // Den passenden nehmen, nicht irgendeinen: In der Liste stehen alle
-    // Geräte, denen diese Seite je erlaubt wurde.
+    // Take the matching one, not just any: the list contains all devices
+    // this page has ever been permitted to use.
     const device = known.find((g) => NAMES.some(
       (n) => (g.name || "").startsWith(n))) || known[0];
     report(`Bekanntes Gerät: ${device.name || "(ohne Namen)"} - verbinde ohne Dialog.`);
@@ -962,25 +957,25 @@ function command(text, limit_ms = 15000, intern = false) {
       deviceRemembered = device;
       device.addEventListener("gattserverdisconnected", () => {
         report("Verbindung getrennt.");
-        write_out = null;   // siehe Begründung beim anderen Listener oben
+        write_out = null;   // see the reasoning at the other listener above
         if (atDropout) atDropout();
       });
       await locked(() => connectionBuildUp(device));
       return device;
     } catch (failure) {
-      // Das Gerät ist bekannt, aber nicht da - ausgeschaltet, ausser
-      // Reichweite, oder es steckt gerade nicht im Auto.
+      // The device is known but not there - switched off, out of range, or
+      // currently not plugged into the car.
       report("Bekanntes Gerät antwortet nicht: " + failure.message);
       return null;
     }
   }
 
-  /* Erst ohne Dialog, dann mit. Das ist der Weg, den Aufrufer nehmen
-   * sollten - er kostet beim zweiten Mal keine Berührung mehr. */
+  /* First without dialog, then with. This is the way callers should take -
+   * the second time it no longer costs a touch. */
   async function attach() {
-    // Schon verbunden - z.B. weil das automatische Wiederverbinden gerade
-    // erst durchkam: nichts tun, statt eine zweite Verbindung aufzubauen,
-    // die der ersten nur in die Quere käme.
+    // Already connected - e.g. because the automatic reconnect has just come
+    // through: do nothing instead of setting up a second connection that
+    // would only get in the way of the first.
     if (connected_()) return true;
     if (await connectWithoutDialog()) return true;
     await link();
@@ -989,25 +984,25 @@ function command(text, limit_ms = 15000, intern = false) {
 
   function connected_() { return !!write_out; }
 
-  /* ---------- Mithoeren (passiv) ----------
+  /* ---------- Listening in (passive) ----------
    *
-   * Zuhoeren, was auf dem Bus ohnehin laeuft - ohne selbst zu fragen. Das ist
-   * der Weg, auf dem man ein verriegeltes, ladendes Auto beobachten koennte,
-   * ohne dass eine Diagnoseanfrage die Alarmanlage ausloest.
+   * Listen to what is running on the bus anyway - without asking ourselves.
+   * This is the way one could observe a locked, charging car without a
+   * diagnostic request triggering the alarm system.
    *
-   * Gesendet wird dabei **nichts auf den CAN**: Alle Befehle bis ATMA sind
-   * AT-Befehle, die im Dongle bleiben. ATCSM1 stellt den ELM327 auf stilles
-   * Mitlesen, ohne Bestaetigung der Frames; ob ein Nachbau das wirklich tut,
-   * laesst sich von hier aus nicht pruefen.
+   * **Nothing is sent onto the CAN**: all commands up to ATMA are AT
+   * commands that stay in the dongle. ATCSM1 puts the ELM327 into silent
+   * monitoring, without acknowledging the frames; whether a clone really
+   * does that cannot be checked from here.
    *
-   * Ob ueberhaupt etwas ankommt, ist offen: Der OBD-Anschluss haengt beim MEB
-   * vermutlich hinter dem Diagnose-Gateway, auf dem Broadcast-Daten nicht
-   * laufen. Diese Funktion beantwortet genau das - mit einer Liste der
-   * gesehenen Kennungen, wie oft und wie veraenderlich sie sind.
+   * Whether anything arrives at all is open: on the MEB the OBD port
+   * presumably sits behind the diagnostic gateway, on which broadcast data
+   * does not run. This function answers exactly that - with a list of the
+   * identifiers seen, how often and how variable they are.
    *
-   * Danach wird der Handshake wiederholt (nur AT-Befehle): Protokoll, Filter
-   * und Format sind sonst die des Mithoerens, und die naechste Leserunde
-   * bekaeme Unsinn. */
+   * Afterwards the handshake is repeated (AT commands only): protocol,
+   * filter and format are otherwise those of listening in, and the next
+   * read round would get nonsense. */
   function writeRaw(text) {
     const records = new TextEncoder().encode(text);
     const without_response = write_out.properties.writeWithoutResponse
@@ -1079,8 +1074,8 @@ function command(text, limit_ms = 15000, intern = false) {
       listener = collect;
       await writeRaw("ATMA\r");
       await new Promise((w) => setTimeout(w, duration));
-      // Jedes Zeichen beendet das Mithören; die Eingabeaufforderung danach
-      // meldet, dass der Dongle wieder bereit ist.
+      // Any character ends listening in; the prompt after it reports that the
+      // dongle is ready again.
       await writeRaw("\r");
       const upto = Date.now() + 2500;
       while (!stopped && Date.now() < upto) {
@@ -1091,9 +1086,9 @@ function command(text, limit_ms = 15000, intern = false) {
     } finally {
       listener = null;
       buffer = "";
-      // Den Dongle zurückstellen - nur AT-Befehle.
+      // Reset the dongle - AT commands only.
       for (const b of HANDSHAKE) {
-        try { await command(b, 5000, true); } catch (failure) { /* weiter */ }
+        try { await command(b, 5000, true); } catch (failure) { /* carry on */ }
       }
       latestAddress = null;
       changeFailed.clear();
@@ -1112,24 +1107,24 @@ function command(text, limit_ms = 15000, intern = false) {
     return result;
   }
 
-  /* ---------- Nach aussen ---------- */
+  /* ---------- Outward ---------- */
 
   return {
     obtainable: () => !!bt(),
     linked: () => !!write_out,
 
-    /* ---------- Beobachten (für die Einstellungen) ---------- */
+    /* ---------- Observing (for the settings) ---------- */
 
-    /* Woher das Bluetooth kommt: "nativ" (CoreBluetooth in der iOS-App),
-     * "web" (Web Bluetooth, Bluefy/Chrome) oder "keiner". */
+    /* Where Bluetooth comes from: "nativ" (CoreBluetooth in the iOS app),
+     * "web" (Web Bluetooth, Bluefy/Chrome) or "keiner". */
     transport() {
       const native = window.joltBleNative;
       if (native && native.obtainable()) return "nativ";
       return navigator.bluetooth ? "web" : "keiner";
     },
 
-    /* Eine Kopie des Ist-Zustands: nichts davon lässt sich von aussen
-     * verändern, und es ist als JSON ausgebbar (Diagnosebericht). */
+    /* A copy of the current state: none of it can be changed from outside,
+     * and it can be output as JSON (diagnostic report). */
     diagnose() {
       return JSON.parse(JSON.stringify({
         linked: !!write_out,
@@ -1146,7 +1141,7 @@ function command(text, limit_ms = 15000, intern = false) {
       }));
     },
 
-    /* Die letzten Zeilen des Dongle-Protokolls, älteste zuerst. */
+    /* The last lines of the dongle log, oldest first. */
     trace_log(onlyConspicuous) {
       const conspicuous = /FEHLER|Zeitüberschreitung|keine Antwort|verspätet|getrennt|fehlgeschlagen|NO DATA|ERROR|UNABLE|CAN ERROR|BUS/i;
       return logRing
@@ -1155,7 +1150,7 @@ function command(text, limit_ms = 15000, intern = false) {
     },
     logClear() { logRing.length = 0; },
 
-    /* Zähler zurücksetzen - für eine saubere Messung "ab jetzt". */
+    /* Reset counters - for a clean measurement "from now on". */
     resetCounter() {
       counter.commands = { sent: 0, answered: 0, timeout: 0,
                           delayed: 0, sumMs: 0, latestMs: null,
@@ -1167,17 +1162,17 @@ function command(text, limit_ms = 15000, intern = false) {
       counter.connection.retries = 0;
     },
 
-    /* Einen einzelnen Befehl von Hand senden - die Konsole der Einstellungen.
+    /* Send a single command by hand - the console in the settings.
      *
-     * Danach wird die gemerkte Adresse verworfen: Wer ATSH oder ATCRA von
-     * Hand ändert, würde sonst die nächste Leserunde auf der falschen
-     * Adresse beginnen lassen, weil das Modul glaubt, sie stehe noch. */
+     * Afterwards the remembered address is discarded: whoever changes ATSH or
+     * ATCRA by hand would otherwise let the next read round begin on the
+     * wrong address, because the module believes it is still set. */
     async cli(text) {
       try { return await command(String(text).trim(), 8000); }
       finally { latestAddress = null; }
     },
 
-    /* Das gemerkte Gerät vergessen: Der nächste Aufbau fragt wieder nach. */
+    /* Forget the remembered device: the next setup asks again. */
     forget() {
       deviceRemembered = null;
       const native = window.joltBleNative;
@@ -1185,9 +1180,9 @@ function command(text, limit_ms = 15000, intern = false) {
       counter.connection.device = "";
       report("Gemerktes Gerät vergessen.");
     },
-    /* `melder` bekommt jede Zeile, die sonst im Protokoll stünde; `abriss`
-     * wird gerufen, wenn die Verbindung stirbt - ob das ein Grund zum
-     * Wiederverbinden ist, entscheidet der Aufrufer, nicht dieses Modul. */
+    /* `reporter` receives every line that would otherwise go into the log;
+     * `dropout` is called when the connection dies - whether that is a
+     * reason to reconnect is decided by the caller, not by this module. */
     set_up(reporter, dropout) { reporterOutside = reporter || reporterOutside; atDropout = dropout; },
     link,
     attach,
@@ -1203,27 +1198,27 @@ function command(text, limit_ms = 15000, intern = false) {
     voltage,
     socFromRaw,
     socFromResponse,
-    // Fuer die Diagnoseseite: rohe Nutzbytes einer Antwort, inklusive
-    // Mehrrahmen-Zusammensetzung.
+    // For the diagnostics page: raw payload bytes of a response, including
+    // multi-frame reassembly.
     payload_bytes,
     NAMES,
-    /* Was ausgelesen wird, mit Beschriftung und Einheit.
+    /* What is read out, with label and unit.
      *
-     * Damit kann die Oberflaeche jeden Messwert anzeigen, ohne die Liste ein
-     * zweites Mal zu fuehren - eine neue Datenkennung taucht dort dann von
-     * selbst auf. Die Lesefunktion und die Zieladresse bleiben drinnen; sie
-     * gehen niemanden ausserhalb etwas an.
+     * With this the UI can show every reading without maintaining the list a
+     * second time - a new data identifier then appears there by itself. The
+     * read function and the target address stay inside; they are none of
+     * anybody's business outside.
      *
-     * `pflicht` wandert mit: Der Ladestand ist der einzige Wert, ohne den
-     * eine Runde verworfen wird, und das soll man ihm ansehen koennen. */
+     * `required` travels along: the charge level is the only value without
+     * which a round is discarded, and that should be visible. */
     FIELDS: READINGS.flatMap((m) => [
       { name: m.name, title: m.title, unit: m.unit,
         put: m.put, required: m.required, rarely: m.rarely },
-      // Werte, die aus derselben Antwort mitkommen, gehoeren genauso in die
-      // Tabelle - sonst zeigt sie weniger, als gemessen wird. Titel,
-      // Einheit und Stellen stehen bei ihnen in der Tabelle selbst; fehlen
-      // sie dort, erben sie vom Hauptwert. Das ist der Grund, warum die
-      // Drehzahl des Kompressors nicht in Watt erscheint.
+      // Values that come along from the same response belong in the table just
+      // the same - otherwise it shows less than is measured. Title, unit and
+      // decimals are in the table itself for them; if missing there, they
+      // inherit from the main value. That is why the compressor speed does not
+      // appear in watts.
       ...(m.also || []).map((w) => ({
         name: w.name,
         title: w.title || w.name,
@@ -1232,21 +1227,20 @@ function command(text, limit_ms = 15000, intern = false) {
         required: false, rarely: m.rarely })),
     ]),
 
-    /* Was beim Aufloesen der Tabelle auffiel - leer, wenn alles stimmt.
-     * Die Diagnoseseite zeigt es an: Ein Tippfehler im Adressnamen sieht
-     * am Auto sonst aus wie ein schweigendes Steuergeraet. */
+    /* What was noticed when resolving the table - empty if everything is
+     * fine. The diagnostics page displays it: a typo in an address name
+     * otherwise looks like a silent control unit at the car. */
     TABLE_ERROR,
 
-    /* Die aufgeloeste Lesefunktion eines Messwerts - **fuer
+    /* The resolved read function of a reading - **for
      * tools/check_readings.js**.
      *
-     * Sonst bleiben die Lesefunktionen drinnen; sie gehen niemanden
-     * ausserhalb etwas an. Hier ist die Ausnahme begruendet: Die
-     * Umrechnungen sind aus handgeschriebenen Funktionen zu Tabellenzeilen
-     * geworden, und dass dabei kein Vorzeichen und kein Teiler verrutscht
-     * ist, laesst sich nur pruefen, wenn die Pruefung an sie herankommt.
-     * Ohne diesen Zugang muesste sie den Interpreter nachbauen - und
-     * verglichen wuerde dann Nachbau gegen Nachbau. */
+     * Otherwise the read functions stay inside; they are none of anybody's
+     * business outside. The exception is justified here: the conversions
+     * turned from hand-written functions into table rows, and that no sign
+     * and no divisor slipped in the process can only be checked if the check
+     * can get at them. Without this access it would have to rebuild the
+     * interpreter - and then replica would be compared against replica. */
     readFor(name) {
       for (const m of READINGS) {
         if (m.name === name) return m.load;

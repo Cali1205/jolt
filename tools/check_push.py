@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
-"""Prüft die Benachrichtigungen aufs Telefon - Web Push.
+"""Checks the notifications to the phone - Web Push.
 
-Was hier **nicht** geprüft wird, und warum: der Netzsprung zum Push-Dienst
-(Google, Mozilla, Apple). Der gehört nicht in ein Prüfskript - er braucht ein
-echtes Gerät mit einem echten Abo, und ein Skript, das gegen fremde Dienste
-läuft, schlägt irgendwann aus Gründen fehl, die nichts mit jolt zu tun haben.
+What is **not** checked here, and why: the network hop to the push service
+(Google, Mozilla, Apple). It does not belong in a check script - it needs a
+real device with a real subscription, and a script that runs against
+third-party services will eventually fail for reasons that have nothing to
+do with jolt.
 
-Was geprüft wird, ist alles davor - und das ist das meiste:
+What is checked is everything before that - and that is most of it:
 
-- **Die Schlüssel.** Erzeugt jolt ein Paar, das py_vapid annimmt, und passt der
-  öffentliche zum privaten? Ein Schlüssel im falschen Format fällt sonst erst
-  am Telefon auf.
-- **Die Verschlüsselung, im Rundlauf.** Die Nutzlast wird für ein
-  nachgebautes Browser-Abo verschlüsselt und mit dessen privatem Schlüssel
-  wieder entschlüsselt. Kommt der Klartext zurück, stimmt der ganze Pfad nach
-  RFC 8291 - das ist der Teil, an dem Web Push in der Praxis scheitert.
-- **Die Abo-Verwaltung.** Anlegen ist idempotent, Abmelden wirkt.
-- **Das Aufräumen.** Ein Abo, dessen Browser sich abgemeldet hat (404/410),
-  verschwindet. Ein Zeitfehler oder eine 500 dagegen nicht - wer Abos bei der
-  ersten Störung wegwirft, schaltet die Benachrichtigungen dauerhaft ab.
-- **Der Auslöser.** Ohne Schlüssel ist die Funktion aus und behauptet nichts.
+- **The keys.** Does jolt generate a pair that py_vapid accepts, and does
+  the public one match the private one? A key in the wrong format otherwise
+  only shows up on the phone.
+- **The encryption, round trip.** The payload is encrypted for a
+  reconstructed browser subscription and decrypted again with its private
+  key. If the plaintext comes back, the whole path according to RFC 8291
+  is correct - that is the part where Web Push fails in practice.
+- **Subscription management.** Creating is idempotent, unsubscribing works.
+- **Clean-up.** A subscription whose browser has unsubscribed (404/410)
+  disappears. A timeout or a 500, however, does not - whoever throws away
+  subscriptions at the first glitch permanently switches notifications off.
+- **The trigger.** Without a key the function is off and claims nothing.
 
     ./tools/check_push.py
 """
@@ -52,10 +53,10 @@ def b64(raw_data: bytes) -> str:
 
 
 class Browserabo:
-    """Ein nachgebautes Abo, wie es ein Browser anlegen würde.
+    """A reconstructed subscription, as a browser would create it.
 
-    Es hat einen echten privaten Schlüssel - nur damit lässt sich prüfen, ob
-    die verschlüsselte Nutzlast beim Empfänger wieder lesbar wird.
+    It has a real private key - only that makes it possible to check whether
+    the encrypted payload becomes readable again at the recipient.
     """
 
     def __init__(self, endpoint: str = "https://push.example.org/abo-1"):
@@ -89,7 +90,7 @@ def part_key():
     verify(raw_public_[0] == 0x04,
            "und beginnt mit 0x04, wie es die Kodierung verlangt")
 
-    # Nimmt py_vapid den privaten Schlüssel an, und gehören beide zusammen?
+    # Does py_vapid accept the private key, and do both belong together?
     vapid = Vapid01.from_string(private_)
     derived = vapid.public_key.public_bytes(
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
@@ -183,9 +184,9 @@ def part_dispatch():
         def dispatcher(subscription, msg):
             empfangen[subscription.endpoint] = msg
             if subscription.endpoint.endswith("abgemeldet"):
-                return 410      # der Browser hat die Erlaubnis entzogen
+                return 410      # the browser has revoked the permission
             if subscription.endpoint.endswith("gestoert"):
-                return 500      # der Push-Dienst hat gerade ein Problem
+                return 500      # the push service has a problem right now
             return 201
 
         result = push.send(db, "jolt", "Ladeplan geändert", dispatcher=dispatcher)
@@ -209,8 +210,8 @@ def part_dispatch():
         verify("url" in contents,
                "und ein Ziel für den Klick auf die Meldung")
 
-        # Ein Versender, der wirft, darf den Versand an die anderen nicht
-        # abbrechen - im Funkloch ist das der Normalfall.
+        # A sender that throws must not abort sending to the others - in a dead
+        # zone this is the normal case.
         def raises(subscription, msg):
             if subscription.endpoint.endswith("lebt"):
                 raise OSError("Netz weg")
@@ -267,8 +268,8 @@ def part_with_key():
     os.environ["VAPID_SUBJECT"] = "mailto:jolt@example.org"
     try:
         client = TestClient(app)
-        # Ohne Netz gilt jeder https-Name als öffentlich; die Prüfung selbst
-        # steht in check_security.py.
+        # Without network every https name counts as public; the check itself is
+        # in check_security.py.
         push.endpoint_allowed = lambda url: url.startswith("https://")
         response = client.get("/api/push/schluessel").json()
         verify(response["configured"] is True, "eingerichtet")
@@ -305,9 +306,9 @@ def main() -> int:
     part_without_key()
     part_with_key()
 
-    # Was dieses Skript nicht kann, gehört in die Ausgabe und nicht nur in
-    # den Quelltext - ein bestandener Lauf, der verschweigt, was er nicht
-    # angefasst hat, weckt mehr Vertrauen als er verdient.
+    # What this script cannot do belongs in the output and not only in the
+    # source - a passed run that conceals what it did not touch inspires more
+    # trust than it deserves.
     return verify.balance(
         "Nicht geprüft (und nicht prüfbar ohne echtes Gerät): der Sprung zum\n"
         "Push-Dienst. Dafür gibt es POST /api/push/probe.")

@@ -1,27 +1,27 @@
-"""Ist die Säule frei? - und der ehrliche Umgang damit, dass wir es nicht wissen.
+"""Is the charger free? - and an honest way of dealing with not knowing.
 
-Echte Belegungsdaten öffentlicher Ladesäulen sind in Deutschland nicht frei
-verfügbar. Wer sie hat, hat sie über OCPI-Verträge mit Betreibern oder über
-kommerzielle Aggregatoren. Für ein Privatprojekt ist das vorerst zu.
+Real occupancy data for public chargers is not freely available in Germany.
+Whoever has it has it through OCPI contracts with operators or through
+commercial aggregators. For a private project that is out of reach for now.
 
-Statt Verfügbarkeit vorzutäuschen, macht jolt drei Dinge:
+Instead of faking availability, jolt does three things:
 
-1. Dieses Interface steht, damit eine OCPI-Anbindung später ein Adapter ist
-   und kein Umbau.
-2. Solange keine Daten da sind, zählt **Redundanz**: Ein Standort mit acht
-   Ladepunkten ist einem mit zwei vorzuziehen, auch wenn er zwei Minuten
-   Umweg kostet. Das ist die beste verfügbare Näherung an "da ist
-   wahrscheinlich was frei".
-3. Der Nutzer kann melden, dass ein Standort belegt ist. Das gilt für die
-   laufende Fahrt - und ist die einzige Information, die wirklich stimmt.
+1. This interface exists so that an OCPI integration later is an adapter
+   and not a rebuild.
+2. As long as there is no data, **redundancy** counts: a site with eight
+   charge points is preferable to one with two, even if it costs two minutes
+   of detour. That is the best available approximation of "something is
+   probably free there".
+3. The user can report that a site is occupied. That applies to the current
+   trip - and is the only information that is really correct.
 """
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
-# Wie lange eine Meldung "belegt" gilt. Eine halbe Stunde ist die Zeit, die
-# ein Schnellladevorgang typischerweise dauert - danach ist die Aussage
-# wertlos und würde nur einen brauchbaren Standort dauerhaft ausschliessen.
+# How long an "occupied" report stays valid. Half an hour is how long a fast
+# charging session typically takes - after that the statement is worthless
+# and would only exclude a usable site permanently.
 REPORT_VALID_S = 30 * 60
 
 
@@ -39,7 +39,7 @@ class AvailabilitySource(Protocol):
 
 
 class Unknown:
-    """Die Vorgabe: keine Daten, nur die Anzahl der Ladepunkte."""
+    """The default: no data, only the number of charge points."""
 
     def state(self, charge_point) -> State:
         return State(free=None, total=charge_point.point_count or 1,
@@ -47,11 +47,11 @@ class Unknown:
 
 
 class Reports:
-    """Meldungen der Nutzer, im Speicher gehalten.
+    """User reports, kept in memory.
 
-    Bewusst nicht in der Datenbank: Die Aussage ist nach dreissig Minuten
-    wertlos, und etwas, das schneller verfällt als ein Neustart dauert,
-    gehört nicht dauerhaft gespeichert.
+    Deliberately not in the database: the statement is worthless after thirty
+    minutes, and something that expires faster than a restart takes does not
+    belong in permanent storage.
     """
 
     def __init__(self, onward: AvailabilitySource | None = None):
@@ -81,35 +81,35 @@ class Reports:
         return self._next.state(charge_point)
 
 
-# Ab wie vielen Ladepunkten ein Standort als "gross" gilt und die volle
-# Gutschrift bekommt. Darüber wächst nichts mehr - der Sprung von 30 auf 40
-# Säulen ändert nichts mehr an der Frage, ob etwas frei ist.
+# From how many charge points a site counts as "large" and gets the full
+# credit. Beyond that nothing grows any more - the jump from 30 to 40
+# chargers no longer changes the question of whether something is free.
 #
-# Stand vorher bei rund 15, und das war zu früh: In den Daten einer
-# Frankreich-Route bekamen Standorte mit 15, 17, 20, 28 und 30 Ladepunkten
-# alle exakt dieselbe Gutschrift. Die Grösse hörte damit genau dort auf zu
-# zählen, wo die interessanten Ladeparks anfangen.
+# It used to be around 15, and that was too early: in the data of a France
+# route, sites with 15, 17, 20, 28 and 30 charge points all got exactly the
+# same credit. Size thus stopped counting exactly where the interesting
+# charging parks begin.
 LARGE_PARK = 30
 CHARGE_PARK_BONUS_MIN = 4.0
 
 
 def redundancy_bonus(point_count: int, at_most: float = CHARGE_PARK_BONUS_MIN
                     ) -> float:
-    """Zeitgutschrift in Minuten für einen Standort mit vielen Ladepunkten.
+    """Time credit in minutes for a site with many charge points.
 
-    Solange niemand weiss, was frei ist, ist die Anzahl der Ladepunkte die
-    einzige belastbare Aussage über das Risiko, vor einer belegten Säule zu
-    stehen. Ein Standort mit vielen Punkten ist einen kleinen Umweg wert -
-    und, seit die Gutschrift nicht mehr am Umweg hängt, auch einen Vorzug
-    gegenüber einem kleineren direkt daneben.
+    As long as nobody knows what is free, the number of charge points is the
+    only reliable indication of the risk of facing an occupied charger. A
+    site with many points is worth a small detour - and, since the credit no
+    longer depends on the detour, also a preference over a smaller one right
+    next to it.
 
-    Der Logarithmus, weil der Sprung von 2 auf 4 Ladepunkten viel mehr
-    bedeutet als der von 20 auf 22. Die volle Gutschrift gibt es ab
-    `GROSSER_PARK` Punkten.
+    The logarithm, because the jump from 2 to 4 charge points means much
+    more than the one from 20 to 22. The full credit applies from
+    `LARGE_PARK` points.
 
-    `hoechstens` ist einstellbar, weil es eine Vorliebe ist und keine
-    Naturkonstante: Wem ein grosser Ladepark wenig bedeutet, stellt es auf
-    null, und dann entscheidet allein die Zeit.
+    `at_most` is adjustable because it is a preference and not a constant of
+    nature: anyone to whom a large charging park means little sets it to
+    zero, and then time alone decides.
     """
     import math
     if at_most <= 0:
@@ -118,23 +118,23 @@ def redundancy_bonus(point_count: int, at_most: float = CHARGE_PARK_BONUS_MIN
     return round(min(at_most, at_most * share), 2)
 
 
-# Zeitgutschrift für einen bevorzugten Anbieter - in derselben Grössenordnung
-# wie der Redundanz-Bonus, damit keiner der beiden Effekte den anderen
-# systematisch überstimmt.
+# Time credit for a preferred provider - of the same order of magnitude as
+# the redundancy bonus, so that neither effect systematically outweighs the
+# other.
 OPERATOR_BONUS_MIN = 4.0
 
 
 def operator_bonus(operator: str, preferred: list[str] | None) -> float:
-    """Zeitgutschrift in Minuten, wenn der Betreiber auf der bevorzugten Liste steht.
+    """Time credit in minutes if the operator is on the preferred list.
 
-    Kein harter Filter, sondern wie der Redundanz-Bonus nur ein Gewicht in der
-    Stoppwahl: Ein bevorzugter Anbieter macht einen Halt attraktiver, nie
-    kostenlos - der Bonus wiegt beim Aufruf ausschliesslich den Umweg auf, nie
-    die Ladezeit (siehe optimizer.py).
+    Not a hard filter but, like the redundancy bonus, only a weight in the
+    stop choice: a preferred provider makes a stop more attractive, never
+    free - when called, the bonus offsets only the detour, never the charging
+    time (see optimizer.py).
 
-    Der Vergleich ist eine Teilzeichenkette, klein geschrieben: "EnBW" in der
-    Liste trifft "EnBW mobility+" im Datensatz, ohne dass der genaue
-    Anbieter-Wortlaut bekannt sein muss.
+    The comparison is a lowercase substring match: "EnBW" in the list
+    matches "EnBW mobility+" in the record, without needing to know the exact
+    provider wording.
     """
     if not preferred or not operator:
         return 0.0
@@ -145,6 +145,6 @@ def operator_bonus(operator: str, preferred: list[str] | None) -> float:
     return 0.0
 
 
-# Eine Instanz für den Prozess. Der Zustand ist bewusst prozesslokal - jolt
-# läuft als ein Container für einen Haushalt.
+# One instance per process. The state is deliberately process-local - jolt
+# runs as one container for one household.
 REPORTS = Reports()

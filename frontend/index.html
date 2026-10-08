@@ -26,9 +26,9 @@ header {
 }
 header .marke { font-weight: 700; font-size: 19px; letter-spacing: -.02em; }
 header .marke b { color: var(--akzent); }
-/* Ganz nach rechts, klein und blass: Die Fassung soll ablesbar sein, ohne
-   dass sie im Weg steht. Ziffern in Tabellenbreite, damit die Zeile bei
-   jedem Neuladen dieselbe Breite hat und nicht zappelt. */
+/* Far to the right, small and pale: the version should be readable without
+   getting in the way. Tabular-width digits, so that the line has the same
+   width on every reload and does not jitter. */
 header .stand {
   margin-left: auto; font-size: 11px; color: var(--gedaempft);
   font-variant-numeric: tabular-nums; text-align: right; line-height: 1.25;
@@ -112,11 +112,11 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
-/* ------------------------------- Einstellungen
+/* ------------------------------- Settings
  *
- * Klappen statt einer langen Seite: Man sucht hier eine Sache und kommt
- * selten wieder. Die Diagnose-Tabelle ist breit und darf seitlich scrollen,
- * statt die Seite zu dehnen. */
+ * Collapsibles instead of a long page: one looks for a single thing here and
+ * rarely comes back. The diagnostics table is wide and may scroll sideways
+ * instead of stretching the page. */
 details.einst { background: var(--flaeche); border: 1px solid var(--rand);
   border-radius: 14px; margin-bottom: 10px; }
 details.einst > summary { cursor: pointer; padding: 14px; font-weight: 600;
@@ -167,8 +167,8 @@ pre.diag-protokoll .zeit { color: var(--gedaempft); }
 @media (max-width: 420px) { .kachel-vorschau { grid-template-columns: repeat(3, 1fr); } }
 
 
-/* Die eine Zahl, die im Fahren zählt: Reicht es? Alles andere ist Beiwerk,
-   und Beiwerk gehört nicht in dieselbe Grösse wie die Antwort. */
+/* The one number that counts while driving: is it enough? Everything else is
+   extra, and extras do not belong in the same size as the answer. */
 #live-antwort { text-align: center; padding: 6px 0 12px; }
 #live-antwort .antwort-zahl { font-size: 46px; font-weight: 700;
   letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
@@ -181,9 +181,9 @@ pre.diag-protokoll .zeit { color: var(--gedaempft); }
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
 #live-verbrauch { width: 100%; height: 110px; display: block; margin-top: 10px;
   border-radius: 10px; border: 1px solid var(--rand); background: #0c1116; }
-/* Die Rohwerte hinter einer Klappe. Zugeklappt eine Zeile, aufgeklappt die
-   ganze Tabelle - so steht die Diagnose zur Verfügung, ohne im Fahrbild zu
-   stehen. */
+/* The raw values behind a collapsible. Collapsed a single line, expanded the
+   whole table - so the diagnostics are available without being in the
+   driving view. */
 #live-roh { margin-top: 14px; border-top: 1px solid var(--rand);
   padding-top: 10px; }
 #live-roh > summary { cursor: pointer; font-size: 13px;
@@ -195,19 +195,18 @@ pre.diag-protokoll .zeit { color: var(--gedaempft); }
 #live-roh > summary:hover { color: var(--text); }
 #live-auto-zeile { margin-top: 12px; padding-top: 10px;
   border-top: 1px solid var(--rand); }
-/* Der Kontextstreifen: eine Zeile Text statt sechs Kacheln. Was man nur
-   gelegentlich braucht, soll nicht so aussehen wie das, was man dauernd
-   braucht. */
+/* The context strip: one line of text instead of six tiles. What one only
+   needs occasionally should not look like what one needs constantly. */
 #live-auto-zeile { font-size: 13px; color: var(--gedaempft);
   line-height: 1.6; }
 #live-auto-zeile b { color: var(--text); font-weight: 600;
   font-variant-numeric: tabular-nums; }
-/* Alle Rohwerte, zum Nachsehen statt zum Fahren.
+/* All raw values, for looking things up rather than for driving.
  *
- * Zwei Spalten auf breiten Schirmen, eine auf dem Telefon. Zahlen rechts und
- * in gleichbreiten Ziffern, damit sie untereinander vergleichbar bleiben -
- * beim Prüfen liest man diese Tabelle von oben nach unten, und ein Wert, der
- * sich nicht ändert, soll dabei auffallen. */
+ * Two columns on wide screens, one on the phone. Numbers on the right and in
+ * equal-width digits, so that they stay comparable one below the other -
+ * when checking, one reads this table from top to bottom, and a value that
+ * does not change should stand out. */
 table.rohwerte { width: 100%; border-collapse: collapse; margin-top: 10px;
   font-size: 12.5px; }
 table.rohwerte th, table.rohwerte td { padding: 4px 8px; text-align: left;
@@ -217,9 +216,9 @@ table.rohwerte td { text-align: right; color: var(--text);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.rohwerte tr.leer td, table.rohwerte tr.leer th { color: var(--gedaempft);
   opacity: .55; }
-/* Ein Wert, der nicht aus dieser Runde stammt, bleibt stehen - blasser, und
-   mit seinem Alter daneben. Ein alter Kilometerstand ist nützlicher als eine
-   leere Zeile; man muss nur sehen, dass er alt ist. */
+/* A value that does not come from this round stays - paler, and with its
+   age next to it. An old odometer reading is more useful than an empty
+   row; one only has to see that it is old. */
 table.rohwerte tr.alt td { opacity: .68; }
 table.rohwerte tr.alt.sehr td { opacity: .42; }
 table.rohwerte .wann { color: var(--gedaempft); font-size: 11px;
@@ -229,9 +228,9 @@ table.rohwerte .wann { color: var(--gedaempft); font-size: 11px;
     column-gap: 22px; }
   table.rohwerte tr { display: grid; grid-template-columns: 1fr auto; }
 }
-/* Das Logger-Token wird genau einmal gezeigt und muss abgetippt oder kopiert
-   werden - also umbrechend, auswählbar und in gleichbreiter Schrift, damit
-   sich l und 1 unterscheiden lassen. */
+/* The logger token is shown exactly once and has to be typed or copied -
+   so wrapping, selectable and in a monospaced font, so that l and 1 can be
+   told apart. */
 #logger-token { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px; background: #0c1116; border: 1px solid var(--rand);
   border-radius: 8px; padding: 10px 12px; margin: 8px 0;
@@ -244,9 +243,9 @@ table.rohwerte .wann { color: var(--gedaempft); font-size: 11px;
 .balken { height: 8px; background: #0c1116; border-radius: 99px; overflow: hidden;
   border: 1px solid var(--rand); margin-top: 6px; }
 .balken > i { display: block; height: 100%; background: var(--gut); }
-/* Die Fahrten-Historie. Ihr Zweck ist Vergleich, und Vergleichen heisst
-   Zahlen untereinander lesen - deshalb eine Tabelle mit rechtsbündigen,
-   gleichbreiten Ziffern statt punktgetrennter Sätze. */
+/* The trips history. Its purpose is comparison, and comparing means reading
+   numbers one below the other - hence a table with right-aligned,
+   equal-width digits instead of dot-separated sentences. */
 .tabelle-halter { overflow-x: auto; -webkit-overflow-scrolling: touch;
   margin: 0 -14px; padding: 0 14px; }
 table.fahrten { width: 100%; border-collapse: collapse; font-size: 13px;
@@ -260,11 +259,10 @@ table.fahrten tr:last-child td { border-bottom: none; }
 table.fahrten .num { text-align: right; font-variant-numeric: tabular-nums;
   padding-right: 12px; }
 table.fahrten th.num { padding-right: 12px; }
-/* Der Verbrauch ist die Zahl, wegen der man die Tabelle aufschlägt. */
+/* The consumption is the number one opens the table for. */
 table.fahrten .stark { color: var(--akzent); font-weight: 650; }
-/* Das Datum bleibt auch auf dem Telefon stehen: Es ist die Achse, an der
-   verglichen wird - dieselbe Strecke im Januar und im Juni. Es darf dafür
-   umbrechen. */
+/* The date stays on the phone too: it is the axis along which things are
+   compared - the same route in January and in June. It may wrap for that. */
 table.fahrten .datum { color: var(--gedaempft); font-size: 12px;
   white-space: normal; max-width: 92px; }
 table.fahrten .strecke { white-space: normal; min-width: 190px; }
@@ -281,9 +279,8 @@ button.klein { background: transparent; border: 1px solid var(--rand);
   font-size: 12px; cursor: pointer; width: auto; }
 button.klein:hover { color: var(--text); border-color: var(--gedaempft); }
 table.fahrten .tat-spalte { white-space: nowrap; text-align: right; }
-/* Auf schmalen Schirmen fallen die hinteren Spalten weg - in der
-   Reihenfolge ihres Werts fürs Vergleichen. Was bleibt, ist Datum,
-   Strecke, Kilometer und Verbrauch. */
+/* On narrow screens the rear columns drop out - in the order of their value
+   for comparing. What remains is date, route, kilometres and consumption. */
 @media (max-width: 720px) {
   table.fahrten .weg-schmal { display: none; }
 }
@@ -301,17 +298,16 @@ table.kurve input { padding: 6px 8px; }
 <header>
   <span class="marke"><b>jolt</b></span>
   <span id="demo-plakette" class="plakette" hidden>Demo-Routen</span>
-  <!-- Rechts aussen und unaufdringlich: Die Zeile beantwortet genau eine
-       Frage - "läuft hier wirklich die neue Fassung?". Sie wird beim
-       Ausliefern eingesetzt (siehe _stand_zeile in main.py); bleibt der
-       Platzhalter stehen, ist die Seite an FastAPI vorbeigekommen. -->
-  <!-- Die Zeitpunkte stehen als Sekunden drin, nicht als fertiger Text:
-       Der Container läuft in UTC, das Telefon in seiner eigenen Zone. Wer
-       hier serverseitig formatiert, zeigt im Sommer eine Uhrzeit zwei
-       Stunden neben der Uhr des Betrachters - und das ausgerechnet bei
-       einer Anzeige, die Zweifel ausräumen soll. Formatiert wird deshalb
-       im Browser (app.js); der Text hier ist nur der Rückfall, falls das
-       JavaScript nicht läuft. -->
+  <!-- Far right and unobtrusive: the line answers exactly one question -
+       "is the new version really running here?". It is inserted on delivery
+       (see _stand_zeile in main.py); if the placeholder stays in place, the
+       page bypassed FastAPI. -->
+  <!-- The timestamps are in as seconds, not as finished text: the container
+       runs in UTC, the phone in its own zone. Whoever formats on the server
+       here shows, in summer, a time two hours off the viewer's clock - and
+       that on a display meant to dispel doubt. Formatting is therefore done
+       in the browser (app.js); the text here is only the fallback in case
+       JavaScript does not run. -->
   <span class="stand" id="stand" title="Code-Stand · Start des Servers"
         data-stand="{{STAND_S}}" data-start="{{START_S}}">{{STAND}}</span>
 </header>
@@ -327,10 +323,10 @@ table.kurve input { padding: 6px 8px; }
 <main>
   <div id="meldungen"></div>
 
-  <!-- ------------------------------- Anmelden -->
-  <!-- Nur sichtbar, wenn APP_PASSWORT gesetzt ist und kein gültiges Token
-       vorliegt - siehe app.js. Verdeckt bis dahin nav und alle anderen
-       Ansichten, damit niemand eine Oberfläche sieht, die nur 401 liefert. -->
+  <!-- ------------------------------- Login (Anmelden) -->
+  <!-- Only visible if APP_PASSWORT is set and no valid token is present -
+       see app.js. Until then it covers nav and all other views, so that
+       nobody sees a UI that only returns 401. -->
   <section id="ansicht-login" hidden>
     <div class="karte-block">
       <h2 style="margin-top:0">Anmelden</h2>
@@ -344,7 +340,7 @@ table.kurve input { padding: 6px 8px; }
     </div>
   </section>
 
-  <!-- ------------------------------- Planen -->
+  <!-- ------------------------------- Plan (Planen) -->
   <section id="ansicht-planen">
     <div class="karte-block">
       <div class="reihe">
@@ -371,9 +367,9 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
-      <!-- Der Zuschlag gehört zur Fahrt und nicht zum Fahrzeug: Der Träger
-           ist im Sommer dran und im Winter nicht. Und ohne ihn landet sein
-           Verbrauch im Korrekturfaktor des Autos, der dauerhaft gilt. -->
+      <!-- The surcharge belongs to the trip and not to the vehicle: the rack
+           is on in summer and not in winter. And without it, its consumption
+           ends up in the car's correction factor, which applies permanently. -->
       <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
         <input type="checkbox" id="alternative" style="width:auto">
         <span>Mautfreie Route mitrechnen und vergleichen</span>
@@ -424,16 +420,16 @@ table.kurve input { padding: 6px 8px; }
         <option value="1.20">Dachbox</option>
       </select>
 
-      <!-- Vorgabe 100 %, nicht 120 %.
-           Der Wert stand auf 120, weil die Annahmen des Routings zu
-           vorsichtig wirkten. Nachgerechnet an einer echten Langstrecke
-           (Reutlingen - Le Gurp, 1214 km) trifft aber genau 100 % den
-           gemessenen Verbrauch: 25,7 kWh/100 km bei 106 km/h im Mittel,
-           gegenueber 25-26 aus der Praxis. Mit 120 % sagte das Modell 31,7
-           voraus - und rechnete dabei streckenweise mit 153 km/h, die der
-           ID.Buzz gar nicht faehrt.
-           Wer schneller faehrt, schiebt den Regler; als Vorgabe gehoert
-           dorthin, was gemessen wurde. -->
+      <!-- Default 100 %, not 120 %.
+           The value used to be 120 because the routing's assumptions seemed
+           too cautious. Recalculated on a real long-distance trip
+           (Reutlingen - Le Gurp, 1214 km), exactly 100 % matches the
+           measured consumption: 25.7 kWh/100 km at 106 km/h on average,
+           against 25-26 from practice. With 120 % the model predicted 31.7
+           - and in places calculated with 153 km/h, which the ID.Buzz does
+           not even drive.
+           Whoever drives faster moves the slider; as the default, what was
+           measured belongs there. -->
       <label for="tempo">Tempo gegenüber der Routing-Annahme:
         <span id="tempo-wert">100</span> %</label>
       <input type="range" id="tempo" min="70" max="130" step="5" value="100">
@@ -443,10 +439,10 @@ table.kurve input { padding: 6px 8px; }
       <div class="unter" style="margin-top:2px">Personen und Gepäck dieser
         Fahrt. Ganz links gilt der Wert aus dem Fahrzeugprofil.</div>
 
-      <!-- Ein Anhänger bringt Masse UND eine eigene Luftwiderstandsfläche mit.
-           Die Vorgaben sind Schätzwerte (Fläche = cw mal A des Anhängers im
-           Windschatten des Autos) - bis eine aufgezeichnete Fahrt sie
-           bestätigt. Beide Felder bleiben deshalb von Hand änderbar. -->
+      <!-- A trailer brings mass AND its own drag area. The defaults are
+           estimates (area = cw times A of the trailer in the slipstream of
+           the car) - until a recorded trip confirms them. Both fields
+           therefore remain editable by hand. -->
       <label for="anhaenger">Anhänger</label>
       <select id="anhaenger">
         <option value="" selected>keiner</option>
@@ -490,17 +486,17 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
-      <!-- Die Karte wandert beim Wechsel der Ansicht in den jeweils
-           sichtbaren Halter - siehe app.js. -->
+      <!-- On switching views the map moves into the respectively visible
+           holder - see app.js. -->
       <div id="karte-halter-planen"></div>
 
       <div class="karte-block">
         <h2 style="margin-top:0">Ladeplan</h2>
         <div class="werte" id="ladeplan-werte"></div>
         <ol class="liste" id="ladeplan"></ol>
-        <!-- Der Regler steht beim Ladeplan und nicht bei den Säulenfiltern:
-             Er ändert nicht, welche Ladepunkte in Frage kommen, sondern wie
-             viele Halte sich lohnen. -->
+        <!-- The slider sits with the charging plan and not with the charger
+             filters: it does not change which charging points come into
+             question, but how many stops are worthwhile. -->
         <div class="reihe">
           <div>
             <label for="haltekosten">Aufwand je Halt
@@ -565,33 +561,33 @@ table.kurve input { padding: 6px 8px; }
 
     <div id="live-inhalt" hidden>
       <div class="karte-block">
-        <!-- Die Antwort zuerst, gross: nicht der Ladestand (der ist eine
-             Eingabe), sondern ob es reicht. -->
+        <!-- The answer first, big: not the charge level (that is an input),
+             but whether it is enough. -->
         <div id="live-antwort">
           <div class="antwort-zahl" id="live-antwort-zahl">–</div>
           <div class="antwort-text" id="live-antwort-text">warte auf Messung</div>
         </div>
         <div class="balken"><i id="live-balken" style="width:0%"></i></div>
 
-        <!-- Die Zahlen, die man liest, direkt unter der Antwort - nicht
-             unter zwei Diagrammen. Was man im Fahren braucht, steht oben;
-             was man ansieht, wenn man Zeit hat, darunter. -->
+        <!-- The numbers one reads, directly under the answer - not under two
+             charts. What one needs while driving is at the top; what one looks
+             at when one has time, below. -->
         <div class="werte" id="live-werte"></div>
 
-        <!-- Eine Zeile aus dem Auto: Verbrauch, Leistung, Nebenverbraucher.
-             Getrennt von den Kacheln darüber, weil es zwei verschiedene
-             Dinge sind - oben, was jolt rechnet, hier, was das Auto misst. -->
+        <!-- One line from the car: consumption, power, auxiliary consumers.
+             Separate from the tiles above, because they are two different
+             things - above, what jolt calculates, here, what the car measures. -->
         <div id="live-auto" hidden>
           <div id="live-auto-zeile"></div>
         </div>
 
-        <!-- Der Dongle, auch auf einer **geplanten** Fahrt.
-             Bisher wurde er nur beim Aufzeichnen verbunden. Auf einer
-             Langstrecke ist er aber am nützlichsten - und dort lief jolt
-             blind. `requestDevice` braucht eine Nutzergeste, also ein Knopf.
+        <!-- The dongle, also on a **planned** trip.
+             So far it was only connected when recording. But on a long
+             distance it is most useful - and there jolt ran blind.
+             `requestDevice` needs a user gesture, hence a button.
 
-             Pausieren ist kein Luxus: Wer an der Säule abschliesst,
-             während jolt weiter über CAN fragt, löst die Alarmanlage aus. -->
+             Pausing is no luxury: whoever locks the car at the charger
+             while jolt keeps asking over CAN triggers the alarm system. -->
         <div class="karte-fuss" style="margin-top:12px">
           <button class="tat neben" id="dongle-an" style="margin:0">Dongle verbinden</button>
           <button class="tat neben" id="dongle-pause" style="margin:0" hidden>Pause</button>
@@ -611,9 +607,9 @@ table.kurve input { padding: 6px 8px; }
         </div>
       </div>
 
-      <!-- Die Kurven. Sie beantworten eine andere Frage als die Zahlen oben:
-           nicht "wie steht es", sondern "wird es besser oder schlechter" -
-           und dafür schaut man hin, statt im Vorbeifahren zu blicken. -->
+      <!-- The curves. They answer a different question than the numbers above:
+           not "how is it going" but "is it getting better or worse" -
+           and one looks at them for that, instead of glancing in passing. -->
       <div class="karte-block">
         <canvas id="live-verlauf"></canvas>
         <div class="karte-fuss">
@@ -625,10 +621,10 @@ table.kurve input { padding: 6px 8px; }
           <span></span><span></span>
         </div>
 
-        <!-- Alle Rohwerte - zugeklappt. Sie sind zum **Prüfen** da, nicht
-             zum Fahren: siebzehn Zeilen mitten im Fahrbild sind Lärm, und
-             wer nachsehen will, tippt einmal. Das Alter steht schon in der
-             Zeile darüber, damit man ohne Aufklappen sieht, ob es lebt. -->
+        <!-- All raw values - collapsed. They are there for **checking**, not
+             for driving: seventeen rows in the middle of the driving view are
+             noise, and whoever wants to look taps once. The age is already in
+             the line above, so one sees without expanding whether it is alive. -->
         <details id="live-roh" hidden>
           <summary>Alle Werte aus dem Auto
             <span id="live-auto-stand"></span></summary>
@@ -636,17 +632,17 @@ table.kurve input { padding: 6px 8px; }
         </details>
       </div>
 
-      <!-- Ganz oben, direkt unter den Werten: Der Ladestand wird an der Säule
-           eingetippt, im Stehen, oft mit Handschuhen und meist in Eile. Wer
-           dafür erst an einer Karte und einem Ladeplan vorbeiscrollen muss,
-           tippt ihn irgendwann nicht mehr ein - und dann rechnet jolt den
-           Rest der Fahrt gegen einen Wert von vor zwei Stunden. -->
+      <!-- At the very top, directly under the values: the charge level is typed
+           in at the charger, standing, often with gloves and mostly in a hurry.
+           Whoever first has to scroll past a map and a charging plan for that
+           eventually stops typing it in - and then jolt calculates the rest of
+           the trip against a value from two hours ago. -->
       <div class="karte-block">
         <label for="ist-soc" style="margin-top:0">Ladestand jetzt</label>
         <div class="reihe">
-          <!-- Das Feld doppelt so breit wie der Knopf: .reihe verteilt sonst
-               gleichmässig, und eine zweistellige Zahl braucht weniger Platz
-               als ein Wort - aber sie ist das, worauf gezielt wird. -->
+          <!-- The field twice as wide as the button: .reihe otherwise distributes
+               evenly, and a two-digit number needs less space than a word - but
+               it is what is aimed at. -->
           <input type="number" id="ist-soc" min="0" max="100" step="1"
                  inputmode="numeric" enterkeyhint="send"
                  style="flex:2; font-size:22px; padding:12px; text-align:center">
@@ -681,9 +677,9 @@ table.kurve input { padding: 6px 8px; }
                    value="120">
           </div>
           <div>
-            <!-- Stau getrennt vom Verbrauch: Wer steht, verbraucht je
-                 Kilometer kaum mehr, kommt aber viel später an. Nur so lässt
-                 sich der Auslöser prüfen, den der Verbrauch nie auslöst. -->
+            <!-- Traffic jam separate from consumption: whoever stands consumes
+                 hardly more per kilometre, but arrives much later. Only this way
+                 can the trigger be checked that consumption never triggers. -->
             <label for="stau">Fahrzeit
               <span id="stau-wert">100</span> %</label>
             <input type="range" id="stau" min="100" max="200" step="10" value="100">
@@ -695,7 +691,7 @@ table.kurve input { padding: 6px 8px; }
     </div>
   </section>
 
-  <!-- ------------------------------- Fahrten -->
+  <!-- ------------------------------- Trips (Fahrten) -->
   <section id="ansicht-fahrten" hidden>
     <div class="karte-block">
       <h2 style="margin-top:0">Fahrt aufzeichnen</h2>
@@ -705,19 +701,18 @@ table.kurve input { padding: 6px 8px; }
         kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
         den echten Verbrauch des Autos zu lernen.</p>
 
-      <!-- Ein Knopf für beide Fälle. Ob der Dongle mitspielt, entscheidet
-           sich beim Antippen: In Bluefy gibt es Web Bluetooth, in Safari
-           nicht. Zwei Knöpfe dafür wären eine Frage an den Nutzer, die
-           der Browser schon beantwortet hat. -->
+      <!-- One button for both cases. Whether the dongle plays along is decided
+           on tapping: in Bluefy there is Web Bluetooth, in Safari there is
+           not. Two buttons for that would be a question to the user that the
+           browser has already answered. -->
       <p class="leer" style="padding-top:0" id="aufz-dongle-hinweis"></p>
-      <!-- Eigene Fahrzeugwahl, nicht die aus der Planen-Ansicht.
-           Bisher griff das Aufzeichnen auf `#fahrzeug-wahl` zu, und die
-           steht drei Ansichten weiter. War sie leer, fiel es auf das erste
-           Fahrzeug der Liste zurueck - das beim ersten Start angelegte
-           "Allgemeine E-Auto (60 kWh)". Zwei echte Testfahrten sind so dem
-           falschen Auto zugeschrieben worden, und weil daran Akkugroesse,
-           Masse und Luftwiderstand haengen, war der Verbrauch danach um
-           ein Drittel zu niedrig. -->
+      <!-- Own vehicle choice, not the one from the planning view.
+           Recording used to access `#fahrzeug-wahl`, and that sits three
+           views away. If it was empty, it fell back to the first vehicle in
+           the list - the "Allgemeines E-Auto (60 kWh)" created on first
+           start. Two real test trips were attributed to the wrong car that
+           way, and because battery size, mass and drag depend on it, the
+           consumption afterwards was a third too low. -->
       <label for="aufz-fahrzeug">Fahrzeug</label>
       <select id="aufz-fahrzeug"></select>
       <input type="text" id="aufz-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
@@ -729,7 +724,7 @@ table.kurve input { padding: 6px 8px; }
     </div>
   </section>
 
-  <!-- ------------------------------- Fahrzeug -->
+  <!-- ------------------------------- Vehicle (Fahrzeug) -->
   <section id="ansicht-fahrzeug" hidden>
     <div class="karte-block">
       <label for="fahrzeug-liste">Fahrzeug</label>
@@ -772,12 +767,12 @@ table.kurve input { padding: 6px 8px; }
     </div>
   </section>
 
-  <!-- ------------------------------- Einstellungen -->
-  <!-- Was man selten braucht: Konto, Benachrichtigungen, Dongle, Speicher.
-       Und die Diagnose des Dongles - sie steht hier und nicht im Fahrbild,
-       weil man sie ansieht, wenn etwas nicht stimmt, nicht beim Fahren.
-       Jeder Abschnitt ist eine Klappe; offen ist nur, was man beim Öffnen
-       am ehesten sucht. -->
+  <!-- ------------------------------- Settings (Einstellungen) -->
+  <!-- What one rarely needs: account, notifications, dongle, storage.
+       And the dongle diagnostics - they are here and not in the driving view,
+       because one looks at them when something is wrong, not while driving.
+       Each section is a collapsible; only what one is most likely to look for
+       on opening is open. -->
   <section id="ansicht-einstellungen" hidden>
 
     <details class="einst" open>
@@ -937,8 +932,8 @@ table.kurve input { padding: 6px 8px; }
     </details>
   </section>
 
-  <!-- Genau eine Karte für die ganze App. Zwei Canvas-Elemente hiessen zwei
-       Kachel-Caches und zwei Zustände, die auseinanderlaufen können. -->
+  <!-- Exactly one map for the whole app. Two canvas elements would mean two
+       tile caches and two states that can drift apart. -->
   <div id="karte-block" class="karte-block">
     <canvas id="karte"></canvas>
     <div class="karte-fuss">
@@ -948,11 +943,11 @@ table.kurve input { padding: 6px 8px; }
   </div>
 </main>
 
-<!-- Die Reihenfolge ist hier Bedingung, nicht Geschmack: ble-plugin.js legt
-     window.joltBlePlugin an, obd-ble-native.js baut darauf die
-     Web-Bluetooth-Gestalt, und erst obd-core.js greift danach. Im Browser
-     melden sich die beiden ersten als "nicht nativ" und der Kern nimmt
-     navigator.bluetooth - sie kosten dort nur den Ladevorgang. -->
+<!-- The order is a requirement here, not a matter of taste: ble-plugin.js
+     creates window.joltBlePlugin, obd-ble-native.js builds the Web Bluetooth
+     shape on it, and only then does obd-core.js take over. In the browser the
+     first two report as "nicht nativ" (not native) and the core takes
+     navigator.bluetooth - there they only cost the loading time. -->
 <script src="/static/ble-plugin.js"></script>
 <script src="/static/obd-ble-native.js"></script>
 <script src="/static/readings.js"></script>

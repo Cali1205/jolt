@@ -1,29 +1,29 @@
-"""Geometrie auf der Erdkugel. Zwei Funktionen, keine Abhängigkeiten.
+"""Geometry on the globe. Two functions, no dependencies.
 
-Diese beiden standen in `energie/model.py`, und das war die einzige
-Schichtverletzung im Backend: `routing/corridor.py` musste für eine
-Entfernung zwischen zwei Punkten in die Physik greifen. Eine Entfernung ist
-aber keine Aussage über Energie, und `routing` liegt unter `energie`.
+These two used to live in `energy/model.py`, and that was the only layer
+violation in the backend: `routing/corridor.py` had to reach into the physics
+for a distance between two points. A distance, however, is no statement about
+energy, and `routing` sits below `energy`.
 
-Warum hier und nicht in `routing/geo.py`, wie zunächst vorgeschlagen: Dann
-hinge `energie` an `routing`, und die Verletzung wäre nur umgedreht. Beide
-Schichten brauchen diese Funktionen, also gehören sie **unter** beide - auf
-dieselbe Ebene wie `models` und `security`.
+Why here and not in `routing/geo.py`, as first proposed: then `energy` would
+depend on `routing`, and the violation would merely be turned around. Both
+layers need these functions, so they belong **below** both - on the same level
+as `models` and `security`.
 
-Bewusst ohne einen einzigen Import aus dem Projekt. Ein Modul, das nichts
-kennt, kann von überall benutzt werden, ohne je einen Zyklus zu bilden.
+Deliberately without a single import from the project. A module that knows
+nothing can be used from anywhere without ever forming a cycle.
 """
 import math
 
-# Mittlerer Erdradius nach WGS84. Für Entfernungen entlang einer Route ist
-# die Kugelnäherung genau genug: Der Fehler gegenüber dem Ellipsoid liegt
-# unter einem halben Prozent, und die Stützpunkte einer Route stehen ohnehin
-# nur alle paar hundert Meter.
+# Mean Earth radius according to WGS84. For distances along a route the
+# spherical approximation is accurate enough: the error compared with the
+# ellipsoid is below half a percent, and the support points of a route are
+# only a few hundred metres apart anyway.
 ERDRADIUS_M = 6371008.8
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Entfernung zweier Punkte auf der Erdkugel in Metern."""
+    """Distance between two points on the globe in metres."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp = p2 - p1
     dl = math.radians(lon2 - lon1)
@@ -32,7 +32,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def bearing_degree(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Fahrtrichtung von Punkt 1 nach Punkt 2, 0 = Norden."""
+    """Heading from point 1 to point 2, 0 = north."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dl = math.radians(lon2 - lon1)
     y = math.sin(dl) * math.cos(p2)
@@ -42,15 +42,15 @@ def bearing_degree(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def offset_point(lat: float, lon: float, bearing: float,
                     distance_m: float) -> tuple[float, float]:
-    """Der Punkt, der `strecke_m` weit in Richtung `peilung` liegt.
+    """The point that lies `distance_m` away in the direction `bearing`.
 
-    Die Umkehrung von `haversine_m` und `peilung_grad` zusammen. Gebraucht
-    von `routing/variants.py`, um Ausweichpunkte neben eine Route zu legen -
-    dafür genügt die Kugelnäherung ebenso wie für die Entfernung.
+    The inverse of `haversine_m` and `bearing_degree` taken together. Needed
+    by `routing/variants.py` to place detour points beside a route - for that
+    the spherical approximation suffices, just as for the distance.
 
-    Bewusst nicht "ein Grad Breite sind 111,32 km": Das stimmt nur für die
-    Breite. Bei der Länge hängt es vom Breitengrad ab, und wer es dort
-    vergisst, versetzt einen Punkt in Südfrankreich um ein Drittel zu weit.
+    Deliberately not "one degree of latitude is 111.32 km": that is only true
+    for latitude. For longitude it depends on the latitude, and anyone who
+    forgets that displaces a point in southern France by a third too far.
     """
     d = distance_m / ERDRADIUS_M
     b = math.radians(bearing)
@@ -59,7 +59,7 @@ def offset_point(lat: float, lon: float, bearing: float,
                    + math.cos(p1) * math.sin(d) * math.cos(b))
     dl = math.atan2(math.sin(b) * math.sin(d) * math.cos(p1),
                     math.cos(d) - math.sin(p1) * math.sin(p2))
-    # Auf -180..180 normieren, damit ein Versatz über den Datumswechsel
-    # hinweg keine Länge von 190 Grad ergibt.
+    # Normalise to -180..180 so that an offset across the date line does not
+    # yield a longitude of 190 degrees.
     new_lon = (lon + math.degrees(dl) + 540.0) % 360.0 - 180.0
     return math.degrees(p2), new_lon

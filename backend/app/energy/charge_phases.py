@@ -1,53 +1,53 @@
-"""Eine Messreihe in Fahr- und Ladeabschnitte zerlegen.
+"""Split a series of measurements into driving and charging sections.
 
-**Warum es dieses Modul gibt.** Die Frage "hat das Auto zwischen diesen
-beiden Messpunkten geladen?" wurde an fünf Stellen unabhängig beantwortet -
-mit drei Konstanten in drei Modulen, zwei verschiedenen Schwellen (0,5 und
-1,0 Prozentpunkte) und zwei verschiedenen Formen (paarweise gegen den
-Vorgänger, oder gegen das Minimum eines Zeitfensters). Keine der fünf wusste
-von den anderen.
+**Why this module exists.** The question "did the car charge between these
+two measurement points?" was answered independently in five places - with
+three constants in three modules, two different thresholds (0.5 and 1.0
+percentage points) and two different forms (pairwise against the predecessor,
+or against the minimum of a time window). None of the five knew about the
+others.
 
-Das war keine Geschmacksfrage, sondern die Quelle mehrerer Fehler. Ein
-Ladestopp ist für fast jede Auswertung einer Messreihe ein Sonderfall, und
-wer ihn nicht kennt, rechnet still falsch:
+That was not a matter of taste but the source of several bugs. A charging
+stop is a special case for almost every evaluation of a measurement series,
+and anyone who does not know about it silently calculates wrong:
 
-* Die Kalibrierung nahm Anfang minus Ende. Nachgeladene Prozentpunkte fehlten
-  in dieser Differenz - aus einer Fahrt mit 29 kWh/100 km wurde ein gelernter
-  Wert von 12, und weil er in den Plausibilitätsgrenzen blieb, fiel es nicht
-  auf.
-* Die Abweichung verglich den Ladestand gegen ein Profil, das keine
-  Ladestopps kennt, und meldete danach dreistellige Prozentpunkte.
+* The calibration took start minus end. Percentage points recharged were
+  missing from that difference - a trip at 29 kWh/100 km turned into a
+  learned value of 12, and because it stayed within the plausibility limits,
+  nobody noticed.
+* The deviation compared the charge level against a profile that knows no
+  charging stops, and then reported three-digit percentage points.
 
-Behoben wurde beides, indem die Erkennung dort **noch einmal** geschrieben
-wurde. Beim nächsten Modul, das Messpunkte auswertet, wäre dasselbe passiert.
-Deshalb steht sie jetzt einmal hier.
+Both were fixed by writing the detection **once more** in each place. The
+next module to evaluate measurement points would have gone the same way.
+That is why it now lives in one place, here.
 
-**Warum in `energie` und nicht in `live`.** `energie.kalibrierung` gehört zu
-den Nutzern, und `energie` liegt unter `live` - andersherum entstünde ein
-Zyklus. Inhaltlich passt es: Es geht um die Deutung einer Messreihe, so wie
-bei der Kalibrierung daneben.
+**Why in `energy` and not in `live`.** `energy.calibration` is one of the
+users, and `energy` sits below `live` - the other way round would create a
+cycle. Content-wise it fits: it is about interpreting a measurement series,
+just like the calibration next to it.
 
-**Was ein Messpunkt sein muss.** Nichts weiter als ein Objekt mit `soc`,
-`zeit` und `km_auf_route`. Bewusst kein ORM-Typ: `energie` kennt die
-Datenbank nicht, und das soll so bleiben - nur deshalb lassen sich die
-Prüfskripte ohne Anwendung laufen.
+**What a measurement point must be.** Nothing more than an object with `soc`,
+`timestamp` and `km_on_route`. Deliberately not an ORM type: `energy` does not
+know the database, and that should stay so - only for that reason can the
+check scripts run without the application.
 """
 from dataclasses import dataclass
 from datetime import timedelta
 
-# Ab wie viel Anstieg ein Abschnitt als Ladevorgang gilt. Darunter ist es
-# Rekuperation oder das Rauschen der SoC-Messung (meist 0,5 % Auflösung), und
-# beides gehört zur Fahrt. **Die eine Schwelle**, vorher drei.
+# From what rise onwards a section counts as charging. Below that it is
+# regeneration or the noise of the SoC measurement (usually 0.5 % resolution),
+# and both belong to driving. **The one threshold**, previously three.
 CHARGING_PP = 0.5
 
 
 @dataclass(frozen=True)
 class Section:
-    """Das Stück zwischen zwei aufeinanderfolgenden Messpunkten.
+    """The stretch between two consecutive measurement points.
 
-    `soc_pp` ist positiv, wenn verbraucht wurde, und negativ beim Laden -
-    also in Richtung "was hat es gekostet", nicht in Richtung "wie hat sich
-    der Ladestand verändert". Das ist die Blickrichtung aller Nutzer.
+    `soc_pp` is positive when energy was consumed and negative when charging -
+    i.e. in the direction of "what did it cost", not "how did the charge level
+    change". That is the viewpoint of all users.
     """
     begin: object
     past: object
@@ -57,7 +57,7 @@ class Section:
 
     @property
     def charged_pp(self) -> float:
-        """Wie viel in diesem Abschnitt nachgeladen wurde, sonst null."""
+        """How much was recharged in this section, otherwise zero."""
         return -self.soc_pp if self.charges else 0.0
 
     @property
@@ -68,16 +68,15 @@ class Section:
 
 
 def sections(points) -> list[Section]:
-    """Die Messreihe paarweise zerlegen, jeder Abschnitt mit Ladekennzeichen.
+    """Split the series pairwise, each section with a charging flag.
 
-    Nur Punkte mit **gemeldetem** Ladestand zählen. An einem Punkt ohne
-    Ladestand lässt sich kein Anstieg ablesen, und ein hochgerechneter Wert
-    wäre hier besonders schädlich: Er stammt aus demselben Modell, das die
-    Nutzer dieser Funktion gerade prüfen wollen.
+    Only points with a **reported** charge level count. At a point without a
+    charge level no rise can be read, and an extrapolated value would be
+    particularly harmful here: it comes from the same model that the users of
+    this function are about to check.
 
-    Die Zeit zwischen zwei Meldungen geht dadurch nicht verloren - sie steckt
-    dann in einem grösseren Sprung, und wer sie braucht, findet sie über
-    `Abschnitt.minuten`.
+    The time between two reports is not lost as a result - it ends up in a
+    larger jump, and whoever needs it finds it via `Section.mins`.
     """
     with_soc = [p for p in points if p.soc is not None]
     result = []
@@ -92,11 +91,11 @@ def sections(points) -> list[Section]:
 
 
 def charged_pp(points, until_point=None) -> float:
-    """Wie viele Prozentpunkte insgesamt nachgeladen wurden.
+    """How many percentage points were recharged in total.
 
-    `bis_punkt` begrenzt auf den Anfang der Reihe bis zu diesem Punkt -
-    gebraucht für die Abweichung während der Fahrt, die wissen muss, was
-    **bisher** geladen wurde.
+    `until_point` limits it to the start of the series up to that point -
+    needed for the deviation during the trip, which must know what has been
+    charged **so far**.
     """
     total = 0.0
     for section in sections(points):
@@ -107,11 +106,11 @@ def charged_pp(points, until_point=None) -> float:
 
 
 def consumption(points) -> tuple[float, float]:
-    """(verbrauchte Prozentpunkte, dabei gefahrene Kilometer).
+    """(consumed percentage points, kilometres driven in the process).
 
-    Ladeabschnitte bleiben aussen vor - sie sagen nichts über den Verbrauch,
-    und ihre Strecke darf auch nicht mitzählen, sonst stünde sie im Nenner
-    ohne den zugehörigen Verbrauch im Zähler.
+    Charging sections are left out - they say nothing about consumption, and
+    their distance must not count either, otherwise it would be in the
+    denominator without the matching consumption in the numerator.
     """
     pp = km = 0.0
     for section in sections(points):
@@ -123,16 +122,17 @@ def consumption(points) -> tuple[float, float]:
 
 
 def charge_pauses_minutes(points, driven_minutes) -> float:
-    """Wie viel der verstrichenen Zeit auf Ladepausen entfiel.
+    """How much of the elapsed time was spent on charging pauses.
 
-    `gefahrene_minuten(von_km, bis_km)` liefert die **Fahrzeit** für ein
-    Stück Strecke; abgezogen wird sie, weil eine Talfahrt den Ladestand auch
-    hebt, aber keine zusätzliche Zeit kostet. Übrig bleibt die Standzeit.
+    `driven_minutes(from_km, to_km)` returns the **driving time** for a
+    stretch of road; it is subtracted because a downhill run also raises the
+    charge level but costs no extra time. What remains is the standing time.
 
-    Gebraucht wird das, weil das Energieprofil ausschliesslich Fahrzeit führt:
-    Die Ladezeit steht im Plan, nie im Profil. Wer die Wanduhr ungefiltert
-    dagegen hält, sieht nach dem ersten Ladestopp eine Verspätung in Höhe der
-    Ladedauer - dauerhaft, denn sie wird nie wieder aufgeholt.
+    This is needed because the energy profile carries driving time only: the
+    charging time is in the plan, never in the profile. Anyone who holds the
+    wall clock against it unfiltered sees a delay equal to the charging
+    duration after the first charging stop - permanently, since it is never
+    made up.
     """
     total = 0.0
     for section in sections(points):
@@ -149,13 +149,13 @@ def charge_pauses_minutes(points, driven_minutes) -> float:
 
 def charges_at_end(points, timeframe_minutes: float,
                   min_swing_pp: float) -> bool:
-    """Sah der Schluss der Messreihe nach einem Ladevorgang aus?
+    """Did the end of the series look like a charging process?
 
-    Eine andere Frage als `abschnitte`, deshalb eine eigene Schwelle: Hier
-    geht es nicht darum, ob ein einzelner Abschnitt lädt, sondern ob am Ende
-    **genug** nachgeladen wurde, um von einer Ladepause auszugehen. Der
-    Aufrufer entscheidet, wie viel genug ist - für das Aufräumen einer
-    vergessenen Fahrt darf die Schwelle höher liegen als für eine Bilanz.
+    A different question from `sections`, hence its own threshold: here it is
+    not about whether a single section charges, but whether **enough** was
+    recharged at the end to assume a charging pause. The caller decides how
+    much is enough - for cleaning up a forgotten trip the threshold may be
+    higher than for a balance.
     """
     with_soc = [p for p in points if p.soc is not None and p.timestamp is not None]
     if len(with_soc) < 2:

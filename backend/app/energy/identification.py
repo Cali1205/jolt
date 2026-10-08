@@ -1,47 +1,46 @@
-"""Die Modellparameter aus einer gefahrenen Strecke zurückrechnen.
+"""Back-calculate the model parameters from a driven route.
 
-`calibration.py` lernt **eine** Zahl je Fahrzeug: Prognose gegen
-Wirklichkeit, alles in einen Korrekturfaktor. Das ist bewusst so und für
-seinen Zweck richtig - aber es kann eine Sorte Fehler grundsätzlich nicht
-beheben. Ein Faktor verschiebt die Verbrauchskurve; er dreht sie nicht. Wenn
-das Modell bei 90 km/h stimmt und bei 130 daneben liegt, macht ein Skalar es
-an einer der beiden Stellen schlechter, egal wie er gewählt wird. Genau diese
-Frage - "wie ändert sich der Verbrauch mit dem Tempo, und wie mit der
-Steigung?" - ist aber die, an der ein Ladeplan hängt.
+`calibration.py` learns **one** number per vehicle: forecast against reality,
+all folded into a single correction factor. That is deliberate and right for
+its purpose - but there is one kind of error it fundamentally cannot fix. A
+factor shifts the consumption curve; it does not rotate it. If the model is
+right at 90 km/h and off at 130, a scalar makes it worse at one of the two
+places, no matter how it is chosen. Yet exactly this question - "how does
+consumption change with speed, and how with gradient?" - is the one a
+charging plan hinges on.
 
-**Warum das überhaupt geht.** Das Modell in `model.py` ist in seinen
-Parametern linear. Durch die Streckenlänge geteilt wird daraus eine Bilanz
-von Kräften, in der jeder Summand ein Produkt aus einem gesuchten Parameter
-und einer gemessenen Grösse ist:
+**Why this is possible at all.** The model in `model.py` is linear in its
+parameters. Divided by the distance, it becomes a balance of forces in which
+every summand is a product of a sought parameter and a measured quantity:
 
-    E/s = F_roll + c_w·A·(½ρ⟨v²⟩) + (1/η)·mg·(auf/s)
-                 + η_rek·mg·(ab/s) + P_neben·(1/v) + k_beschl·(E_kin/s)
+    E/s = F_roll + c_w·A·(½ρ⟨v²⟩) + (1/η)·mg·(up/s)
+                 + η_regen·mg·(down/s) + P_aux·(1/v) + k_accel·(E_kin/s)
 
-Damit ist die Parameterschätzung eine gewöhnliche Ausgleichsrechnung.
+That makes the parameter estimation an ordinary least-squares fit.
 
-**Warum je Kilometer und nicht je Zeitfenster.** Rechnet man in absoluten
-Grössen, wächst jeder Regressor mit der Fensterlänge, und Roll- und
-Luftwiderstand korrelieren zu 0,97 - nicht aus Physik, sondern weil ein
-längeres Fenster von allem mehr hat. Die Parameter sind dann einzeln nicht
-mehr trennbar. Normiert stehen sich ein konstantes Glied, ein v²-Glied und
-ein 1/v-Glied gegenüber; das sind unterscheidbare Formen.
+**Why per kilometre and not per time window.** If you calculate in absolute
+quantities, every regressor grows with the window length, and rolling and air
+resistance correlate at 0.97 - not because of physics, but because a longer
+window has more of everything. The parameters can then no longer be separated
+individually. Normalised, a constant term, a v² term and a 1/v term face each
+other; those are distinguishable shapes.
 
-**Warum Fenster und nicht Einzelsegmente.** Ein Messpunktabstand von zwölf
-Sekunden sind rund 350 m. Der Höhenunterschied darauf liegt in derselben
-Grössenordnung wie das Rauschen der SRTM-Höhendaten, der Energiezuwachs in
-der Grössenordnung der Zählerauflösung. Über 90 s / 1,5 km mitteln sich
-beide heraus, während die Streuung in Tempo und Steigung erhalten bleibt -
-und die trägt die Information.
+**Why windows and not single segments.** A measurement point spacing of twelve
+seconds is about 350 m. The elevation difference over that is of the same
+order as the noise of the SRTM elevation data, the energy increment of the
+same order as the meter resolution. Over 90 s / 1.5 km both average out,
+while the spread in speed and gradient is preserved - and that carries the
+information.
 
-**Was diese Rechnung nicht kann.** Masse und Höhenmassstab multiplizieren
-denselben Term (m·g·Δh). Wer die Masse zu niedrig ansetzt oder wessen
-Höhendaten die Anstiege glattbügeln, bekommt dieselbe Antwort: zu grosse
-Steigungskoeffizienten. Die beiden Ursachen sind aus einer Fahrt heraus
-nicht unterscheidbar - deshalb prüft `Ergebnis.warnungen`, ob η_rek über 1
-liegt, was physikalisch unmöglich ist und genau auf diesen Fall zeigt.
+**What this calculation cannot do.** Mass and elevation scale multiply the
+same term (m·g·Δh). Someone who assumes the mass too low, or whose elevation
+data smooth out the climbs, gets the same answer: gradient coefficients that
+are too large. The two causes cannot be told apart from a single trip - which
+is why `Result.warnings` checks whether η_regen is above 1, which is
+physically impossible and points to exactly this case.
 
-Rein, ohne Datenbank und ohne Netz - wie `model.py`, damit
-tools/check_identification.py sie direkt durchrechnen kann.
+Pure, without database and without network - like `model.py`, so that
+tools/check_identification.py can run it directly.
 """
 import math
 from dataclasses import dataclass, field
@@ -52,21 +51,22 @@ G = 9.80665
 R_AIR = 287.058
 P0 = 101325.0
 
-# Ein Fenster muss beide Schwellen reissen, sonst trägt es zu wenig Signal.
+# A window must exceed both thresholds, otherwise it carries too little
+# signal.
 TIMEFRAME_S = 90.0
 TIMEFRAME_M = 1500.0
-# Grösserer Messpunktabstand heisst Lücke: Was dazwischen geschah, ist
-# unbekannt, und ein Fenster darüber hinweg wäre erfunden.
+# A larger measurement point spacing means a gap: what happened in between
+# is unknown, and a window across it would be made up.
 MAX_SPACING_S = 60.0
-# Darüber ist es ein GPS-Ausreisser und kein Auto.
+# Above this it is a GPS outlier and not a car.
 MAX_SPEED_KMH = 190.0
 MIN_SEGMENT_M = 5.0
-# Zufluss über dieser Leistung im Fahren ist keine Rekuperation mehr,
-# sondern eine Säule - der Abschnitt gehört nicht in eine Verbrauchsmessung.
+# Inflow above this power while driving is no longer regeneration but a
+# charging pillar - the section does not belong in a consumption measurement.
 MAX_REGEN_KW = 60.0
-# Glättungsbreite des Höhenprofils. SRTM streut um einige Meter; wer diese
-# Streuung als Steigung liest, findet auf ebener Autobahn Hunderte
-# Höhenmeter. Derselbe Grund wie in live/recording.py.
+# Smoothing width of the elevation profile. SRTM scatters by a few metres;
+# reading that scatter as gradient yields hundreds of metres of climb on a
+# flat motorway. Same reason as in live/recording.py.
 SMOOTHING_M = 600.0
 
 COLUMNS = ("f_roll", "cw_a", "uphill", "downhill", "p_neben", "beschl")
@@ -74,19 +74,19 @@ COLUMNS = ("f_roll", "cw_a", "uphill", "downhill", "p_neben", "beschl")
 
 @dataclass
 class Sample:
-    """Was die Identifikation von einem Punkt braucht - mehr nicht.
+    """What the identification needs from a point - nothing more.
 
-    Bewusst nicht `models.LivePunkt`: Die Rechnung soll ohne Datenbank
-    laufen, und eine aufgezeichnete Fahrt aus einer anderen Quelle hat
-    dieselben Grössen unter anderen Namen.
+    Deliberately not `models.LivePoint`: the calculation should run without a
+    database, and a recorded trip from another source has the same quantities
+    under other names.
     """
     time_s: float
     lat: float
     lon: float
     elevation_m: float
-    # Kumulierte Zähler des Fahrzeugs in Wh. Ihre Differenz ist die
-    # Nettoenergie: Was die Batterie abgab, abzüglich dessen, was die
-    # Rekuperation zurückbrachte.
+    # Cumulative counters of the vehicle in Wh. Their difference is the net
+    # energy: what the battery delivered, minus what regeneration brought
+    # back.
     discharge_wh: float | None = None
     charged_wh: float | None = None
 
@@ -113,13 +113,13 @@ class Timeframe:
 
 @dataclass
 class Result:
-    # Alle Kraftgrössen sind **wirksame** Werte: Gemessen wird die Energie an
-    # der Batterie, der Antriebswirkungsgrad steckt also schon darin. Wer sie
-    # mit den Rohwerten aus `Fahrzeugwerte` vergleicht, muss dort durch
-    # eta_antrieb teilen - `tools/consumption_analysis.py` tut genau das.
+    # All force quantities are **effective** values: the energy is measured at
+    # the battery, so the drivetrain efficiency is already included. Anyone
+    # comparing them with the raw values from `VehicleValues` has to divide
+    # those by eta_drive - `tools/consumption_analysis.py` does exactly that.
     f_roll_n: float = 0.0
     cw_a_m2: float = 0.0
-    # Kehrwert des Antriebswirkungsgrads, wie er am Berg wirksam wird.
+    # Reciprocal of the drivetrain efficiency as it takes effect uphill.
     uphill_factor: float = 0.0
     eta_regen: float = 0.0
     p_aux_w: float = 0.0
@@ -143,18 +143,18 @@ class Result:
 
 
 def air_density(temp_c: float, elevation_m: float) -> float:
-    """Wie in model.py - hier wiederholt, damit das Modul für sich steht."""
+    """As in model.py - repeated here so that the module stands on its own."""
     elevation = max(-500.0, min(elevation_m, 9000.0))
     return (P0 * (1.0 - 2.25577e-5 * elevation) ** 5.25588) / (R_AIR * (273.15 + temp_c))
 
 
 def elevation_smooth(points: list[Sample],
                    timeframe_m: float = SMOOTHING_M) -> list[float]:
-    """Gleitendes Mittel über die *Strecke*, nicht über den Index.
+    """Moving average over the *distance*, not over the index.
 
-    Über den Index gemittelt würde ein Stau, in dem hundert Punkte auf
-    derselben Stelle liegen, das Höhenprofil dort plattdrücken und an der
-    Ausfahrt eine Stufe erzeugen.
+    Averaged over the index, a traffic jam in which a hundred points lie at the
+    same spot would flatten the elevation profile there and create a step at
+    the exit.
     """
     if len(points) < 3:
         return [p.elevation_m for p in points]
@@ -176,7 +176,7 @@ def elevation_smooth(points: list[Sample],
 def build_timeframe(points: list[Sample], mass_kg: float,
                    temp_c: float = 15.0,
                    smoothing_m: float = SMOOTHING_M) -> list[Timeframe]:
-    """Messpunkte zu auswertbaren Fenstern verdichten."""
+    """Condense measurement points into evaluable windows."""
     if len(points) < 3:
         return []
     elevations = elevation_smooth(points, smoothing_m)
@@ -215,19 +215,18 @@ def build_timeframe(points: list[Sample], mass_kg: float,
         if t < TIMEFRAME_S or s < TIMEFRAME_M:
             return
         energy = sum(x["de"] - x["dg"] for x in buffer)
-        # Aero segmentweise: ⟨v²⟩ ist nicht ⟨v⟩², und die Tempostreuung
-        # innerhalb des Fensters ist gerade das, was den Term trägt.
+        # Aero per segment: ⟨v²⟩ is not ⟨v⟩², and the speed spread within
+        # the window is precisely what carries the term.
         aero = sum(0.5 * air_density(temp_c, (x["h1"] + x["h2"]) / 2)
                    * (x["s"] / x["dt"]) ** 2 * x["s"] for x in buffer)
-        # Steigung nach Vorzeichen getrennt aufsummieren, nicht als
-        # Nettodifferenz: Ein Fenster mit +50 m Anstieg und -80 m Gefälle hat
-        # netto -30 m, aber der Anstieg hat Energie gekostet und das Gefälle
-        # nur einen Teil davon zurückgegeben. Netto gerechnet landet diese
-        # Differenz in den übrigen Parametern.
+        # Sum the gradient separately by sign, not as a net difference: a
+        # window with +50 m climb and -80 m descent has -30 m net, but the
+        # climb cost energy and the descent gave back only part of it. Counted
+        # net, this difference ends up in the remaining parameters.
         uphill = sum(max(0.0, x["h2"] - x["h1"]) for x in buffer)
         downhill = sum(min(0.0, x["h2"] - x["h1"]) for x in buffer)
-        # Beschleunigungsarbeit. Ohne diesen Term landet der Stadtverkehr im
-        # Nebenverbraucher-Glied: Beide sind bei niedrigem Tempo gross.
+        # Acceleration work. Without this term city traffic ends up in the
+        # auxiliary-consumer term: both are large at low speed.
         kin = 0.0
         for x, nx in zip(buffer, buffer[1:]):
             v1, v2 = x["s"] / x["dt"], nx["s"] / nx["dt"]
@@ -254,10 +253,10 @@ def build_timeframe(points: list[Sample], mass_kg: float,
     return origin_of
 
 
-# ---------- Ausgleichsrechnung ----------
+# ---------- Least-squares fit ----------
 
 def _inverse(a: list[list[float]]) -> list[list[float]]:
-    """Gauss-Jordan mit Teilpivotisierung. Bei sechs Unbekannten genügt das."""
+    """Gauss-Jordan with partial pivoting. Sufficient for six unknowns."""
     n = len(a)
     m = [list(z) + [1.0 if i == j else 0.0 for j in range(n)]
          for i, z in enumerate(a)]
@@ -276,7 +275,7 @@ def _inverse(a: list[list[float]]) -> list[list[float]]:
 
 
 def _eigenvalues(a: list[list[float]]) -> list[float]:
-    """Jacobi-Rotation - nur für die Konditionszahl, nicht für die Lösung."""
+    """Jacobi rotation - only for the condition number, not for the solution."""
     n = len(a)
     m = [list(z) for z in a]
     for _ in range(200):
@@ -299,7 +298,7 @@ def _eigenvalues(a: list[list[float]]) -> list[float]:
 
 
 def _rows(timeframe: list[Timeframe], mass_kg: float) -> tuple[list, list, list]:
-    """Kraftbilanz je Meter. Jeder Summand hat die Einheit Newton."""
+    """Force balance per metre. Every summand has the unit newton."""
     X, y, gew = [], [], []
     for f in timeframe:
         s = f.distance_m
@@ -307,26 +306,26 @@ def _rows(timeframe: list[Timeframe], mass_kg: float) -> tuple[list, list, list]
             1.0,                                # F_roll
             f.aero_j / s,                       # c_w·A
             mass_kg * G * f.on_m / s,         # 1/η
-            mass_kg * G * f.from_m / s,          # η_rek
-            f.duration_s / s,                      # P_neben
-            f.kin_j / s,                        # Beschleunigungsanteil
+            mass_kg * G * f.from_m / s,          # η_regen
+            f.duration_s / s,                      # P_aux
+            f.kin_j / s,                        # acceleration share
         ])
         y.append(f.energy_wh * 3600.0 / s)
-        # Gewichtet mit der Strecke: Ein Fenster über 4 km trägt mehr
-        # Information als eines über 1,5 km, und sein spezifischer Verbrauch
-        # streut entsprechend weniger.
+        # Weighted by distance: a window over 4 km carries more information
+        # than one over 1.5 km, and its specific consumption scatters
+        # correspondingly less.
         gew.append(s)
     return X, y, gew
 
 
 def identifizieren(timeframe: list[Timeframe], mass_kg: float,
                    lam: float = 0.02) -> Result:
-    """Die Parameter aus den Fenstern schätzen.
+    """Estimate the parameters from the windows.
 
-    `lam` ist eine schwache Ridge-Dämpfung auf den spaltennormierten Daten.
-    Sie kostet etwas Erwartungstreue und kauft dafür, dass eine Fahrt ohne
-    Steigung oder ohne Tempowechsel nicht in eine fast singuläre Matrix
-    läuft und wilde Parameter ausspuckt.
+    `lam` is a weak ridge damping on the column-normalised data. It costs a
+    little unbiasedness and buys that a trip without gradient or without
+    speed changes does not run into a nearly singular matrix and spit out
+    wild parameters.
     """
     k = len(COLUMNS)
     res = Result(mass_kg=mass_kg, n_timeframe=len(timeframe))
@@ -365,9 +364,10 @@ def identifizieren(timeframe: list[Timeframe], mass_kg: float,
     ss_tot = sum(g * (v - my) ** 2 for g, v in zip(gew, y))
     ss_res = sum(g * (v - p) ** 2 for g, v, p in zip(gew, y, prior))
     res.r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    # Residuenvarianz bei Gewichtung Var(y_i) = σ²/w_i: die gewichtete
-    # Quadratsumme durch die Freiheitsgrade - *nicht* zusätzlich durch die
-    # Gewichtssumme, sonst kommen die Standardfehler um sqrt(Σw) zu klein.
+    # Residual variance with weighting Var(y_i) = σ²/w_i: the weighted sum of
+    # squares divided by the degrees of freedom - *not* additionally by the
+    # sum of weights, otherwise the standard errors come out too small by
+    # sqrt(Σw).
     sigma2 = ss_res / (n - k) if n > k else float("inf")
 
     (res.f_roll_n, res.cw_a_m2, res.uphill_factor, res.eta_regen,
@@ -380,11 +380,10 @@ def identifizieren(timeframe: list[Timeframe], mass_kg: float,
 
 
 def _examine(res: Result) -> None:
-    """Physikalische Schranken prüfen und Unsicheres benennen.
+    """Check physical bounds and name what is uncertain.
 
-    Nicht um die Zahlen zu beschönigen, sondern damit niemand einen
-    Parametersatz in den Ladeplan übernimmt, der eine Fahrt beschreibt und
-    kein Auto.
+    Not to beautify the numbers, but so that nobody adopts a parameter set
+    into the charging plan that describes a trip and not a car.
     """
     if res.eta_regen > 1.0:
         required = res.mass_kg * res.eta_regen
@@ -422,10 +421,10 @@ def _examine(res: Result) -> None:
 def consumption_wh_km(res: Result, speed_kmh: float,
                     gradient_pct: float = 0.0, temp_c: float = 15.0,
                     elevation_m: float = 400.0) -> float:
-    """Die identifizierte Verbrauchskurve auswerten.
+    """Evaluate the identified consumption curve.
 
-    Das Gegenstück zu `modell.segment_wh`, aber mit den gemessenen statt den
-    angenommenen Parametern - gedacht für den Vergleich der beiden.
+    The counterpart of `model.segment_wh`, but with the measured instead of
+    the assumed parameters - intended for comparing the two.
     """
     v = speed_kmh / 3.6
     if v <= 0:

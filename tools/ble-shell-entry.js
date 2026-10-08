@@ -1,18 +1,18 @@
-/* Eintrag fuer das gebuendelte Plugin-Paket, siehe package.json -> huelle.
- * Was hier steht, landet als window.joltBlePlugin in frontend/ble-plugin.js. */
+/* Entry point for the bundled plugin package, see package.json -> huelle.
+ * Whatever is exported here ends up as window.joltBlePlugin in frontend/ble-plugin.js. */
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { Capacitor } from '@capacitor/core';
 
-/* Das Hintergrund-Standort-Plugin bringt keinen eigenen JS-Teil mit, nur den
- * nativen: Es wird ueber den Namen angesprochen, unter dem es sich in Swift
- * anmeldet. Im Browser gibt es dieses Plugin nicht - dort greift
- * `navigator.geolocation`, siehe frontend/live.js. */
+/* The background location plugin has no JS part of its own, only the
+ * native one: it is addressed by the name it registers under in Swift.
+ * The browser has no such plugin - there `navigator.geolocation` is used,
+ * see frontend/live.js. */
 const BackgroundGeolocation = Capacitor.registerPlugin('BackgroundGeolocation');
 
-/* Die Live Activity: nimmt das Anzeigemodell (frontend/display.js) entgegen und
- * zeigt es auf dem Sperrbildschirm und im CarPlay-Dashboard. Der native Teil
- * liegt in plugins/jolt-anzeige. */
+/* The Live Activity: takes the display model (frontend/display.js) and
+ * shows it on the lock screen and in the CarPlay dashboard. The native part
+ * lives in plugins/jolt-anzeige. */
 const JoltAnzeige = Capacitor.registerPlugin('JoltAnzeige');
 
 window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation, JoltAnzeige };

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Prüft das Verbrauchsmodell an Fällen, deren Ergebnis man vorher kennt.
+"""Checks the consumption model against cases whose result is known beforehand.
 
-Kein Testframework, keine Netzverbindung, keine Datenbank - `python3
-tools/check_model.py` genügt. Geprüft wird nicht auf exakte Zahlen (die
-hängen an Parametern, die sich ändern dürfen), sondern auf die Verhältnisse,
-die physikalisch gelten müssen. Genau die sind es, deren Verletzung einen
-unterwegs an der falschen Säule stehen lässt.
+No test framework, no network connection, no database - `python3
+tools/check_model.py` is enough. It does not check exact numbers (those
+depend on parameters that are allowed to change) but the ratios that must
+hold physically. Violating exactly these is what leaves you standing at the
+wrong charger on the road.
 
     ./tools/check_model.py
 """
@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from examine import Check, application_provide  # noqa: E402
 
-# Dieses Skript rührt keine Datenbank an - es rechnet nur Physik.
+# This script does not touch a database - it only computes physics.
 application_provide("modell", db_name=False)
 
 from app.energy.model import (VehicleValues, Environment, hvac_power_w,  # noqa: E402
@@ -26,10 +26,10 @@ verify = Check()
 
 
 def current_distance(km: float, elevation_end_m: float = 0.0, points_per_km: int = 1):
-    """Eine synthetische Route: gerade nach Norden, linear ansteigend.
+    """A synthetic route: straight north, rising linearly.
 
-    Ein Grad Breite sind rund 111,32 km - daraus lässt sich eine Strecke
-    beliebiger Länge exakt konstruieren, ohne ein Routing zu brauchen.
+    One degree of latitude is about 111.32 km - that lets us construct a
+    distance of any length exactly, without needing a routing service.
     """
     count = max(2, int(km * points_per_km))
     points = []
@@ -40,7 +40,7 @@ def current_distance(km: float, elevation_end_m: float = 0.0, points_per_km: int
 
 
 def pass_distance(km: float, summit_m: float, points_per_km: int = 1):
-    """Hinauf und wieder hinunter: dieselbe Höhe am Anfang und am Ende."""
+    """Up and back down: same elevation at the start and at the end."""
     count = max(2, int(km * points_per_km))
     if count % 2:
         count += 1
@@ -66,7 +66,7 @@ def cycle(fz, km, kmh, elevation=0.0, temp_c=20.0, start_soc=100.0, wind_ms=0.0,
 
 
 def main() -> int:
-    fz = VehicleValues()      # 1950 kg, c_w 0.28, 2.3 m², 60 kWh netto
+    fz = VehicleValues()      # 1950 kg, c_w 0.28, 2.3 m², 60 kWh net
 
     verify.section("Luftdichte")
     verify(abs(air_density(15.0, 0.0) - 1.225) < 0.01,
@@ -101,8 +101,8 @@ def main() -> int:
     verify(fast.kwh_total > slow.kwh_total * 1.10,
            "130 km/h braucht über 10 % mehr als 110 km/h",
            f"{slow.kwh_total} -> {fast.kwh_total} kWh")
-    # Bei reinem Luftwiderstand waeren es (130/110)^2 = 1,40. Roll- und
-    # Nebenverbrauch daempfen das, deshalb muss der Zuwachs darunter liegen.
+    # With pure air drag it would be (130/110)^2 = 1.40. Rolling resistance and
+    # auxiliary load dampen that, so the increase must lie below it.
     verify(fast.kwh_total < slow.kwh_total * 1.40,
            "aber weniger als der reine v²-Faktor von 1,40")
 
@@ -122,11 +122,11 @@ def main() -> int:
     verify(down.kwh_total < up.kwh_total,
            "bergab weniger als bergauf")
 
-    # 1200 m auf 25 km sind knapp 5 % Steigung. Erst ab dieser Grössenordnung
-    # übersteigt die Hangabtriebskraft den Fahrwiderstand, sodass es bergab
-    # überhaupt etwas zu rekuperieren gibt. Bei sanftem Gefälle zieht das Auto
-    # weiterhin - dort ist ein Pass tatsächlich ein Nullsummenspiel, und das
-    # Modell sagt das zu Recht.
+    # 1200 m over 25 km is just under 5 % grade. Only at this order of magnitude
+    # does the downhill force exceed the driving resistance, so that there is
+    # anything to recuperate going downhill at all. On gentle slopes the car keeps
+    # pulling - there a pass really is a zero-sum game, and the model rightly says
+    # so.
     pass_points, _ = pass_distance(50.0, 1200.0)
     environment = Environment(temp_c=20.0)
     over_the_pass = compute_profile(fz, pass_points,
@@ -149,7 +149,7 @@ def main() -> int:
            f"{warm.kwh_total} -> {cold.kwh_total} kWh")
 
     print("\nWind")
-    against = cycle(fz, 100.0, 120.0, wind_ms=10.0, wind_degree=0.0)    # aus Norden
+    against = cycle(fz, 100.0, 120.0, wind_ms=10.0, wind_degree=0.0)    # from the north
     back = cycle(fz, 100.0, 120.0, wind_ms=10.0, wind_degree=180.0)
     verify(against.kwh_total > just.kwh_total > back.kwh_total,
            "Gegenwind kostet, Rückenwind spart - die Route führt nach Norden",

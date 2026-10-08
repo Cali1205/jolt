@@ -1,17 +1,16 @@
-"""Fahrten: aufgezeichnet statt geplant.
+"""Trips: recorded instead of planned.
 
-Bisher entstand eine Fahrt immer aus einer Planung - Start, Ziel, Route vom
-Routing-Dienst, Profil gerechnet. Der umgekehrte Weg fehlte: losfahren,
-mitschreiben, und die Strecke hinterher aus dem entstehen lassen, was
-aufgezeichnet wurde.
+Until now a trip always originated from planning - start, destination, route
+from the routing service, profile calculated. The reverse path was missing:
+drive off, record, and let the route emerge afterwards from what was
+recorded.
 
-Gebraucht wird er für die Kalibrierung. Eine bekannte kurze Strecke, immer
-dieselbe, ein paarmal gefahren, ist die sauberste Verbrauchsmessung
-überhaupt - und dafür erst eine Route planen zu müssen, ist umständlich
-genug, dass man es bleiben lässt.
+It is needed for calibration. A known short route, always the same, driven a
+few times, is the cleanest consumption measurement there is - and having to
+plan a route first is cumbersome enough that you let it be.
 
-Das Flag unterscheidet die beiden: Bei einer Aufzeichnung sind Geometrie und
-Energieprofil zu Beginn leer und werden beim Beenden gebaut (siehe
+The flag distinguishes the two: for a recording, geometry and energy profile
+are empty at the start and are built when it ends (see
 `live/aufzeichnung.py`).
 
 Revision ID: 0010

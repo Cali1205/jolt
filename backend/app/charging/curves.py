@@ -1,28 +1,29 @@
-"""Ladekurven: wie viel Leistung fliesst bei welchem Ladestand.
+"""Charge curves: how much power flows at which state of charge.
 
-"150 kW Ladeleistung" ist eine Spitzenangabe, die meist zwischen 20 und 40 %
-SoC gilt. Bei 70 % sind es vielleicht noch 60 kW, bei 85 % noch 35. Wer den
-Unterschied ignoriert, plant zu wenige und zu lange Stopps.
+"150 kW charging power" is a peak figure that usually applies between 20 and
+40 % SoC. At 70 % it may only be 60 kW, at 85 % just 35. Ignoring the
+difference leads to planning too few and too long stops.
 
-Daraus folgt die Regel, die den Zeitgewinn bringt: Zweimal kurz von 10 auf
-55 % ist oft schneller als einmal lang von 10 auf 90 % - die letzten dreissig
-Prozentpunkte kosten mehr Zeit als die ersten sechzig.
+This gives the rule that saves time: two short charges from 10 to 55 % are
+often faster than one long charge from 10 to 90 % - the last thirty
+percentage points cost more time than the first sixty.
 """
 
-# Der Ladeschritt der numerischen Integration. 1 Prozentpunkt ist fein genug:
-# Auf 60 kWh sind das 0,6 kWh je Schritt, und innerhalb eines solchen Schritts
-# ändert sich die Leistung um wenige Prozent.
+# The charging step of the numerical integration. 1 percentage point is fine
+# enough: on 60 kWh that is 0.6 kWh per step, and within one such step the
+# power changes by only a few percent.
 STEP_SOC = 1.0
 
 
 def power_at(curve: list[tuple[float, float]], soc: float,
                  max_charger_kw: float = 1e9, max_vehicle_kw: float = 1e9,
                  temperature_factor: float = 1.0) -> float:
-    """Ladeleistung in kW bei diesem Ladestand.
+    """Charging power in kW at this state of charge.
 
-    Zwischen den Stützstellen wird linear interpoliert; ausserhalb gilt der
-    jeweils äussere Wert. Begrenzt wird am Ende durch die Säule und das
-    Fahrzeug - die Kurve allein sagt nur, was das Auto *könnte*.
+    Between the support points the value is interpolated linearly; outside
+    them the nearest outer value applies. In the end the result is capped by
+    the charger and the vehicle - the curve alone only says what the car
+    *could* do.
     """
     if not curve:
         return min(max_charger_kw, max_vehicle_kw)
@@ -47,11 +48,11 @@ def charge_time_minutes(curve: list[tuple[float, float]], from_soc: float,
                      until_soc: float, battery_net_kwh: float,
                      max_charger_kw: float = 1e9, max_vehicle_kw: float = 1e9,
                      temperature_factor: float = 1.0) -> float:
-    """Ladezeit für einen Ladehub, numerisch über die Kurve integriert.
+    """Charging time for one charge swing, integrated numerically over the curve.
 
-    Bewusst keine geschlossene Formel: Die Kurve ist stückweise linear und hat
-    Knicke genau dort, wo das Batteriemanagement abregelt. Ein Integral über
-    1-Prozent-Schritte ist genauer als jede Näherung und kostet nichts.
+    Deliberately not a closed formula: the curve is piecewise linear and has
+    kinks exactly where the battery management derates. An integral over
+    1-percent steps is more accurate than any approximation and costs nothing.
     """
     if until_soc <= from_soc or battery_net_kwh <= 0:
         return 0.0
@@ -71,32 +72,33 @@ def charge_time_minutes(curve: list[tuple[float, float]], from_soc: float,
 
 
 def temperature_factor(batterie_c: float) -> float:
-    """Abschlag auf die Ladeleistung bei kalter Batterie.
+    """Derating of the charging power for a cold battery.
 
-    Eine Näherung, aber eine notwendige: Wer im Winter ohne Vorkonditionierung
-    an den Schnelllader fährt, sieht statt 150 kW oft 50 - das ist der
-    Unterschied zwischen 18 und 50 Minuten Standzeit und damit grösser als
-    jeder Fehler in der Streckenprognose.
+    An approximation, but a necessary one: anyone who drives to a fast
+    charger in winter without preconditioning often sees 50 kW instead of
+    150 - that is the difference between 18 and 50 minutes of stop time and
+    therefore larger than any error in the route forecast.
     """
     if batterie_c >= 20.0:
         return 1.0
     if batterie_c <= -5.0:
         return 0.25
-    # Zwischen -5 und 20 °C linear von 25 % auf 100 %.
+    # Between -5 and 20 °C linear from 25 % to 100 %.
     return 0.25 + (batterie_c + 5.0) / 25.0 * 0.75
 
 
 def as_pairs(charge_curve_points) -> list[tuple[float, float]]:
-    """ORM-Objekte in die Form bringen, mit der dieses Modul rechnet."""
+    """Convert ORM objects into the form this module works with."""
     return sorted((p.soc_percent, p.kw) for p in charge_curve_points)
 
 
 # ---------------------------------------------------------------------------
-# Vorlagen
+# Templates
 #
-# ACHTUNG: Näherungswerte, keine Herstellerangaben. Sie sind gut genug, um
-# sofort loszulegen, und werden über den Korrekturfaktor (energie/calibration.py)
-# an das eigene Auto herangeführt. Wer genaue Werte hat, trägt sie ein.
+# CAUTION: approximate values, not manufacturer data. They are good enough to
+# get started right away, and are adapted to the user's own car through the
+# correction factor (energie/calibration.py). Anyone with exact values
+# should enter them.
 # ---------------------------------------------------------------------------
 
 TEMPLATES: list[dict] = [

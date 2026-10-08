@@ -1,12 +1,12 @@
-"""Adapter für openrouteservice.
+"""Adapter for openrouteservice.
 
-Gewählt, weil es als einziger kostenlose Dienst ein **Höhenprofil** zur Route
-mitliefert (`elevation=true`). Ohne Höhe wäre das Verbrauchsmodell auf die
-Ebene beschränkt, und damit genau in den Fällen blind, in denen ein Ladeplaner
-sich lohnt.
+Chosen because it is the only free service that delivers an **elevation
+profile** with the route (`elevation=true`). Without elevation the
+consumption model would be limited to flat terrain, and thus blind in
+exactly the cases where a charging planner is worthwhile.
 
-Kontingent des freien Zugangs: 2.500 Anfragen/Tag, 40.000/Monat.
-Schlüssel: https://openrouteservice.org/dev/#/signup
+Quota of the free tier: 2,500 requests/day, 40,000/month.
+Key: https://openrouteservice.org/dev/#/signup
 """
 import logging
 import os
@@ -17,8 +17,8 @@ from .provider import City, Route, RoutingError
 
 BASIS = "https://api.openrouteservice.org"
 TIMEOUT = 25
-# Fällt ein Teilstück ohne Geschwindigkeitsangabe an (kommt an Kreuzungen und
-# beim Zielpunkt vor), wird mit diesem Wert weitergerechnet statt abgebrochen.
+# If a segment comes without a speed value (happens at intersections and at
+# the destination point), this value is used to carry on instead of aborting.
 SPEED_FALLBACK_MS = 22.0        # ~80 km/h
 
 log = logging.getLogger("uvicorn.error")
@@ -28,7 +28,7 @@ class ORS:
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.environ.get("ORS_API_KEY", "")
 
-    # ---------- intern ----------
+    # ---------- internal ----------
 
     def _header(self) -> dict:
         if not self.api_key:
@@ -40,15 +40,16 @@ class ORS:
 
     @staticmethod
     def _speed_per_segment(attrs: dict, point_count: int) -> list:
-        """Aus den Routing-Schritten eine Geschwindigkeit je Teilstück machen.
+        """Turn the routing steps into a speed per segment.
 
-        ORS gibt Distanz und Dauer je Schritt sowie die Indizes der zugehörigen
-        Geometriepunkte (`way_points`). Daraus wird die Durchschnitts-
-        geschwindigkeit dieses Schritts auf alle seine Teilstücke verteilt.
+        ORS returns distance and duration per step as well as the indices of
+        the associated geometry points (`way_points`). From these, the
+        average speed of that step is distributed over all its segments.
 
-        Das ist genauer als "Gesamtstrecke durch Gesamtzeit": Ein Plan, der die
-        Ortsdurchfahrt mit Autobahntempo rechnet, unterschätzt den Verbrauch
-        auf der Autobahn - und dort entscheidet er sich.
+        This is more accurate than "total distance divided by total time": a
+        plan that computes the pass through a town at motorway speed
+        underestimates the consumption on the motorway - and that is where
+        it is decided.
         """
         velocity = [0.0] * max(0, point_count - 1)
         for section in attrs.get("segments", []):
@@ -63,7 +64,7 @@ class ORS:
                     velocity[i] = v
         return [v if v > 0 else SPEED_FALLBACK_MS for v in velocity]
 
-    # ---------- öffentlich ----------
+    # ---------- public ----------
 
     def route(self, start: tuple[float, float], destination: tuple[float, float],
               intermediate_stops: list[tuple[float, float]] | None = None,
@@ -81,8 +82,8 @@ class ORS:
                 json={"coordinates": coordinates, "elevation": True,
                       "instructions": True, "units": "m",
                       "preference": preference,
-                      # Nur setzen, wenn gefragt: Ein leeres `avoid_features`
-                      # lehnt ORS mit HTTP 400 ab.
+                      # Only set when requested: ORS rejects an empty
+                      # `avoid_features` with HTTP 400.
                       **({"options": {"avoid_features": ["tollways"]}}
                          if toll_free else {})})
         except requests.RequestException as failure:
@@ -107,8 +108,9 @@ class ORS:
         summary = attrs.get("summary", {})
 
         if geometry and len(geometry[0]) < 3:
-            log.warning("Route ohne Höhenwerte erhalten - Verbrauch wird in "
-                        "der Ebene gerechnet und fällt bergig zu niedrig aus.")
+            log.warning("Received route without elevation values - consumption "
+                        "is computed on flat terrain and comes out too low "
+                        "in hilly areas.")
 
         return Route(points=geometry,
                      speed_ms=self._speed_per_segment(attrs, len(geometry)),
@@ -116,12 +118,12 @@ class ORS:
                      drive_time_s=float(summary.get("duration") or 0.0))
 
     def elevations(self, points: list) -> list | None:
-        """Höhen über /elevation/line - derselbe Schlüssel wie fürs Routing.
+        """Elevations via /elevation/line - same key as for routing.
 
-        Eine Anfrage je aufgezeichneter Fahrt, also einmal am Ende und nicht
-        unterwegs. Bei Ausfall wird nichts geworfen, sondern None gemeldet:
-        Eine Aufzeichnung ohne Höhen ist immer noch eine Aufzeichnung, und
-        sie deswegen zu verlieren wäre der schlechtere Tausch.
+        One request per recorded trip, i.e. once at the end and not on the
+        road. On failure nothing is raised, None is returned instead: a
+        recording without elevations is still a recording, and losing it for
+        that reason would be the worse trade.
         """
         if not points or len(points) < 2:
             return None
@@ -133,25 +135,25 @@ class ORS:
             response.raise_for_status()
             geometry = (response.json() or {}).get("geometry")
         except (requests.RequestException, ValueError) as failure:
-            log.warning("Höhenabfrage bei ORS fehlgeschlagen: %s", failure)
+            log.warning("Elevation request to ORS failed: %s", failure)
             return None
         if not isinstance(geometry, list) or len(geometry) != len(points):
-            log.warning("Höhenantwort passt nicht zur Anfrage (%s statt %s "
-                        "Punkte).", len(geometry or []), len(points))
+            log.warning("Elevation response does not match the request (%s "
+                        "instead of %s points).", len(geometry or []), len(points))
             return None
         return [[p[0], p[1], p[2] if len(p) > 2 else 0.0] for p in geometry]
 
     def seek(self, text: str, country: str = "") -> list[City]:
-        # Ohne Länderfilter sucht ORS weltweit - genau das will ein Reiseziel
-        # jenseits der Grenze. Nur wenn `land` explizit gesetzt ist (z.B. um
-        # eine Eingabe wie "Hamburg" von gleichnamigen Orten anderswo zu
-        # unterscheiden), wird eingeschränkt.
+        # Without a country filter ORS searches worldwide - which is exactly
+        # what a destination across the border needs. Only if `land`
+        # (country) is explicitly set (e.g. to distinguish an input like
+        # "Hamburg" from places of the same name elsewhere) is it restricted.
         params = {"text": text, "size": 6}
         if country:
             params["boundary.country"] = country
         try:
-            # Schlüssel im Header, nie in der URL: Sonst steht er in jeder
-            # Fehlermeldung, die an den Client geht.
+            # Key in the header, never in the URL: otherwise it appears in
+            # every error message that goes to the client.
             response = requests.get(f"{BASIS}/geocode/search", timeout=TIMEOUT,
                                    params=params, headers=self._header())
             response.raise_for_status()
