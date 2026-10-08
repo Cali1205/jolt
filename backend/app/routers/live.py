@@ -183,7 +183,7 @@ async def _punkt_verarbeiten(db: Session, sitzung: models.LiveSitzung,
 
 @router.post("/start/{fahrt_id}", dependencies=[Depends(deps.aktuelle_sitzung)])
 def starten(fahrt_id: int, radius_km: float = Query(10.0, gt=0, le=50),
-            min_kw: float = Query(50.0, ge=0), steckertyp: str = "",
+            min_kw: float = Query(50.0, ge=0), steckertyp: str = Query("", max_length=40),
             umweg_grenze_min: float = Query(umplanung.VORGABEN["umweg_grenze_min"],
                                             gt=0, le=60),
             stopp_fixkosten_min: float = Query(
@@ -283,7 +283,7 @@ class Aufzeichnungsstart(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     soc: float | None = Field(default=None, ge=0, le=100)
-    name: str = ""
+    name: str = Field(default="", max_length=120)
 
 
 @router.post("/aufzeichnung", dependencies=[Depends(deps.aktuelle_sitzung)])
