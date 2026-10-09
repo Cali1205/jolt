@@ -9,9 +9,8 @@ import UIKit
 /// is shown is what the UI's display model supplies - the same one that
 /// also feeds the Live Activity:
 ///
-///   Tabs "Bilder" (CPListImageRowItem, opens first), "Kacheln"
-///   (CPGridTemplate) and "Tabelle" (CPInformationTemplate), all with the
-///   same eight slots at most:
+///   Tabs "Übersicht" (CPListImageRowItem, opens first) and "Tabelle"
+///   (CPInformationTemplate), both with the same eight slots at most:
 ///     charge level, arrival, reserve, consumption (average of the trip
 ///     above the bars), auxiliary loads, regeneration, charging stops, and
 ///     as the last one the control tile: start / end the recording
@@ -27,7 +26,6 @@ import UIKit
 @objc(JoltCarPlaySceneDelegate)
 public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var iface: CPInterfaceController?
-    private var lattice: CPGridTemplate?
     private var imagesList: CPListTemplate?
     private var table: CPInformationTemplate?
     private var observerId: UUID?
@@ -47,19 +45,12 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     ) {
         iface = interfaceController
         record(JoltDisplayStore.shared.latest)
-        // The same values in three arrangements, for comparing in the car: tiles
-        // (iOS grid), image rows (denser) and table (text only).
+        // The same values in two arrangements: image rows and table (text only).
         let model = JoltDisplayStore.shared.latest
         let entries = self.entries(model)
 
-        let cells = CPGridTemplate(title: "jolt", gridButtons: tileButtons(entries))
-        cells.tabTitle = "Kacheln"
-        cells.tabImage = UIImage(systemName: "square.grid.2x2")
-        cells.trailingNavigationBarButtons = toolbar(model)
-        lattice = cells
-
         let rows = CPListTemplate(title: "jolt", sections: imageRows(entries))
-        rows.tabTitle = "Bilder"
+        rows.tabTitle = "Übersicht"
         rows.tabImage = UIImage(systemName: "photo.on.rectangle")
         rows.trailingNavigationBarButtons = toolbar(model)
         imagesList = rows
@@ -71,8 +62,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         board.trailingNavigationBarButtons = toolbar(model)
         table = board
 
-        // The image rows come first: that is the view the app opens with.
-        let tab = CPTabBarTemplate(templates: [rows, cells, board])
+        // The overview comes first: that is the view the app opens with.
+        let tab = CPTabBarTemplate(templates: [rows, board])
         interfaceController.setRootTemplate(tab, animated: false, completion: nil)
 
         observerId = JoltDisplayStore.shared.observe { [weak self] model in
@@ -101,7 +92,6 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         }
         resultId = nil
         running = nil
-        lattice = nil
         imagesList = nil
         table = nil
         iface = nil
@@ -317,13 +307,6 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         }
     }
 
-    /// Largest image of a grid tile; iOS only states it from 26 - before
-    /// that the images stay at 120 points, as `tileImage` has always drawn.
-    private var gridBound: CGSize? {
-        if #available(iOS 26.0, *) { return CPGridTemplate.maximumGridButtonImageSize }
-        return nil
-    }
-
     /// Largest image in an image row.
     private var rowBound: CGSize? { CPListImageRowItem.maximumImageSize }
 
@@ -536,18 +519,12 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         var control = false
     }
 
-    private func tileButtons(_ entries: [Entry]) -> [CPGridButton] {
-        entries.prefix(8).map { e in
-            CPGridButton(
-                titleVariants: [e.title], image: fitted(e.picture, to: gridBound),
-                handler: e.handler.map { call -> ((CPGridButton) -> Void) in { _ in call() } })
-        }
-    }
-
-    /// Image rows of four images each; the caption under the image only
-    /// exists from iOS 17.4, before that only the image is shown.
+    /// Image rows of two images each (an experiment: with four the images
+    /// were small; if they do not get larger, go back to four). The caption
+    /// under the image only exists from iOS 17.4, before that only the image
+    /// is shown.
     private func imageRows(_ entries: [Entry]) -> [CPListSection] {
-        let perRow = 4
+        let perRow = 2
         var rows: [CPListTemplateItem] = []
         var start = 0
         while start < entries.count {
@@ -681,8 +658,6 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
     private func show(_ model: JoltDisplay?) {
         let entries = self.entries(model)
-        lattice?.updateGridButtons(tileButtons(entries))
-        lattice?.trailingNavigationBarButtons = toolbar(model)
         imagesList?.updateSections(imageRows(entries))
         imagesList?.trailingNavigationBarButtons = toolbar(model)
         table?.items = tablesRows(entries)
