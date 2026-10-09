@@ -107,7 +107,7 @@ const extrem = {
   arrival: [{ min: 5, text: "+5 min" }, { min: 125, text: "+2 h 05" }, { min: -125, text: "−2 h 05" },
             { min: 0, text: "nach Plan" }, { min: -45, text: "−45 min" }],
   reserve: [{ km: 999, text: "999 km" }, { km: 0.4, text: "gleich" }, { km: 1234, text: "1.234 km" }],
-  consumption: [{ text: "123,4", bar: [10, null, 30, 200, 15, 0.5] }, { text: "–", bar: [null, null, 5, null, null, null] }],
+  consumption: [{ text: "123,4", label: "Ø", bar: [10, null, 30, 200, 15, 0.5] }, { text: "–", bar: [null, null, 5, null, null, null] }],
   aux: [{ val: 12.5, text: "12,5", series: [1, 2, 3] }, { val: 0, text: "0,0", series: [0, 0, 0] }],
   regen: [{ val: 100, series: [1, 2] }, { val: 0, series: null }],
   stops: [{ count: 8, upcoming: "1.234 km", kms: [10, 100, 400, 800, 900, 1000, 1100, 1200] },

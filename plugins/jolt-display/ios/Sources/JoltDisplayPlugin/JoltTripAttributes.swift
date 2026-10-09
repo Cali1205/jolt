@@ -46,8 +46,17 @@ public struct JoltDisplay: Codable, Hashable {
         public var mins: Int
     }
 
+    /// Average consumption of the whole trip so far; nil in the first
+    /// kilometre.
+    public struct Trip: Codable, Hashable {
+        public var kwh100: Double
+        public var km: Double
+        public var text: String
+    }
+
     public struct History: Codable, Hashable {
         public var timeframe: [Timeframe]
+        public var trip: Trip?
         /// The last thirty minutes in bars of five minutes, oldest first;
         /// nil is a gap (stale), not zero consumption.
         public var bar: [Double?]?

@@ -312,6 +312,7 @@ def part_live_activity() -> None:
     assignment = {"JoltDisplay": sent, "Soc": model["soc"], "Stop": model["stop"],
                   "Row": model["reserve"], "History": model["history"],
                   "Timeframe": model["history"]["timeframe"][0],
+                  "Trip": model["history"]["trip"],
                   "Regen": model["history"]["regen"], "Aux": model["aux"],
                   "ListStop": (model["stopList"] or [{}])[0]}
     for structure, present in assignment.items():
@@ -342,8 +343,16 @@ def part_live_activity() -> None:
                    "JoltDisplayPlugin.swift")
     verify("forActivity.tileImages = nil" in plugin,
            "die Live Activity bekommt die Bilder nicht - sie darf höchstens 4 KB tragen")
-    verify("CPGridTemplate.maximumGridButtonImageSize" in scene,
-           "Bilder werden auf die Grösse begrenzt, die CarPlay für Kacheln zulässt")
+    verify("CPGridTemplate.maximumGridButtonImageSize" in scene
+           and "CPListImageRowItem.maximumImageSize" in scene,
+           "Bilder werden auf die grösste Grösse gebracht, die CarPlay für Kacheln und Bildzeilen zulässt")
+    verify("CPTabBarTemplate(templates: [rows, cells, board])" in scene,
+           "die Bilder-Ansicht ist der erste Reiter - damit startet CarPlay")
+    verify("self?.endAsk()" in scene and "self?.launch()" in scene and "control: true" in scene,
+           "die Steuer-Kachel startet und beendet die Aufzeichnung (mit Rückfrage beim Beenden)")
+    verify(all(f"func {n}(" in scene for n in
+               ("showSoc", "showArrival", "showReserve", "showRegen", "showConsumption", "showAux")),
+           "jede Wert-Kachel hat eine Detailseite")
 
 
 def part_carplay() -> None:

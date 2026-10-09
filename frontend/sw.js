@@ -9,7 +9,7 @@
  */
 // Count up with every change to the shell: the name is the only lever by
 // which an old cache is discarded (see "activate").
-const CACHE = "jolt-v25";
+const CACHE = "jolt-v26";
 const SCAFFOLD = [
   "/", "/static/core.js", "/static/map.js", "/static/route.js",
   "/static/tiles.js", "/static/display.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
