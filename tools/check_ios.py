@@ -343,11 +343,11 @@ def part_live_activity() -> None:
                    "JoltDisplayPlugin.swift")
     verify("forActivity.tileImages = nil" in plugin,
            "die Live Activity bekommt die Bilder nicht - sie darf höchstens 4 KB tragen")
-    verify("CPGridTemplate.maximumGridButtonImageSize" in scene
-           and "CPListImageRowItem.maximumImageSize" in scene,
-           "Bilder werden auf die grösste Grösse gebracht, die CarPlay für Kacheln und Bildzeilen zulässt")
-    verify("CPTabBarTemplate(templates: [rows, cells, board])" in scene,
-           "die Bilder-Ansicht ist der erste Reiter - damit startet CarPlay")
+    verify("CPListImageRowItem.maximumImageSize" in scene,
+           "Bilder werden auf die grösste Grösse gebracht, die CarPlay für Bildzeilen zulässt")
+    verify("CPTabBarTemplate(templates: [rows, board])" in scene
+           and "CPGridButton" not in scene,
+           "die Übersicht (Bilder) ist der erste Reiter - damit startet CarPlay - und es gibt keine Kachelansicht mehr")
     verify("self?.endAsk()" in scene and "self?.launch()" in scene and "control: true" in scene,
            "die Steuer-Kachel startet und beendet die Aufzeichnung (mit Rückfrage beim Beenden)")
     verify(all(f"func {n}(" in scene for n in
