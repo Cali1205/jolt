@@ -209,7 +209,8 @@ def end_orphaned(db) -> list[dict]:
     """
     now = datetime.utcnow()
     ended_at = []
-    for session in db.query(models.LiveSession).filter_by(running=True).all():
+    for session in (db.query(models.LiveSession).filter_by(running=True)
+                    .with_for_update(skip_locked=True).all()):
         points = session.points
         tail = points[-1].timestamp if points else session.started_at
         if not points:

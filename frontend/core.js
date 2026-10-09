@@ -189,7 +189,15 @@ window.jolt = (function () {
     refresh();
   }
 
-  return { state, api, token, setToken, report, reportsClear,
+  /* Names come from outside (vehicle names, price patterns): never put
+   * them into innerHTML or an attribute as they are. */
+  function esc(text) {
+    return String(text === null || text === undefined ? "" : text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  return { state, esc, api, token, setToken, report, reportsClear,
            sessionRemember, rememberedSession,
            num, duration, valueTile, timestamp, timeMs, at, sliderCouple };
 })();

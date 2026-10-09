@@ -117,7 +117,7 @@ window.joltVehicle = (function () {
   function priceRow(pattern, eurKwh) {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td><input type="text" class="preis-muster" value="${pattern || ""}"
+      <td><input type="text" class="preis-muster" value="${K.esc(pattern)}"
                  placeholder="Ionity"></td>
       <td><input type="number" class="preis-wert" step="0.01" min="0" max="5"
                  value="${eurKwh}"></td>
@@ -182,7 +182,7 @@ window.joltVehicle = (function () {
       if (!selection) continue;
       const earlier = selection.value;
       selection.innerHTML = K.state.vehicles
-        .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+        .map((f) => `<option value="${f.id}">${K.esc(f.name)}</option>`).join("");
       if (earlier) selection.value = earlier;
       // The choice for recording survives the restart: whoever sits in the
       // car wants to make it once and never again. Same consideration as on
