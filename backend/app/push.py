@@ -196,7 +196,7 @@ def send(db, title: str, text: str, url: str = "/", dispatcher=None) -> dict:
     """
     if dispatcher is None:
         if not actual_configured():
-            return {"sent": 0, "removed": 0, "failure": 0, "origin_of": True}
+            return {"sent": 0, "removed": 0, "failure": 0, "skipped": True}
         dispatcher = _send_real
 
     message = json.dumps({"title": title, "text": text, "url": url},
@@ -227,7 +227,7 @@ def send(db, title: str, text: str, url: str = "/", dispatcher=None) -> dict:
     db.commit()
 
     return {"sent": sent, "removed": len(tot), "failure": failure,
-            "origin_of": False}
+            "skipped": False}
 
 
 def send_background(db_factory, title: str, text: str, url: str = "/") -> None:

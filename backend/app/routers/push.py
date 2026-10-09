@@ -37,7 +37,7 @@ def public_key():
     the UI has to know whether it can offer the button at all.
     """
     return {"configured": push.actual_configured(),
-            "keyname": push.pub_key()}
+            "public_key": push.pub_key()}
 
 
 @router.post("/subscription", dependencies=[Depends(deps.current_session)])

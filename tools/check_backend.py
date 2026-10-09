@@ -1117,12 +1117,12 @@ def main() -> int:
         f"/api/vehicles/{vehicle_id}/logger-token").json()["logger_token"]
     verify(len(token) >= 32, "ein Logger-Token lässt sich erzeugen",
            f"{len(token)} Zeichen")
-    lst = client.get("/api/vehicles").json()[0]
-    verify(lst.get("logger_active") is True,
+    vehicle = client.get("/api/vehicles").json()[0]
+    verify(vehicle.get("logger_active") is True,
            "das Fahrzeug meldet, dass ein Logger eingerichtet ist")
-    verify("logger_token" not in lst,
+    verify("logger_token" not in vehicle,
            "das Token selbst steht in keiner Listenantwort - es wird genau "
-           "einmal gezeigt", str(list(lst.keys())))
+           "einmal gezeigt", str(list(vehicle.keys())))
 
     # The car is parked outside and the logger sends anyway. That is not an
     # error: an unattended device that receives error responses starts

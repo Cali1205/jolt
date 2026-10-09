@@ -238,7 +238,7 @@ def part_without_key():
             result = push.send(db, "jolt", "sollte nicht rausgehen")
         finally:
             db.close()
-        verify(result.get("origin_of") is True and result["sent"] == 0,
+        verify(result.get("skipped") is True and result["sent"] == 0,
                "und es wird nichts verschickt - statt es vorzutäuschen",
                str(result))
 
@@ -273,7 +273,7 @@ def part_with_key():
         push.endpoint_allowed = lambda url: url.startswith("https://")
         response = client.get("/api/push/key").json()
         verify(response["configured"] is True, "eingerichtet")
-        verify(response["keyname"] == publicly,
+        verify(response["public_key"] == publicly,
                "und der öffentliche Schlüssel kommt heraus")
 
         browser = Browserabo("https://push.example.org/ueber-api")

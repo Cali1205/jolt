@@ -79,9 +79,9 @@ class DemoRouting:
         return None
 
     def seek(self, text: str, country: str = "") -> list[City]:
-        keyname = (text or "").strip().lower()
+        query = (text or "").strip().lower()
         for name, (lat, lon) in PLACES.items():
-            if keyname and keyname in name:
+            if query and query in name:
                 return [City(name=f"{name.capitalize()} (Demo)", lat=lat, lon=lon)]
         return []
 

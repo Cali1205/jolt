@@ -91,11 +91,11 @@ def import_ocm(countries: str = "DE", max_results: int = Query(2000, le=20000),
     over 50 MB and would block the request for minutes. That is what
     tools/import_bnetza.py is for.
     """
-    keyname = os.environ.get("OCM_API_KEY", "")
-    if not keyname:
+    api_key = os.environ.get("OCM_API_KEY", "")
+    if not api_key:
         raise HTTPException(400, "Kein OCM_API_KEY gesetzt.")
     try:
-        return chargers_import.from_ocm(db, keyname,
+        return chargers_import.from_ocm(db, api_key,
                                       countries=[l.strip() for l in countries.split(",")],
                                       max_results=max_results, min_kw=min_kw)
     except Exception as failure:      # noqa: BLE001
