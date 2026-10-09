@@ -31,6 +31,12 @@
 
   /* ---------- Log ---------- */
 
+  function esc(text) {
+    return String(text === null || text === undefined ? "" : text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
   function log(text, direction) {
     const timestamp = new Date().toLocaleTimeString("de-DE");
     const arrow = direction === "raus" ? "→" : (direction === "rein" ? "←" : " ");
@@ -234,7 +240,7 @@
       let remembered = null;
       try { remembered = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
       selection.innerHTML = vehicles
-        .map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+        .map((f) => `<option value="${f.id}">${esc(f.name)}</option>`).join("");
       if (remembered && vehicles.some((f) => String(f.id) === remembered)) {
         selection.value = remembered;
       }
@@ -609,7 +615,7 @@
         + `<table class="pruef"><tbody>${rows.join("")}</tbody></table>`;
       log(`Prüfung: ${good} plausibel, ${bad} auffällig, ${without} ohne Wert`);
     } catch (failure) {
-      resultEl.innerHTML = `<p class="stand schlecht">${failure.message}</p>`;
+      resultEl.innerHTML = `<p class="stand schlecht">${esc(failure.message)}</p>`;
       log("Prüfung: " + failure.message);
     } finally {
       btn.disabled = false;
@@ -808,7 +814,7 @@
       el("climate-b").disabled = false;
     } catch (failure) {
       el("climate-result").innerHTML =
-        `<p class="stand schlecht">${failure.message}</p>`;
+        `<p class="stand schlecht">${esc(failure.message)}</p>`;
       log("Klima-Messung 1: " + failure.message);
     } finally {
       k.disabled = false;
@@ -823,7 +829,7 @@
       showClimate();
     } catch (failure) {
       el("climate-result").innerHTML =
-        `<p class="stand schlecht">${failure.message}</p>`;
+        `<p class="stand schlecht">${esc(failure.message)}</p>`;
       log("Klima-Messung 2: " + failure.message);
     } finally {
       k.disabled = false;

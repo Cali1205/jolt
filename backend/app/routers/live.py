@@ -121,8 +121,15 @@ class LoggerReport(BaseModel):
     format: str = "jolt"
 
 
-def _fetch_session(db: Session, session_id: int) -> models.LiveSession:
-    session = db.get(models.LiveSession, session_id)
+def _fetch_session(db: Session, session_id: int,
+                   lock: bool = False) -> models.LiveSession:
+    """`lock` holds the row until the commit, so that two requests that end
+    the same session cannot both pass the `running` check."""
+    if lock:
+        session = (db.query(models.LiveSession).filter_by(id=session_id)
+                   .with_for_update().one_or_none())
+    else:
+        session = db.get(models.LiveSession, session_id)
     if not session:
         raise HTTPException(404, "Live-Sitzung nicht gefunden.")
     return session
@@ -206,6 +213,13 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
                                                       running=True).all():
         old.running = False
         old.ended_at = datetime.utcnow()
+        try:
+            cleanup.end_and_learn(db, old)
+        except Exception as failure:      # noqa: BLE001
+            # Same consideration as in `start_recording`: the new start must
+            # not fail because of the old session.
+            log.warning("Could not finish previous session %s: %s",
+                        old.id, failure)
 
     session = models.LiveSession(trip_id=trip_id)
 
@@ -482,7 +496,7 @@ def finish(session_id: int, db: Session = Depends(get_db)):
     here it is updated - damped, so that a single trip with a roof box does
     not bend it permanently.
     """
-    session = _fetch_session(db, session_id)
+    session = _fetch_session(db, session_id, lock=True)
     # Ending twice (retry after a dead zone, double tap, or the cleanup was
     # faster) must not learn twice: the vehicle's correction factor would be
     # updated twice from the same trip.

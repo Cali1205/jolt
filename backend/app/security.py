@@ -4,6 +4,7 @@ Contains security headers and an IP-based rate limit. Deliberately without an
 external dependency: an instance with a handful of devices gets by with an
 in-memory counter, and that cannot fail on its own.
 """
+import logging
 import os
 import threading
 import time
@@ -12,6 +13,8 @@ from collections import defaultdict, deque
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+log = logging.getLogger(__name__)
 
 # Only proxies from this list may set the client IP. Without the check any
 # client could forge the header and bypass the rate limit.
@@ -49,6 +52,9 @@ CSP = ("default-src 'self'; "
        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 
 
+_warned_proxy = False
+
+
 def client_ip(request: Request) -> str:
     """Determine the real client IP.
 
@@ -63,7 +69,15 @@ def client_ip(request: Request) -> str:
     counts is the first entry from the right that is not itself a trusted
     proxy.
     """
+    global _warned_proxy
     peer = request.client.host if request.client else "unbekannt"
+    if (not TRUSTED_PROXIES and not _warned_proxy
+            and request.headers.get("x-forwarded-for")):
+        _warned_proxy = True
+        log.warning("X-Forwarded-For received but TRUSTED_PROXIES is empty: "
+                    "all clients count as %s, so the login and logger-token "
+                    "locks apply to everyone at once. Set TRUSTED_PROXIES to "
+                    "the proxy address.", peer)
     if peer in TRUSTED_PROXIES:
         forwarded = request.headers.get("x-forwarded-for", "")
         entries = [e.strip() for e in forwarded.split(",") if e.strip()]
