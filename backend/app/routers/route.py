@@ -34,7 +34,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import deps, models, routing
 from ..database import get_db
@@ -731,8 +731,12 @@ def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=20
     comparison of why the same route needed two charging stops in January and
     one in June.
     """
-    trips = (db.query(models.Trip).order_by(models.Trip.id.desc())
-               .limit(bound).all())
+    # Load vehicle and sessions in one go each; otherwise every row asks the
+    # database twice more.
+    trips = (db.query(models.Trip)
+               .options(selectinload(models.Trip.vehicle),
+                        selectinload(models.Trip.live_sessions))
+               .order_by(models.Trip.id.desc()).limit(bound).all())
 
     result = []
     for f in trips:

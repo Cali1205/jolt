@@ -298,6 +298,54 @@ def part_with_key():
             os.environ.pop(name, None)
 
 
+def part_guarded_session():
+    print("\nDer Versand geht nur an öffentliche Adressen und folgt keinem Redirect")
+    import socket
+    import requests
+    from requests.adapters import BaseAdapter
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    try:
+        try:
+            push._guarded_session().post(f"https://127.0.0.1:{port}/",
+                                         data=b"x", timeout=3)
+            refused = False
+            reason = "keine Ausnahme"
+        except requests.ConnectionError as failure:
+            refused = "non-public" in str(failure)
+            reason = str(failure)[:100]
+    finally:
+        server.close()
+    verify(refused, "eine Verbindung zu einer nicht öffentlichen Adresse wird "
+           "beim Verbinden abgelehnt - auch wenn der Name vorher harmlos "
+           "aufgelöst wurde (DNS-Rebinding)", reason)
+
+    class Redirect(BaseAdapter):
+        calls = 0
+
+        def send(self, request, **kwargs):
+            Redirect.calls += 1
+            response = requests.Response()
+            response.status_code = 302
+            response.headers["Location"] = "https://10.0.0.1/intern"
+            response.url = request.url
+            response.request = request
+            return response
+
+        def close(self):
+            pass
+
+    session = push._guarded_session()
+    session.mount("https://", Redirect())
+    response = session.post("https://push.example.org/x", data=b"x")
+    verify(response.status_code == 302 and Redirect.calls == 1,
+           "eine Weiterleitung wird nicht verfolgt - sie könnte nach innen "
+           "zeigen", f"{response.status_code}, {Redirect.calls} Aufruf(e)")
+
+
 def main() -> int:
     part_key()
     part_encryption()
@@ -305,6 +353,7 @@ def main() -> int:
     part_dispatch()
     part_without_key()
     part_with_key()
+    part_guarded_session()
 
     # What this script cannot do belongs in the output and not only in the
     # source - a passed run that conceals what it did not touch inspires more
