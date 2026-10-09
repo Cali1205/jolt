@@ -519,10 +519,12 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         var control = false
     }
 
-    /// Image rows of four images each; the caption under the image only
-    /// exists from iOS 17.4, before that only the image is shown.
+    /// Image rows of two images each (an experiment: with four the images
+    /// were small; if they do not get larger, go back to four). The caption
+    /// under the image only exists from iOS 17.4, before that only the image
+    /// is shown.
     private func imageRows(_ entries: [Entry]) -> [CPListSection] {
-        let perRow = 4
+        let perRow = 2
         var rows: [CPListTemplateItem] = []
         var start = 0
         while start < entries.count {
