@@ -669,7 +669,7 @@ window.joltLive = (function () {
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: keyAsBytes(key.keyname),
+          applicationServerKey: keyAsBytes(key.public_key),
         });
       }
 

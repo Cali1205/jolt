@@ -455,8 +455,8 @@ window.joltMap = (function () {
     drawLater();
   }
 
-  function setMarker(lst) {
-    marker = lst || [];
+  function setMarker(markers) {
+    marker = markers || [];
     contentFit(false);
     showButton();
     drawLater();

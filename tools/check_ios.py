@@ -81,11 +81,11 @@ def part_scripts() -> None:
                f"{name} hat keinen Syntaxfehler", result.stderr.strip())
 
     plist = load("tools", "ios_info_plist.sh")
-    for keyname in ("NSBluetoothAlwaysUsageDescription",
+    for key_name in ("NSBluetoothAlwaysUsageDescription",
                        "NSLocationWhenInUseUsageDescription",
                        "ITSAppUsesNonExemptEncryption"):
-        verify(keyname in plist,
-               f"die Info.plist bekommt {keyname} - ohne ihn räumt iOS "
+        verify(key_name in plist,
+               f"die Info.plist bekommt {key_name} - ohne ihn räumt iOS "
                f"die App ab oder TestFlight hält jeden Bau an")
     verify("bluetooth-central" in plist,
            "und den Hintergrundmodus für die Dongle-Verbindung")

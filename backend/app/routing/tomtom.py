@@ -83,12 +83,12 @@ class Traffic:
     forecast: bool = False       # forecast time-dependently instead of live
 
 
-def keyname() -> str:
+def api_key() -> str:
     return os.environ.get("TOMTOM_API_KEY", "").strip()
 
 
 def obtainable() -> bool:
-    return bool(keyname())
+    return bool(api_key())
 
 
 def _departure(departure: datetime | None) -> datetime | None:
@@ -121,7 +121,7 @@ def _query(places: str, timeout: int, **parameter) -> dict:
     try:
         response = requests.get(
             f"{BASIS}/{places}/json", timeout=timeout,
-            params={"key": keyname(), "traffic": "true",
+            params={"key": api_key(), "traffic": "true",
                     "computeTravelTimeFor": "all", "routeType": "fastest",
                     "travelMode": "car", **parameter})
     except requests.RequestException as failure:
