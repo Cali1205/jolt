@@ -38,6 +38,19 @@ from app.live import session as live_session  # noqa: E402
 from app.live import replanning  # noqa: E402
 from app.main import app  # noqa: E402
 
+# The weather service is a live network call; the real weather shifts the
+# consumption factor this check measures. Fail it so the model always
+# calculates with its fixed fallback weather.
+import requests  # noqa: E402
+from app.energy import weather  # noqa: E402
+
+
+def _no_network(*args, **kwargs):
+    raise requests.ConnectionError("network disabled in this check")
+
+
+weather.requests.get = _no_network
+
 verify = Check()
 
 
