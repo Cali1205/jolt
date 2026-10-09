@@ -166,6 +166,52 @@ def endpoint_allowed(endpoint: str) -> bool:
     return all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
 
 
+def _global_peer(sock) -> bool:
+    return ipaddress.ip_address(sock.getpeername()[0].split("%")[0]).is_global
+
+
+def _guarded_session():
+    """A `requests` session that only connects to public addresses and does
+    not follow redirects.
+
+    `endpoint_allowed` resolves the name once; the connection resolves it
+    again, and a name that answers differently the second time (DNS
+    rebinding) would get past the first check. So the address actually
+    connected to is checked as well, before anything is sent. A redirect to
+    an internal host is cut off for the same reason.
+    """
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.connection import HTTPSConnection
+    from urllib3.connectionpool import HTTPSConnectionPool
+
+    class Connection(HTTPSConnection):
+        def _new_conn(self):
+            sock = super()._new_conn()
+            if not _global_peer(sock):
+                sock.close()
+                raise OSError("connection to a non-public address refused")
+            return sock
+
+    class Pool(HTTPSConnectionPool):
+        ConnectionCls = Connection
+
+    class Adapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            super().init_poolmanager(*args, **kwargs)
+            self.poolmanager.pool_classes_by_scheme = {
+                **self.poolmanager.pool_classes_by_scheme, "https": Pool}
+
+    class Session(requests.Session):
+        def request(self, method, url, **kwargs):
+            kwargs["allow_redirects"] = False
+            return super().request(method, url, **kwargs)
+
+    session = Session()
+    session.mount("https://", Adapter())
+    return session
+
+
 def _send_real(subscription: models.PushSubscription, message: bytes) -> int:
     """The actual sending to the push service. Returns the HTTP status."""
     from pywebpush import WebPushException, webpush
@@ -179,7 +225,8 @@ def _send_real(subscription: models.PushSubscription, message: bytes) -> int:
             subscription_info=_as_subscription(subscription), data=message,
             vapid_private_key=private_key(),
             vapid_claims={"sub": sender()},
-            content_encoding="aes128gcm", timeout=TIME_LIMIT_S)
+            content_encoding="aes128gcm", timeout=TIME_LIMIT_S,
+            requests_session=_guarded_session())
         return getattr(response, "status_code", 201)
     except WebPushException as failure:
         response = getattr(failure, "response", None)
