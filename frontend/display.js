@@ -69,6 +69,7 @@ window.joltDisplay = (function () {
   // stalled (dongle gone) and the "now" is an old one.
   const TRACK_FRESH_MS = 45000;
   const MIN_KM = 0.3;
+  const TRIP_MIN_KM = 1;
   // This is how old a read value may be. Rarely read values (climate) only
   // arrive every few minutes.
   const VALUE_OLD_MS = 15 * 60000;
@@ -137,8 +138,19 @@ window.joltDisplay = (function () {
       }
     }
 
-    if (!windows.some((f) => f.kw !== null) && !hasBar && !regen) return null;
-    return { timeframe: windows, bar: hasBar ? bar : null, regen };
+    // The average of the whole trip so far (running mean): the number that
+    // stands above the consumption bars. It uses the same energy and GPS
+    // distance as the windows; below a kilometre it would still jump about.
+    let trip = null;
+    const t = energyAndDistance(track, 0);
+    if (t && t.km >= TRIP_MIN_KM && t.kwh > 0) {
+      const kwh100 = t.kwh / t.km * 100;
+      trip = { kwh100: Math.round(kwh100 * 10) / 10,
+               km: Math.round(t.km * 10) / 10, text: num(kwh100, 1) };
+    }
+
+    if (!windows.some((f) => f.kw !== null) && !hasBar && !regen && !trip) return null;
+    return { timeframe: windows, bar: hasBar ? bar : null, regen, trip };
   }
 
   function valueFresh(vals, name, now) {

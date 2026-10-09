@@ -9,12 +9,13 @@ import UIKit
 /// is shown is what the UI's display model supplies - the same one that
 /// also feeds the Live Activity:
 ///
-///   Tabs "Kacheln" (CPGridTemplate), "Bilder" (CPListImageRowItem) and
-///   "Tabelle" (CPInformationTemplate), all with the same eight slots at
-///   most:
-///     End trip, charge level, consumption (with bars), regeneration,
-///     arrival, reserve, auxiliary loads, charging stops
-///     Charging stops and consumption open a page; a stop opens its
+///   Tabs "Bilder" (CPListImageRowItem, opens first), "Kacheln"
+///   (CPGridTemplate) and "Tabelle" (CPInformationTemplate), all with the
+///   same eight slots at most:
+///     charge level, arrival, reserve, consumption (average of the trip
+///     above the bars), auxiliary loads, regeneration, charging stops, and
+///     as the last one the control tile: start / end the recording
+///     Every value tile opens a page with the details; a stop opens its
 ///     information page
 ///
 /// If something is missing, the row is missing. If the display is older
@@ -70,7 +71,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         board.trailingNavigationBarButtons = toolbar(model)
         table = board
 
-        let tab = CPTabBarTemplate(templates: [cells, rows, board])
+        // The image rows come first: that is the view the app opens with.
+        let tab = CPTabBarTemplate(templates: [rows, cells, board])
         interfaceController.setRootTemplate(tab, animated: false, completion: nil)
 
         observerId = JoltDisplayStore.shared.observe { [weak self] model in
@@ -125,7 +127,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     /// CarPlay takes no more than eight tiles.
     private func entries(_ raw_model: JoltDisplay?) -> [Entry] {
         guard let model = fresh(raw_model) else {
-            return [emptyTile("Keine laufende Fahrt")]
+            return [emptyTile("Keine laufende Fahrt"), controlTile(running: false)]
         }
         var result: [Entry] = []
         /// The image the UI drew for this slot (style "a" or "b"); nil means:
@@ -135,34 +137,39 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         if let soc = model.soc {
             result.append(tile(
                 title: "Ladestand", val: soc.text, minor: nil,
-                line: series("soc"), picture: picture("soc")))
+                line: series("soc"), picture: picture("soc"),
+                handler: { [weak self] in self?.showSoc(model) }))
         } else {
             result.append(emptyTile("Ladestand", picture: picture("soc")))
         }
         if let arrival = model.arrival {
             result.append(tile(title: "Ankunft", val: arrival.text, minor: nil,
-                                   picture: picture("arrival")))
+                                   picture: picture("arrival"),
+                                   handler: { [weak self] in self?.showArrival(model) }))
         } else {
             result.append(emptyTile("Ankunft", picture: picture("arrival")))
         }
         if let reserve = model.reserve {
             result.append(tile(title: "Reserve", val: reserve.text, minor: "in",
-                                   picture: picture("reserve")))
+                                   picture: picture("reserve"),
+                                   handler: { [weak self] in self?.showReserve(model) }))
         } else {
             result.append(emptyTile("Reserve", picture: picture("reserve")))
         }
 
         let timeframe = (model.history?.timeframe ?? []).filter { $0.kwh100 != nil }
         if !timeframe.isEmpty || model.history?.bar != nil {
-            // At the top the value of the shortest window, below it the last
-            // thirty minutes in bars of five minutes.
+            // At the top the average of the whole trip (before the first
+            // kilometre: the shortest window), below it the last thirty
+            // minutes in bars of five minutes.
+            let trip = model.history?.trip
             result.append(tile(
-                title: "kWh/100 km",
-                val: timeframe.first?.text ?? "–",
-                minor: timeframe.first.map { timeframeName($0.min) },
+                title: trip == nil ? "kWh/100 km" : "Ø Verbrauch",
+                val: trip?.text ?? timeframe.first?.text ?? "–",
+                minor: nil,
                 bar: model.history?.bar,
                 picture: picture("consumption"),
-                handler: { [weak self] in self?.showConsumption(timeframe) }))
+                handler: { [weak self] in self?.showConsumption(model) }))
         } else {
             result.append(emptyTile("kWh/100 km", picture: picture("consumption")))
         }
@@ -182,7 +189,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                 minor: nil,
                 line: series("aux"),
                 picture: picture("aux"),
-                handler: { [weak self] in self?.showAux(parts) }))
+                handler: { [weak self] in self?.showAux(model) }))
         } else {
             result.append(emptyTile("Nebenverbraucher", picture: picture("aux")))
         }
@@ -193,7 +200,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
                 val: "\(regen.percent) %",
                 minor: nil,
                 line: series("regen"),
-                picture: picture("regen")))
+                picture: picture("regen"),
+                handler: { [weak self] in self?.showRegen(model) }))
         } else {
             result.append(emptyTile("Rekuperation", picture: picture("regen")))
         }
@@ -208,7 +216,71 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         } else {
             result.append(emptyTile("Ladestopps", picture: picture("stops")))
         }
+        // The seven value tiles are fixed; the control tile is the eighth.
+        result.append(controlTile(running: true))
         return Array(result.prefix(8))
+    }
+
+    /// The control tile: starts the recording, or ends it while one is
+    /// running. The same actions as the button in the title bar, but in the
+    /// middle of the view and as large as the other tiles. While the UI has
+    /// not answered yet it shows that and does nothing.
+    private func controlTile(running active: Bool) -> Entry {
+        if let text = running {
+            return Entry(title: text, val: "…", picture: controlImage(.wait),
+                         handler: nil, control: true)
+        }
+        if active {
+            return Entry(title: "Beenden", val: "", picture: controlImage(.stop),
+                         handler: { [weak self] in self?.endAsk() }, control: true)
+        }
+        return Entry(title: "Start", val: "", picture: controlImage(.start),
+                     handler: { [weak self] in self?.launch() }, control: true)
+    }
+
+    private enum Control { case start, stop, wait }
+
+    /// Dark tile with a large symbol in the colour of its meaning (the same
+    /// colours as the tiles of the UI): green triangle, red square, three dots.
+    private func controlImage(_ kind: Control) -> UIImage {
+        let page: CGFloat = 120
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        let ground = UIColor(red: 0.078, green: 0.122, blue: 0.169, alpha: 1)
+        let edge = UIColor(red: 0.153, green: 0.220, blue: 0.290, alpha: 1)
+        let good = UIColor(red: 0.212, green: 0.878, blue: 0.545, alpha: 1)
+        let bad = UIColor(red: 1.0, green: 0.310, blue: 0.373, alpha: 1)
+        let muted = UIColor(red: 0.525, green: 0.588, blue: 0.651, alpha: 1)
+        return UIGraphicsImageRenderer(size: CGSize(width: page, height: page), format: format).image { _ in
+            let frame = CGRect(x: 0.5, y: 0.5, width: page - 1, height: page - 1)
+            ground.setFill()
+            UIBezierPath(roundedRect: frame, cornerRadius: 17).fill()
+            edge.setStroke()
+            let outline = UIBezierPath(roundedRect: frame, cornerRadius: 17)
+            outline.lineWidth = 1
+            outline.stroke()
+            let mid = page / 2
+            switch kind {
+            case .start:
+                good.setFill()
+                let t = UIBezierPath()
+                t.move(to: CGPoint(x: mid - 17, y: mid - 28))
+                t.addLine(to: CGPoint(x: mid + 31, y: mid))
+                t.addLine(to: CGPoint(x: mid - 17, y: mid + 28))
+                t.close()
+                t.fill()
+            case .stop:
+                bad.setFill()
+                UIBezierPath(roundedRect: CGRect(x: mid - 26, y: mid - 26, width: 52, height: 52),
+                             cornerRadius: 8).fill()
+            case .wait:
+                muted.setFill()
+                for i in -1...1 {
+                    UIBezierPath(ovalIn: CGRect(x: mid + CGFloat(i) * 24 - 7, y: mid - 7,
+                                                width: 14, height: 14)).fill()
+                }
+            }
+        }
     }
 
     private func emptyTile(_ title: String, picture: UIImage? = nil) -> Entry {
@@ -223,30 +295,37 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
               let text = model.tileImages?[place],
               let records = Data(base64Encoded: text),
               let picture = UIImage(data: records, scale: 2) else { return nil }
-        return limited(picture)
+        return picture
     }
 
-    /// CarPlay shows tile images at a certain size at most; a larger one
-    /// would be scaled down or cropped by the system. Here it is scaled down
-    /// to fit beforehand, keeping the aspect ratio.
+    /// The image scaled to the largest size the template allows, keeping
+    /// the aspect ratio. A smaller image would be shown smaller than it could
+    /// be; a larger one the system would scale down or crop.
     ///
-    /// iOS only states the limit from 26 (`maximumGridButtonImageSize`);
-    /// before that the image stays as it is - 120 points, as large as what
-    /// `tileImage` has always drawn.
-    private func limited(_ picture: UIImage) -> UIImage {
-        guard #available(iOS 26.0, *) else { return picture }
-        let bound = CPGridTemplate.maximumGridButtonImageSize
-        guard bound.width > 0, bound.height > 0,
-              picture.size.width > bound.width || picture.size.height > bound.height
-        else { return picture }
+    /// Nil bound (the system states none): the image stays as it is.
+    private func fitted(_ picture: UIImage, to bound: CGSize?) -> UIImage {
+        guard let bound = bound, bound.width > 0, bound.height > 0,
+              picture.size.width > 0, picture.size.height > 0 else { return picture }
         let factor = min(bound.width / picture.size.width, bound.height / picture.size.height)
-        let destination = CGSize(width: picture.size.width * factor, height: picture.size.height * factor)
+        guard abs(factor - 1) > 0.01 else { return picture }
+        let destination = CGSize(width: (picture.size.width * factor).rounded(),
+                                 height: (picture.size.height * factor).rounded())
         let format = UIGraphicsImageRendererFormat()
         format.scale = picture.scale
         return UIGraphicsImageRenderer(size: destination, format: format).image { _ in
             picture.draw(in: CGRect(origin: .zero, size: destination))
         }
     }
+
+    /// Largest image of a grid tile; iOS only states it from 26 - before
+    /// that the images stay at 120 points, as `tileImage` has always drawn.
+    private var gridBound: CGSize? {
+        if #available(iOS 26.0, *) { return CPGridTemplate.maximumGridButtonImageSize }
+        return nil
+    }
+
+    /// Largest image in an image row.
+    private var rowBound: CGSize? { CPListImageRowItem.maximumImageSize }
 
     // MARK: - History
 
@@ -300,21 +379,137 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         iface?.pushTemplate(page, animated: true, completion: nil)
     }
 
-    private func showConsumption(_ timeframe: [JoltDisplay.Timeframe]) {
-        let points = timeframe.map {
-            CPInformationItem(title: "letzte \(timeframeName($0.min))",
-                              detail: "\($0.text) kWh/100 km")
-        }
+    /// Page with the details of a tile; the same information template for
+    /// all of them.
+    private func push(_ title: String, _ points: [CPInformationItem]) {
         let page = CPInformationTemplate(
-            title: "Verbrauch", layout: .leading, items: points, actions: [])
+            title: title, layout: .leading,
+            items: points.isEmpty ? [CPInformationItem(title: "Keine Werte", detail: nil)] : points,
+            actions: [])
         iface?.pushTemplate(page, animated: true, completion: nil)
     }
 
-    private func showAux(_ parts: [String]) {
-        let points = parts.map { CPInformationItem(title: $0, detail: nil) }
-        let page = CPInformationTemplate(
-            title: "Nebenverbraucher", layout: .leading, items: points, actions: [])
-        iface?.pushTemplate(page, animated: true, completion: nil)
+    private func number(_ val: Double, _ digits: Int = 1, signed: Bool = false) -> String {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.minimumFractionDigits = digits
+        f.maximumFractionDigits = digits
+        if signed { f.positivePrefix = "+" }
+        return f.string(from: NSNumber(value: val)) ?? "\(val)"
+    }
+
+    /// The last thirty minutes of a remembered value: change, lowest, highest.
+    private func trend(_ name: String, unit: String, digits: Int = 1) -> CPInformationItem? {
+        guard let lst = JoltCarPlaySceneDelegate.series_list[name], lst.count >= 2,
+              let first = lst.first, let last = lst.last else { return nil }
+        let mins = max(1, Int((last.timestamp.timeIntervalSince(first.timestamp) / 60).rounded()))
+        let vals = lst.map { $0.val }
+        return CPInformationItem(
+            title: "Verlauf \(mins) min",
+            detail: "\(number(last.val - first.val, digits, signed: true)) \(unit)"
+                + " · min \(number(vals.min() ?? 0, digits))"
+                + " · max \(number(vals.max() ?? 0, digits))")
+    }
+
+    private func nextStop(_ model: JoltDisplay) -> CPInformationItem? {
+        guard let stop = model.stop else { return nil }
+        var detail = "in \(stop.kmText)"
+        if let soc = stop.arrivalSocText {
+            detail += " · \(soc) bei Ankunft" + (stop.planned == true ? " (geplant)" : "")
+        }
+        return CPInformationItem(title: "Nächster Stopp: \(stop.name)", detail: detail)
+    }
+
+    private func showSoc(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let soc = model.soc {
+            points.append(CPInformationItem(
+                title: "Ladestand",
+                detail: soc.text + (soc.source.map { " · " + sourceText($0) } ?? "")))
+        }
+        if let item = trend("soc", unit: "%-Punkte") { points.append(item) }
+        if let item = nextStop(model) { points.append(item) }
+        if let rest = model.rest {
+            points.append(CPInformationItem(title: "Reststrecke", detail: rest.text))
+        }
+        push("Ladestand", points)
+    }
+
+    private func showArrival(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let arrival = model.arrival {
+            points.append(CPInformationItem(title: "Ankunft gegenüber Plan", detail: arrival.text))
+        }
+        if let rest = model.rest {
+            points.append(CPInformationItem(title: "Reststrecke", detail: rest.text))
+        }
+        if let item = nextStop(model) { points.append(item) }
+        push("Ankunft", points)
+    }
+
+    private func showReserve(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let reserve = model.reserve {
+            points.append(CPInformationItem(title: "Reserve in", detail: reserve.text))
+        }
+        if let rest = model.rest {
+            points.append(CPInformationItem(title: "Reststrecke", detail: rest.text))
+        }
+        if let item = nextStop(model) { points.append(item) }
+        push("Reserve", points)
+    }
+
+    private func showRegen(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let regen = model.history?.regen {
+            points.append(CPInformationItem(
+                title: "Rekuperation",
+                detail: "\(regen.percent) % der verbrauchten Energie · letzte \(timeframeName(regen.mins))"))
+        }
+        if let item = trend("regen", unit: "%-Punkte", digits: 0) { points.append(item) }
+        push("Rekuperation", points)
+    }
+
+    private func showConsumption(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let trip = model.history?.trip {
+            points.append(CPInformationItem(
+                title: "Ø Fahrt",
+                detail: "\(trip.text) kWh/100 km · \(number(trip.km, 0)) km"))
+        }
+        for f in model.history?.timeframe ?? [] where f.kwh100 != nil {
+            points.append(CPInformationItem(
+                title: "letzte \(timeframeName(f.min))",
+                detail: "\(f.text) kWh/100 km · \(f.kwText) kW"))
+        }
+        if let bar = model.history?.bar {
+            // Oldest first, like in the tile; a gap is a dash.
+            let text = bar.map { $0.map { number($0) } ?? "–" }.joined(separator: " · ")
+            points.append(CPInformationItem(title: "Balken je 5 min (älteste zuerst)", detail: text))
+        }
+        push("Verbrauch", points)
+    }
+
+    private func showAux(_ model: JoltDisplay) {
+        var points: [CPInformationItem] = []
+        if let aux = model.aux {
+            if let text = aux.text {
+                points.append(CPInformationItem(
+                    title: "Nebenverbraucher",
+                    detail: text + (aux.source.map { " · " + sourceText($0) } ?? "")))
+            }
+            if let heating = aux.heatingText {
+                points.append(CPInformationItem(title: "Heizung", detail: heating))
+            }
+            if let climate = aux.climateText {
+                points.append(CPInformationItem(title: "Klima", detail: climate))
+            }
+            if let battery = aux.batterieText {
+                points.append(CPInformationItem(title: "Akku", detail: battery))
+            }
+        }
+        if let item = trend("aux", unit: "kW") { points.append(item) }
+        push("Nebenverbraucher", points)
     }
 
     // MARK: - Drawing tiles
@@ -336,12 +531,15 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         let val: String
         let picture: UIImage
         let handler: (() -> Void)?
+        /// The tile that starts / ends the recording: not a value, so it does
+        /// not appear in the table.
+        var control = false
     }
 
     private func tileButtons(_ entries: [Entry]) -> [CPGridButton] {
         entries.prefix(8).map { e in
             CPGridButton(
-                titleVariants: [e.title], image: e.picture,
+                titleVariants: [e.title], image: fitted(e.picture, to: gridBound),
                 handler: e.handler.map { call -> ((CPGridButton) -> Void) in { _ in call() } })
         }
     }
@@ -354,7 +552,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         var start = 0
         while start < entries.count {
             let part = Array(entries[start..<min(start + perRow, entries.count)])
-            let pictures = part.map { $0.picture }
+            let pictures = part.map { fitted($0.picture, to: rowBound) }
             let row: CPListImageRowItem
             if #available(iOS 17.4, *) {
                 row = CPListImageRowItem(
@@ -374,7 +572,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     }
 
     private func tablesRows(_ entries: [Entry]) -> [CPInformationItem] {
-        entries.map { CPInformationItem(title: $0.title, detail: $0.val) }
+        entries.filter { !$0.control }.map { CPInformationItem(title: $0.title, detail: $0.val) }
     }
 
     /// A tile as an image: a large value, below it a small line or a bar

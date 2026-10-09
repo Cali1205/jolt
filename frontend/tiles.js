@@ -215,7 +215,7 @@ window.joltTiles = (function () {
     reason(c);
     const colour = COLOR.accent;
     numberFitting(c, d.text, PAGE / 2, 34, 30, 92, COLOR.text, "center");
-    write_out(c, "kWh/100 km", PAGE / 2, 50, 12.5, COLOR.muted,
+    write_out(c, d.label ? "Ø kWh/100 km" : "kWh/100 km", PAGE / 2, 50, 12.5, COLOR.muted,
               { orientation: "center", weight: 600 });
     const x0 = 13, y0 = 58, b = PAGE - 26, h = 40;
     write_out(c, "−30 min", x0, 114, 11.5, COLOR.muted, { weight: 500 });
@@ -410,7 +410,7 @@ window.joltTiles = (function () {
     reason(c);
     stripe(c, COLOR.accent);
     numberLeft(c, d.text, "", 40, 34, 92);
-    write_out(c, "kWh/100 km", 17, 54, 12.5, COLOR.muted, { weight: 600 });
+    write_out(c, d.label ? "Ø kWh/100" : "kWh/100 km", 17, 54, 12.5, COLOR.muted, { weight: 600 });
     const x0 = 17, y0 = 62, b = PAGE - 31, h = 38;
     write_out(c, "−30", x0, 114, 11.5, COLOR.muted, { weight: 500 });
     write_out(c, "jetzt", x0 + b, 114, 11.5, COLOR.muted,
@@ -568,8 +568,12 @@ window.joltTiles = (function () {
     const v = m.history;
     const windows = v && Array.isArray(v.timeframe) ? v.timeframe.filter((f) => f && actual(f.kwh100)) : [];
     const hasBar = !!(v && Array.isArray(v.bar) && v.bar.some(actual));
-    result.consumption = windows.length || hasBar
-      ? { text: windows.length ? windows[0].text : "–", bar: hasBar ? v.bar : null } : null;
+    // The number above the bars is the average of the trip; without one (the
+    // first kilometre) the shortest window stands in, and the caption says so.
+    const trip = v && v.trip && actual(v.trip.kwh100) ? v.trip : null;
+    result.consumption = trip || windows.length || hasBar
+      ? { text: trip ? trip.text : (windows.length ? windows[0].text : "–"),
+          label: trip ? "Ø" : null, bar: hasBar ? v.bar : null } : null;
 
     const aux = m.aux;
     const auxKw = aux && actual(aux.kw) ? aux.kw : null;
@@ -641,6 +645,7 @@ window.joltTiles = (function () {
           timeframe: [{ min: 5, kwh100: 17.4, kw: 14.1, text: "17,4", kwText: "14,1" }],
           bar: [15.2, 18.9, 16.4, 21.7, 17.8, 17.4],
           regen: { percent: 23, mins: 60 },
+          trip: { kwh100: 17.1, km: 84.3, text: "17,1" },
         },
         aux: { kw: 1.8, text: "1,8 kW" },
         stopList: [

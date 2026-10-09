@@ -263,6 +263,10 @@ verify(v.timeframe[0].text === "15,0" && v.timeframe[0].kwText === "10,5",
        "Texte mit Komma, fertig fuer die Anzeige", JSON.stringify(v.timeframe[0]));
 verify(v.bar.length === 6 && v.bar.every((b) => b !== null && Math.abs(b - 15) < 0.3),
        "sechs Balken zu fuenf Minuten, alle um 15", JSON.stringify(v.bar));
+verify(v.trip && Math.abs(v.trip.kwh100 - 15) < 0.2 && v.trip.text === "15,0" && v.trip.km > 70,
+       "Durchschnitt der ganzen Fahrt: 15 kWh/100 km ueber mehr als 70 km", JSON.stringify(v.trip));
+verify(as_of({ track: trip(0.4) }).history === null || !as_of({ track: trip(0.4) }).history.trip,
+       "unter einem Kilometer gibt es noch keinen Fahrt-Durchschnitt");
 verify(v.regen && v.regen.percent === 17 && v.regen.mins >= 55,
        "Rekuperation: ein Sechstel der entnommenen Energie kam zurueck (17 %)",
        JSON.stringify(v.regen));
