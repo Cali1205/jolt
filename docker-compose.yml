@@ -74,3 +74,43 @@ services:
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  # Nightly dump of the database at 03:30, half an hour before Watchtower may
+  # restart the app. Keeps BACKUP_KEEP_DAYS days (default 14). Restore:
+  #   gunzip -c jolt-<date>.sql.gz | docker exec -i jolt-db psql -U jolt jolt
+  jolt-backup:
+    image: postgres:16-alpine
+    container_name: jolt-backup
+    restart: unless-stopped
+    depends_on:
+      jolt-db:
+        condition: service_healthy
+    environment:
+      PGHOST: jolt-db
+      PGUSER: jolt
+      PGDATABASE: jolt
+      PGPASSWORD: ${DB_PASSWORD}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - /mnt/user/appdata/jolt-backups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          h=$$(date +%H); m=$$(date +%M); s=$$(date +%S)
+          now=$$(( $${h#0} * 3600 + $${m#0} * 60 + $${s#0} ))
+          wait=$$(( 12600 - now ))
+          [ "$$wait" -le 0 ] && wait=$$(( wait + 86400 ))
+          sleep "$$wait"
+          file=/backups/jolt-$$(date +%F).sql.gz
+          if pg_dump | gzip > "$$file.part" && [ -s "$$file.part" ]; then
+            mv "$$file.part" "$$file"
+            echo "backup written: $$file"
+          else
+            rm -f "$$file.part"
+            echo "backup FAILED"
+          fi
+          find /backups -name 'jolt-*.sql.gz' -mtime +$$KEEP_DAYS -delete
+        done

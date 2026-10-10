@@ -289,7 +289,14 @@ jolt → Package settings → Change visibility), then in the project folder
 be done by hand. Update right away: `docker exec jolt-watchtower /watchtower --run-once --label-enable`
 or restart the container from the Unraid UI.
 
-A database backup is **not** part of this; take one before risky migrations.
+`jolt-db` was created before the compose file existed and has no compose
+labels, so `docker compose up` collides with its name. Always start the others
+with `docker compose up -d --no-deps jolt-app watchtower jolt-backup`.
+
+The `jolt-backup` container writes a gzipped `pg_dump` to
+`/mnt/user/appdata/jolt-backups` every night at 03:30 and keeps 14 days
+(`BACKUP_KEEP_DAYS`). Restore: `gunzip -c jolt-<date>.sql.gz | docker exec -i jolt-db psql -U jolt jolt`
+into an empty database.
 
 ### Import chargers
 
