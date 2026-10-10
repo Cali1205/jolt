@@ -37,8 +37,14 @@ REPORT_ERROR_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 
 # The live endpoint receives measurement points every second. A limit of 120
 # requests per minute would be exactly wrong for it: it would choke off the
-# very function it is all about.
-EXEMPT = ("/api/live/",)
+# very function it is all about. Only these high-frequency paths are exempt;
+# everything else under /api/live/ (start, end, read, simulate) costs a
+# database session per call and stays under the general limit.
+EXEMPT_SUFFIXES = ("/report", "/point", "/points")
+
+
+def is_exempt(path: str) -> bool:
+    return path.startswith("/api/live/") and path.endswith(EXEMPT_SUFFIXES)
 
 CSP = ("default-src 'self'; "
        # Map tiles come from the OSM tile server, otherwise the map stays empty.
@@ -157,7 +163,7 @@ def count_report_error(request: Request) -> None:
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith("/api/") and not path.startswith(EXEMPT):
+        if path.startswith("/api/") and not is_exempt(path):
             if not _count(_hit, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
                 # Return a response instead of raising `HTTPException`:
                 # FastAPI's exception handling does not apply in a middleware,

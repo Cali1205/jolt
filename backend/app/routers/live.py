@@ -214,7 +214,8 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
         old.running = False
         old.ended_at = datetime.utcnow()
         try:
-            cleanup.end_and_learn(db, old)
+            with db.begin_nested():
+                cleanup.end_and_learn(db, old)
         except Exception as failure:      # noqa: BLE001
             # Same consideration as in `start_recording`: the new start must
             # not fail because of the old session.
@@ -333,7 +334,8 @@ def start_recording(start: RecordingStart,
         old.running = False
         old.ended_at = datetime.utcnow()
         try:
-            cleanup.end_and_learn(db, old)
+            with db.begin_nested():
+                cleanup.end_and_learn(db, old)
         except Exception as failure:      # noqa: BLE001
             # The new trip must not fail because of this - someone is sitting
             # in the car and wants to drive off.
