@@ -159,7 +159,8 @@ window.joltApp = (function () {
       return withDay
         ? two(d.getDate()) + "." + two(d.getMonth() + 1) + ". " + clock : clock;
     };
-    field.textContent = date(as_of, true)
+    const version = field.dataset.version ? "v" + field.dataset.version + " · " : "";
+    field.textContent = version + date(as_of, true)
       + (start ? " · seit " + date(start, false) : "");
   }
 

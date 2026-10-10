@@ -228,8 +228,8 @@ jobs:
       # Connect rejects it. The workflow's run number does that on its own and
       # needs no state in the repository; multiplied by ten plus the attempt,
       # because a re-run keeps the same number and would otherwise be
-      # rejected as a duplicate. The visible version (MARKETING_VERSION, 1.0)
-      # stays until someone deliberately raises it.
+      # rejected as a duplicate. The visible version (MARKETING_VERSION)
+      # comes from the VERSION file.
       - name: Archive
         shell: bash
         run: |
@@ -251,6 +251,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/jolt.xcarchive" \
+            MARKETING_VERSION="$(tr -d '[:space:]' < VERSION)" \
             CURRENT_PROJECT_VERSION="$(( ${{ github.run_number }} * 10 + ${{ github.run_attempt }} ))" \
             ${EXTRA[@]+"${EXTRA[@]}"} \
             | xcbeautify --renderer github-actions

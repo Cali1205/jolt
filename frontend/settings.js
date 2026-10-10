@@ -68,6 +68,7 @@ window.joltSettings = (function () {
     rows.push(row("Code-Stand", esc(as_of ? as_of.textContent : "–")));
     try {
       status = await K.api("/api/status");
+      rows.push(row("Version", esc("v" + status.version + " · Build " + status.build)));
       rows.push(row("Routing",
         status.demo_routing ? "Demo – erfundene Routen" : "echt (OpenRouteService)",
         status.demo_routing ? "warnung" : "gut"));

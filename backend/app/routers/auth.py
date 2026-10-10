@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import deps, models, routing
+from .. import deps, models, routing, version
 from ..database import get_db
 from ..security import login_limit
 
@@ -23,7 +23,8 @@ def status():
     not just the log.
     """
     return {"password_required": deps.password_set(),
-            "demo_routing": routing.is_demo()}
+            "demo_routing": routing.is_demo(),
+            "version": version.VERSION, "build": version.BUILD}
 
 
 @router.post("/login")

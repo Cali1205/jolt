@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 import asyncio
 
-from . import deps, push, routing
+from . import deps, push, routing, version
 from .live import cleanup
 from .database import SessionLocal, migrate, seed_templates
 from .routers import ALL_ROUTER
@@ -176,10 +176,12 @@ def _as_of_row(html: str) -> str:
     therefore labelled as UTC.
     """
     return (html
+            .replace("{{VERSION}}", version.VERSION)
             .replace("{{STAND_S}}", str(CODE_AS_OF))
             .replace("{{START_S}}", str(PROCESS_START))
             .replace("{{STAND}}",
-                     time.strftime("%d.%m. %H:%M UTC",
+                     "v" + version.VERSION + " · "
+                     + time.strftime("%d.%m. %H:%M UTC",
                                    time.gmtime(CODE_AS_OF))))
 
 
