@@ -79,6 +79,13 @@ def main() -> int:
     status = client.get("/api/status").json()
     verify(status["demo_routing"] is True, "Demo-Routing ist aktiv (kein Schlüssel)")
     verify(status["password_required"] is False, "ohne APP_PASSWORT offener Zugang")
+    expected = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "VERSION"),
+                    encoding="utf-8").read().strip()
+    verify(status["version"] == expected and status["build"],
+           "/api/status nennt Version %s und Build" % expected)
+    page = client.get("/").text
+    verify("v" + expected in page and "{{" not in page,
+           "die Startseite trägt die Version und keinen offenen Platzhalter")
 
     print("\nFahrzeuge")
     vehicles = client.get("/api/vehicles").json()
