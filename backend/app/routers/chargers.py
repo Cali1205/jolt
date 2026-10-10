@@ -1,4 +1,6 @@
+import logging
 import os
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
@@ -8,6 +10,8 @@ from .. import deps, models
 from ..database import get_db
 from ..charging import chargers_import, availability
 from ..routing import corridor
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chargers", tags=["chargers"],
                    dependencies=[Depends(deps.current_session)])
@@ -77,14 +81,16 @@ def report_occupied(charge_point_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{charge_point_id}/occupied")
-def occupied_revert(charge_point_id: int):
+def occupied_revert(charge_point_id: int, db: Session = Depends(get_db)):
+    if not db.get(models.ChargePoint, charge_point_id):
+        raise HTTPException(404, "Ladepunkt nicht gefunden.")
     availability.REPORTS.release(charge_point_id)
     return {"ok": True}
 
 
 @router.post("/import/ocm")
-def import_ocm(countries: str = "DE", max_results: int = Query(2000, le=20000),
-               min_kw: float = 0.0, db: Session = Depends(get_db)):
+def import_ocm(countries: str = "DE", max_results: int = Query(2000, ge=1, le=20000),
+               min_kw: float = Query(0.0, ge=0),  db: Session = Depends(get_db)):
     """Trigger the Open Charge Map import.
 
     The Bundesnetzagentur file is deliberately not downloaded here: it is
@@ -94,9 +100,14 @@ def import_ocm(countries: str = "DE", max_results: int = Query(2000, le=20000),
     api_key = os.environ.get("OCM_API_KEY", "")
     if not api_key:
         raise HTTPException(400, "Kein OCM_API_KEY gesetzt.")
+    codes = [c.strip().upper() for c in countries.split(",") if c.strip()]
+    if not codes or len(codes) > 10 or not all(re.fullmatch(r"[A-Z]{2}", c) for c in codes):
+        raise HTTPException(422, "countries: 1 bis 10 Laendercodes aus zwei Buchstaben.")
     try:
-        return chargers_import.from_ocm(db, api_key,
-                                      countries=[l.strip() for l in countries.split(",")],
+        return chargers_import.from_ocm(db, api_key, countries=codes,
                                       max_results=max_results, min_kw=min_kw)
     except Exception as failure:      # noqa: BLE001
-        raise HTTPException(502, f"Import fehlgeschlagen: {failure}") from failure
+        # Never pass the exception text on: for HTTP errors `requests` puts
+        # the whole URL in it, and the OCM key is a query parameter.
+        log.warning("Open Charge Map import failed: %s", type(failure).__name__)
+        raise HTTPException(502, "Import fehlgeschlagen (Details im Serverlog).") from failure

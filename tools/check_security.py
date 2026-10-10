@@ -354,6 +354,17 @@ def part_55() -> None:
            "wird festgehalten")
 
 
+def part_92() -> None:
+    """Bug scan #92: rate limit only spares the high-frequency live paths."""
+    from app import security
+    verify.section("Rate-Limit-Ausnahme nur für Messpfade")
+    for path in ("/api/live/report", "/api/live/5/point", "/api/live/5/points"):
+        verify(security.is_exempt(path), "%s ist ausgenommen" % path)
+    for path in ("/api/live/start/1", "/api/live/5/end", "/api/live/5",
+                 "/api/live/5/simulate", "/api/vehicles"):
+        verify(not security.is_exempt(path), "%s unterliegt dem Limit" % path)
+
+
 def main() -> int:
     part_password()
     part_client_ip()
@@ -362,6 +373,7 @@ def main() -> int:
     part_limit()
     part_live()
     part_55()
+    part_92()
     return verify.balance()
 
 

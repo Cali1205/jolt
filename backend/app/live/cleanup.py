@@ -251,6 +251,18 @@ def end_orphaned(db) -> list[dict]:
     return ended_at
 
 
+def purge_auth_sessions(db) -> int:
+    """Delete logins that have expired. `examine_session` only does that when
+    the very token shows up again; abandoned ones would pile up."""
+    from .. import deps, models
+    limit = datetime.utcnow() - deps.SESSION_MAX_AGE
+    count = (db.query(models.AuthSession)
+             .filter(models.AuthSession.last_seen < limit)
+             .delete(synchronize_session=False))
+    db.commit()
+    return count
+
+
 async def loop(db_factory) -> None:
     """The background task. Fired up when the application starts.
 
@@ -263,6 +275,7 @@ async def loop(db_factory) -> None:
         db = db_factory()
         try:
             end_orphaned(db)
+            purge_auth_sessions(db)
         except Exception as failure:      # noqa: BLE001
             # A failed round must not end the task - otherwise cleanup stops
             # for good at the first error, and nobody notices.
