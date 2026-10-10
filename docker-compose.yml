@@ -16,11 +16,17 @@ services:
       retries: 5
 
   jolt-app:
+    # Built by GitHub Actions on every merge to main (.github/workflows/ci.yml)
+    # and pulled by Watchtower below. `docker compose build` still works for
+    # a local image.
+    image: ghcr.io/cali1205/jolt:latest
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: jolt-app
     restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     depends_on:
       jolt-db:
         condition: service_healthy
@@ -50,3 +56,21 @@ services:
     ports:
       - "8322:8000"
     # Hinter einem Reverse Proxy: jolt.<domain> -> host-ip:8322
+
+  # (nickfedor fork: the original containrrr image no longer talks to current
+  # Docker versions.) Looks for a new jolt-app image once a night and restarts only that
+  # container (jolt-db has no label and is left alone). At night on purpose:
+  # a restart cuts the connection of a running trip. Migrations run at app
+  # start. Change the time with WATCHTOWER_SCHEDULE (six-field cron, with
+  # seconds), the time zone with TZ.
+  watchtower:
+    image: nickfedor/watchtower:latest
+    container_name: jolt-watchtower
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

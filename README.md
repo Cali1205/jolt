@@ -275,6 +275,22 @@ docker compose up --build
 Then at <http://localhost:8322>. The database lives on the host under
 `/opt/docker/jolt/db` — adjust in `docker-compose.yml` if needed.
 
+### Deployment (Unraid, no ssh)
+
+Every merge to `main` builds the image in GitHub Actions and pushes it to
+`ghcr.io/cali1205/jolt:latest` (only when all checks are green). A Watchtower
+container from the same `docker-compose.yml` looks for a new image every night
+at 04:00 (`WATCHTOWER_SCHEDULE`, `TZ`) and restarts `jolt-app` only. Database
+migrations run at app start.
+
+One-time setup on the host: the package must be public (GitHub → Packages →
+jolt → Package settings → Change visibility), then in the project folder
+`docker rm -f jolt-app && docker compose up -d`. After that nothing needs to
+be done by hand. Update right away: `docker exec jolt-watchtower /watchtower --run-once --label-enable`
+or restart the container from the Unraid UI.
+
+A database backup is **not** part of this; take one before risky migrations.
+
 ### Import chargers
 
 Download the file „Ladesäulenregister" (CSV) from the [charging station map of the
