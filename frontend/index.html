@@ -761,14 +761,15 @@ table.kurve input { padding: 6px 8px; }
           <button class="tat neben" id="dongle-on" style="margin:0">Dongle verbinden</button>
           <button class="tat neben" id="dongle-pause" style="margin:0" hidden>Pause</button>
         </div>
-        <label style="display:flex;gap:8px;align-items:center;margin-top:8px">
-          <input type="checkbox" id="dongle-car" style="width:auto" checked>
-          <span>Dongle nur beim Fahren lesen</span>
-        </label>
-        <div class="unter" style="margin-top:2px">Im Stand fragt jolt das Auto
+        <div class="schalter-zeile" style="margin-top:8px">
+          <label for="dongle-car">Dongle nur beim Fahren lesen
+            <button type="button" class="info" data-info="help-dongle" aria-expanded="false" aria-label="Erklärung">i</button></label>
+          <input type="checkbox" id="dongle-car" class="schalter" checked>
+        </div>
+        <p class="hilfe" id="help-dongle" hidden>Im Stand fragt jolt das Auto
           nichts und trennt den Dongle, sobald du weggehst oder das Auto drei
           Minuten steht. Beim Losfahren (ab 15&nbsp;km/h) verbindet es sich
-          selbst wieder. So löst ein abgeschlossenes Auto keinen Alarm aus.</div>
+          selbst wieder. So löst ein abgeschlossenes Auto keinen Alarm aus.</p>
 
         <div class="karte-fuss">
           <span id="live-hint">–</span>
@@ -818,8 +819,8 @@ table.kurve input { padding: 6px 8px; }
           <button class="tat" id="soc-report"
                   style="margin-top:0">Melden</button>
         </div>
-        <p class="leer" id="soc-explanation" style="padding-bottom:0">Vorbelegt
-          ist der zuletzt gemeldete Wert. Die Position holt das Telefon per GPS.</p>
+        <p class="leer" id="soc-explanation" style="padding-bottom:0">Vorbelegt:
+          letzter Wert · Position per GPS</p>
       </div>
 
       <div id="map-holder-live"></div>
@@ -833,30 +834,34 @@ table.kurve input { padding: 6px 8px; }
         <ol class="liste" id="live-plan"></ol>
       </div>
 
-      <div class="karte-block">
-        <h2 style="margin-top:0">Ohne Auto prüfen</h2>
-        <p class="leer" style="padding-top:0">Spielt die geplante Fahrt ab. Mit
-          Mehrverbrauch über 100 % muss die Nachführung anschlagen und die
-          Reserve nach vorn rücken – das ist der Prüfstein.</p>
-        <div class="reihe">
-          <div>
-            <label for="extra-consumption">Mehrverbrauch
-              <span id="extra-consumption-output">120</span> %</label>
-            <input type="range" id="extra-consumption" min="70" max="180" step="5"
-                   value="120">
+      <details class="opt">
+        <summary><span class="opt-titel">Ohne Auto prüfen</span>
+          <button type="button" class="info" data-info="help-simulation" aria-expanded="false" aria-label="Erklärung">i</button></summary>
+        <div class="opt-inhalt">
+          <p class="hilfe" id="help-simulation" hidden>Spielt die geplante Fahrt
+            ab. Mit Mehrverbrauch über 100 % muss die Nachführung anschlagen
+            und die Reserve nach vorn rücken – das ist der Prüfstein.</p>
+          <div class="regler">
+            <div class="regler-kopf">
+              <label for="extra-consumption">Mehrverbrauch</label>
+              <output class="regler-wert"><span id="extra-consumption-output">120</span> %</output>
+            </div>
+            <input type="range" id="extra-consumption" min="70" max="180" step="5" value="120">
           </div>
-          <div>
-            <!-- Traffic jam separate from consumption: whoever stands consumes
-                 hardly more per kilometre, but arrives much later. Only this way
-                 can the trigger be checked that consumption never triggers. -->
-            <label for="jam">Fahrzeit
-              <span id="jam-output">100</span> %</label>
+          <!-- Traffic jam separate from consumption: whoever stands consumes
+               hardly more per kilometre, but arrives much later. Only this way
+               can the trigger be checked that consumption never triggers. -->
+          <div class="regler">
+            <div class="regler-kopf">
+              <label for="jam">Fahrzeit</label>
+              <output class="regler-wert"><span id="jam-output">100</span> %</output>
+            </div>
             <input type="range" id="jam" min="100" max="200" step="10" value="100">
           </div>
+          <button class="tat neben" id="simulate">Simulation starten</button>
         </div>
-        <button class="tat neben" id="simulate">Simulation starten</button>
-        <button class="tat neben" id="live-end">Fahrt beenden</button>
-      </div>
+      </details>
+      <button class="tat neben" id="live-end" style="margin-top:14px">Fahrt beenden</button>
     </div>
   </section>
 
