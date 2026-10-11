@@ -279,9 +279,21 @@ Then at <http://localhost:8322>. The database lives on the host under
 
 Every merge to `main` builds the image in GitHub Actions and pushes it to
 `ghcr.io/cali1205/jolt:latest` (only when all checks are green). A Watchtower
-container from the same `docker-compose.yml` looks for a new image every night
-at 04:00 (`WATCHTOWER_SCHEDULE`, `TZ`) and restarts `jolt-app` only. Database
+container from the same `docker-compose.yml` looks for a new image every 10
+minutes (`WATCHTOWER_SCHEDULE`, `TZ`) and restarts `jolt-app` only. Database
 migrations run at app start.
+
+A running trip is never cut: before the restart Watchtower runs
+`tools/update_guard.py` inside `jolt-app`; while a live session is running it
+exits with 75 and Watchtower leaves the container alone until the next run.
+
+Optional, to update right after a merge instead of waiting up to 10 minutes:
+set `WATCHTOWER_HTTP_API_ENDPOINTS=update` and `WATCHTOWER_HTTP_API_TOKEN` in
+the `.env`, publish `/v1/update` through the Cloudflare tunnel behind a
+Cloudflare Access service token, and store `WATCHTOWER_URL`,
+`WATCHTOWER_TOKEN`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as
+GitHub secrets. The CI step "Trigger Watchtower" then calls it after every
+push of the image; without the secrets it is skipped.
 
 One-time setup on the host: the package must be public (GitHub → Packages →
 jolt → Package settings → Change visibility), then in the project folder
