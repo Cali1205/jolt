@@ -27,6 +27,9 @@ services:
     restart: unless-stopped
     labels:
       com.centurylinklabs.watchtower.enable: "true"
+      # Before replacing the container Watchtower runs this inside it; exit
+      # code 75 = a trip is running, try again at the next run.
+      com.centurylinklabs.watchtower.lifecycle.pre-update: "python /srv/tools/update_guard.py"
     depends_on:
       jolt-db:
         condition: service_healthy
@@ -58,11 +61,15 @@ services:
     # Hinter einem Reverse Proxy: jolt.<domain> -> host-ip:8322
 
   # (nickfedor fork: the original containrrr image no longer talks to current
-  # Docker versions.) Looks for a new jolt-app image once a night and restarts only that
-  # container (jolt-db has no label and is left alone). At night on purpose:
-  # a restart cuts the connection of a running trip. Migrations run at app
-  # start. Change the time with WATCHTOWER_SCHEDULE (six-field cron, with
-  # seconds), the time zone with TZ.
+  # Docker versions.) Looks for a new jolt-app image every 10 minutes and
+  # restarts only that container (jolt-db has no label and is left alone). A
+  # running trip is protected by the pre-update hook on jolt-app
+  # (tools/update_guard.py): the update waits until the trip is over.
+  # Migrations run at app start. Change the rhythm with WATCHTOWER_SCHEDULE
+  # (six-field cron, with seconds), the time zone with TZ.
+  # Optional trigger: with WATCHTOWER_HTTP_API_ENDPOINTS=update and a token, a
+  # POST to /v1/update starts a run at once (the CI does that after pushing
+  # the image, see README). Polling keeps running next to it.
   watchtower:
     image: nickfedor/watchtower:latest
     container_name: jolt-watchtower
@@ -70,8 +77,15 @@ services:
     environment:
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      WATCHTOWER_LIFECYCLE_HOOKS: "true"
+      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 */10 * * * *}
+      WATCHTOWER_HTTP_API_ENDPOINTS: ${WATCHTOWER_HTTP_API_ENDPOINTS:-}
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "true"
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_HTTP_API_TOKEN:-}
       TZ: ${TZ:-Europe/Berlin}
+    ports:
+      # Only used when the HTTP API is switched on.
+      - "8099:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 

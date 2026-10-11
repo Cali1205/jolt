@@ -32,6 +32,7 @@ jobs:
       - run: ./tools/check_security.py
       - run: ./tools/check_legacy_paths.py
       - run: ./tools/check_push.py
+      - run: ./tools/check_update_guard.py
       - run: ./tools/check_backend.py
 
       # The revisions are the only source of the schema - there is no
@@ -168,6 +169,8 @@ jobs:
   image:
     needs: [check, huelle]
     runs-on: ubuntu-latest
+    env:
+      WATCHTOWER_URL: ${{ secrets.WATCHTOWER_URL }}
     permissions:
       contents: read
       packages: write
@@ -200,3 +203,16 @@ jobs:
             ghcr.io/cali1205/jolt:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Optional: ask Watchtower on the server to update right away instead
+      # of waiting for its next run. Only runs when the secrets are set; a
+      # failure here must not turn the build red - Watchtower polls anyway.
+      - name: Trigger Watchtower
+        if: github.event_name == 'push' && env.WATCHTOWER_URL != ''
+        continue-on-error: true
+        env:
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          curl --fail --silent --show-error --max-time 120 -X POST             -H "Authorization: Bearer ${WATCHTOWER_TOKEN}"             -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}"             -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}"             "${WATCHTOWER_URL}/v1/update"
