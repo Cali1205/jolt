@@ -112,6 +112,62 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+/* ------------------------------- Planning: technical, dense
+ *
+ * Route as a line from start to destination, sliders with the value in a
+ * monospace tabular number on the right, explanations behind a small (i),
+ * the options folded away and summed up as chips. */
+.strecke { position: relative; padding-left: 22px; }
+.strecke::before { content: ""; position: absolute; left: 6px; top: 26px; bottom: 22px;
+  border-left: 2px dotted var(--rand); }
+.strecke-feld { position: relative; }
+.strecke-feld::before { content: ""; position: absolute; left: -22px; top: 33px;
+  width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--akzent);
+  background: var(--grund); }
+.strecke-feld:last-child::before { background: var(--akzent); border-radius: 2px; }
+.treffer { position: relative; z-index: 3; }
+.regler { margin-top: 12px; }
+.regler-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.regler-kopf label { margin: 0; }
+.regler-wert { font: 600 15px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--akzent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+input[type="range"] { accent-color: var(--akzent); height: 28px; }
+.schalter-zeile { display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 8px 0; border-top: 1px solid var(--rand); }
+.schalter-zeile:first-of-type { border-top: none; }
+.schalter-zeile label { margin: 0; flex: 1; color: var(--text); font-size: 14px; }
+input.schalter { appearance: none; -webkit-appearance: none; width: 46px; height: 28px;
+  flex: 0 0 46px; padding: 0; border-radius: 99px; background: #2a333d; border: none;
+  position: relative; cursor: pointer; transition: background .15s; }
+input.schalter::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px;
+  height: 22px; border-radius: 50%; background: #e6ebf0; transition: transform .15s; }
+input.schalter:checked { background: var(--akzent); }
+input.schalter:checked::after { transform: translateX(18px); background: #17130a; }
+button.info { display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-left: 4px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--rand); background: transparent; color: var(--gedaempft);
+  font: italic 600 12px Georgia, serif; vertical-align: middle; cursor: pointer; }
+button.info[aria-expanded="true"] { color: var(--akzent); border-color: var(--akzent); }
+.hilfe { margin: 2px 0 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45;
+  color: var(--gedaempft); background: #0c1116; border-left: 2px solid var(--akzent);
+  border-radius: 0 8px 8px 0; }
+.hilfe strong { color: var(--text); }
+details.opt { margin-top: 14px; border: 1px solid var(--rand); border-radius: 12px;
+  background: #12171d; }
+details.opt > summary { list-style: none; cursor: pointer; padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px; }
+details.opt > summary::-webkit-details-marker { display: none; }
+details.opt > summary::after { content: "▸"; margin-left: auto; color: var(--gedaempft); }
+details.opt[open] > summary::after { content: "▾"; }
+.opt-titel { font-weight: 600; font-size: 14px; }
+.opt-inhalt { padding: 0 14px 14px; }
+.opt-inhalt h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--gedaempft); font-weight: 600; margin: 16px 0 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.chip { font: 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; padding: 2px 8px;
+  border-radius: 99px; background: #0c1116; border: 1px solid var(--rand);
+  color: var(--gedaempft); white-space: nowrap; }
+button.tat.gross { padding: 14px; font-size: 16px; letter-spacing: .01em; }
 /* ------------------------------- Settings
  *
  * Collapsibles instead of a long page: one looks for a single thing here and
@@ -342,14 +398,18 @@ table.kurve input { padding: 6px 8px; }
 
   <!-- ------------------------------- Plan (Planen) -->
   <section id="view-plan">
+    <!-- Planning is two levels: what every trip needs (route, vehicle,
+         departure) is always visible, everything that changes the model
+         sits behind "Optionen" and is summarised there as chips. The long
+         explanations are not gone - they sit behind the (i) of their option. -->
     <div class="karte-block">
-      <div class="reihe">
-        <div>
+      <div class="strecke">
+        <div class="strecke-feld">
           <label for="start">Start</label>
           <input id="start" placeholder="Hamburg" autocomplete="off">
           <ul class="treffer" id="start-hits"></ul>
         </div>
-        <div>
+        <div class="strecke-feld">
           <label for="destination">Ziel</label>
           <input id="destination" placeholder="München" autocomplete="off">
           <ul class="treffer" id="destination-hits"></ul>
@@ -362,113 +422,152 @@ table.kurve input { padding: 6px 8px; }
           <select id="vehicle-choice"></select>
         </div>
         <div>
-          <label for="start-soc">Ladestand beim Start: <span id="start-soc-output">80</span> %</label>
-          <input type="range" id="start-soc" min="5" max="100" step="1" value="80">
+          <label for="departure">Abfahrt <button type="button" class="info" data-info="help-departure" aria-expanded="false" aria-label="Erklärung">i</button></label>
+          <input type="datetime-local" id="departure">
         </div>
       </div>
-
-      <!-- The surcharge belongs to the trip and not to the vehicle: the rack
-           is on in summer and not in winter. And without it, its consumption
-           ends up in the car's correction factor, which applies permanently. -->
-      <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <input type="checkbox" id="alternative" style="width:auto">
-        <span>Mautfreie Route mitrechnen und vergleichen</span>
-      </label>
-      <p class="leer" style="padding-top:0">Ohne Haken wird nur die schnellste
-        gerechnet – eine Anfrage statt zweier, und das Tageskontingent des
-        Routings ist begrenzt. Mit Haken kommt eine Route ohne Mautstraßen
-        dazu, und jolt vergleicht beide <strong>am fertigen Ladeplan</strong>:
-        nicht welche Straße kürzer ist, sondern wo du früher ankommst und was
-        es kostet, wenn das Laden mitzählt.
-        <br>Die Maut selbst kennt jolt nicht – auf einer Frankreich-Langstrecke
-        sind es leicht vierzig Euro, und die musst du gegen die Mehrzeit
-        halten.</p>
-
-      <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <input type="checkbox" id="own-trips" style="width:auto" checked>
-        <span>Meine gefahrenen Strecken mitrechnen</span>
-      </label>
-      <p class="leer" style="padding-top:0">Ist zu Start und Ziel schon einmal
-        eine Fahrt aufgezeichnet oder gefahren worden, rechnet jolt diesen Weg
-        als weitere Route mit und vergleicht ihn am fertigen Ladeplan. Das
-        kostet höchstens zwei Routing-Anfragen mehr.</p>
-
-      <label for="departure">Abfahrt</label>
-      <input type="datetime-local" id="departure">
-      <p class="leer" style="padding-top:0">Leer heisst jetzt. Mit einer Zeit
+      <p class="hilfe" id="help-departure" hidden>Leer heisst jetzt. Mit einer Zeit
         rechnet jolt den <strong>Verkehr</strong> (TomTom, zeitabhängig
         prognostiziert - Freitag um vier ist ein anderer Tag als Sonntag um
         drei) und das <strong>Wetter</strong> (stündliche Vorhersage, an jedem
         Punkt für die Stunde der Ankunft) für diese Zeit. Das Wetter reicht
         15 Tage, der Verkehr 60 Tage voraus.</p>
 
-      <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
-        <input type="checkbox" id="tomtom" style="width:auto" checked>
-        <span>Verkehr und Alternativen von TomTom</span>
-      </label>
-      <p class="leer" style="padding-top:0">Fragt TomTom nach weiteren Wegen und
-        nach dem aktuellen Verkehr auf jeder Route; die Verzögerung geht in die
-        Rangfolge ein. Gespeichert wird davon nichts - die Strecke selbst
-        kommt weiter von OpenRouteService. Ohne Schlüssel auf dem Server
-        passiert nichts.</p>
-
-      <label for="attachment">Aussen am Auto</label>
-      <select id="attachment">
-        <option value="1.0" selected>nichts</option>
-        <option value="1.15">Fahrradträger, 2 Räder</option>
-        <option value="1.25">Fahrradträger, 4 Räder</option>
-        <option value="1.20">Dachbox</option>
-      </select>
-
-      <!-- Default 100 %, not 120 %.
-           The value used to be 120 because the routing's assumptions seemed
-           too cautious. Recalculated on a real long-distance trip
-           (Reutlingen - Le Gurp, 1214 km), exactly 100 % matches the
-           measured consumption: 25.7 kWh/100 km at 106 km/h on average,
-           against 25-26 from practice. With 120 % the model predicted 31.7
-           - and in places calculated with 153 km/h, which the ID.Buzz does
-           not even drive.
-           Whoever drives faster moves the slider; as the default, what was
-           measured belongs there. -->
-      <label for="speed">Tempo gegenüber der Routing-Annahme:
-        <span id="speed-output">100</span> %</label>
-      <input type="range" id="speed" min="70" max="130" step="5" value="100">
-
-      <label for="payload">Zuladung: <span id="payload-output">–</span></label>
-      <input type="range" id="payload" min="-25" max="800" step="25" value="-25">
-      <div class="unter" style="margin-top:2px">Personen und Gepäck dieser
-        Fahrt. Ganz links gilt der Wert aus dem Fahrzeugprofil.</div>
-
-      <!-- A trailer brings mass AND its own drag area. The defaults are
-           estimates (area = cw times A of the trailer in the slipstream of
-           the car) - until a recorded trip confirms them. Both fields
-           therefore remain editable by hand. -->
-      <label for="trailer">Anhänger</label>
-      <select id="trailer">
-        <option value="" selected>keiner</option>
-        <option value="750,0.5">Kleinanhänger / Boot, 750 kg</option>
-        <option value="1300,1.1">Wohnwagen, 1300 kg</option>
-        <option value="2000,1.3">Grosser Wohnwagen / Pferdeanhänger, 2000 kg</option>
-        <option value="eigen">eigene Werte …</option>
-      </select>
-      <div id="trailer-values" hidden>
-        <label for="trailer-kg">Masse des Anhängers (kg)</label>
-        <input type="number" id="trailer-kg" min="0" max="3500" step="50">
-        <label for="trailer-cwa">Zusätzliche Luftwiderstandsfläche (m²)</label>
-        <input type="number" id="trailer-cwa" min="0" max="5" step="0.1">
-        <div class="unter" style="margin-top:2px">cw mal Stirnfläche des
-          Anhängers, wie sie hinter dem Auto wirkt. Ein Wohnwagen liegt grob
-          bei 1 bis 1,5 m².</div>
+      <div class="regler">
+        <div class="regler-kopf">
+          <label for="start-soc">Ladestand beim Start</label>
+          <output class="regler-wert"><span id="start-soc-output">80</span> %</output>
+        </div>
+        <input type="range" id="start-soc" min="5" max="100" step="1" value="80">
       </div>
 
-      <label for="speed-max">Höchstgeschwindigkeit dieser Fahrt (km/h)</label>
-      <input type="number" id="speed-max" min="30" max="250" step="5"
-             placeholder="keine Grenze">
-      <div class="unter" style="margin-top:2px">Harte Grenze, anders als der
-        Tempo-Regler: Für ein Gespann sind es 100 km/h. Leer lassen, wenn nur
-        die Höchstgeschwindigkeit des Fahrzeugs gilt.</div>
+      <details class="opt" id="options">
+        <summary>
+          <span class="opt-titel">Optionen</span>
+          <span class="chips" id="options-summary"><span class="chip">Standard</span></span>
+        </summary>
+        <div class="opt-inhalt" id="options-body">
 
-      <button class="tat" id="compute">Route rechnen</button>
+          <h3>Routen</h3>
+          <!-- The surcharge belongs to the trip and not to the vehicle: the
+               rack is on in summer and not in winter. And without it, its
+               consumption ends up in the car's correction factor, which
+               applies permanently. -->
+          <div class="schalter-zeile">
+            <label for="alternative">Mautfreie Route mitrechnen und vergleichen
+              <button type="button" class="info" data-info="help-alternative" aria-expanded="false" aria-label="Erklärung">i</button></label>
+            <input type="checkbox" id="alternative" class="schalter">
+          </div>
+          <p class="hilfe" id="help-alternative" hidden>Ohne Haken wird nur die schnellste
+            gerechnet – eine Anfrage statt zweier, und das Tageskontingent des
+            Routings ist begrenzt. Mit Haken kommt eine Route ohne Mautstraßen
+            dazu, und jolt vergleicht beide <strong>am fertigen Ladeplan</strong>:
+            nicht welche Straße kürzer ist, sondern wo du früher ankommst und was
+            es kostet, wenn das Laden mitzählt.
+            <br>Die Maut selbst kennt jolt nicht – auf einer Frankreich-Langstrecke
+            sind es leicht vierzig Euro, und die musst du gegen die Mehrzeit
+            halten.</p>
+
+          <div class="schalter-zeile">
+            <label for="own-trips">Meine gefahrenen Strecken mitrechnen
+              <button type="button" class="info" data-info="help-own-trips" aria-expanded="false" aria-label="Erklärung">i</button></label>
+            <input type="checkbox" id="own-trips" class="schalter" checked>
+          </div>
+          <p class="hilfe" id="help-own-trips" hidden>Ist zu Start und Ziel schon einmal
+            eine Fahrt aufgezeichnet oder gefahren worden, rechnet jolt diesen Weg
+            als weitere Route mit und vergleicht ihn am fertigen Ladeplan. Das
+            kostet höchstens zwei Routing-Anfragen mehr.</p>
+
+          <div class="schalter-zeile">
+            <label for="tomtom">Verkehr und Alternativen von TomTom
+              <button type="button" class="info" data-info="help-tomtom" aria-expanded="false" aria-label="Erklärung">i</button></label>
+            <input type="checkbox" id="tomtom" class="schalter" checked>
+          </div>
+          <p class="hilfe" id="help-tomtom" hidden>Fragt TomTom nach weiteren Wegen und
+            nach dem aktuellen Verkehr auf jeder Route; die Verzögerung geht in die
+            Rangfolge ein. Gespeichert wird davon nichts - die Strecke selbst
+            kommt weiter von OpenRouteService. Ohne Schlüssel auf dem Server
+            passiert nichts.</p>
+
+          <h3>Fahrzeug und Beladung</h3>
+          <label for="attachment">Aussen am Auto</label>
+          <select id="attachment">
+            <option value="1.0" selected>nichts</option>
+            <option value="1.15">Fahrradträger, 2 Räder</option>
+            <option value="1.25">Fahrradträger, 4 Räder</option>
+            <option value="1.20">Dachbox</option>
+          </select>
+
+          <div class="regler">
+            <div class="regler-kopf">
+              <label for="payload">Zuladung
+                <button type="button" class="info" data-info="help-payload" aria-expanded="false" aria-label="Erklärung">i</button></label>
+              <output class="regler-wert" id="payload-output">–</output>
+            </div>
+            <input type="range" id="payload" min="-25" max="800" step="25" value="-25">
+          </div>
+          <p class="hilfe" id="help-payload" hidden>Personen und Gepäck dieser
+            Fahrt. Ganz links gilt der Wert aus dem Fahrzeugprofil.</p>
+
+          <!-- A trailer brings mass AND its own drag area. The defaults are
+               estimates (area = cw times A of the trailer in the slipstream
+               of the car) - until a recorded trip confirms them. Both fields
+               therefore remain editable by hand. -->
+          <label for="trailer">Anhänger</label>
+          <select id="trailer">
+            <option value="" selected>keiner</option>
+            <option value="750,0.5">Kleinanhänger / Boot, 750 kg</option>
+            <option value="1300,1.1">Wohnwagen, 1300 kg</option>
+            <option value="2000,1.3">Grosser Wohnwagen / Pferdeanhänger, 2000 kg</option>
+            <option value="eigen">eigene Werte …</option>
+          </select>
+          <div id="trailer-values" hidden>
+            <div class="reihe">
+              <div>
+                <label for="trailer-kg">Masse (kg)</label>
+                <input type="number" id="trailer-kg" min="0" max="3500" step="50">
+              </div>
+              <div>
+                <label for="trailer-cwa">Luftwiderstandsfläche (m²)
+                  <button type="button" class="info" data-info="help-trailer-cwa" aria-expanded="false" aria-label="Erklärung">i</button></label>
+                <input type="number" id="trailer-cwa" min="0" max="5" step="0.1">
+              </div>
+            </div>
+            <p class="hilfe" id="help-trailer-cwa" hidden>cw mal Stirnfläche des
+              Anhängers, wie sie hinter dem Auto wirkt. Ein Wohnwagen liegt grob
+              bei 1 bis 1,5 m².</p>
+          </div>
+
+          <h3>Tempo</h3>
+          <!-- Default 100 %, not 120 %.
+               The value used to be 120 because the routing's assumptions
+               seemed too cautious. Recalculated on a real long-distance trip
+               (Reutlingen - Le Gurp, 1214 km), exactly 100 % matches the
+               measured consumption: 25.7 kWh/100 km at 106 km/h on average,
+               against 25-26 from practice. With 120 % the model predicted
+               31.7 - and in places calculated with 153 km/h, which the
+               ID.Buzz does not even drive.
+               Whoever drives faster moves the slider; as the default, what
+               was measured belongs there. -->
+          <div class="regler">
+            <div class="regler-kopf">
+              <label for="speed">Tempo gegenüber der Routing-Annahme</label>
+              <output class="regler-wert"><span id="speed-output">100</span> %</output>
+            </div>
+            <input type="range" id="speed" min="70" max="130" step="5" value="100">
+          </div>
+
+          <label for="speed-max">Höchstgeschwindigkeit (km/h)
+            <button type="button" class="info" data-info="help-speed-max" aria-expanded="false" aria-label="Erklärung">i</button></label>
+          <input type="number" id="speed-max" min="30" max="250" step="5"
+                 placeholder="keine Grenze">
+          <p class="hilfe" id="help-speed-max" hidden>Harte Grenze, anders als der
+            Tempo-Regler: Für ein Gespann sind es 100 km/h. Leer lassen, wenn nur
+            die Höchstgeschwindigkeit des Fahrzeugs gilt.</p>
+        </div>
+      </details>
+
+      <button class="tat gross" id="compute">Route rechnen</button>
     </div>
 
     <div id="result" hidden>
@@ -494,44 +593,63 @@ table.kurve input { padding: 6px 8px; }
         <h2 style="margin-top:0">Ladeplan</h2>
         <div class="werte" id="charge-plan-values"></div>
         <ol class="liste" id="charge-plan"></ol>
-        <!-- The slider sits with the charging plan and not with the charger
-             filters: it does not change which charging points come into
+        <!-- The sliders sit with the charging plan and not with the charger
+             filters: they do not change which charging points come into
              question, but how many stops are worthwhile. -->
-        <div class="reihe">
-          <div>
-            <label for="holding-cost">Aufwand je Halt
-              <span id="holding-cost-output">5</span> min</label>
-            <input type="range" id="holding-cost" min="0" max="15" step="1" value="5">
+        <details class="opt">
+          <summary>
+            <span class="opt-titel">Abwägung</span>
+            <span class="chips" id="tradeoff-summary"></span>
+          </summary>
+          <div class="opt-inhalt">
+            <div class="regler">
+              <div class="regler-kopf">
+                <label for="holding-cost">Aufwand je Halt
+                  <button type="button" class="info" data-info="help-holding" aria-expanded="false" aria-label="Erklärung">i</button></label>
+                <output class="regler-wert"><span id="holding-cost-output">5</span> min</output>
+              </div>
+              <input type="range" id="holding-cost" min="0" max="15" step="1" value="5">
+            </div>
+            <p class="hilfe" id="help-holding" hidden>Einparken, Kabel, freischalten –
+              alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
+              jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
+              <strong>0</strong> ist Anhalten gratis, und es entstehen viele
+              Kurzstopps im steilen Teil der Ladekurve – rechnerisch schnell,
+              praktisch nicht fahrbar.</p>
+
+            <div class="regler">
+              <div class="regler-kopf">
+                <label for="charge-park">Grosser Ladepark zählt
+                  <button type="button" class="info" data-info="help-park" aria-expanded="false" aria-label="Erklärung">i</button></label>
+                <output class="regler-wert"><span id="charge-park-output">4</span> min</output>
+              </div>
+              <input type="range" id="charge-park" min="0" max="12" step="1" value="4">
+            </div>
+            <p class="hilfe" id="help-park" hidden>Der Regler sagt, was ein
+              <strong>grosser Ladepark</strong> wert ist. Wo dreissig Säulen
+              stehen, ist eher eine frei – das ist die einzige belastbare Aussage
+              über Belegung, solange es keine echten Verfügbarkeitsdaten gibt.
+              Die Gutschrift wiegt Umweg und Aufwand des Halts auf, nie die
+              Ladezeit. Auf <strong>0</strong> entscheidet allein die Uhr.
+              Bevorzugte Anbieter stellst du beim Fahrzeug ein.</p>
+
+            <div class="regler">
+              <div class="regler-kopf">
+                <label for="time-value">Deine Stunde ist
+                  <button type="button" class="info" data-info="help-time" aria-expanded="false" aria-label="Erklärung">i</button></label>
+                <output class="regler-wert"><span id="time-value-output">30</span> €</output>
+              </div>
+              <input type="range" id="time-value" min="0" max="120" step="5" value="30">
+            </div>
+            <p class="hilfe" id="help-time" hidden>Damit wird aus Geld eine Zeit,
+              und beides lässt sich gegeneinander abwägen. Bei <strong>30 €</strong>
+              wiegt ein Euro zwei Minuten: Zehn Minuten länger laden lohnt sich,
+              wenn es fünf Euro spart. Höher gestellt zählt Zeit mehr, niedriger
+              der Preis. Bei <strong>0</strong> sind Kosten gleichgültig und jolt
+              rechnet rein auf Zeit – so war es bisher.
+              <br>Die Preise pflegst du beim Fahrzeug.</p>
           </div>
-          <div>
-            <label for="charge-park">Grosser Ladepark zählt
-              <span id="charge-park-output">4</span> min</label>
-            <input type="range" id="charge-park" min="0" max="12" step="1" value="4">
-          </div>
-        </div>
-        <label for="time-value">Deine Stunde ist
-          <span id="time-value-output">30</span> € wert</label>
-        <input type="range" id="time-value" min="0" max="120" step="5" value="30">
-        <p class="leer" style="padding-top:4px">Damit wird aus Geld eine Zeit,
-          und beides lässt sich gegeneinander abwägen. Bei <strong>30 €</strong>
-          wiegt ein Euro zwei Minuten: Zehn Minuten länger laden lohnt sich,
-          wenn es fünf Euro spart. Höher gestellt zählt Zeit mehr, niedriger
-          der Preis. Bei <strong>0</strong> sind Kosten gleichgültig und jolt
-          rechnet rein auf Zeit – so war es bisher.
-          <br>Die Preise pflegst du beim Fahrzeug.</p>
-        <p class="leer" style="padding-top:4px">Einparken, Kabel, freischalten –
-          alles, was ein Halt kostet, bevor geladen wird. Höher gestellt plant
-          jolt weniger und längere Stopps, niedriger mehr und kürzere. Bei
-          <strong>0</strong> ist Anhalten gratis, und es entstehen viele
-          Kurzstopps im steilen Teil der Ladekurve – rechnerisch schnell,
-          praktisch nicht fahrbar.</p>
-        <p class="leer" style="padding-top:0">Der zweite Regler sagt, was ein
-          <strong>grosser Ladepark</strong> wert ist. Wo dreissig Säulen
-          stehen, ist eher eine frei – das ist die einzige belastbare Aussage
-          über Belegung, solange es keine echten Verfügbarkeitsdaten gibt.
-          Die Gutschrift wiegt Umweg und Aufwand des Halts auf, nie die
-          Ladezeit. Auf <strong>0</strong> entscheidet allein die Uhr.
-          Bevorzugte Anbieter stellst du beim Fahrzeug ein.</p>
+        </details>
       </div>
 
       <div class="karte-block">

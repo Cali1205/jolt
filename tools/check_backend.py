@@ -1489,7 +1489,7 @@ def main() -> int:
     verify(html.index('id="live-values"') < html.index('id="live-history"'),
            "und die Kacheln über den Diagrammen - was man im Fahren liest, "
            "steht oben")
-    verify('id="live-car-status"' in html.split("<summary>")[1].split("</summary>")[0],
+    verify('id="live-car-status"' in html.split('<details id="live-raw"')[1].split("<summary>")[1].split("</summary>")[0],
            "das Alter steht in der zugeklappten Zeile - man soll ohne "
            "Aufklappen sehen, ob es lebt")
 

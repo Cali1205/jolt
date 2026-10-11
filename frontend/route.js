@@ -649,6 +649,56 @@ window.joltRoute = (function () {
     });
   }
 
+  /* ---------- Info buttons and summaries ---------- */
+
+  /* The (i) next to an option shows or hides its explanation. A button
+   * inside a <label> would also operate the field behind it - hence
+   * preventDefault. */
+  function infoSetUp() {
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest ? event.target.closest("[data-info]") : null;
+      if (!button) return;
+      event.preventDefault();
+      const text = document.getElementById(button.dataset.info);
+      if (!text) return;
+      text.hidden = !text.hidden;
+      button.setAttribute("aria-expanded", String(!text.hidden));
+    });
+  }
+
+  /* What deviates from the default, as chips in the folded "Optionen" line:
+   * whoever has changed something there sees it without opening. */
+  function optionsSummary() {
+    const box = document.getElementById("options-summary");
+    const get = (id) => document.getElementById(id);
+    if (!box || !get("alternative") || !get("speed")) return;
+    const chips = [];
+    if (get("alternative").checked) chips.push("Mautfrei-Vergleich");
+    if (!get("own-trips").checked) chips.push("ohne eigene Strecken");
+    if (!get("tomtom").checked) chips.push("ohne TomTom");
+    const attachment = get("attachment");
+    if (attachment.value !== "1.0") {
+      chips.push(attachment.options[attachment.selectedIndex].text);
+    }
+    if (Number(get("speed").value) !== 100) chips.push(`Tempo ${get("speed").value} %`);
+    const payload = payloadValue();
+    if (payload !== null) chips.push(`Zuladung ${payload} kg`);
+    if (get("trailer").value) chips.push("Anhänger");
+    if (get("speed-max").value) chips.push(`max ${get("speed-max").value} km/h`);
+    box.innerHTML = (chips.length ? chips : ["Standard"])
+      .map((text) => `<span class="chip">${K.esc(text)}</span>`).join("");
+  }
+
+  function tradeoffSummary() {
+    const box = document.getElementById("tradeoff-summary");
+    const get = (id) => document.getElementById(id);
+    if (!box || !get("time-value")) return;
+    box.innerHTML = [`${get("time-value").value} €/h`,
+                     `${get("holding-cost").value} min/Halt`,
+                     `Park ${get("charge-park").value} min`]
+      .map((text) => `<span class="chip">${K.esc(text)}</span>`).join("");
+  }
+
   /* ---------- Set up ---------- */
 
   function set_up() {
@@ -658,6 +708,18 @@ window.joltRoute = (function () {
     K.sliderCouple("speed", "speed-output");
     payloadCouple();
     trailerCouple();
+    infoSetUp();
+    const optionsBody = document.getElementById("options-body");
+    if (optionsBody) {
+      optionsBody.addEventListener("input", optionsSummary);
+      optionsBody.addEventListener("change", optionsSummary);
+    }
+    optionsSummary();
+    for (const id of ["holding-cost", "charge-park", "time-value"]) {
+      const slider = document.getElementById(id);
+      if (slider) slider.addEventListener("input", tradeoffSummary);
+    }
+    tradeoffSummary();
     departureLimits();
     const departureField = document.getElementById("departure");
     // Anyone touching the field again after an hour's break should not work
