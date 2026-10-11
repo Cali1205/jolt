@@ -34,9 +34,9 @@ class VehicleInput(BaseModel):
     frontal_area_m2: float = Field(default=2.30, gt=0, le=20, allow_inf_nan=False)
     c_rr: float = Field(default=0.010, ge=0, le=0.1, allow_inf_nan=False)
     # Top speed in km/h; None = no limit in the model.
-    max_speed_kmh: float | None = Field(default=None, ge=30, le=300)
-    eta_drive: float = Field(default=0.88, gt=0, le=1)
-    eta_regen: float = Field(default=0.70, ge=0, le=1)
+    max_speed_kmh: float | None = Field(default=None, ge=30, le=300, allow_inf_nan=False)
+    eta_drive: float = Field(default=0.88, gt=0, le=1, allow_inf_nan=False)
+    eta_regen: float = Field(default=0.70, ge=0, le=1, allow_inf_nan=False)
     p_aux_w: float = Field(default=350.0, ge=0, le=20000, allow_inf_nan=False)
     heat_pump: bool = True
     reserve_soc: float = Field(default=10.0, ge=0, le=50)

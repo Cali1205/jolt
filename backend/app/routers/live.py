@@ -7,6 +7,7 @@ real vehicle data will dock on later.
 """
 import asyncio
 import json
+import weakref
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -156,6 +157,25 @@ def _active_session_to_vehicle(db: Session, vehicle_id: int):
             .first())
 
 
+_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def _session_lock(session_id: int) -> asyncio.Lock:
+    lock = _locks.get(session_id)
+    if lock is None:
+        lock = _locks[session_id] = asyncio.Lock()
+    return lock
+
+
+def _record_locked(db: Session, session: models.LiveSession,
+                   point: sources.RawPoint, new_plan: bool):
+    db.refresh(session)
+    return live_session.record_sample(
+        db, session, point.lat, point.lon, point.soc,
+        point.speed_kmh, point.outside_temp_c, timestamp=point.timestamp,
+        raw_values=point.raw_values, new_plan=new_plan)
+
+
 async def _process_point(db: Session, session: models.LiveSession,
                              point: sources.RawPoint,
                              new_plan: bool = True) -> dict:
@@ -169,11 +189,14 @@ async def _process_point(db: Session, session: models.LiveSession,
     # and writes synchronously, and in an `async def` that would block the
     # event loop - a batch of 500 points made every other request and every
     # WebSocket wait.
-    state = await run_in_threadpool(
-        live_session.record_sample,
-        db, session, point.lat, point.lon, point.soc,
-        point.speed_kmh, point.outside_temp_c, timestamp=point.timestamp,
-        raw_values=point.raw_values, new_plan=new_plan)
+    # One point at a time per session: `record_sample` reads and writes the
+    # factors and the plan, and two concurrent reports (phone and OBD logger,
+    # a retried batch) would otherwise overwrite each other's update. The
+    # session is refreshed under the lock, because it was loaded before
+    # waiting for it.
+    async with _session_lock(session.id):
+        state = await run_in_threadpool(
+            _record_locked, db, session, point, new_plan)
 
     message = {"kind": "zustand", "simulated": False,
                  **live_session.state_as_dict(state)}
@@ -209,8 +232,11 @@ def launch(trip_id: int, radius_km: float = Query(10.0, gt=0, le=50),
     # A second running session for the same trip would only be confusing:
     # two consumption factors for the same route, and nobody knows which one
     # applies. The old one is therefore ended.
-    for old in db.query(models.LiveSession).filter_by(trip_id=trip_id,
-                                                      running=True).all():
+    # Locked like in `finish` and in the cleanup: a start racing with an end
+    # must not learn from the same session twice.
+    for old in (db.query(models.LiveSession)
+                .filter_by(trip_id=trip_id, running=True)
+                .with_for_update().all()):
         old.running = False
         old.ended_at = datetime.utcnow()
         try:
@@ -330,7 +356,8 @@ def start_recording(start: RecordingStart,
     for old in (db.query(models.LiveSession)
                 .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
                 .filter(models.Trip.vehicle_id == vehicle.id,
-                        models.LiveSession.running.is_(True)).all()):
+                        models.LiveSession.running.is_(True))
+                .with_for_update(of=models.LiveSession).all()):
         old.running = False
         old.ended_at = datetime.utcnow()
         try:
