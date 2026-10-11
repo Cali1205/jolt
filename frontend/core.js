@@ -105,18 +105,35 @@ window.jolt = (function () {
 
   /* ---------- Meldungen ---------- */
 
+  /* Returns the box, so that the caller can take the message away again
+   * when its reason is gone. The same text twice does not pile up: the
+   * existing box gets a counter and moves to the end - on a trip with an
+   * unstable dongle the same sentence used to fill the whole screen. */
   function report(text, variety) {
     const container = document.getElementById("reports");
-    if (!container) return;
-    const box = document.createElement("div");
-    box.className = "meldung " + (variety || "hinweis");
-    box.textContent = text;
+    if (!container) return null;
+    const kind = variety || "hinweis";
+    let box = Array.from(container.children).find(
+      (b) => b.dataset.text === text && b.dataset.kind === kind);
+    if (box) {
+      const count = (Number(box.dataset.count) || 1) + 1;
+      box.dataset.count = String(count);
+      box.textContent = `${text}  (${count}×)`;
+      clearTimeout(box._timer);
+    } else {
+      box = document.createElement("div");
+      box.className = "meldung " + kind;
+      box.dataset.text = text;
+      box.dataset.kind = kind;
+      box.textContent = text;
+    }
     container.appendChild(box);
     // Errors stay until the next attempt runs - a message that disappears
     // after three seconds was never read on the road.
-    if (variety !== "fehler") {
-      setTimeout(() => box.remove(), 6000);
+    if (kind !== "fehler") {
+      box._timer = setTimeout(() => box.remove(), 6000);
     }
+    return box;
   }
 
   function reportsClear() {

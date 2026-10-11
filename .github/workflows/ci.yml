@@ -162,6 +162,10 @@ jobs:
       - name: Check CarPlay tiles
         run: node tools/check_tiles.js
 
+      # The same message must not pile up on a trip with an unstable dongle.
+      - name: Check message list
+        run: node tools/check_reports.js
+
   # The image is built on every pull request (a broken Dockerfile shows up
   # before the merge) and pushed only from main. The Unraid host pulls
   # :latest by itself (Watchtower, see docker-compose.yml), so what lands

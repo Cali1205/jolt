@@ -26,7 +26,7 @@ const storage = {};
 const reports = [];
 const K0 = {
   state: { sessionId: 7 },
-  report: (t) => reports.push(t),
+  report: (t) => { reports.push(t); return null; },
   at() {}, sliderCouple() {}, sessionRemember() {}, rememberedSession: () => null,
   api: async (fs_path, opt) => { K0.lastBody = opt && opt.body; return { kind: "zustand" }; },
 };
