@@ -53,6 +53,7 @@ window.joltLive = (function () {
   // Whether a warning about the silence has already been given. Once is
   // enough: a message that comes every twelve seconds gets switched off.
   let quietReported = false;
+  let quietBox = null;      // the message about the silent car, while it applies
   /* Measurement points for the consumption plot: [{time, kw, km, soc}, ...].
    *
    * Collected raw and only combined into sections at draw time - this way
@@ -1596,7 +1597,7 @@ window.joltLive = (function () {
        * lock should not report, a dropped dongle should. */
       if (!quietReported && age > 180) {
         quietReported = true;
-        K.report("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
+        quietBox = K.report("Seit drei Minuten kommt nichts mehr aus dem Auto. jolt "
           + "zeichnet die Strecke weiter auf, aber ohne Ladestand – zum "
           + "Lernen taugt sie dann nicht. jolt in den Vordergrund holen, "
           + "dann verbindet sich der Dongle von selbst wieder.", "fehler");
@@ -1980,6 +1981,9 @@ window.joltLive = (function () {
         latestRawValues = raw;
         latestRawValuesTime = Date.now();
         quietReported = false;
+        // The car answers again: the message is obsolete and goes away
+        // instead of waiting for the next one to pile up on top of it.
+        if (quietBox) { quietBox.remove(); quietBox = null; }
         valuesRemember(raw);
         auxLoadRemember(raw);
         const val = window.joltObd.socFromRaw(raw.soc_raw);
@@ -2260,6 +2264,7 @@ window.joltLive = (function () {
     latestRawValues = null;
     latestRawValuesTime = 0;
     quietReported = false;
+    if (quietBox) { quietBox.remove(); quietBox = null; }
     valuesAsOf = {};
     unanswered = new Set();
     consumptionStart = null;
