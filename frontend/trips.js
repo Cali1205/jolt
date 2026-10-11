@@ -72,29 +72,36 @@ window.joltTrips = (function () {
     return begin || past || "ohne Namen";
   }
 
+  /* One card per trip instead of a table with eleven columns: on the phone
+   * the rear columns used to drop out anyway. The two figures that decide
+   * (consumption, kilometres) are big, the rest are chips. */
   function row(trip) {
-    const soc = (trip.soc_at_target === null || trip.soc_at_target === undefined)
-      ? "" : `${num(trip.start_soc, 0)}→${num(trip.soc_at_target, 0)} %`;
-    return `<tr data-id="${trip.id}">
-      <td class="datum">${date(trip.created_at)}</td>
-      <td class="strecke">
-        <div class="titel">${distance(trip)}</div>
-        <div class="unter">${trip.vehicle || ""} ${brands(trip)}</div>
-      </td>
-      <td class="num">${num(trip.distance_km, 0)}</td>
-      <td class="num weg-eng">${K.duration(trip.drive_time_minutes)}</td>
-      <td class="num stark">${num(trip.consumption_kwh_100km, 1)}</td>
-      <td class="num weg-schmal">${num(trip.kwh_total, 0)}</td>
-      <td class="num weg-schmal">${num(trip.outside_temp_c, 0)}</td>
-      <td class="num weg-schmal">${num(trip.payload_kg, 0)}</td>
-      <td class="num weg-schmal">${trip.speed_factor
-        ? Math.round(trip.speed_factor * 100) : ""}</td>
-      <td class="num weg-schmal">${soc}</td>
-      <td class="tat-spalte">
+    const chip = (text) => `<span class="chip">${text}</span>`;
+    const chips = [chip(K.duration(trip.drive_time_minutes)),
+      chip(num(trip.kwh_total, 0) + " kWh"),
+      chip(num(trip.outside_temp_c, 0) + " °C"),
+      trip.payload_kg ? chip(num(trip.payload_kg, 0) + " kg") : "",
+      trip.speed_factor ? chip("Tempo " + Math.round(trip.speed_factor * 100) + " %") : "",
+      (trip.soc_at_target === null || trip.soc_at_target === undefined)
+        ? "" : chip(`${num(trip.start_soc, 0)}→${num(trip.soc_at_target, 0)} %`),
+    ].join("");
+    return `<div class="fahrt" data-id="${trip.id}">
+      <div class="fahrt-kopf">
+        <div class="fahrt-text">
+          <div class="titel">${distance(trip)}</div>
+          <div class="unter">${date(trip.created_at)} · ${trip.vehicle || ""} ${brands(trip)}</div>
+        </div>
+        <div class="fahrt-zahlen">
+          <div class="stark">${num(trip.consumption_kwh_100km, 1)}<small> kWh/100</small></div>
+          <div class="unter">${num(trip.distance_km, 0)} km</div>
+        </div>
+      </div>
+      <div class="chips" style="margin-top:8px">${chips}</div>
+      <div class="fahrt-tat">
         <button class="klein" data-open="${trip.id}">öffnen</button>
-        <button class="klein" data-delete="${trip.id}">×</button>
-      </td>
-    </tr>`;
+        <button class="klein" data-delete="${trip.id}" aria-label="löschen">×</button>
+      </div>
+    </div>`;
   }
 
   async function load() {
@@ -107,25 +114,7 @@ window.joltTrips = (function () {
         holder.innerHTML = '<p class="leer">Noch keine Fahrt geplant.</p>';
         return;
       }
-      holder.innerHTML = `
-        <div class="tabelle-halter">
-          <table class="fahrten">
-            <thead><tr>
-              <th class="datum">Datum</th>
-              <th>Strecke</th>
-              <th class="num">km</th>
-              <th class="num weg-eng">Zeit</th>
-              <th class="num">kWh/100</th>
-              <th class="num weg-schmal">kWh</th>
-              <th class="num weg-schmal">°C</th>
-              <th class="num weg-schmal">Zuladung</th>
-              <th class="num weg-schmal">Tempo %</th>
-              <th class="num weg-schmal">Ladestand</th>
-              <th></th>
-            </tr></thead>
-            <tbody>${trips.map(row).join("")}</tbody>
-          </table>
-        </div>`;
+      holder.innerHTML = trips.map(row).join("");
       charged = true;
     } catch (failure) {
       holder.innerHTML = "";
@@ -429,7 +418,7 @@ window.joltTrips = (function () {
       if (uphill) { open_it(uphill.dataset.open); return; }
       const path = event.target.closest("[data-delete]");
       if (path) {
-        const row = path.closest("tr");
+        const row = path.closest(".fahrt");
         const title = row ? row.querySelector(".titel") : null;
         remove(path.dataset.delete,
                  title ? title.textContent.trim() : "Diese Fahrt");

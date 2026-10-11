@@ -43,26 +43,43 @@ window.joltVehicle = (function () {
         + "Vorteil bei der Stoppwahl." },
   ];
 
+  /* Two groups: what everybody sets (battery, charging) is open, the
+   * physics of the car sits folded behind it. Hints are not gone but behind
+   * an (i); numbers stand two to a row. */
+  const PHYSICS = ["curb_mass_kg", "payload_kg", "c_w", "frontal_area_m2", "c_rr",
+                   "max_speed_kmh", "eta_drive", "eta_regen", "p_aux_w", "waermepumpe"];
+
+  function fieldHtml(field) {
+    const id = "veh-" + field.name;
+    const info = field.hint
+      ? ` <button type="button" class="info" data-info="hint-${id}" aria-expanded="false" aria-label="Erklärung">i</button>` : "";
+    const hint = field.hint ? `<p class="hilfe" id="hint-${id}" hidden>${field.hint}</p>` : "";
+    if (field.kind === "checkbox") {
+      return `<div class="schalter-zeile feld-breit"><label for="${id}">${field.title}${info}</label>`
+        + `<input type="checkbox" id="${id}" class="schalter"></div>${hint}`;
+    }
+    let user_input;
+    if (field.kind === "auswahl") {
+      user_input = `<select id="${id}">`
+        + field.vals.map((w) => `<option value="${w}">${w}</option>`).join("")
+        + `</select>`;
+    } else if (field.kind === "text" || field.kind === "liste") {
+      user_input = `<input type="text" id="${id}">`;
+    } else {
+      user_input = `<input type="number" id="${id}" step="${field.step}">`;
+    }
+    const wide = field.kind === "text" || field.kind === "liste" ? " feld-breit" : "";
+    return `<div class="feld${wide}"><label for="${id}">${field.title}${info}</label>${user_input}${hint}</div>`;
+  }
+
   function formBuild() {
     const container = document.getElementById("vehicle-form");
-    container.innerHTML = FIELDS.map((field) => {
-      const id = "veh-" + field.name;
-      let user_input;
-      if (field.kind === "checkbox") {
-        user_input = `<input type="checkbox" id="${id}" style="width:auto">`;
-      } else if (field.kind === "auswahl") {
-        user_input = `<select id="${id}">`
-          + field.vals.map((w) => `<option value="${w}">${w}</option>`).join("")
-          + `</select>`;
-      } else if (field.kind === "text" || field.kind === "liste") {
-        user_input = `<input type="text" id="${id}">`;
-      } else {
-        user_input = `<input type="number" id="${id}" step="${field.step}">`;
-      }
-      const hint = field.hint
-        ? `<div class="unter" style="margin-top:2px">${field.hint}</div>` : "";
-      return `<label for="${id}">${field.title}</label>${user_input}${hint}`;
-    }).join("");
+    const base = FIELDS.filter((f) => !PHYSICS.includes(f.name));
+    const physics = FIELDS.filter((f) => PHYSICS.includes(f.name));
+    container.innerHTML = `<div class="formgitter">${base.map(fieldHtml).join("")}</div>`
+      + `<details class="opt"><summary><span class="opt-titel">Fahrphysik</span>`
+      + `<span class="chips"><span class="chip">Masse · cw · Wirkungsgrad</span></span></summary>`
+      + `<div class="opt-inhalt"><div class="formgitter">${physics.map(fieldHtml).join("")}</div></div></details>`;
   }
 
   function fillForm(vehicle) {

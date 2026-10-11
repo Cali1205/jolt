@@ -122,6 +122,9 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+.formgitter { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.formgitter .feld-breit, .formgitter .hilfe { grid-column: 1 / -1; }
+.formgitter .feld { min-width: 0; }
 .werte.gross { grid-template-columns: repeat(3, 1fr); }
 .werte.gross .wert .zahl { font-size: 24px; font-variant-numeric: tabular-nums; }
 .werte.gross + details.opt { margin-top: 10px; }
@@ -358,6 +361,18 @@ table.fahrten tr:hover td { background: #0c1116; }
 .marke.gut { border-color: #235c3c; color: var(--gut); }
 .marke.auf { border-color: #56421a; color: var(--akzent); }
 .marke.warn { border-color: #5b441a; color: var(--warnung); }
+.fahrt { border-top: 1px solid var(--rand); padding: 12px 0; }
+.fahrt:first-child { border-top: none; }
+.fahrt-kopf { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.fahrt-text { min-width: 0; }
+.fahrt .titel { font-weight: 600; }
+.fahrt .unter { font-size: 11px; color: var(--gedaempft); margin-top: 2px; }
+.fahrt-zahlen { text-align: right; white-space: nowrap; }
+.fahrt .stark { font: 700 18px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--akzent); }
+.fahrt .stark small { font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--gedaempft); }
+.fahrt-tat { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.fahrt-tat button.klein { min-height: 36px; min-width: 44px; }
 button.klein { background: transparent; border: 1px solid var(--rand);
   color: var(--gedaempft); border-radius: 7px; padding: 4px 9px; font: inherit;
   font-size: 12px; cursor: pointer; width: auto; }
