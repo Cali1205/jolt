@@ -161,6 +161,7 @@ button.tat:disabled { opacity: .55; cursor: default; }
 input[type="range"] { accent-color: var(--akzent); height: 28px; }
 .schalter-zeile { display: flex; justify-content: space-between; align-items: center;
   gap: 12px; padding: 8px 0; border-top: 1px solid var(--rand); }
+.schalter-zeile[hidden] { display: none; }
 .schalter-zeile:first-of-type { border-top: none; }
 .schalter-zeile label { margin: 0; flex: 1; color: var(--text); font-size: 14px; }
 input.schalter { appearance: none; -webkit-appearance: none; width: 46px; height: 28px;
@@ -868,8 +869,8 @@ table.kurve input { padding: 6px 8px; }
   <!-- ------------------------------- Trips (Fahrten) -->
   <section id="view-trips" hidden>
     <div class="karte-block">
-      <h2 style="margin-top:0">Fahrt aufzeichnen</h2>
-      <p class="leer" style="padding-top:0">Ohne Route und ohne Planung
+      <h2 style="margin-top:0">Fahrt aufzeichnen <button type="button" class="info" data-info="help-rec" aria-expanded="false" aria-label="Erklärung">i</button></h2>
+      <p class="hilfe" id="help-rec" hidden>Ohne Route und ohne Planung
         losfahren – jolt schreibt mit und baut die Strecke hinterher aus den
         Messpunkten, samt Höhenprofil aus Kartendaten. Gedacht für bekannte
         kurze Strecken: Ein paarmal dieselbe gefahren ist die sauberste Art,
@@ -906,15 +907,15 @@ table.kurve input { padding: 6px 8px; }
       <label for="template">Aus Vorlage befüllen</label>
       <select id="template"></select>
       <div id="vehicle-form"></div>
-      <h2>Ladekurve</h2>
-      <p class="leer" style="padding-top:0">Leistung bei welchem Ladestand.
+      <h2>Ladekurve <button type="button" class="info" data-info="help-curve" aria-expanded="false" aria-label="Erklärung">i</button></h2>
+      <p class="hilfe" id="help-curve" hidden>Leistung bei welchem Ladestand.
         Dazwischen wird interpoliert.</p>
       <table class="kurve"><tbody id="curve-rows"></tbody></table>
       <button class="tat neben" id="curve-row-new">Stützstelle hinzufügen</button>
       <button class="tat" id="vehicle-save">Speichern</button>
 
-      <h2>Strompreise</h2>
-      <p class="leer" style="padding-top:0">Was du je Kilowattstunde zahlst.
+      <h2>Strompreise <button type="button" class="info" data-info="help-price" aria-expanded="false" aria-label="Erklärung">i</button></h2>
+      <p class="hilfe" id="help-price" hidden>Was du je Kilowattstunde zahlst.
         jolt kann das nicht wissen – der Preis hängt an deinem Vertrag, nicht
         an der Säule: Dieselbe Ionity-Säule kostet mit Abo etwa die Hälfte
         von dem, was sie ad hoc kostet. Der Name wird als Teil verglichen,
@@ -924,8 +925,8 @@ table.kurve input { padding: 6px 8px; }
       <table class="kurve"><tbody id="price-rows"></tbody></table>
       <button class="tat neben" id="price-row-new">Anbieter hinzufügen</button>
 
-      <h2>Logger im Auto</h2>
-      <p class="leer" style="padding-top:0">Ein Gerät, das fest im Auto sitzt –
+      <h2>Logger im Auto <button type="button" class="info" data-info="help-logger" aria-expanded="false" aria-label="Erklärung">i</button></h2>
+      <p class="hilfe" id="help-logger" hidden>Ein Gerät, das fest im Auto sitzt –
         OBD2-Dongle, Kurzbefehl, Kleinstrechner – kann die Sitzung einer Fahrt
         nicht kennen; die entsteht erst beim Losfahren. Mit diesem Token meldet
         es Messpunkte an <code>POST /api/live/report</code>, und jolt sucht die
@@ -963,7 +964,8 @@ table.kurve input { padding: 6px 8px; }
     <details class="einst">
       <summary>Benachrichtigungen</summary>
       <div class="einst-inhalt">
-        <p class="leer" style="padding-top:0">Eine geänderte Ladeplanung meldet
+        <p class="unter" style="margin:0 0 6px">Änderungen der Ladeplanung aufs Telefon <button type="button" class="info" data-info="help-push" aria-expanded="false" aria-label="Erklärung">i</button></p>
+        <p class="hilfe" id="help-push" hidden>Eine geänderte Ladeplanung meldet
           jolt aufs Telefon – auch bei dunklem Bildschirm.</p>
         <dl class="einst-liste" id="settings-push"></dl>
         <button class="tat neben" id="settings-push-on">Aktivieren</button>
@@ -975,17 +977,18 @@ table.kurve input { padding: 6px 8px; }
     <details class="einst" id="settings-carplay">
       <summary>CarPlay-Darstellung <span class="einst-kurz" id="settings-carplay-short">–</span></summary>
       <div class="einst-inhalt">
-        <p class="leer" style="padding-top:0">Die Kacheln im CarPlay-Dashboard
+        <p class="hilfe" id="help-carplay" hidden>-Dashboard
           sind Bilder. Zwei Stile zum Ausprobieren – die Vorschau unten zeigt
           sie mit Probewerten, so wie sie im Auto erscheinen. Die Umstellung
           gilt sofort, sobald eine Fahrt läuft.</p>
-        <label for="settings-carplay-style">Stil im Auto</label>
+        <label for="settings-carplay-style">Stil im Auto <button type="button" class="info" data-info="help-carplay" aria-expanded="false" aria-label="Erklärung">i</button></label>
         <select id="settings-carplay-style"></select>
         <h3>A – Instrument</h3>
         <div class="kachel-vorschau" id="preview-a"></div>
         <h3>B – Telemetrie</h3>
         <div class="kachel-vorschau" id="preview-b"></div>
-        <p class="leer" style="padding-top:6px">Rot, gelb, grün folgen dem Zustand:
+        <p class="unter">Farben <button type="button" class="info" data-info="help-carplay-farben" aria-expanded="false" aria-label="Erklärung">i</button></p>
+        <p class="hilfe" id="help-carplay-farben" hidden>Rot, gelb, grün folgen dem Zustand:
           Ladestand unter 35&nbsp;% gelb, unter 20&nbsp;% rot; Ankunft ab
           +2&nbsp;min gelb, ab +15&nbsp;min rot; Reserve unter 100&nbsp;km gelb,
           unter 40&nbsp;km rot. Fehlt ein Wert, bleibt der Platz leer.
@@ -997,11 +1000,11 @@ table.kurve input { padding: 6px 8px; }
     <details class="einst">
       <summary>Dongle</summary>
       <div class="einst-inhalt">
-        <label class="einst-haken">
-          <input type="checkbox" id="settings-car" style="width:auto">
-          <span>Dongle nur beim Fahren lesen</span>
-        </label>
-        <p class="leer" style="padding-top:0">Im Stand fragt jolt das Auto nichts
+        <div class="schalter-zeile">
+          <label for="settings-car">Dongle nur beim Fahren lesen <button type="button" class="info" data-info="help-settings-car" aria-expanded="false" aria-label="Erklärung">i</button></label>
+          <input type="checkbox" id="settings-car" class="schalter">
+        </div>
+        <p class="hilfe" id="help-settings-car" hidden>
           und trennt den Dongle – ein abgeschlossenes Auto löst sonst die
           Alarmanlage aus. Dieselbe Einstellung wie in der Live-Ansicht.</p>
         <button class="tat neben" id="settings-connect">Dongle verbinden</button>
@@ -1021,8 +1024,8 @@ table.kurve input { padding: 6px 8px; }
         <h3>Verbindung</h3>
         <dl class="einst-liste" id="diag-connection"></dl>
 
-        <h3>Messwerte</h3>
-        <p class="leer" style="padding-top:0">Je Messgrösse: letzter Wert und wie
+        <h3>Messwerte <button type="button" class="info" data-info="help-readings" aria-expanded="false" aria-label="Erklärung">i</button></h3>
+        <p class="hilfe" id="help-readings" hidden>Je Messgrösse: letzter Wert und wie
           alt er ist, wie oft er kam (<b>ok</b>), leer blieb (<b>leer</b> –
           das Steuergerät antwortet, aber die Datenkennung passt nicht zum
           Fahrzeug) oder ausblieb (<b>aus</b> – keine Antwort), und wie lange
@@ -1036,10 +1039,10 @@ table.kurve input { padding: 6px 8px; }
         <button class="tat neben" id="diag-reset">Zähler zurücksetzen</button>
 
         <h3>Protokoll</h3>
-        <label class="einst-haken">
-          <input type="checkbox" id="diag-flagged" style="width:auto">
-          <span>Nur Auffälliges (Fehler, Zeitüberschreitungen, Abrisse)</span>
-        </label>
+        <div class="schalter-zeile">
+          <label for="diag-flagged">Nur Auffälliges</label>
+          <input type="checkbox" id="diag-flagged" class="schalter">
+        </div>
         <pre id="diag-log" class="diag-protokoll"></pre>
         <button class="tat neben" id="diag-copy">Bericht kopieren</button>
         <button class="tat neben" id="diag-log-clear">Protokoll leeren</button>
@@ -1048,8 +1051,8 @@ table.kurve input { padding: 6px 8px; }
           davon ist ein Geheimnis. Zum Einfügen in eine Nachricht, wenn ein Wert
           fehlt.</p>
 
-        <h3>Befehl senden</h3>
-        <p class="leer" style="padding-top:0">Ein ELM327-Befehl (<code>ATRV</code>,
+        <h3>Befehl senden <button type="button" class="info" data-info="help-command" aria-expanded="false" aria-label="Erklärung">i</button></h3>
+        <p class="hilfe" id="help-command" hidden>Ein ELM327-Befehl (<code>ATRV</code>,
           <code>ATDP</code>) oder eine Abfrage (<code>22028C</code>). Die Antwort
           steht im Protokoll. <strong>Während einer laufenden Fahrt</strong> stört
           ein Befehl die Messung: Adresse und Filter werden danach neu gesetzt,
@@ -1060,13 +1063,13 @@ table.kurve input { padding: 6px 8px; }
                  enterkeyhint="send">
           <button class="tat" id="diag-send" style="margin:0">Senden</button>
         </div>
-        <label class="einst-haken" id="diag-trip-row" hidden>
-          <input type="checkbox" id="diag-trip-ok" style="width:auto">
-          <span>Trotz laufender Fahrt senden</span>
-        </label>
+        <div class="schalter-zeile" id="diag-trip-row" hidden>
+          <label for="diag-trip-ok">Trotz laufender Fahrt senden</label>
+          <input type="checkbox" id="diag-trip-ok" class="schalter">
+        </div>
 
-        <h3>Mithören (passiv)</h3>
-        <p class="leer" style="padding-top:0">Hört eine Weile auf dem Bus zu und
+        <h3>Mithören (passiv) <button type="button" class="info" data-info="help-listen" aria-expanded="false" aria-label="Erklärung">i</button></h3>
+        <p class="hilfe" id="help-listen" hidden>Hört eine Weile auf dem Bus zu und
           zeigt, welche Meldungen ohne Anfrage ankommen – und ob sich ihr Inhalt
           ändert. <strong>Gesendet werden nur AT-Befehle, die im Dongle bleiben,
           nichts auf den CAN.</strong> Gedacht für ein ladendes Auto, ohne dass
