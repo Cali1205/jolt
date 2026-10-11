@@ -240,18 +240,28 @@ window.joltRoute = (function () {
     document.getElementById("result").hidden = false;
 
     const reserveVariety = trip.suffices ? "gut" : "schlecht";
+    // Three figures that decide, the rest folded away behind "Details".
     document.getElementById("metrics").innerHTML = [
       K.valueTile("Strecke", K.num(trip.distance_km) + " km"),
       K.valueTile("Fahrzeit", K.duration(trip.drive_time_minutes)),
-      trafficTile(trip, latestVariants),
-      K.valueTile("Energie", K.num(trip.kwh_total, 1) + " kWh"),
-      K.valueTile("Verbrauch", K.num(trip.consumption_kwh_100km, 1) + " kWh/100"),
       trip.suffices
         ? K.valueTile("Am Ziel", K.num(trip.soc_at_target) + " %", "gut")
         : K.valueTile("Reserve bei", K.num(trip.reserve_at_km) + " km",
                        reserveVariety),
+    ].join("");
+    document.getElementById("metrics-more").innerHTML = [
+      trafficTile(trip, latestVariants),
+      K.valueTile("Energie", K.num(trip.kwh_total, 1) + " kWh"),
+      K.valueTile("Verbrauch", K.num(trip.consumption_kwh_100km, 1) + " kWh/100"),
       K.valueTile("Gerechnet bei", K.num(trip.weather.temp_c, 1) + " °C"),
     ].join("");
+    const chips = document.getElementById("metrics-chips");
+    if (chips) {
+      chips.innerHTML = [K.num(trip.kwh_total, 1) + " kWh",
+                         K.num(trip.consumption_kwh_100km, 1) + "/100",
+                         K.num(trip.weather.temp_c) + " °C"]
+        .map((x) => `<span class="chip">${x}</span>`).join("");
+    }
 
     if (!trip.suffices) {
       K.report(`Die Strecke ist ohne Nachladen nicht zu schaffen: Die Reserve `
@@ -427,23 +437,29 @@ window.joltRoute = (function () {
   function drawPlan(plan, planList, vals) {
     if (!plan.feasible) {
       planList.innerHTML = `<li class="leer">${sanitize(plan.reason)}</li>`;
+      const hide = document.getElementById("plan-details");
+      if (hide) hide.hidden = true;
       return;
     }
 
     vals.innerHTML = [
       K.valueTile("Gesamt", K.duration(plan.total_minutes)),
-      K.valueTile("davon Laden", K.duration(plan.charge_time_minutes)),
-      K.valueTile("davon Umwege", K.duration(plan.detour_time_minutes)),
-      // Make visible what the mere number of stops costs - otherwise the slider
-      // next to it is a number without effect that you can see.
-      K.valueTile("davon Halte", K.duration(plan.holding_cost_minutes)),
-      // The second yardstick next to time. Without it the time-value slider
-      // would be a setting whose effect you cannot see.
-      K.valueTile("Stromkosten", K.num(plan.cost_eur, 2) + " €"),
       K.valueTile("Stopps", String(plan.stop_count)),
       K.valueTile("Am Ziel", K.num(plan.soc_at_target) + " %",
                    plan.soc_at_target >= 15 ? "gut" : ""),
     ].join("");
+    // The breakdown makes the sliders' effect visible (holding cost, cost
+    // per hour) - but it is not what you read first.
+    const more = document.getElementById("charge-plan-more");
+    if (more) {
+      more.innerHTML = [
+        K.valueTile("davon Laden", K.duration(plan.charge_time_minutes)),
+        K.valueTile("davon Umwege", K.duration(plan.detour_time_minutes)),
+        K.valueTile("davon Halte", K.duration(plan.holding_cost_minutes)),
+        K.valueTile("Stromkosten", K.num(plan.cost_eur, 2) + " €"),
+      ].join("");
+      document.getElementById("plan-details").hidden = false;
+    }
 
     if (!plan.stop_count) {
       planList.innerHTML = '<li class="leer">Kein Ladestopp nötig – die Strecke '
@@ -473,19 +489,28 @@ window.joltRoute = (function () {
             Ausweichstandort ohne Nachladen erreichbar${tight
               ? " – und hier stehen nur wenige Ladepunkte" : ""}</div>`;
 
+      // Charge bar: grey up to the arrival level, green for what is added.
+      const from = Math.max(0, Math.min(100, Number(s.arrival_soc) || 0));
+      const to = Math.max(from, Math.min(100, Number(s.departure_soc) || 0));
       entry.innerHTML = `
-        <div class="haupt">
-          <div class="titel">${i + 1}. ${sanitize(s.name || s.operator
+        <div class="stopp-kopf">
+          <span class="stopp-nr">${i + 1}</span>
+          <div class="titel">${sanitize(s.name || s.operator
             || "Ladepunkt")}</div>
-          <div class="unter">km ${K.num(s.km_on_route)} · nach
-            ${K.duration(s.arrival_minute)} · ${K.num(s.arrival_soc)} %
-            → ${K.num(s.departure_soc)} % · ${K.num(s.kwh_charged, 1)} kWh
-            · Umweg ${K.num(s.detour_minutes, 1)} min
-            · ${s.point_count} Ladepunkte${
-              s.cost_eur ? " · " + K.num(s.cost_eur, 2) + " €" : ""}</div>
-          ${detour_alt}
+          <div class="stopp-dauer">${K.duration(s.charge_time_minutes)}</div>
         </div>
-        <div class="kw">${K.duration(s.charge_time_minutes)}</div>`;
+        <div class="ladebalken"><i class="vorher" style="width:${from}%"></i><i
+          style="left:${from}%;width:${to - from}%"></i></div>
+        <div class="ladebalken-zahlen"><span>${K.num(from)} %</span><span>+${
+          K.num(s.kwh_charged, 1)} kWh</span><span>${K.num(to)} %</span></div>
+        <div class="chips" style="margin-top:8px">
+          <span class="chip">km ${K.num(s.km_on_route)}</span>
+          <span class="chip">nach ${K.duration(s.arrival_minute)}</span>
+          <span class="chip">Umweg ${K.num(s.detour_minutes, 1)} min</span>
+          <span class="chip">${s.point_count} Punkte</span>${
+            s.cost_eur ? `<span class="chip">${K.num(s.cost_eur, 2)} €</span>` : ""}
+        </div>
+        ${detour_alt}`;
       planList.appendChild(entry);
     });
   }

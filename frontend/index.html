@@ -122,6 +122,23 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+.werte.gross { grid-template-columns: repeat(3, 1fr); }
+.werte.gross .wert .zahl { font-size: 24px; font-variant-numeric: tabular-nums; }
+.werte.gross + details.opt { margin-top: 10px; }
+.stopps li { display: block; padding: 12px 2px; }
+.stopp-kopf { display: flex; align-items: center; gap: 10px; }
+.stopp-nr { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--akzent);
+  color: #17130a; font: 700 13px ui-monospace, Menlo, Consolas, monospace;
+  display: flex; align-items: center; justify-content: center; }
+.stopp-kopf .titel { flex: 1; min-width: 0; }
+.stopp-dauer { font: 700 18px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--akzent); white-space: nowrap; }
+.ladebalken { position: relative; height: 8px; border-radius: 99px; background: #0c1116;
+  border: 1px solid var(--rand); margin: 10px 0 4px; overflow: hidden; }
+.ladebalken i { position: absolute; top: 0; bottom: 0; background: var(--gut); }
+.ladebalken i.vorher { background: #3a4654; left: 0; }
+.ladebalken-zahlen { display: flex; justify-content: space-between;
+  font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--gedaempft); }
 /* ------------------------------- Planning: technical, dense
  *
  * Route as a line from start to destination, sliders with the value in a
@@ -602,7 +619,12 @@ table.kurve input { padding: 6px 8px; }
       </div>
 
       <div class="karte-block">
-        <div class="werte" id="metrics"></div>
+        <div class="werte gross" id="metrics"></div>
+        <details class="opt" id="metrics-details">
+          <summary><span class="opt-titel">Details</span>
+            <span class="chips" id="metrics-chips"></span></summary>
+          <div class="opt-inhalt"><div class="werte" id="metrics-more"></div></div>
+        </details>
         <canvas id="profile"></canvas>
         <div class="karte-fuss">
           <span>Ladestand über der Strecke</span>
@@ -616,8 +638,12 @@ table.kurve input { padding: 6px 8px; }
 
       <div class="karte-block">
         <h2 style="margin-top:0">Ladeplan</h2>
-        <div class="werte" id="charge-plan-values"></div>
-        <ol class="liste" id="charge-plan"></ol>
+        <div class="werte gross" id="charge-plan-values"></div>
+        <details class="opt" id="plan-details" hidden>
+          <summary><span class="opt-titel">Aufschlüsselung</span></summary>
+          <div class="opt-inhalt"><div class="werte" id="charge-plan-more"></div></div>
+        </details>
+        <ol class="liste stopps" id="charge-plan"></ol>
         <!-- The sliders sit with the charging plan and not with the charger
              filters: they do not change which charging points come into
              question, but how many stops are worthwhile. -->
