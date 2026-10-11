@@ -286,9 +286,20 @@ def part_eventloop() -> None:
     source = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                                "backend", "app", "routers", "live.py"),
                   encoding="utf-8").read()
-    verify("await run_in_threadpool(\n        live_session.record_sample" in source,
+    verify("async with _session_lock(session.id):" in source
+           and "await run_in_threadpool(\n            _record_locked" in source
+           and "live_session.record_sample(" in source,
            "das Einsortieren eines Messpunkts läuft im Threadpool - ein Stapel "
            "von 500 Punkten hielt sonst jede andere Anfrage und jeden WebSocket an")
+    from app.routers import live as live_router
+    import asyncio as _aio
+
+    async def same_lock():
+        lock = live_router._session_lock(4711)
+        return (live_router._session_lock(4711) is lock
+                and live_router._session_lock(4712) is not lock)
+    verify(_aio.run(same_lock()),
+           "je Sitzung gibt es genau eine Sperre, verschiedene Sitzungen teilen sie nicht")
     import re
     for name in ("report_point", "report_points", "report_logger", "simulate"):
         body = re.search(r"async def %s\(.*?(?=\n@router|\nclass |\Z)" % name,

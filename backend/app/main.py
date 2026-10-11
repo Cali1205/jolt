@@ -225,7 +225,7 @@ def obd_page():
                           int(os.path.getmtime(os.path.join(FRONTEND, name))))
         except OSError:
             pass
-    html = html.replace("STAND", time.strftime("%d.%m. %H:%M",
+    html = html.replace("{{STAND}}", time.strftime("%d.%m. %H:%M",
                                                time.localtime(newest)))
     return HTMLResponse(html, headers=WITHOUT_CACHE)
 
