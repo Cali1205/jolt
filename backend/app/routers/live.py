@@ -452,6 +452,10 @@ async def report_logger(report: LoggerReport, request: Request,
         # unfiltered.
         raise HTTPException(400, str(failure))
 
+    # Same time check as /point and /points, for every source: normalises to
+    # naive UTC and rejects a clock from 1970 or from the future.
+    point.timestamp = _examine_time(point.timestamp)
+
     session = await run_in_threadpool(_active_session_to_vehicle, db,
                                       vehicle.id)
     if not session:

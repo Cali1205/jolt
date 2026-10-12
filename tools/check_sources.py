@@ -89,6 +89,16 @@ def part_jolt():
     verify(point.timestamp is None and point.charges is None,
            "was nicht mitgeschickt wurde, bleibt None - und wird nicht geraten")
 
+    base = {"lat": 48.13, "lon": 11.58, "soc": 62.5}
+    raises(q, {**base, "timestamp": "gestern"},
+           "ein kaputter Zeitstempel ist ein SourcesError und kein 500", "Zeitstempel")
+    raises(q, {**base, "speed_kmh": float("inf")},
+           "unendlich ist keine Geschwindigkeit", "keine Zahl")
+    raises(q, {**base, "speed_kmh": 9999},
+           "wie beim angemeldeten Weg: über 500 km/h wird abgelehnt", "Geschwindigkeit")
+    raises(q, {**base, "outside_temp_c": 200},
+           "eine Außentemperatur von 200 °C auch", "Außentemperatur")
+
     point = q.normalize({"lat": 48.13, "lon": 11.58, "soc": 62.5,
                              "timestamp": "2026-08-25T09:30:00", "charges": True})
     verify(point.timestamp == datetime(2026, 8, 25, 9, 30),

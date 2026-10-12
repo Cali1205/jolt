@@ -11,7 +11,7 @@ service is.
 """
 from datetime import datetime
 
-from . import RawPoint, limits, required, truth, num
+from . import RawPoint, SourcesError, limits, required, truth, num
 
 
 # Phones that already post (an iOS shortcut, a logger app) still use the field
@@ -26,14 +26,23 @@ class JoltFormat:
     def normalize(self, records: dict) -> RawPoint:
         records = {LEGACY_KEYS.get(key, key): value for key, value in records.items()}
         timestamp = records.get("timestamp")
+        try:
+            timestamp = (datetime.fromisoformat(timestamp)
+                         if isinstance(timestamp, str) and timestamp else None)
+        except ValueError:
+            raise SourcesError(f"Zeitstempel unbrauchbar: {timestamp!r}")
+        speed = num(records, "speed_kmh")
+        temperature = num(records, "outside_temp_c")
         return RawPoint(
             lat=limits(required(records, "lat"), -90, 90, "Breitengrad"),
             lon=limits(required(records, "lon"), -180, 180, "Längengrad"),
             soc=limits(required(records, "soc"), 0, 100, "Ladestand"),
-            speed_kmh=num(records, "speed_kmh"),
-            outside_temp_c=num(records, "outside_temp_c"),
-            timestamp=datetime.fromisoformat(timestamp) if isinstance(timestamp, str) and timestamp
-            else None,
+            # The same limits as the authenticated Sample model: a logger
+            # is not allowed to send what the app would reject.
+            speed_kmh=None if speed is None else limits(speed, 0, 500, "Geschwindigkeit"),
+            outside_temp_c=None if temperature is None
+            else limits(temperature, -80, 70, "Außentemperatur"),
+            timestamp=timestamp,
             charges=truth(records, "charges"),
             # Taken over unchanged: a translator that tidies up here throws
             # away exactly what the field is for.
