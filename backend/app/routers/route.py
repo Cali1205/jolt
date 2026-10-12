@@ -767,7 +767,10 @@ def trips_list(db: Session = Depends(get_db), bound: int = Query(30, ge=1, le=20
             "recording": bool(f.recording),
             # Whether this trip was actually driven - a planned trip without
             # a live session is a draft, not a memory.
-            "driven": bool(f.live_sessions)})
+            "driven": bool(f.live_sessions),
+            # The latest session of this trip: the trips view opens its
+            # measured points from there.
+            "session_id": max((s.id for s in f.live_sessions), default=None)})
     return result
 
 

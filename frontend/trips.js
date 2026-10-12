@@ -113,6 +113,9 @@ window.joltTrips = (function () {
     if (holder) holder.innerHTML = '<p class="leer">lädt …</p>';
     try {
       const trips = await K.api("/api/trips");
+      for (const trip of trips) {
+        if (trip.session_id) sessions.set(trip.id, trip.session_id);
+      }
       const driven = trips.filter((t) => t.driven || t.recording);
       const drafts = trips.filter((t) => !(t.driven || t.recording));
       if (holder) {
@@ -131,6 +134,139 @@ window.joltTrips = (function () {
       if (plans) plans.innerHTML = "";
       K.report("Fahrten: " + failure.message, "fehler");
     }
+  }
+
+  /* ---------- Detail of a driven trip (stays in this tab) ---------- */
+
+  const sessions = new Map();   // trip id -> session id, from the list
+
+  function haversineKm(a, b) {
+    const rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 12742 * Math.asin(Math.sqrt(h));
+  }
+
+  /* The measured points as (km, soc). `km_on_route` is only set on a planned
+   * trip; a recording has none, so the distance is summed up from the track. */
+  function measuredCurve(points) {
+    let run = 0, last = null;
+    return points.filter((p) => typeof p.soc === "number").map((p) => {
+      if (typeof p.km_on_route === "number") {
+        run = p.km_on_route;
+      } else if (last) {
+        run += haversineKm(last, p);
+      }
+      last = p;
+      return { km: run, soc: p.soc };
+    });
+  }
+
+  function drawTripProfile(trip, curve) {
+    const canvas = document.getElementById("trip-profile");
+    if (!canvas) return;
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (!width || !height) return;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    const pen = canvas.getContext("2d");
+    pen.setTransform(ratio, 0, 0, ratio, 0, 0);
+    pen.clearRect(0, 0, width, height);
+    const planned = (trip.profile || []).filter((p) => typeof p.soc === "number");
+    const maxKm = Math.max(1, ...planned.map((p) => p.km || 0),
+                           ...curve.map((p) => p.km));
+    const x = (km) => (km / maxKm) * (width - 8) + 4;
+    const y = (soc) => height - 6 - (Math.max(0, Math.min(100, soc)) / 100) * (height - 24);
+    const line = (list, color, dash) => {
+      if (list.length < 2) return;
+      pen.beginPath();
+      list.forEach((p, i) => (i ? pen.lineTo(x(p.km), y(p.soc)) : pen.moveTo(x(p.km), y(p.soc))));
+      pen.strokeStyle = color; pen.lineWidth = dash ? 1.5 : 2;
+      pen.setLineDash(dash ? [4, 4] : []); pen.stroke(); pen.setLineDash([]);
+    };
+    line(planned, "#8a97a5", true);
+    line(curve, "#ffc93c", false);
+  }
+
+  function chip(text) { return `<span class="chip">${text}</span>`; }
+
+  async function openDetail(id) {
+    const overview = document.getElementById("trips-overview");
+    const detail = document.getElementById("trip-detail");
+    if (!detail) return;
+    try {
+      const trip = await K.api("/api/trips/" + id);
+      const sessionId = sessions.get(Number(id));
+      let points = [];
+      if (sessionId) {
+        points = (await K.api(`/api/live/${sessionId}/points`)).points || [];
+      }
+      const curve = measuredCurve(points);
+
+      const first = points[0], last = points[points.length - 1];
+      const measuredKm = curve.length ? curve[curve.length - 1].km : null;
+      const minutes = (first && last)
+        ? (new Date(last.timestamp) - new Date(first.timestamp)) / 60000 : null;
+      const socFrom = curve.length ? curve[0].soc : trip.start_soc;
+      const socTo = curve.length ? curve[curve.length - 1].soc : trip.soc_at_target;
+
+      // Consumption from the car's own counters, if it delivered them.
+      let consumption = null;
+      const withCounter = points.filter((p) => typeof p.odometer_km === "number"
+                                                && typeof p.discharge_kwh === "number");
+      if (withCounter.length > 1) {
+        const a = withCounter[0], b = withCounter[withCounter.length - 1];
+        const km = b.odometer_km - a.odometer_km, kwh = b.discharge_kwh - a.discharge_kwh;
+        if (km > 1 && kwh > 0) consumption = kwh / km * 100;
+      }
+
+      document.getElementById("trip-title").textContent =
+        distance({ start: trip.start.text, destination: trip.destination.text });
+      document.getElementById("trip-sub").textContent =
+        `${trip.vehicle.name} · ${points.length} Messpunkte`;
+      document.getElementById("trip-metrics").innerHTML = [
+        K.valueTile("Strecke", K.num(measuredKm !== null ? measuredKm : trip.distance_km) + " km"),
+        K.valueTile("Dauer", K.duration(minutes !== null ? minutes : trip.drive_time_minutes)),
+        K.valueTile("Ladestand", socTo === null || socTo === undefined
+          ? "–" : `${K.num(socFrom)}→${K.num(socTo)} %`),
+      ].join("");
+      document.getElementById("trip-more").innerHTML = [
+        K.valueTile(consumption !== null ? "Verbrauch (gemessen)" : "Verbrauch (geplant)",
+          K.num(consumption !== null ? consumption : trip.consumption_kwh_100km, 1) + " kWh/100"),
+        K.valueTile("Geplant", K.num(trip.distance_km) + " km · "
+          + K.duration(trip.drive_time_minutes)),
+        K.valueTile("Gerechnet bei", K.num(trip.weather.temp_c, 1) + " °C"),
+      ].join("");
+      document.getElementById("trip-chips").innerHTML = chip(
+        K.num(consumption !== null ? consumption : trip.consumption_kwh_100km, 1) + "/100");
+
+      overview.hidden = true;
+      detail.hidden = false;
+      drawTripProfile(trip, curve);
+
+      // Map: the track driven, otherwise the planned route.
+      const track = points.length > 1 ? points.map((p) => [p.lon, p.lat]) : trip.geometry;
+      window.joltMap.drawNew();
+      window.joltMap.setRoute(track);
+      const end = track[track.length - 1], begin = track[0];
+      window.joltMap.setMarker([
+        { lat: begin[1], lon: begin[0], kind: "start", text: "Start" },
+        { lat: end[1], lon: end[0], kind: "ziel", text: "Ziel" }]);
+      window.joltMap.onRouteFit();
+      window.scrollTo(0, 0);
+    } catch (failure) {
+      K.report("Fahrt öffnen: " + failure.message, "fehler");
+    }
+  }
+
+  function closeDetail() {
+    document.getElementById("trip-detail").hidden = true;
+    document.getElementById("trips-overview").hidden = false;
+    // The map goes back to what planning shows.
+    const planned = K.state.trip;
+    if (planned && planned.geometry) window.joltMap.setRoute(planned.geometry);
   }
 
   /* Bring an old trip back onto the map.
@@ -420,6 +556,7 @@ window.joltTrips = (function () {
 
   function set_up() {
     K.at("rec-start", "click", startRecording);
+    K.at("trip-back", "click", closeDetail);
     carplayConnect();
     dongleHint();
     // One listener on the holder instead of one per row: the list is rebuilt
@@ -429,7 +566,11 @@ window.joltTrips = (function () {
       if (!holder) continue;
       holder.addEventListener("click", (event) => {
         const uphill = event.target.closest("[data-open]");
-        if (uphill) { open_it(uphill.dataset.open); return; }
+        if (uphill) {
+          if (holder.id === "trips-list") openDetail(uphill.dataset.open);
+          else open_it(uphill.dataset.open);
+          return;
+        }
         const path = event.target.closest("[data-delete]");
         if (path) {
           const row = path.closest(".fahrt");
