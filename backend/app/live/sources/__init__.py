@@ -116,7 +116,9 @@ def num(records: dict, *names: str) -> float | None:
         # NaN does not come out of JSON, but it does come out of
         # float("nan") - and it silently poisons every calculation behind it,
         # because every comparison with it yields False and no limit kicks in.
-        if read != read:
+        # inf compares fine, which is why it needs its own test: it passes
+        # a missing limit and then distorts the calibration.
+        if read != read or read in (float("inf"), float("-inf")):
             raise SourcesError(f"Feld {name!r} ist keine Zahl: {value!r}")
         return read
     return None

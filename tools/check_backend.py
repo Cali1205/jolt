@@ -1161,7 +1161,7 @@ def main() -> int:
     # happens in live/quellen/, details are checked by check_sources.py.
     foreign = client.post("/api/live/report", json={
         "token": token, "format": "abrp",
-        "tlm": {"utc": 1787654321, "soc": 44.0, "lat": sample["lat"],
+        "tlm": {"utc": int(__import__("time").time()), "soc": 44.0, "lat": sample["lat"],
                 "lon": sample["lon"], "speed": 98.0, "ext_temp": 19.0,
                 "is_charging": 0}})
     verify(foreign.status_code == 200
