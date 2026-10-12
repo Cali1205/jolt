@@ -892,7 +892,7 @@ table.kurve input { padding: 6px 8px; }
 
   <!-- ------------------------------- Trips (Fahrten) -->
   <section id="view-trips" hidden>
-    <div class="karte-block">
+    <div class="karte-block" id="trips-overview">
       <h2 style="margin-top:0">Fahrt aufzeichnen <button type="button" class="info" data-info="help-rec" aria-expanded="false" aria-label="Erklärung">i</button></h2>
       <p class="hilfe" id="help-rec" hidden>Ohne Route und ohne Planung
         losfahren – jolt schreibt mit und baut die Strecke hinterher aus den
@@ -920,6 +920,28 @@ table.kurve input { padding: 6px 8px; }
 
       <h2>Gefahrene Fahrten</h2>
       <div id="trips-list"></div>
+    </div>
+
+    <!-- Detail of a driven or recorded trip: stays in this tab, so that what
+         was driven stays apart from planning. -->
+    <div id="trip-detail" hidden>
+      <div class="karte-block">
+        <button class="klein" id="trip-back" type="button">← Alle Fahrten</button>
+        <h2 id="trip-title" style="margin:10px 0 2px"></h2>
+        <div class="unter" id="trip-sub"></div>
+        <div class="werte gross" id="trip-metrics" style="margin-top:12px"></div>
+        <details class="opt">
+          <summary><span class="opt-titel">Details</span>
+            <span class="chips" id="trip-chips"></span></summary>
+          <div class="opt-inhalt"><div class="werte" id="trip-more"></div></div>
+        </details>
+        <canvas id="trip-profile" style="width:100%;height:140px;display:block;margin-top:10px"></canvas>
+        <div class="karte-fuss">
+          <span>Ladestand über der Strecke</span>
+          <span><span style="color:#ffc93c">━</span> gemessen · <span style="color:#8a97a5">╌</span> geplant</span>
+        </div>
+      </div>
+      <div id="map-holder-trips"></div>
     </div>
   </section>
 
