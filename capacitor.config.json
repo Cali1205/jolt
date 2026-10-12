@@ -7,7 +7,8 @@
     "allowNavigation": ["jolt.the-smarthome.de"]
   },
   "ios": {
-    "contentInset": "always",
+    "contentInset": "never",
+    "backgroundColor": "#101418",
     "limitsNavigationsToAppBoundDomains": false
   }
 }
