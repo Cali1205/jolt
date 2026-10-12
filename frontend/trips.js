@@ -104,20 +104,31 @@ window.joltTrips = (function () {
     </div>`;
   }
 
+  /* Planned and driven apart: saved plans (drafts) belong to "Planen",
+   * what was driven or recorded belongs to "Fahrten". One request, two lists. */
   async function load() {
     const holder = document.getElementById("trips-list");
-    if (!holder) return;
-    holder.innerHTML = '<p class="leer">lädt …</p>';
+    const plans = document.getElementById("plans-list");
+    if (!holder && !plans) return;
+    if (holder) holder.innerHTML = '<p class="leer">lädt …</p>';
     try {
       const trips = await K.api("/api/trips");
-      if (!trips.length) {
-        holder.innerHTML = '<p class="leer">Noch keine Fahrt geplant.</p>';
-        return;
+      const driven = trips.filter((t) => t.driven || t.recording);
+      const drafts = trips.filter((t) => !(t.driven || t.recording));
+      if (holder) {
+        holder.innerHTML = driven.length ? driven.map(row).join("")
+          : '<p class="leer">Noch keine Fahrt gefahren oder aufgezeichnet.</p>';
       }
-      holder.innerHTML = trips.map(row).join("");
+      if (plans) {
+        plans.innerHTML = drafts.length ? drafts.map(row).join("")
+          : '<p class="leer">Noch keine Planung gespeichert.</p>';
+        const count = document.getElementById("plans-count");
+        if (count) count.textContent = String(drafts.length);
+      }
       charged = true;
     } catch (failure) {
-      holder.innerHTML = "";
+      if (holder) holder.innerHTML = "";
+      if (plans) plans.innerHTML = "";
       K.report("Fahrten: " + failure.message, "fehler");
     }
   }
@@ -129,8 +140,10 @@ window.joltTrips = (function () {
    * same thing inevitably drift apart. */
   async function open_it(id) {
     try {
-      await window.joltRoute.tripCharging(Number(id));
+      // View first, then draw: a canvas in a hidden view has no size, and the
+      // charge curve over the route would stay blank.
       window.joltApp.showView("plan");
+      await window.joltRoute.tripCharging(Number(id));
     } catch (failure) {
       K.report("Fahrt öffnen: " + failure.message, "fehler");
     }
@@ -409,21 +422,23 @@ window.joltTrips = (function () {
     K.at("rec-start", "click", startRecording);
     carplayConnect();
     dongleHint();
-    const holder = document.getElementById("trips-list");
-    if (!holder) return;
     // One listener on the holder instead of one per row: the list is rebuilt
     // after every deletion, individually bound listeners would then be dead.
-    holder.addEventListener("click", (event) => {
-      const uphill = event.target.closest("[data-open]");
-      if (uphill) { open_it(uphill.dataset.open); return; }
-      const path = event.target.closest("[data-delete]");
-      if (path) {
-        const row = path.closest(".fahrt");
-        const title = row ? row.querySelector(".titel") : null;
-        remove(path.dataset.delete,
+    for (const holder of [document.getElementById("trips-list"),
+                          document.getElementById("plans-list")]) {
+      if (!holder) continue;
+      holder.addEventListener("click", (event) => {
+        const uphill = event.target.closest("[data-open]");
+        if (uphill) { open_it(uphill.dataset.open); return; }
+        const path = event.target.closest("[data-delete]");
+        if (path) {
+          const row = path.closest(".fahrt");
+          const title = row ? row.querySelector(".titel") : null;
+          remove(path.dataset.delete,
                  title ? title.textContent.trim() : "Diese Fahrt");
-      }
-    });
+        }
+      });
+    }
   }
 
   // Load on switching to the view, not at startup: whoever never taps the

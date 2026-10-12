@@ -13,7 +13,7 @@ window.joltApp = (function () {
     }
     mapRehang(name);
     // The trips list only fetches its data when someone is looking.
-    if (name === "trips" && window.joltTrips) window.joltTrips.show();
+    if ((name === "trips" || name === "plan") && window.joltTrips) window.joltTrips.show();
     // The settings update every second - but only while they are being
     // looked at.
     if (window.joltSettings) window.joltSettings.show(name === "settings");

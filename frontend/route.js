@@ -100,6 +100,8 @@ window.joltRoute = (function () {
         ...trailerValues(),
         speed_max_kmh: numberOrNull("speed-max"),
       }});
+      // The new plan is stored: the list of saved plans catches up.
+      if (window.joltTrips) window.joltTrips.load();
       latestVariants = response.variants || [];
       latestDeparture = response.departure || null;
       drawVariants();

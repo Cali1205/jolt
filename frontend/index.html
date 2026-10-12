@@ -629,6 +629,14 @@ table.kurve input { padding: 6px 8px; }
       <button class="tat gross" id="compute">Route rechnen</button>
     </div>
 
+    <!-- Saved plans live with planning, not with the trips: a plan is not
+         a trip until it has been driven. -->
+    <details class="opt" id="plans-block">
+      <summary><span class="opt-titel">Gespeicherte Planungen</span>
+        <span class="chips"><span class="chip" id="plans-count">–</span></span></summary>
+      <div class="opt-inhalt"><div id="plans-list"></div></div>
+    </details>
+
     <div id="result" hidden>
       <div class="karte-block" id="variants-block" hidden>
         <h2 style="margin-top:0">Routenvarianten</h2>
@@ -910,7 +918,7 @@ table.kurve input { padding: 6px 8px; }
       <button class="tat" id="rec-start">Aufzeichnung starten</button>
       <p class="leer" id="rec-status"></p>
 
-      <h2>Vergangene Fahrten</h2>
+      <h2>Gefahrene Fahrten</h2>
       <div id="trips-list"></div>
     </div>
   </section>
