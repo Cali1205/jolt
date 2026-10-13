@@ -319,16 +319,16 @@ console.log("\nNebenverbraucher");
 const now_ts = NOW;
 const vals = {
   aux_load_kw: { val: 1.84, timestamp: now_ts - 20000 },
-  ptc_current_a: { val: 5.0, timestamp: now_ts - 20000 },
-  voltage_v: { val: 380, timestamp: now_ts - 20000 },
+  dcdc_current_a: { val: 30, timestamp: now_ts - 20000 },
+  batt_v: { val: 14, timestamp: now_ts - 20000 },
   compressor_w: { val: 450, timestamp: now_ts - 5 * 60000 },
   batterie_c: { val: 27.4, timestamp: now_ts - 20000 },
 };
 let n = as_of({ vals }).aux;
 verify(n.kw === 1.8 && n.text === "1,8 kW" && n.source === "gemessen",
        "der gemessene Nebenverbrauch, mit Quelle", JSON.stringify(n));
-verify(n.heatingKw === 1.9 && n.heatingText === "1,9 kW",
-       "Heizung = Strom mal Packspannung (5 A mal 380 V)", JSON.stringify(n));
+verify(n.heatingKw === 1.4 && n.heatingText === "1,4 kW",
+       "Heizung/Klima = Nebenverbrauch minus 12-V-Netz (1,84 kW minus 30 A mal 14 V)", JSON.stringify(n));
 verify(n.climateKw === 0.5 && n.climateText === "0,5 kW",
        "Klimakompressor in kW (450 W, fuenf Minuten alt ist noch gut)", JSON.stringify(n));
 verify(n.batterieC === 27 && n.batterieText === "27 °C", "Batterietemperatur");
@@ -336,9 +336,9 @@ n = as_of({ vals: { ...vals, aux_load_kw: undefined },
             aux: { kw: 0.9, timestamp: now_ts - 60000 } }).aux;
 verify(n.kw === 0.9 && n.source === "geschaetzt",
        "ohne Messung gilt die Naeherung aus dem Stand - und heisst so", JSON.stringify(n));
-n = as_of({ vals: { ptc_current_a: { val: 5, timestamp: now_ts } } }).aux;
+n = as_of({ vals: { dcdc_current_a: { val: 5, timestamp: now_ts } } }).aux;
 verify(n === null,
-       "Heizstrom ohne Packspannung ergibt keine Heizleistung - und ohne alles nichts");
+       "DC/DC-Strom ohne Nebenverbrauch ergibt keine Heizleistung - und ohne alles nichts");
 n = as_of({ vals: { aux_load_kw: { val: 1.5, timestamp: now_ts - 20 * 60000 } } }).aux;
 verify(n === null, "ein Wert, der zwanzig Minuten alt ist, wird nicht mehr gezeigt");
 n = as_of({ vals: { aux_load_kw: { val: NaN, timestamp: now_ts }, batterie_c: { val: "warm", timestamp: now_ts } } }).aux;

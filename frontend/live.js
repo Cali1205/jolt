@@ -1502,26 +1502,28 @@ window.joltLive = (function () {
     }
   }
 
-  /* Heating and air conditioning in kW: the PTC heater plus the A/C
-   * compressor. On a car with a heat pump the compressor *is* the heating
-   * for most of the year - the PTC element only kicks in when it gets really
-   * cold, and showing it alone read "0.0 kW" at 10 degrees while the
-   * auxiliary consumers drew three. The compressor is read every few rounds
-   * only, so its last value counts for two minutes; the PTC current is
-   * taken from this round or, failing that, from the same window. */
+  /* Heating and air conditioning in kW, derived: the auxiliary consumers
+   * minus the 12 V network (DC/DC converter).
+   *
+   * There is no direct reading of the cabin heater on this car. DID 221620,
+   * once taken for "heating current", is the *battery* heater and sat at
+   * 0 A on every drive while the auxiliary consumers followed the cold
+   * (0.9 kW at 13 degrees, 2.6 kW at 6). What remains of `aux_load_kw` after
+   * the DC/DC power is heater and A/C compressor - the two consumers one can
+   * influence. The DC/DC current is read only every tenth round, so its last
+   * value counts for five minutes. An estimate, hence the "≈". */
   function climateKw(raw) {
-    const fresh = (name) => {
+    const fresh = (name, ms) => {
       if (typeof raw[name] === "number") return raw[name];
       const last = valuesAsOf[name];
       return last && typeof last.val === "number"
-        && Date.now() - last.timestamp < 120000 ? last.val : null;
+        && Date.now() - last.timestamp < ms ? last.val : null;
     };
-    const ptc = fresh("ptc_current_a");
-    const volt = typeof raw.voltage_v === "number" ? raw.voltage_v : null;
-    const compressor = fresh("compressor_w");
-    const ptcKw = (ptc !== null && volt !== null) ? ptc * volt / 1000 : null;
-    if (ptcKw === null && compressor === null) return null;
-    return (ptcKw || 0) + (compressor || 0) / 1000;
+    const aux = typeof raw.aux_load_kw === "number" ? raw.aux_load_kw : null;
+    const current = fresh("dcdc_current_a", 300000);
+    const volt = fresh("batt_v", 300000);
+    if (aux === null || current === null || volt === null) return null;
+    return Math.max(0, aux - current * volt / 1000);
   }
 
   /* What the car measures - as a **row**, not a row of tiles.
@@ -1568,7 +1570,7 @@ window.joltLive = (function () {
       let n = `<b>${K.num(raw.aux_load_kw, 1)}</b> kW Nebenverbraucher`;
       const climate = climateKw(raw);
       if (climate !== null) {
-        n += `, davon <b>${K.num(climate, 1)}</b> Heizung/Klima`;
+        n += `, davon ≈<b>${K.num(climate, 1)}</b> Heizung/Klima`;
       }
       parts.push(n);
     } else if (aux_load) {
