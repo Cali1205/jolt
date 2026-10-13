@@ -409,6 +409,40 @@ window.joltReadings = {
       did: "22210E", address: "VEHICLE", rarely: 2,
       downhill: 1, len_total: 1 },
 
+    /* Cell voltages, highest and lowest cell: the first two payload bytes,
+     * /4096 V (evDash and ev-charge-tracker agree; spot2000 only says that the
+     * last byte is the cell number). The spread between the two is the
+     * balancing state of the pack, and a pack that is out of balance
+     * delivers less than its label - it belongs next to the capacity. The
+     * bounds (2.0 - 4.5 V) throw the value away if the scale is wrong. */
+    { name: "cell_max_v", title: "Zelle hoechste Spannung", unit: "V",
+      put: 3, did: "221E33", address: "BMS", rarely: 5,
+      downhill: 0, len_total: 2, divider: 4096, min: 2, max: 4.5 },
+    { name: "cell_min_v", title: "Zelle niedrigste Spannung", unit: "V",
+      put: 3, did: "221E34", address: "BMS", rarely: 5,
+      downhill: 0, len_total: 2, divider: 4096, min: 2, max: 4.5 },
+
+    /* Motor torque per axle in Nm, signed 16-bit (danjulio/ev_info_display,
+     * vehicle control unit like the auxiliary load, so no address switch).
+     * Torque times speed is the mechanical power at the wheel: together with
+     * the pack power it splits the consumption into drive and losses, and in B
+     * mode it shows how much is given back. The front axle only exists on
+     * the all-wheel versions, hence rare - on a rear-drive car it stays
+     * empty and drops out. (The source flips the sign in reverse.) */
+    { name: "torque_rear_nm", title: "Drehmoment hinten", unit: "Nm", put: 0,
+      did: "22033B", address: "VEHICLE",
+      downhill: 0, len_total: 2, sign: true, min: -1500, max: 1500 },
+    { name: "torque_front_nm", title: "Drehmoment vorn", unit: "Nm", put: 0,
+      did: "220335", address: "VEHICLE", rarely: 20,
+      downhill: 0, len_total: 2, sign: true, min: -1500, max: 1500 },
+
+    /* The charging state the BMS side reports (codingABI): 01 precondition
+     * met, 02 none, 03 error, 05 end, 16 AC, 18 trickle. Stored raw; the
+     * charging analysis can tell a charge that stops early from one that ends. */
+    { name: "charging_state_raw", title: "Ladezustand", unit: null, put: 0,
+      did: "2215D5", address: "AKKU11", rarely: 10,
+      downhill: 0, len_total: 1 },
+
     /* Energy content of the battery, as the car counts it: the same
      * address family as the capacity above, and the conversion is
      * "missing" in the list as well. Assumed like the capacity (32-bit
