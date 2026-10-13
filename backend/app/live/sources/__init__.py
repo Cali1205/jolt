@@ -133,8 +133,8 @@ def required(records: dict, *names: str) -> float:
 
 # Raw values are stored per point as JSON, so they have to stay small. The
 # authenticated Sample model and the logger translator share this check.
-RAW_VALUES_MAX_KEY = 80
-RAW_VALUES_MAX_BYTES = 8000
+RAW_VALUES_MAX_KEY = 250
+RAW_VALUES_MAX_BYTES = 24000
 
 
 def raw_values_limited(value: dict | None) -> dict | None:

@@ -45,7 +45,7 @@ REPORT_ERROR_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 
 _EXEMPT_PATH = re.compile(r"/api/live/(report|\d+/points?)")
 # Largest request body accepted on /api/. A full batch is 500 points of at
-# most 8 kB raw values; anything beyond is not a measurement.
+# most 24 kB raw values; anything beyond is not a measurement.
 MAX_BODY_BYTES = 6_000_000
 
 

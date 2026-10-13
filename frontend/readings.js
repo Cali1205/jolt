@@ -124,6 +124,9 @@ window.joltReadings = {
 
     // The DC/DC converter feeds the 12 V network from the high-voltage battery.
     DCDC: { cp: "17", sh: "FC00B9", cra: "17FE00B9", fcsh: "17FC00B9" },
+
+    // The on-board AC charger, on the 11-bit side like the climate unit.
+    CHARGER: { cp: "00", sh: "744", cra: "7AE", fcsh: "744", trace_log: "6" },
   },
 
   /* ===================================================================
@@ -443,10 +446,307 @@ window.joltReadings = {
       did: "2215D5", address: "AKKU11", rarely: 10,
       downhill: 0, len_total: 1 },
 
-    /* Not read: 222AB8 (energy content) came back as a constant 0.001 that
-     * does not follow the charge level; CO2 (2242DB), humidity (2227C4), seat
-     * heating (223ADF/223AE0) and recirculation (22263B) are not answered or
-     * constant on the ID.Buzz (drive of 2026-10-13). */
+    /* ----- Probes from the OBDb list for the ID.4 (2026-10-13) -----------
+     *
+     * OBDb/Volkswagen-ID.4 documents the conversions; the ID.Buzz sheet
+     * there is empty, so nothing below is confirmed on this car. All of it is
+     * read slowly, with tight bounds: what does not answer drops out for the
+     * session, what falls outside the bounds becomes null. The first drive
+     * tells which of them work. */
+
+    /* Energy content of the pack right now: payload bytes 2-3 times 25 Wh.
+     * (The first attempt read four bytes / 1 310 770 and got a constant
+     * 0.001 - the upper two bytes are zero, the value sits in the lower
+     * two. 1310 * 0.025 = 32.8 kWh = 45 % of 72.8, the charge level of
+     * that drive.) It has to fall with the charge level. */
+    { name: "energy_content_kwh", title: "Energieinhalt Akku", unit: "kWh",
+      put: 1, did: "222AB8", address: "AKKU11", rarely: 10,
+      downhill: 2, len_total: 2, divider: 40, min: 0, max: 120 },
+
+    /* The car's own average consumption in seven categories (16 bit each,
+     * /10; the categories are not named in the source). */
+    { name: "avg_csmp_cat0", title: "Verbrauch Auto Kat. 0", unit: null, put: 1,
+      did: "222AB7", address: "AKKU11", rarely: 40,
+      downhill: 0, len_total: 2, divider: 10, min: 0, max: 100,
+      also: [
+        { name: "avg_csmp_cat1", title: "Verbrauch Auto Kat. 1", unit: null, put: 1,
+          downhill: 2, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat2", title: "Verbrauch Auto Kat. 2", unit: null, put: 1,
+          downhill: 4, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat3", title: "Verbrauch Auto Kat. 3", unit: null, put: 1,
+          downhill: 6, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat4", title: "Verbrauch Auto Kat. 4", unit: null, put: 1,
+          downhill: 8, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat5", title: "Verbrauch Auto Kat. 5", unit: null, put: 1,
+          downhill: 10, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat6", title: "Verbrauch Auto Kat. 6", unit: null, put: 1,
+          downhill: 12, len_total: 2, divider: 10, min: 0, max: 100 },
+      ] },
+
+    /* Charge level to 0.01 %, signed 16 bit /100 (vehicle control unit). */
+    { name: "soc_fine_pct", title: "Ladestand fein", unit: "%", put: 2,
+      did: "223DEF", address: "VEHICLE", rarely: 2,
+      downhill: 0, len_total: 2, sign: true, divider: 100, min: 0, max: 100 },
+
+    /* Battery current as the motor controller sees it (/10 A) and the total
+     * current of the HV auxiliaries (/100 A). */
+    { name: "motor_batt_current_a", title: "Batteriestrom Motorsteuerung", unit: "A",
+      put: 1, did: "22035E", address: "VEHICLE", rarely: 2,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -1000, max: 1000 },
+    { name: "hv_aux_current_a", title: "HV-Nebenverbraucher Strom", unit: "A",
+      put: 2, did: "220360", address: "VEHICLE", rarely: 5,
+      downhill: 0, len_total: 2, sign: true, divider: 100, min: -100, max: 300 },
+
+    /* Climate circuit: compressor speed (byte x 100 /min), refrigerant
+     * pressure (byte x 0.2 bar), refrigerant pressure/temperature from the
+     * second sensor block (16 bit x 0.0088 bar; 16 bit x 0.1 - 40 degC) and
+     * the evaporator outlet temperature (16 bit /10, signed). */
+    { name: "compressor_rpm_b", title: "Kompressor Drehzahl (2226)", unit: "1/min",
+      put: 0, did: "222603", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, factor: 100, min: 0, max: 10000 },
+    { name: "refrig_p_bar", title: "Kältemitteldruck", unit: "bar", put: 1,
+      did: "222605", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, factor: 0.2, min: 0, max: 60 },
+    { name: "refrig_p2_bar", title: "Kältemitteldruck Fühler 1", unit: "bar", put: 2,
+      did: "224EEF", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 2, factor: 0.0088, min: 0, max: 60,
+      also: [
+        { name: "refrig_t_c", title: "Kältemitteltemperatur Fühler 1", unit: "°C", put: 1,
+          downhill: 2, len_total: 2, divider: 10, offset: -40, min: -40, max: 150 },
+      ] },
+    { name: "evaporator_t_c", title: "Verdampfer Temperatur", unit: "°C", put: 1,
+      did: "222612", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -40, max: 100 },
+
+    /* 12 V battery (battery management on the 11-bit side): voltage
+     * (16 bit /1000 + 4), current (32 bit signed /1000), charge level,
+     * temperature (byte - 40). */
+    { name: "aux12_v", title: "12-V-Batterie Spannung", unit: "V", put: 2,
+      did: "222AF7", address: "AKKU11", rarely: 20,
+      downhill: 0, len_total: 2, divider: 1000, offset: 4, min: 8, max: 17,
+      also: [
+        { name: "aux12_a", title: "12-V-Batterie Strom", unit: "A", put: 2,
+          downhill: 2, len_total: 4, sign: true, divider: 1000, min: -200, max: 200 },
+        { name: "aux12_soc_pct", title: "12-V-Batterie Ladestand", unit: "%", put: 0,
+          downhill: 7, len_total: 1, min: 0, max: 100 },
+        { name: "aux12_t_c", title: "12-V-Batterie Temperatur", unit: "°C", put: 0,
+          downhill: 8, len_total: 1, offset: -40, min: -40, max: 100 },
+      ] },
+
+    /* DC/DC converter: low-side voltage and current (battery management, 11
+     * bit) and the voltage from the converter's own control unit (16 bit
+     * /512). */
+    { name: "dcdc_low_v", title: "DC/DC Spannung niederseitig", unit: "V", put: 1,
+      did: "222A53", address: "AKKU11", rarely: 10,
+      downhill: 0, len_total: 1, divider: 10, min: 0, max: 20,
+      also: [
+        { name: "dcdc2_current_a", title: "DC/DC Strom (2)", unit: "A", put: 1,
+          downhill: 1, len_total: 2, offset: -511, min: -200, max: 300 },
+      ] },
+    { name: "dcdc_v", title: "DC/DC Spannung", unit: "V", put: 2,
+      did: "22465D", address: "DCDC", rarely: 10,
+      downhill: 0, len_total: 2, divider: 512, min: 8, max: 17 },
+
+    /* ----- Test block: everything else from the OBDb list (2026-10-13) --
+     *
+     * Read on purpose in one test drive to see which of them arrive on the
+     * ID.Buzz at all (unconfirmed, conversions from the ID.4 sheet). Slow
+     * (every 6th to 14th round), tight bounds. After the drive the ones that
+     * stay empty or constant are removed again - each costs time in the round.
+     * Not included: the 108 single cell voltages, 32-bit temperatures without a
+     * scale (224672, 224FAE, 220805) and the GPS values. */
+    { name: "motor_rpm", title: "Motordrehzahl", unit: "1/min", put: 0,
+      did: "223DF8", address: "VEHICLE", rarely: 6,
+      downhill: 0, len_total: 2, sign: true, divider: 2, min: -20000, max: 20000 },
+    { name: "motor_rpm_b", title: "Motordrehzahl (F40C)", unit: "1/min", put: 0,
+      did: "22F40C", address: "VEHICLE", rarely: 6,
+      downhill: 0, len_total: 2, divider: 4, min: 0, max: 20000 },
+    { name: "accel_ms2", title: "Beschleunigung", unit: "m/s²", put: 2,
+      did: "224539", address: "VEHICLE", rarely: 6,
+      downhill: 0, len_total: 2, sign: true, divider: 1000, min: -30, max: 30 },
+    { name: "torque_req_nm", title: "Drehmoment angefordert", unit: "Nm", put: 0,
+      did: "2229D4", address: "VEHICLE", rarely: 6,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -1500, max: 1500 },
+    { name: "radiator_fan_pct", title: "Kühlerlüfter", unit: "%", put: 0,
+      did: "222055", address: "VEHICLE", rarely: 7,
+      downhill: 0, len_total: 2, divider: 100, min: 0, max: 100 },
+    { name: "coolant_pump_pct", title: "Kühlmittelpumpe", unit: "%", put: 0,
+      did: "22276D", address: "VEHICLE", rarely: 7,
+      downhill: 0, len_total: 2, divider: 100, min: 0, max: 100 },
+    { name: "dcdc_coolant_t_c", title: "Kühlmittel DC/DC", unit: "°C", put: 1,
+      did: "2243B8", address: "VEHICLE", rarely: 7,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -40, max: 150 },
+    { name: "hv_v_traction", title: "Batteriespannung Fahrbetrieb", unit: "V", put: 1,
+      did: "224675", address: "VEHICLE", rarely: 7,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: 0, max: 1000 },
+    { name: "pedal_pct", title: "Fahrpedal", unit: "%", put: 0,
+      did: "22F449", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, divider: 2.55, min: 0, max: 100 },
+    { name: "outside_hum_pct", title: "Luftfeuchte außen", unit: "%", put: 0,
+      did: "2227C3", address: "CLIMATE", rarely: 8,
+      downhill: 7, len_total: 1, divider: 2, min: 0, max: 100 },
+    { name: "outside_t_cabin_c", title: "Außentemperatur Kabinenfühler", unit: "°C", put: 1,
+      did: "22260A", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, divider: 2, offset: -50, min: -50, max: 80 },
+    { name: "air_pollution", title: "Luftgüte", unit: null, put: 1,
+      did: "2226ED", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, sign: true, divider: 10, min: -30, max: 30 },
+    { name: "fan1_pct", title: "Lüfter 1", unit: "%", put: 1,
+      did: "222606", address: "CLIMATE", rarely: 9,
+      downhill: 0, len_total: 2, divider: 10, min: 0, max: 100 ,
+      also: [
+            { name: "fan2_pct", title: "Lüfter 2", unit: "%", put: 1,
+          downhill: 2, len_total: 2, divider: 10, min: 0, max: 100 },
+      ] },
+    { name: "recirc_flap_pct", title: "Umluftklappe", unit: "%", put: 1,
+      did: "22261E", address: "CLIMATE", rarely: 9,
+      downhill: 2, len_total: 1, factor: 0.5, min: 0, max: 100 },
+    { name: "defl_fl_t_c", title: "Ausströmer vorne links", unit: "°C", put: 1,
+      did: "22260C", address: "CLIMATE", rarely: 9,
+      downhill: 0, len_total: 1, factor: 0.333, min: 0, max: 100 },
+    { name: "defl_fr_t_c", title: "Ausströmer vorne rechts", unit: "°C", put: 1,
+      did: "22260D", address: "CLIMATE", rarely: 9,
+      downhill: 0, len_total: 1, factor: 0.333, min: 0, max: 100 },
+    { name: "defl_rear_t_c", title: "Ausströmer hinten", unit: "°C", put: 1,
+      did: "22263D", address: "CLIMATE", rarely: 9,
+      downhill: 0, len_total: 1, factor: 0.333, min: 0, max: 100 },
+    { name: "t_flap_fl_pct", title: "Temperaturklappe links", unit: "%", put: 1,
+      did: "222622", address: "CLIMATE", rarely: 9,
+      downhill: 2, len_total: 1, factor: 0.5, min: 0, max: 100 },
+    { name: "t_flap_fr_pct", title: "Temperaturklappe rechts", unit: "%", put: 1,
+      did: "222626", address: "CLIMATE", rarely: 9,
+      downhill: 2, len_total: 1, factor: 0.5, min: 0, max: 100 },
+    { name: "cell_soc_max_pct", title: "Zell-Ladestand höchster", unit: "%", put: 2,
+      did: "221E2C", address: "BMS", rarely: 10,
+      downhill: 0, len_total: 2, divider: 100, min: 0, max: 100 },
+    { name: "cell_soc_min_pct", title: "Zell-Ladestand niedrigster", unit: "%", put: 2,
+      did: "221E2D", address: "BMS", rarely: 10,
+      downhill: 0, len_total: 2, divider: 100, min: 0, max: 100 },
+    { name: "hv_after_contacts_v", title: "HV nach den Schützen", unit: "V", put: 1,
+      did: "22189B", address: "BMS", rarely: 10,
+      downhill: 0, len_total: 2, factor: 0.5, offset: -1000, min: 0, max: 1000 },
+    { name: "hv_before_v", title: "HV vor dem Hauptschalter", unit: "V", put: 1,
+      did: "221E36", address: "BMS", rarely: 11,
+      downhill: 0, len_total: 2, factor: 0.03125, min: 0, max: 1000 },
+    { name: "hv_after_v", title: "HV nach dem Hauptschalter", unit: "V", put: 1,
+      did: "221E38", address: "BMS", rarely: 11,
+      downhill: 0, len_total: 2, factor: 0.03125, min: 0, max: 1000 },
+    { name: "hv_charge_v", title: "HV Ladespannung", unit: "V", put: 1,
+      did: "221E39", address: "BMS", rarely: 11,
+      downhill: 0, len_total: 2, sign: true, factor: 0.03125, min: -1000, max: 1000 },
+    { name: "min_discharge_v_raw", title: "Entladespannung min (roh)", unit: null, put: 0,
+      did: "225170", address: "BMS", rarely: 11,
+      downhill: 0, len_total: 2 },
+    { name: "max_charge_v_raw", title: "Ladespannung max (roh)", unit: null, put: 0,
+      did: "225171", address: "BMS", rarely: 11,
+      downhill: 0, len_total: 2 },
+    { name: "batt_ptc_v", title: "Batterieheizer Spannung", unit: "V", put: 1,
+      did: "221621", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 1, divider: 10, min: 0, max: 500 },
+    { name: "batt_ecu_t_c", title: "Batterie-Steuergerät Temperatur", unit: "°C", put: 0,
+      did: "221622", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 1, offset: -50, min: -50, max: 150 },
+    { name: "batt_ptc_t1_c", title: "Batterieheizer Temp. 1", unit: "°C", put: 0,
+      did: "221623", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 1, offset: -50, min: -50, max: 150 },
+    { name: "batt_ptc_t2_c", title: "Batterieheizer Temp. 2", unit: "°C", put: 0,
+      did: "221624", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 1, offset: -50, min: -50, max: 150 },
+    { name: "bms_odometer_km", title: "Kilometerstand BMS", unit: "km", put: 0,
+      did: "2202BD", address: "BMS", rarely: 40,
+      downhill: 1, len_total: 3, min: 0, max: 2000000 },
+    { name: "batt_mod_t_01", title: "Akkumodul 1 Temperatur", unit: "°C", put: 1,
+      did: "221EAE", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_02", title: "Akkumodul 2 Temperatur", unit: "°C", put: 1,
+      did: "221EAF", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_03", title: "Akkumodul 3 Temperatur", unit: "°C", put: 1,
+      did: "221EB0", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_04", title: "Akkumodul 4 Temperatur", unit: "°C", put: 1,
+      did: "221EB1", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_05", title: "Akkumodul 5 Temperatur", unit: "°C", put: 1,
+      did: "221EB2", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_06", title: "Akkumodul 6 Temperatur", unit: "°C", put: 1,
+      did: "221EB3", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_07", title: "Akkumodul 7 Temperatur", unit: "°C", put: 1,
+      did: "221EB4", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_08", title: "Akkumodul 8 Temperatur", unit: "°C", put: 1,
+      did: "221EB5", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_09", title: "Akkumodul 9 Temperatur", unit: "°C", put: 1,
+      did: "221EB6", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_10", title: "Akkumodul 10 Temperatur", unit: "°C", put: 1,
+      did: "221EB7", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_11", title: "Akkumodul 11 Temperatur", unit: "°C", put: 1,
+      did: "221EB8", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_12", title: "Akkumodul 12 Temperatur", unit: "°C", put: 1,
+      did: "221EB9", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_13", title: "Akkumodul 13 Temperatur", unit: "°C", put: 1,
+      did: "221EBA", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_14", title: "Akkumodul 14 Temperatur", unit: "°C", put: 1,
+      did: "221EBB", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_15", title: "Akkumodul 15 Temperatur", unit: "°C", put: 1,
+      did: "221EBC", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_16", title: "Akkumodul 16 Temperatur", unit: "°C", put: 1,
+      did: "221EBD", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_17", title: "Akkumodul 17 Temperatur", unit: "°C", put: 1,
+      did: "227425", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "batt_mod_t_18", title: "Akkumodul 18 Temperatur", unit: "°C", put: 1,
+      did: "227426", address: "BMS", rarely: 12,
+      downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
+    { name: "range_reserve_km", title: "Reichweite Reserve (Auto)", unit: "km", put: 0,
+      did: "222AB4", address: "AKKU11", rarely: 13,
+      downhill: 2, len_total: 2, min: 0, max: 2000 },
+    { name: "range_est_km", title: "Reichweite geschätzt (Auto)", unit: "km", put: 0,
+      did: "222AB5", address: "AKKU11", rarely: 13,
+      downhill: 4, len_total: 2, min: 0, max: 2000 },
+    { name: "motor_pwr_limit_w", title: "Motor Leistungsgrenze", unit: "W", put: 0,
+      did: "2215D1", address: "AKKU11", rarely: 13,
+      downhill: 1, len_total: 2, factor: 50, min: 0, max: 500000 ,
+      also: [
+            { name: "hvbat_energy_info_kwh", title: "Batterieenergie (Motor-Info)", unit: "kWh", put: 1,
+          downhill: 5, len_total: 2, factor: 0.05, min: 0, max: 300 },
+      ] },
+    { name: "aux12_resistance_mohm", title: "12-V-Batterie Widerstand", unit: "mΩ", put: 1,
+      did: "222A0E", address: "AKKU11", rarely: 14,
+      downhill: 0, len_total: 1, factor: 0.2, min: 0, max: 100 },
+    { name: "obc_hvdc_a", title: "Ladegerät HV-Strom", unit: "A", put: 1,
+      did: "22103D", address: "CHARGER", rarely: 14,
+      downhill: 0, len_total: 2, divider: 10, min: -50, max: 500 },
+    { name: "obc_cycle_kwh", title: "Ladegerät Zyklusenergie", unit: "kWh", put: 2,
+      did: "22103E", address: "CHARGER", rarely: 14,
+      downhill: 0, len_total: 2, divider: 100, min: 0, max: 1000 },
+    { name: "obc_efficiency_raw", title: "Ladegerät Wirkungsgrad (roh)", unit: null, put: 1,
+      did: "2215D6", address: "CHARGER", rarely: 14,
+      downhill: 0, len_total: 1, divider: 10, offset: 75, min: 0, max: 200 },
+    { name: "obc_coolant_t_c", title: "Ladegerät Kühlmittel", unit: "°C", put: 0,
+      did: "2215E2", address: "CHARGER", rarely: 14,
+      downhill: 0, len_total: 1, offset: -40, min: -40, max: 150 },
+    { name: "obc_duration_min", title: "Ladegerät Ladedauer gesamt", unit: "min", put: 0,
+      did: "2215EE", address: "CHARGER", rarely: 40,
+      downhill: 0, len_total: 4, min: 0, max: 100000000 },
+    { name: "obc_socket_t_c", title: "Ladebuchse Temperatur", unit: "°C", put: 1,
+      did: "221DDA", address: "CHARGER", rarely: 14,
+      downhill: 1, len_total: 2, divider: 10, offset: -55, min: -55, max: 150 },
+
+    /* Not read (drive of 2026-10-13: no answer or constant): CO2 (2242DB),
+     * humidity (2227C4), seat heating (223ADF/223AE0), recirculation
+     * (22263B). */
 
     /* Very last and only rarely: these two need a protocol switch (see
      * CLIMATE). If it goes wrong, the mandatory values of this round have
