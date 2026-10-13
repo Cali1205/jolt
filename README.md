@@ -614,6 +614,7 @@ most interesting values.
 | Motor torque rear / front | `22033B` / `220335` | Vehicle | every / 20 | signed `[b0:b1]` Nm | from danjulio/ev_info_display; front only on all-wheel cars |
 | Charging state | `2215D5` | AKKU11 | 10 | `b0` (01 ready, 02 none, 03 error, 05 end, 16 AC, 18 trickle) | from codingABI |
 | Cabin heater (PTC air) | `220801` | Climate | 4 | raw windows `ptc_air_b0/b1/b3/b5` | conversion missing in the list; collected raw |
+| CO2 / humidity inside | `2242DB` / `2227C4` | Climate | 20 | `b1 * 100` ppm / `b6 * 0.5` % | slow; humidity conversion from WiCAN, bounded 0-100 % |
 | Seat heating l / r, recirculation | `223ADF` `223AE0` `22263B` | Climate | 20 | raw `b0` | heating consumers; collected raw |
 
 **State of health.** `222AB2` (battery capacity as the car reports it, read every 40th round) is compared with the profile value (new): 72.8 of 77 kWh is 94.5 %. The vehicle view shows it, `GET /api/vehicles` returns `soh_percent` and `capacity_history` (one row per change of 0.2 kWh, at least weekly, with the odometer reading; table `capacity_history`). The same capacity is also what all kWh conversions use.

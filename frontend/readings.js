@@ -496,6 +496,20 @@ window.joltReadings = {
       did: "22263B", address: "CLIMATE", rarely: 20,
       downhill: 0, len_total: 1 },
 
+    /* Interior air, slowly: CO2 in ppm and the relative humidity. Both say
+     * how hard the climate unit has to work - fogged windows and a stuffy
+     * cabin are what make people turn the heating and the recirculation
+     * up. CO2: second payload byte times 100 (spot2000, codingABI, WiCAN
+     * agree). Humidity: the list names 27C4 without a conversion; WiCAN reads
+     * byte 6 of the payload times 0.5, taken over here and bounded to
+     * 0-100 %. Every twentieth round, they change slowly. */
+    { name: "co2_ppm", title: "CO2 Innenraum", unit: "ppm", put: 0,
+      did: "2242DB", address: "CLIMATE", rarely: 20,
+      downhill: 1, len_total: 1, factor: 100, min: 200, max: 10000 },
+    { name: "humidity_in_pct", title: "Luftfeuchte Innenraum", unit: "%", put: 0,
+      did: "2227C4", address: "CLIMATE", rarely: 20,
+      downhill: 6, len_total: 1, factor: 0.5, min: 0, max: 100 },
+
     { name: "outside_temp_c", title: "Aussentemperatur", unit: "°C",
       put: 1, did: "222609", address: "CLIMATE", rarely: 20,
       downhill: 0, len_total: 1, divider: 2, offset: -50 },
