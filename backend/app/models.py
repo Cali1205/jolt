@@ -153,6 +153,9 @@ class Vehicle(Base):
     charge_curve = relationship("ChargeCurvePoint", back_populates="vehicle",
                              cascade="all, delete-orphan",
                              order_by="ChargeCurvePoint.soc_percent")
+    capacity_history = relationship("CapacityHistory", back_populates="vehicle",
+                                    cascade="all, delete-orphan",
+                                    order_by="CapacityHistory.measured_at")
 
     @property
     def mass_kg(self) -> float:
@@ -178,6 +181,27 @@ class ChargeCurvePoint(Base):
 
     __table_args__ = (UniqueConstraint("vehicle_id", "soc_percent",
                                        name="uq_ladekurve_soc"),)
+
+
+class CapacityHistory(Base):
+    """The battery capacity the vehicle reported, over time.
+
+    `Vehicle.measured_capacity_kwh` only holds the latest value. Ageing is a
+    curve, though: whoever wants to know how fast the battery loses capacity
+    (state of health) needs the values from back then, with the odometer
+    reading they were taken at. One row per change of at least 0.2 kWh, and
+    at the latest one per week.
+    """
+    __tablename__ = "capacity_history"
+
+    id = Column(Integer, primary_key=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    measured_at = Column(DateTime, nullable=False)
+    capacity_kwh = Column(Float, nullable=False)
+    odometer_km = Column(Float)
+
+    vehicle = relationship("Vehicle", back_populates="capacity_history")
 
 
 class ChargePoint(Base):
