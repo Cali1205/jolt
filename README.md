@@ -613,6 +613,14 @@ most interesting values.
 | Motor torque rear / front | `22033B` / `220335` | Vehicle | every / 20 | signed `[b0:b1]` Nm | from danjulio/ev_info_display; front only on all-wheel cars |
 | Charging state | `2215D5` | AKKU11 | 10 | `b0` (01 ready, 02 none, 03 error, 05 end, 16 AC, 18 trickle) | from codingABI |
 | Cabin heater (PTC air) | `220801` | Climate | 4 | raw windows `ptc_air_b0/b1/b3/b5` | conversion missing in the list; collected raw |
+| Energy content | `222AB8` | AKKU11 | 10 | `[b2:b3] / 40` kWh | OBDb (ID.4); the first attempt with four bytes gave a constant 0.001 |
+| Average consumption, 7 categories | `222AB7` | AKKU11 | 40 | 16 bit each, `/10` | OBDb; categories unnamed |
+| Charge level fine | `223DEF` | Vehicle | 2 | signed `[b0:b1] / 100` % | OBDb |
+| Battery current (motor controller), HV auxiliary current | `22035E`, `220360` | Vehicle | 2 / 5 | signed `/10` A, `/100` A | OBDb |
+| Compressor speed, refrigerant pressure, evaporator temperature | `222603`, `222605`, `222612` | Climate | 8 | `b0*100`, `b0*0.2`, signed `/10` | OBDb |
+| Refrigerant pressure / temperature, sensor 1 | `224EEF` | Climate | 8 | `[b0:b1]*0.0088` bar, `[b2:b3]/10-40` | OBDb |
+| 12 V battery | `222AF7` | AKKU11 | 20 | V `/1000+4`, A signed `/1000`, SoC `b7`, temp `b8-40` | OBDb |
+| DC/DC low side, DC/DC voltage | `222A53`, `22465D` | AKKU11, DC/DC | 10 | `b0/10` V, `[b1:b2]-511` A, `/512` V | OBDb |
 
 **State of health.** `222AB2` (battery capacity as the car reports it, read every 40th round) is compared with the profile value (new): 72.8 of 77 kWh is 94.5 %. The vehicle view shows it, `GET /api/vehicles` returns `soh_percent` and `capacity_history` (one row per change of 0.2 kWh, at least weekly, with the odometer reading; table `capacity_history`). The same capacity is also what all kWh conversions use.
 | Battery capacity | `222AB2` | Battery | 40 | `[b0:b3]/1310.77/1000` | measured, not brochure |
@@ -652,9 +660,6 @@ a climate compressor. The toolbox for this is under
 
 ### Not implemented
 
-* `222AB8` **energy content** — answers with a constant 0.001 on the ID.Buzz
-  (drive of 2026-10-13), not usable. Consumption does not need it: the
-  difference of the discharge counter is more accurate.
 * CO2 (`2242DB`), humidity (`2227C4`), seat heating (`223ADF`/`223AE0`) and
   recirculation (`22263B`) — not answered or constant on the ID.Buzz.
 * Cell voltages and temperatures (spot2000 lists over a hundred of them) — irrelevant for

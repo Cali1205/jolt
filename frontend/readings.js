@@ -443,10 +443,110 @@ window.joltReadings = {
       did: "2215D5", address: "AKKU11", rarely: 10,
       downhill: 0, len_total: 1 },
 
-    /* Not read: 222AB8 (energy content) came back as a constant 0.001 that
-     * does not follow the charge level; CO2 (2242DB), humidity (2227C4), seat
-     * heating (223ADF/223AE0) and recirculation (22263B) are not answered or
-     * constant on the ID.Buzz (drive of 2026-10-13). */
+    /* ----- Probes from the OBDb list for the ID.4 (2026-10-13) -----------
+     *
+     * OBDb/Volkswagen-ID.4 documents the conversions; the ID.Buzz sheet
+     * there is empty, so nothing below is confirmed on this car. All of it is
+     * read slowly, with tight bounds: what does not answer drops out for the
+     * session, what falls outside the bounds becomes null. The first drive
+     * tells which of them work. */
+
+    /* Energy content of the pack right now: payload bytes 2-3 times 25 Wh.
+     * (The first attempt read four bytes / 1 310 770 and got a constant
+     * 0.001 - the upper two bytes are zero, the value sits in the lower
+     * two. 1310 * 0.025 = 32.8 kWh = 45 % of 72.8, the charge level of
+     * that drive.) It has to fall with the charge level. */
+    { name: "energy_content_kwh", title: "Energieinhalt Akku", unit: "kWh",
+      put: 1, did: "222AB8", address: "AKKU11", rarely: 10,
+      downhill: 2, len_total: 2, divider: 40, min: 0, max: 120 },
+
+    /* The car's own average consumption in seven categories (16 bit each,
+     * /10; the categories are not named in the source). */
+    { name: "avg_csmp_cat0", title: "Verbrauch Auto Kat. 0", unit: null, put: 1,
+      did: "222AB7", address: "AKKU11", rarely: 40,
+      downhill: 0, len_total: 2, divider: 10, min: 0, max: 100,
+      also: [
+        { name: "avg_csmp_cat1", title: "Verbrauch Auto Kat. 1", unit: null, put: 1,
+          downhill: 2, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat2", title: "Verbrauch Auto Kat. 2", unit: null, put: 1,
+          downhill: 4, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat3", title: "Verbrauch Auto Kat. 3", unit: null, put: 1,
+          downhill: 6, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat4", title: "Verbrauch Auto Kat. 4", unit: null, put: 1,
+          downhill: 8, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat5", title: "Verbrauch Auto Kat. 5", unit: null, put: 1,
+          downhill: 10, len_total: 2, divider: 10, min: 0, max: 100 },
+        { name: "avg_csmp_cat6", title: "Verbrauch Auto Kat. 6", unit: null, put: 1,
+          downhill: 12, len_total: 2, divider: 10, min: 0, max: 100 },
+      ] },
+
+    /* Charge level to 0.01 %, signed 16 bit /100 (vehicle control unit). */
+    { name: "soc_fine_pct", title: "Ladestand fein", unit: "%", put: 2,
+      did: "223DEF", address: "VEHICLE", rarely: 2,
+      downhill: 0, len_total: 2, sign: true, divider: 100, min: 0, max: 100 },
+
+    /* Battery current as the motor controller sees it (/10 A) and the total
+     * current of the HV auxiliaries (/100 A). */
+    { name: "motor_batt_current_a", title: "Batteriestrom Motorsteuerung", unit: "A",
+      put: 1, did: "22035E", address: "VEHICLE", rarely: 2,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -1000, max: 1000 },
+    { name: "hv_aux_current_a", title: "HV-Nebenverbraucher Strom", unit: "A",
+      put: 2, did: "220360", address: "VEHICLE", rarely: 5,
+      downhill: 0, len_total: 2, sign: true, divider: 100, min: -100, max: 300 },
+
+    /* Climate circuit: compressor speed (byte x 100 /min), refrigerant
+     * pressure (byte x 0.2 bar), refrigerant pressure/temperature from the
+     * second sensor block (16 bit x 0.0088 bar; 16 bit x 0.1 - 40 degC) and
+     * the evaporator outlet temperature (16 bit /10, signed). */
+    { name: "compressor_rpm_b", title: "Kompressor Drehzahl (2226)", unit: "1/min",
+      put: 0, did: "222603", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, factor: 100, min: 0, max: 10000 },
+    { name: "refrig_p_bar", title: "Kältemitteldruck", unit: "bar", put: 1,
+      did: "222605", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 1, factor: 0.2, min: 0, max: 60 },
+    { name: "refrig_p2_bar", title: "Kältemitteldruck Fühler 1", unit: "bar", put: 2,
+      did: "224EEF", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 2, factor: 0.0088, min: 0, max: 60,
+      also: [
+        { name: "refrig_t_c", title: "Kältemitteltemperatur Fühler 1", unit: "°C", put: 1,
+          downhill: 2, len_total: 2, divider: 10, offset: -40, min: -40, max: 150 },
+      ] },
+    { name: "evaporator_t_c", title: "Verdampfer Temperatur", unit: "°C", put: 1,
+      did: "222612", address: "CLIMATE", rarely: 8,
+      downhill: 0, len_total: 2, sign: true, divider: 10, min: -40, max: 100 },
+
+    /* 12 V battery (battery management on the 11-bit side): voltage
+     * (16 bit /1000 + 4), current (32 bit signed /1000), charge level,
+     * temperature (byte - 40). */
+    { name: "aux12_v", title: "12-V-Batterie Spannung", unit: "V", put: 2,
+      did: "222AF7", address: "AKKU11", rarely: 20,
+      downhill: 0, len_total: 2, divider: 1000, offset: 4, min: 8, max: 17,
+      also: [
+        { name: "aux12_a", title: "12-V-Batterie Strom", unit: "A", put: 2,
+          downhill: 2, len_total: 4, sign: true, divider: 1000, min: -200, max: 200 },
+        { name: "aux12_soc_pct", title: "12-V-Batterie Ladestand", unit: "%", put: 0,
+          downhill: 7, len_total: 1, min: 0, max: 100 },
+        { name: "aux12_t_c", title: "12-V-Batterie Temperatur", unit: "°C", put: 0,
+          downhill: 8, len_total: 1, offset: -40, min: -40, max: 100 },
+      ] },
+
+    /* DC/DC converter: low-side voltage and current (battery management, 11
+     * bit) and the voltage from the converter's own control unit (16 bit
+     * /512). */
+    { name: "dcdc_low_v", title: "DC/DC Spannung niederseitig", unit: "V", put: 1,
+      did: "222A53", address: "AKKU11", rarely: 10,
+      downhill: 0, len_total: 1, divider: 10, min: 0, max: 20,
+      also: [
+        { name: "dcdc2_current_a", title: "DC/DC Strom (2)", unit: "A", put: 1,
+          downhill: 1, len_total: 2, offset: -511, min: -200, max: 300 },
+      ] },
+    { name: "dcdc_v", title: "DC/DC Spannung", unit: "V", put: 2,
+      did: "22465D", address: "DCDC", rarely: 10,
+      downhill: 0, len_total: 2, divider: 512, min: 8, max: 17 },
+
+    /* Not read (drive of 2026-10-13: no answer or constant): CO2 (2242DB),
+     * humidity (2227C4), seat heating (223ADF/223AE0), recirculation
+     * (22263B). */
 
     /* Very last and only rarely: these two need a protocol switch (see
      * CLIMATE). If it goes wrong, the mandatory values of this round have
