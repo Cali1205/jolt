@@ -384,6 +384,16 @@ def capacity_remember(vehicle, raw_values: dict | None, timestamp) -> None:
                  "profile.", capacity, vehicle.battery_net_kwh)
         return
     so_far = vehicle.measured_capacity_kwh
+    when = timestamp or datetime.utcnow()
+    # The history: one row per change, and at the latest one per week - a
+    # curve that is flat for months is still a statement.
+    history = vehicle.capacity_history
+    last = history[-1] if history else None
+    if last is None or abs(last.capacity_kwh - capacity) >= CAPACITY_STEP_KWH             or (when - last.measured_at).days >= 7:
+        odometer = raw_values.get("odometer_km")
+        vehicle.capacity_history.append(models.CapacityHistory(
+            measured_at=when, capacity_kwh=round(capacity, 2),
+            odometer_km=odometer if isinstance(odometer, (int, float)) else None))
     if so_far is not None and abs(so_far - capacity) < CAPACITY_STEP_KWH:
         return
     if so_far is None:

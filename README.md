@@ -604,6 +604,16 @@ most interesting values.
 | Auxiliary loads | `220364` | Vehicle | every | `[b0:b1]/10` | everything except the drive |
 | **Odometer** | `22295A` | Vehicle | every | `[b0:b2]` | whole km; corrects the GPS distance |
 | DC/DC current | `22465B` | DC/DC | 10 | `[b0:b1]/16` | |
+| Battery temperature max / min | `221E0E` / `221E0F` | BMS | 5 | `[b0:b1]/64` | spread of the pack; unverified |
+| Coolant outlet / inlet | `22189D` | BMS | 5 | `[b0:b1]/64`, `[b2:b3]/64` | heat leaving the pack; unverified |
+| Circulation pump | `22743B` | BMS | 5 | `b0` % | unverified |
+| Discharge limit | `221E1C` | BMS | 10 | `[b0:b1]/5` | counterpart of the charge limit |
+| Driving position | `22210E` | Vehicle | 2 | `b1` (08 P, 07 R, 06 N, 05 D, 0C B) | B = strong recuperation; unverified |
+| Energy content | `222AB8` | AKKU11 | 10 | `[b0:b3]/1310770` kWh | assumed like the capacity; the first drive must show it falls with the charge level |
+| Cabin heater (PTC air) | `220801` | Climate | 4 | raw windows `ptc_air_b0/b1/b3/b5` | conversion missing in the list; collected raw |
+| Seat heating l / r, recirculation | `223ADF` `223AE0` `22263B` | Climate | 20 | raw `b0` | heating consumers; collected raw |
+
+**State of health.** `222AB2` (battery capacity as the car reports it, read every 40th round) is compared with the profile value (new): 72.8 of 77 kWh is 94.5 %. The vehicle view shows it, `GET /api/vehicles` returns `soh_percent` and `capacity_history` (one row per change of 0.2 kWh, at least weekly, with the odometer reading; table `capacity_history`). The same capacity is also what all kWh conversions use.
 | Battery capacity | `222AB2` | Battery | 40 | `[b0:b3]/1310.77/1000` | measured, not brochure |
 | Range | `222AB6` | Battery | 10 | `[b0:b1]` | **multi-part** |
 | Outside temperature | `222609` | Climate | 20 | `b0/2−50` | |

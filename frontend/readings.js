@@ -354,6 +354,73 @@ window.joltReadings = {
           put: 0, downhill: 0, len_total: 1, mask: 1 },
       ] },
 
+    /* ===================================================================
+     * More for the consumption analysis (research of 13 Oct 2026)
+     * ===================================================================
+     *
+     * Source: spot2000's MEB list ("VW MEB UDS PIDs list", version 164) -
+     * all of these are in it, none has been verified on this car yet. That is
+     * why every row is rare, none is required, and the plausibility bounds
+     * are tight: a row that does not answer drops out for the session (the
+     * same mechanism as for the climate values), one that answers
+     * nonsense becomes null.
+     *
+     * Everything is stored with the point (`raw_values`), also the ones whose
+     * conversion is open: the analysis can be done afterwards, a missing
+     * measurement cannot be made up. */
+
+    /* Temperature spread of the battery: hottest and coldest point, each
+     * 16-bit /64, the point number follows. Cold cells charge slowly and
+     * pull the consumption up; the spread says how well the pack is
+     * conditioned. */
+    { name: "batt_temp_max_c", title: "Batterie heissester Punkt", unit: "°C",
+      put: 1, did: "221E0E", address: "BMS", rarely: 5,
+      downhill: 0, len_total: 2, divider: 64, min: -40, max: 90 },
+    { name: "batt_temp_min_c", title: "Batterie kaeltester Punkt", unit: "°C",
+      put: 1, did: "221E0F", address: "BMS", rarely: 5,
+      downhill: 0, len_total: 2, divider: 64, min: -40, max: 90 },
+
+    /* The coolant circuit of the battery: outlet in bytes 0-1, inlet in
+     * bytes 2-3, each /64. The difference is the heat that leaves the pack
+     * (or goes into it) - an energy item that is otherwise invisible. */
+    { name: "coolant_in_c", title: "Kuehlmittel Eingang", unit: "°C",
+      put: 1, did: "22189D", address: "BMS", rarely: 5,
+      downhill: 2, len_total: 2, divider: 64, min: -40, max: 90,
+      also: [
+        { name: "coolant_out_c", title: "Kuehlmittel Ausgang", unit: "°C",
+          put: 1, downhill: 0, len_total: 2, divider: 64, min: -40, max: 90 },
+      ] },
+    { name: "circ_pump_pct", title: "Umwaelzpumpe Batterie", unit: "%",
+      put: 0, did: "22743B", address: "BMS", rarely: 5,
+      downhill: 0, len_total: 1, min: 0, max: 100 },
+
+    /* What the battery may deliver at the moment (the other direction to
+     * `charge_limit_a`): cold and low charge level cut the power, and with
+     * it the recuperation. */
+    { name: "discharge_limit_a", title: "Entladegrenze", unit: "A", put: 0,
+      did: "221E1C", address: "BMS", rarely: 10,
+      downhill: 0, len_total: 2, divider: 5 },
+
+    /* Driving position P/R/N/D/B: 08 P, 07 R, 06 N, 05 D, 0C B (per the
+     * list; the position byte is the second payload byte). B is the strong
+     * recuperation - consumption of a drive in B and in D must not be
+     * thrown into one pot. */
+    { name: "gear_raw", title: "Fahrstufe", unit: null, put: 0,
+      did: "22210E", address: "VEHICLE", rarely: 2,
+      downhill: 1, len_total: 1 },
+
+    /* Energy content of the battery, as the car counts it: the same
+     * address family as the capacity above, and the conversion is
+     * "missing" in the list as well. Assumed like the capacity (32-bit
+     * value / 1 310 770 = kWh). If it is right it is the charge level
+     * **without** the rounding of the percent figure: kWh in the pack at any
+     * moment, and the difference between two points is the consumption.
+     * Whether it is, the first drive tells: it has to fall with the
+     * charge level by capacity per percent. */
+    { name: "energy_content_kwh", title: "Energieinhalt Akku", unit: "kWh",
+      put: 2, did: "222AB8", address: "AKKU11", rarely: 10,
+      downhill: 0, len_total: 4, divider: 1310770, min: 0, max: 200 },
+
     /* Very last and only rarely: these two need a protocol switch (see
      * CLIMATE). If it goes wrong, the mandatory values of this round have
      * long been read.
@@ -361,6 +428,40 @@ window.joltReadings = {
      * The outside temperature is the biggest single item of the cold and
      * used to go into the consumption model from a forecast. From the car it
      * is measured, from the route, at the right time. */
+    /* The cabin heater (PTC air heater, HV current) - the missing piece of
+     * the heating. `ptc_current_a` above is the battery heater and read 0 A on
+     * every drive. The list names the parameter (0801 on the climate unit)
+     * but has no conversion; the compressor sits next to it under 0800 with
+     * eleven bytes. Until a drive with the heater on shows the right bytes,
+     * the first bytes are stored unconverted, in the windows that matched
+     * for the compressor: b0, b1-b2, b3-b4, b5-b6. The bounds are wide on
+     * purpose - this is collecting, not displaying. */
+    { name: "ptc_air_b0", title: "Zuheizer Byte 0", unit: null, put: 0,
+      did: "220801", address: "CLIMATE", rarely: 4,
+      downhill: 0, len_total: 1,
+      also: [
+        { name: "ptc_air_b1", title: "Zuheizer Byte 1-2", unit: null, put: 0,
+          downhill: 1, len_total: 2 },
+        { name: "ptc_air_b3", title: "Zuheizer Byte 3-4", unit: null, put: 0,
+          downhill: 3, len_total: 2 },
+        { name: "ptc_air_b5", title: "Zuheizer Byte 5-6", unit: null, put: 0,
+          downhill: 5, len_total: 2 },
+      ] },
+
+    /* Seat heating of the driver and passenger (current in A, conversion
+     * not listed - stored raw as one byte) and the recirculation flap
+     * (00 fresh air, 04 manual recirculation): heating consumers, and the
+     * flap decides how much the heater has to warm up. */
+    { name: "seat_heat_l_raw", title: "Sitzheizung links", unit: null, put: 0,
+      did: "223ADF", address: "CLIMATE", rarely: 20,
+      downhill: 0, len_total: 1 },
+    { name: "seat_heat_r_raw", title: "Sitzheizung rechts", unit: null, put: 0,
+      did: "223AE0", address: "CLIMATE", rarely: 20,
+      downhill: 0, len_total: 1 },
+    { name: "recirculation_raw", title: "Umluft", unit: null, put: 0,
+      did: "22263B", address: "CLIMATE", rarely: 20,
+      downhill: 0, len_total: 1 },
+
     { name: "outside_temp_c", title: "Aussentemperatur", unit: "°C",
       put: 1, did: "222609", address: "CLIMATE", rarely: 20,
       downhill: 0, len_total: 1, divider: 2, offset: -50 },

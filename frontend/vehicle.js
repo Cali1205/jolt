@@ -82,7 +82,41 @@ window.joltVehicle = (function () {
       + `<div class="opt-inhalt"><div class="formgitter">${physics.map(fieldHtml).join("")}</div></div></details>`;
   }
 
+  /* State of health: what the car itself reports as battery capacity,
+   * against the profile value (new). Only shown once a measurement exists;
+   * a curve over the odometer as soon as there are two. */
+  function showHealth(vehicle) {
+    const box = document.getElementById("vehicle-health");
+    if (!box) return;
+    if (!vehicle || typeof vehicle.soh_percent !== "number") { box.hidden = true; return; }
+    const date = vehicle.capacity_measured_at
+      ? new Date(vehicle.capacity_measured_at).toLocaleDateString("de-DE") : "";
+    const colour = vehicle.soh_percent >= 90 ? "gut" : (vehicle.soh_percent >= 80 ? "warnung" : "schlecht");
+    const history = (vehicle.capacity_history || []).filter((h) => typeof h.odometer_km === "number");
+    let curve = "";
+    if (history.length >= 2) {
+      const xs = history.map((h) => h.odometer_km), ys = history.map((h) => h.kwh);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs) || 1;
+      const y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const px = (x) => 4 + (x1 === x0 ? 0 : (x - x0) / (x1 - x0)) * 292;
+      const py = (y) => 36 - (y1 === y0 ? 0.5 : (y - y0) / (y1 - y0)) * 30 - 3;
+      curve = `<svg viewBox="0 0 300 40" style="width:100%;height:40px;margin-top:8px">`
+        + `<polyline fill="none" stroke="#ffc93c" stroke-width="2" points="${
+            history.map((h) => px(h.odometer_km).toFixed(1) + "," + py(h.kwh).toFixed(1)).join(" ")}"/></svg>`
+        + `<div class="unter">kWh über Kilometerstand · ${K.num(x0)} bis ${K.num(x1)} km</div>`;
+    }
+    box.hidden = false;
+    box.innerHTML = `<div class="werte gross">${[
+      K.valueTile("Akku-Gesundheit", K.num(vehicle.soh_percent, 1) + " %", colour),
+      K.valueTile("Kapazität", K.num(vehicle.measured_capacity_kwh, 1) + " kWh"),
+      K.valueTile("Neu", K.num(vehicle.battery_net_kwh, 0) + " kWh"),
+    ].join("")}</div>`
+      + `<div class="unter" style="margin-top:6px">Vom Auto gemeldet${date ? ", zuletzt am " + date : ""}`
+      + ` · ${(vehicle.capacity_history || []).length} Messungen gespeichert</div>` + curve;
+  }
+
   function fillForm(vehicle) {
+    showHealth(vehicle);
     for (const field of FIELDS) {
       const el = document.getElementById("veh-" + field.name);
       if (!el) continue;

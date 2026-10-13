@@ -93,6 +93,17 @@ def _as_dict(vehicle: models.Vehicle) -> dict:
             # Both null as long as it has never been measured.
             "measured_capacity_kwh": vehicle.measured_capacity_kwh,
             "capacity_measured_at": utc_iso(vehicle.capacity_measured_at),
+            # State of health: what the battery can do today against the
+            # profile value (new). The vehicle's own figure, not an estimate
+            # from charging sessions.
+            "soh_percent": (round(vehicle.measured_capacity_kwh
+                                  / vehicle.battery_net_kwh * 100.0, 1)
+                            if vehicle.measured_capacity_kwh
+                            and vehicle.battery_net_kwh else None),
+            "capacity_history": [
+                {"at": utc_iso(h.measured_at), "kwh": h.capacity_kwh,
+                 "odometer_km": h.odometer_km}
+                for h in vehicle.capacity_history[-60:]],
             # What is actually used for calculation - measured, otherwise profile.
             "capacity_kwh": vehicle.capacity_kwh,
             # Only whether one is set up, not which one. The token appears

@@ -681,6 +681,22 @@ def part_measured_capacity():
         verify(VehicleValues.from_model(fz).battery_net_kwh == measured,
                "auch im Verbrauchsmodell - damit zieht die ganze Kette mit")
 
+        verify(len(fz.capacity_history) == 1
+               and fz.capacity_history[0].capacity_kwh == measured,
+               "der erste Wert steht auch im Verlauf (Akku-Gesundheit ueber die Zeit)")
+        api = client.get("/api/vehicles").json()[0]
+        verify(api["soh_percent"] == round(measured / profile_kwh * 100.0, 1)
+               and len(api["capacity_history"]) == 1,
+               "die Schnittstelle liefert die Gesundheit in Prozent und den Verlauf",
+               str(api.get("soh_percent")))
+        live_session.record_sample(
+            db, session, 48.005, 11.0, soc=89.8,
+            raw_values={"soc_raw": 224, "battery_kwh": measured + 0.05,
+                        "odometer_km": 61900})
+        db.refresh(fz)
+        verify(len(fz.capacity_history) == 1,
+               "eine Schwankung unter 0,2 kWh legt keine neue Zeile an")
+
         # Nonsense must not get through.
         live_session.record_sample(
             db, session, 48.01, 11.0, soc=89.5,
