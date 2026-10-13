@@ -374,6 +374,8 @@ def part_92() -> None:
     for path in ("/api/live/start/1", "/api/live/5/end", "/api/live/5",
                  "/api/live/5/simulate", "/api/vehicles"):
         verify(not security.is_exempt(path), "%s unterliegt dem Limit" % path)
+    verify(not security.is_exempt("/api/live/5/points", "GET"),
+           "Auslesen der Punkte (GET) unterliegt dem Limit")
 
 
 def main() -> int:

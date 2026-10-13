@@ -131,6 +131,24 @@ def required(records: dict, *names: str) -> float:
     return value
 
 
+# Raw values are stored per point as JSON, so they have to stay small. The
+# authenticated Sample model and the logger translator share this check.
+RAW_VALUES_MAX_KEY = 80
+RAW_VALUES_MAX_BYTES = 8000
+
+
+def raw_values_limited(value: dict | None) -> dict | None:
+    """Return `value` if it is small enough, otherwise raise ValueError."""
+    if value is None:
+        return value
+    import json
+    if len(value) > RAW_VALUES_MAX_KEY:
+        raise ValueError(f"höchstens {RAW_VALUES_MAX_KEY} Rohwerte je Punkt")
+    if len(json.dumps(value, default=str)) > RAW_VALUES_MAX_BYTES:
+        raise ValueError(f"Rohwerte höchstens {RAW_VALUES_MAX_BYTES} Zeichen")
+    return value
+
+
 def limits(value: float, bottom: float, upper: float, name: str) -> float:
     if not bottom <= value <= upper:
         raise SourcesError(

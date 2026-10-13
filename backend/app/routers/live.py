@@ -29,8 +29,6 @@ router = APIRouter(prefix="/api/live", tags=["live"])
 
 
 # The dongle's measurement has just under twenty values; four times that is headroom.
-RAW_VALUES_MAX_KEY = 80
-RAW_VALUES_MAX_BYTES = 8000
 
 
 class Sample(BaseModel):
@@ -61,13 +59,7 @@ class Sample(BaseModel):
         A batch has up to 500 points; without a limit a single request could
         fill the database and memory.
         """
-        if value is None:
-            return value
-        if len(value) > RAW_VALUES_MAX_KEY:
-            raise ValueError(f"höchstens {RAW_VALUES_MAX_KEY} Rohwerte je Punkt")
-        if len(json.dumps(value, default=str)) > RAW_VALUES_MAX_BYTES:
-            raise ValueError(f"Rohwerte höchstens {RAW_VALUES_MAX_BYTES} Zeichen")
-        return value
+        return sources.raw_values_limited(value)
 
     # Time of the **measurement**. If missing, the time of receipt applies.
     # It is set by a device that submits a dead-zone buffer later - otherwise

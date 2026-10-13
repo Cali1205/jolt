@@ -83,11 +83,15 @@ class AbrpFormat:
         # is almost empty - where a wrong number leaves the driver stranded.
         soc = limits(required(payload, "soc"), 0, 100, "Ladestand")
 
+        speed = num(payload, "speed")
+        temperature = num(payload, "ext_temp", "extTemp")
+
         return RawPoint(
             lat=limits(required(payload, "lat"), -90, 90, "Breitengrad"),
             lon=limits(required(payload, "lon"), -180, 180, "Längengrad"),
             soc=soc,
-            speed_kmh=num(payload, "speed"),
-            outside_temp_c=num(payload, "ext_temp", "extTemp"),
+            speed_kmh=None if speed is None else limits(speed, 0, 500, "Geschwindigkeit"),
+            outside_temp_c=None if temperature is None
+            else limits(temperature, -80, 70, "Außentemperatur"),
             timestamp=_time(num(payload, "utc")),
             charges=truth(payload, "is_charging", "isCharging"))
