@@ -706,6 +706,4 @@ penalises sites without live data systematically chooses the wrong ones on a tri
 
 **What else the compressor offers.** `220800` delivers, besides the power,
 setpoint and actual speed; one value is still uninterpreted (`b7`, the same quantity
-as the power in the ratio 1:187). And `222AB8` (energy content) keeps
-waiting for a conversion — it is not needed, the difference of the
-discharge counter is more accurate.
+as the power in the ratio 1:187).
