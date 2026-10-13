@@ -6,6 +6,7 @@ in-memory counter, and that cannot fail on its own.
 """
 import logging
 import os
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -40,11 +41,17 @@ REPORT_ERROR_MAX = int(os.environ.get("MELDEN_FEHLER_PRO_15MIN", "30"))
 # very function it is all about. Only these high-frequency paths are exempt;
 # everything else under /api/live/ (start, end, read, simulate) costs a
 # database session per call and stays under the general limit.
-EXEMPT_SUFFIXES = ("/report", "/point", "/points")
 
 
-def is_exempt(path: str) -> bool:
-    return path.startswith("/api/live/") and path.endswith(EXEMPT_SUFFIXES)
+_EXEMPT_PATH = re.compile(r"/api/live/(report|\d+/points?)")
+# Largest request body accepted on /api/. A full batch is 500 points of at
+# most 8 kB raw values; anything beyond is not a measurement.
+MAX_BODY_BYTES = 6_000_000
+
+
+def is_exempt(path: str, method: str = "POST") -> bool:
+    """Only the POST routes that receive points; GET /points is costly."""
+    return method == "POST" and _EXEMPT_PATH.fullmatch(path) is not None
 
 CSP = ("default-src 'self'; "
        # Map tiles come from the OSM tile server, otherwise the map stays empty.
@@ -163,7 +170,15 @@ def count_report_error(request: Request) -> None:
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith("/api/") and not is_exempt(path):
+        if path.startswith("/api/"):
+            try:
+                size = int(request.headers.get("content-length") or 0)
+            except ValueError:
+                size = 0
+            if size > MAX_BODY_BYTES:
+                return self._header_rows(request, JSONResponse(
+                    {"detail": "Anfrage zu groß."}, status_code=413))
+        if path.startswith("/api/") and not is_exempt(path, request.method):
             if not _count(_hit, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
                 # Return a response instead of raising `HTTPException`:
                 # FastAPI's exception handling does not apply in a middleware,

@@ -149,6 +149,23 @@ def part_abrp():
     verify(q.normalize({**tlm, "completely_fresh_field": 42}).soc == 57.0,
            "unbekannte Felder werden übergangen statt abgelehnt")
 
+    for field, value in (("speed", 9000), ("ext_temp", 300)):
+        try:
+            q.normalize({**tlm, field: value})
+            verify(False, "%s ausserhalb der Grenzen wird abgelehnt" % field)
+        except SourcesError:
+            verify(True, "%s ausserhalb der Grenzen wird abgelehnt" % field)
+
+    jolt = sources.find("jolt")
+    base = {"lat": 45.0, "lon": 1.0, "soc": 50}
+    try:
+        jolt.normalize({**base, "raw_values": {str(i): 1 for i in range(200)}})
+        verify(False, "zu viele Rohwerte werden abgelehnt")
+    except SourcesError:
+        verify(True, "zu viele Rohwerte werden abgelehnt")
+    verify(jolt.normalize({**base, "raw_values": {"a": 1}}).raw_values == {"a": 1},
+           "wenige Rohwerte kommen unverändert durch")
+
     # The same payload, three wrappings: sent (`tlm`), fetched (`result`),
     # passed on by hand (bare).
     verify(q.normalize({"tlm": tlm}).soc == 57.0,

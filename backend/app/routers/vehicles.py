@@ -3,7 +3,7 @@ import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from .. import deps, models
@@ -54,6 +54,12 @@ class VehicleInput(BaseModel):
     electricity_prices: list[ElectricityPrice] = Field(default=[], max_length=50)
     # [[soc, kw], ...] - empty means "leave the curve unchanged"
     charge_curve: list[list[float]] = Field(default=[], max_length=100)
+
+    @model_validator(mode="after")
+    def _target_above_reserve(self):
+        if self.target_soc < self.reserve_soc:
+            raise ValueError("Ziel-Ladestand liegt unter der Reserve")
+        return self
 
     @field_validator("charge_curve")
     @classmethod
