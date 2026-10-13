@@ -519,12 +519,14 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         var control = false
     }
 
-    /// Image rows of two images each (an experiment: with four the images
-    /// were small; if they do not get larger, go back to four). The caption
-    /// under the image only exists from iOS 17.4, before that only the image
-    /// is shown.
+    /// Image rows of four images each: the two-per-row experiment did not make
+    /// the images larger, only the overview longer (the car's list scrolls,
+    /// and scrolling while driving is what the overview should spare). With
+    /// eight slots that is two rows, all tiles at a glance. The caption under
+    /// the image only exists from iOS 17.4, before that only the image is
+    /// shown.
     private func imageRows(_ entries: [Entry]) -> [CPListSection] {
-        let perRow = 2
+        let perRow = 4
         var rows: [CPListTemplateItem] = []
         var start = 0
         while start < entries.count {
