@@ -621,6 +621,7 @@ most interesting values.
 | Refrigerant pressure / temperature, sensor 1 | `224EEF` | Climate | 8 | `[b0:b1]*0.0088` bar, `[b2:b3]/10-40` | OBDb |
 | 12 V battery | `222AF7` | AKKU11 | 20 | V `/1000+4`, A signed `/1000`, SoC `b7`, temp `b8-40` | OBDb |
 | DC/DC low side, DC/DC voltage | `222A53`, `22465D` | AKKU11, DC/DC | 10 | `b0/10` V, `[b1:b2]-511` A, `/512` V | OBDb |
+| **Test block** (62 values, every 6th-14th round) | many | all | 6-14 | see the block at the end of `frontend/readings.js` | One test drive to see which arrive: motor speed/torque request/acceleration/pedal, cooling and fan duties, climate flaps and vents, cell SoC, HV voltages, battery heater, 18 module temperatures, range reserve, motor power limit, AC charger (`744`/`7AE`). Unconfirmed on the ID.Buzz; the dead ones are removed afterwards. Raw values per point: up to 250 keys / 24 kB. |
 
 **State of health.** `222AB2` (battery capacity as the car reports it, read every 40th round) is compared with the profile value (new): 72.8 of 77 kWh is 94.5 %. The vehicle view shows it, `GET /api/vehicles` returns `soh_percent` and `capacity_history` (one row per change of 0.2 kWh, at least weekly, with the odometer reading; table `capacity_history`). The same capacity is also what all kWh conversions use.
 | Battery capacity | `222AB2` | Battery | 40 | `[b0:b3]/1310.77/1000` | measured, not brochure |

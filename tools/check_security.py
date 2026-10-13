@@ -262,8 +262,8 @@ def part_inputs() -> None:
     for text, change in (("Tempo über 500 km/h", {"speed_kmh": 900}),
                             ("negatives Tempo", {"speed_kmh": -3}),
                             ("Aussentemperatur von 400 Grad", {"outside_temp_c": 400}),
-                            ("hundert Rohwerte", {"raw_values": {f"k{i}": 1 for i in range(100)}}),
-                            ("ein Rohwert von 20 000 Zeichen", {"raw_values": {"a": "x" * 20000}})):
+                            ("dreihundert Rohwerte", {"raw_values": {f"k{i}": 1 for i in range(300)}}),
+                            ("ein Rohwert von 30 000 Zeichen", {"raw_values": {"a": "x" * 30000}})):
         response = client.post("/api/live/1/point", json={**point, **change}, headers=header)
         verify(response.status_code == 422, f"Messpunkt mit {text} wird abgelehnt",
                f"HTTP {response.status_code}")

@@ -159,7 +159,7 @@ def part_abrp():
     jolt = sources.find("jolt")
     base = {"lat": 45.0, "lon": 1.0, "soc": 50}
     try:
-        jolt.normalize({**base, "raw_values": {str(i): 1 for i in range(200)}})
+        jolt.normalize({**base, "raw_values": {str(i): 1 for i in range(300)}})
         verify(False, "zu viele Rohwerte werden abgelehnt")
     except SourcesError:
         verify(True, "zu viele Rohwerte werden abgelehnt")
