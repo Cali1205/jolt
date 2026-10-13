@@ -1502,6 +1502,28 @@ window.joltLive = (function () {
     }
   }
 
+  /* Heating and air conditioning in kW: the PTC heater plus the A/C
+   * compressor. On a car with a heat pump the compressor *is* the heating
+   * for most of the year - the PTC element only kicks in when it gets really
+   * cold, and showing it alone read "0.0 kW" at 10 degrees while the
+   * auxiliary consumers drew three. The compressor is read every few rounds
+   * only, so its last value counts for two minutes; the PTC current is
+   * taken from this round or, failing that, from the same window. */
+  function climateKw(raw) {
+    const fresh = (name) => {
+      if (typeof raw[name] === "number") return raw[name];
+      const last = valuesAsOf[name];
+      return last && typeof last.val === "number"
+        && Date.now() - last.timestamp < 120000 ? last.val : null;
+    };
+    const ptc = fresh("ptc_current_a");
+    const volt = typeof raw.voltage_v === "number" ? raw.voltage_v : null;
+    const compressor = fresh("compressor_w");
+    const ptcKw = (ptc !== null && volt !== null) ? ptc * volt / 1000 : null;
+    if (ptcKw === null && compressor === null) return null;
+    return (ptcKw || 0) + (compressor || 0) / 1000;
+  }
+
   /* What the car measures - as a **row**, not a row of tiles.
    *
    * Six more tiles would have been the same size as the four
@@ -1544,9 +1566,9 @@ window.joltLive = (function () {
     }
     if (typeof raw.aux_load_kw === "number") {
       let n = `<b>${K.num(raw.aux_load_kw, 1)}</b> kW Nebenverbraucher`;
-      if (typeof raw.ptc_current_a === "number"
-          && typeof raw.voltage_v === "number") {
-        n += `, davon <b>${K.num(raw.ptc_current_a * raw.voltage_v / 1000, 1)}</b> Heizung`;
+      const climate = climateKw(raw);
+      if (climate !== null) {
+        n += `, davon <b>${K.num(climate, 1)}</b> Heizung/Klima`;
       }
       parts.push(n);
     } else if (aux_load) {
