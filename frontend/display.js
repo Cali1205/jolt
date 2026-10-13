@@ -160,9 +160,10 @@ window.joltDisplay = (function () {
 
   /* The auxiliary consumers: what the car draws without driving. The measured
    * value (`aux_load_kw`) beats the approximation from standstill.
-   * Heating (PTC) and A/C compressor are added if they were read: they are
-   * the two big consumers one can influence oneself. The heater power is
-   * current times pack voltage - an approximation, not a measurement. */
+   * Heating/A-C is derived: auxiliary load minus the DC/DC converter's power
+   * (the 12 V network). The cabin heater has no reading of its own on this
+   * car - `ptc_current_a` is the battery heater. The A/C compressor is shown
+   * separately if it was read. Both are estimates, not measurements. */
   function auxModel(vals, approximation, now) {
     let kw = valueFresh(vals, "aux_load_kw", now);
     let source = "gemessen";
@@ -170,9 +171,10 @@ window.joltDisplay = (function () {
       kw = approximation.kw;
       source = "geschaetzt";
     }
-    const ptcA = valueFresh(vals, "ptc_current_a", now);
-    const voltage = valueFresh(vals, "voltage_v", now);
-    const heating = (ptcA !== null && voltage !== null) ? ptcA * voltage / 1000 : null;
+    const dcdcA = valueFresh(vals, "dcdc_current_a", now);
+    const battV = valueFresh(vals, "batt_v", now);
+    const heating = (kw !== null && source === "gemessen" && dcdcA !== null && battV !== null)
+      ? Math.max(0, kw - dcdcA * battV / 1000) : null;
     const compressorW = valueFresh(vals, "compressor_w", now);
     const climate = compressorW !== null ? compressorW / 1000 : null;
     const batterie = valueFresh(vals, "batterie_c", now);

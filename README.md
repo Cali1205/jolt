@@ -598,7 +598,7 @@ most interesting values.
 | Total charged | ↑ | BMS | every | `[b8:b11]/8583.07` | from the same response |
 | Charge limit | `221E1B` | BMS | every | `[b0:b1]/5` | |
 | Operating mode | `227448` | BMS | every | `b0` | Bit 2 = charging |
-| Heating current (PTC) | `221620` | BMS | every | `b0/4` | battery heater |
+| Battery heater current | `221620` | BMS | every | `b0/4` | battery heater only (0 A on warm drives); cabin heating is derived: auxiliary loads − DC/DC power |
 | Speed | `22F40D` | BMS | every | `b0` | |
 | Battery temperature | `222A0B` | BMS | 10 | `b0/2−40` | more accurate than the outside temperature for the charging curve |
 | Auxiliary loads | `220364` | Vehicle | every | `[b0:b1]/10` | everything except the drive |

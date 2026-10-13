@@ -211,12 +211,14 @@ window.joltReadings = {
       did: "227448", address: "BMS",
       downhill: 0, len_total: 1 },
 
-    /* The current of the PTC heater. Times pack voltage this gives what the
-     * heater alone draws - in winter the question behind the question,
-     * because it is the only big consumer one can influence oneself. */
+    /* The current of the *battery* heater - not the cabin heater, as it was
+     * once taken for. It sat at 0 A on all drives (battery 12-16 degrees),
+     * while the auxiliary consumers followed the cold. The cabin heating is
+     * derived from `aux_load_kw` and the DC/DC power (live.js, display.js).
+     * Times pack voltage this gives what the battery heater draws. */
     // `max`: one drive delivered 63.5 A (22 kW at 350 V) at 2 kW of auxiliary
     // load - a garbled byte. The PTC element of the MEB draws 7 kW at most.
-    { name: "ptc_current_a", title: "Heizstrom", unit: "A", put: 1,
+    { name: "ptc_current_a", title: "Batterieheizung", unit: "A", put: 1,
       did: "221620", address: "BMS",
       downhill: 0, len_total: 1, divider: 4, min: 0, max: 40 },
 
