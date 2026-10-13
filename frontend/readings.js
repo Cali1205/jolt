@@ -443,17 +443,10 @@ window.joltReadings = {
       did: "2215D5", address: "AKKU11", rarely: 10,
       downhill: 0, len_total: 1 },
 
-    /* Energy content of the battery, as the car counts it: the same
-     * address family as the capacity above, and the conversion is
-     * "missing" in the list as well. Assumed like the capacity (32-bit
-     * value / 1 310 770 = kWh). If it is right it is the charge level
-     * **without** the rounding of the percent figure: kWh in the pack at any
-     * moment, and the difference between two points is the consumption.
-     * Whether it is, the first drive tells: it has to fall with the
-     * charge level by capacity per percent. */
-    { name: "energy_content_kwh", title: "Energieinhalt Akku", unit: "kWh",
-      put: 2, did: "222AB8", address: "AKKU11", rarely: 10,
-      downhill: 0, len_total: 4, divider: 1310770, min: 0, max: 200 },
+    /* Not read: 222AB8 (energy content) came back as a constant 0.001 that
+     * does not follow the charge level; CO2 (2242DB), humidity (2227C4), seat
+     * heating (223ADF/223AE0) and recirculation (22263B) are not answered or
+     * constant on the ID.Buzz (drive of 2026-10-13). */
 
     /* Very last and only rarely: these two need a protocol switch (see
      * CLIMATE). If it goes wrong, the mandatory values of this round have
@@ -481,34 +474,6 @@ window.joltReadings = {
         { name: "ptc_air_b5", title: "Zuheizer Byte 5-6", unit: null, put: 0,
           downhill: 5, len_total: 2 },
       ] },
-
-    /* Seat heating of the driver and passenger (current in A, conversion
-     * not listed - stored raw as one byte) and the recirculation flap
-     * (00 fresh air, 04 manual recirculation): heating consumers, and the
-     * flap decides how much the heater has to warm up. */
-    { name: "seat_heat_l_raw", title: "Sitzheizung links", unit: null, put: 0,
-      did: "223ADF", address: "CLIMATE", rarely: 20,
-      downhill: 0, len_total: 1 },
-    { name: "seat_heat_r_raw", title: "Sitzheizung rechts", unit: null, put: 0,
-      did: "223AE0", address: "CLIMATE", rarely: 20,
-      downhill: 0, len_total: 1 },
-    { name: "recirculation_raw", title: "Umluft", unit: null, put: 0,
-      did: "22263B", address: "CLIMATE", rarely: 20,
-      downhill: 0, len_total: 1 },
-
-    /* Interior air, slowly: CO2 in ppm and the relative humidity. Both say
-     * how hard the climate unit has to work - fogged windows and a stuffy
-     * cabin are what make people turn the heating and the recirculation
-     * up. CO2: second payload byte times 100 (spot2000, codingABI, WiCAN
-     * agree). Humidity: the list names 27C4 without a conversion; WiCAN reads
-     * byte 6 of the payload times 0.5, taken over here and bounded to
-     * 0-100 %. Every twentieth round, they change slowly. */
-    { name: "co2_ppm", title: "CO2 Innenraum", unit: "ppm", put: 0,
-      did: "2242DB", address: "CLIMATE", rarely: 20,
-      downhill: 1, len_total: 1, factor: 100, min: 200, max: 10000 },
-    { name: "humidity_in_pct", title: "Luftfeuchte Innenraum", unit: "%", put: 0,
-      did: "2227C4", address: "CLIMATE", rarely: 20,
-      downhill: 6, len_total: 1, factor: 0.5, min: 0, max: 100 },
 
     { name: "outside_temp_c", title: "Aussentemperatur", unit: "°C",
       put: 1, did: "222609", address: "CLIMATE", rarely: 20,

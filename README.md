@@ -609,13 +609,10 @@ most interesting values.
 | Circulation pump | `22743B` | BMS | 5 | `b0` % | unverified |
 | Discharge limit | `221E1C` | BMS | 10 | `[b0:b1]/5` | counterpart of the charge limit |
 | Driving position | `22210E` | Vehicle | 2 | `b1` (08 P, 07 R, 06 N, 05 D, 0C B) | B = strong recuperation; unverified |
-| Energy content | `222AB8` | AKKU11 | 10 | `[b0:b3]/1310770` kWh | assumed like the capacity; the first drive must show it falls with the charge level |
 | Cell voltage highest / lowest | `221E33` / `221E34` | BMS | 5 | `[b0:b1]/4096` V | balancing state; scale from evDash, bounded 2.0-4.5 V |
 | Motor torque rear / front | `22033B` / `220335` | Vehicle | every / 20 | signed `[b0:b1]` Nm | from danjulio/ev_info_display; front only on all-wheel cars |
 | Charging state | `2215D5` | AKKU11 | 10 | `b0` (01 ready, 02 none, 03 error, 05 end, 16 AC, 18 trickle) | from codingABI |
 | Cabin heater (PTC air) | `220801` | Climate | 4 | raw windows `ptc_air_b0/b1/b3/b5` | conversion missing in the list; collected raw |
-| CO2 / humidity inside | `2242DB` / `2227C4` | Climate | 20 | `b1 * 100` ppm / `b6 * 0.5` % | slow; humidity conversion from WiCAN, bounded 0-100 % |
-| Seat heating l / r, recirculation | `223ADF` `223AE0` `22263B` | Climate | 20 | raw `b0` | heating consumers; collected raw |
 
 **State of health.** `222AB2` (battery capacity as the car reports it, read every 40th round) is compared with the profile value (new): 72.8 of 77 kWh is 94.5 %. The vehicle view shows it, `GET /api/vehicles` returns `soh_percent` and `capacity_history` (one row per change of 0.2 kWh, at least weekly, with the odometer reading; table `capacity_history`). The same capacity is also what all kWh conversions use.
 | Battery capacity | `222AB2` | Battery | 40 | `[b0:b3]/1310.77/1000` | measured, not brochure |
@@ -655,9 +652,11 @@ a climate compressor. The toolbox for this is under
 
 ### Not implemented
 
-* `222AB8` **energy content** — multi-part, no source gives a conversion.
-  Consumption does not need it: the difference of the discharge counter is
-  more accurate.
+* `222AB8` **energy content** — answers with a constant 0.001 on the ID.Buzz
+  (drive of 2026-10-13), not usable. Consumption does not need it: the
+  difference of the discharge counter is more accurate.
+* CO2 (`2242DB`), humidity (`2227C4`), seat heating (`223ADF`/`223AE0`) and
+  recirculation (`22263B`) — not answered or constant on the ID.Buzz.
 * Cell voltages and temperatures (spot2000 lists over a hundred of them) — irrelevant for
   route planning.
 
