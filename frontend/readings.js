@@ -214,9 +214,11 @@ window.joltReadings = {
     /* The current of the PTC heater. Times pack voltage this gives what the
      * heater alone draws - in winter the question behind the question,
      * because it is the only big consumer one can influence oneself. */
+    // `max`: one drive delivered 63.5 A (22 kW at 350 V) at 2 kW of auxiliary
+    // load - a garbled byte. The PTC element of the MEB draws 7 kW at most.
     { name: "ptc_current_a", title: "Heizstrom", unit: "A", put: 1,
       did: "221620", address: "BMS",
-      downhill: 0, len_total: 1, divider: 4 },
+      downhill: 0, len_total: 1, divider: 4, min: 0, max: 40 },
 
     { name: "speed_kmh", title: "Tempo", unit: "km/h", put: 0,
       did: "22F40D", address: "BMS",
@@ -337,7 +339,10 @@ window.joltReadings = {
      * torque. The bound catches it in case that is different on another
      * vehicle after all. */
     { name: "compressor_w", title: "Klimakompressor", unit: "W",
-      put: 0, did: "220800", address: "CLIMATE", rarely: 20,
+      // Every fourth round (about a minute). Every twentieth left one sample
+      // per four minutes, and that is no measurement of a compressor that
+      // switches on and off.
+      put: 0, did: "220800", address: "CLIMATE", rarely: 4,
       downhill: 5, len_total: 2, min: 0, max: 8000,
       also: [
         { name: "compressor_upm", title: "Kompressor-Drehzahl",

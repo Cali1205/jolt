@@ -42,7 +42,9 @@ const OLD = {
     : null),
   charge_limit_a: (b) => (b.length >= 2 ? (b[0] * 256 + b[1]) / 5 : null),
   mode: (b) => b[0],
-  ptc_current_a: (b) => (b.length ? b[0] / 4 : null),
+  // 0xFF is the "not available" answer: 63.75 A would be 22 kW. The element
+  // draws 7 kW at most, so everything above 40 A counts as no value.
+  ptc_current_a: (b) => (b.length && b[0] / 4 <= 40 ? b[0] / 4 : null),
   speed_kmh: (b) => b[0],
   aux_load_kw: (b) => (b.length >= 2 ? (b[0] * 256 + b[1]) / 10 : null),
   odometer_km: (b) => (b.length >= 3
@@ -89,7 +91,7 @@ const OLD_ADDRESSES = {
   battery_kwh: ["222AB2", "710", false, 40],
   range_km: ["222AB6", "710", false, 10],
   batterie_c: ["222A0B", "FC007B", false, 10],
-  compressor_w: ["220800", "746", false, 20],
+  compressor_w: ["220800", "746", false, 4],
   outside_temp_c: ["222609", "746", false, 20],
   inside_temp_c: ["222613", "746", false, 20],
 };
