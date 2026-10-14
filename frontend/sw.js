@@ -9,10 +9,10 @@
  */
 // Count up with every change to the shell: the name is the only lever by
 // which an old cache is discarded (see "activate").
-const CACHE = "jolt-v26";
+const CACHE = "jolt-v27";
 const SCAFFOLD = [
   "/", "/static/core.js", "/static/map.js", "/static/route.js",
-  "/static/tiles.js", "/static/display.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
+  "/static/tiles.js", "/static/display.js", "/static/pending.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
   "/static/settings.js", "/static/app.js",
   // The OBD2 diagnostics page: Bluetooth needs no network, and an
   // underground car park is exactly the place where one opens it.
@@ -41,20 +41,57 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;   // map tiles
   if (url.pathname.startsWith("/api/")) return;      // never cache
 
-  event.respondWith(
-    fetch(event.request)
+  event.respondWith(networkOrCache(event.request, url));
+});
+
+/* How long the network gets before the copy on the device is used.
+ *
+ * Plain "network first" waits for the browser's own time limit when the
+ * connection is bad but not gone - that is the minute of white screen in a
+ * poor reception area. With this wait the page comes from the copy after a
+ * few seconds; the request keeps running and refreshes the copy, so the next
+ * start has the new version. With good reception nothing changes. */
+const NETWORK_WAIT_MS = 2500;
+
+// The copy is stored without the `?v=` of the page's references: one entry per
+// file, always the latest one.
+function copyKey(url) { return new Request(url.origin + url.pathname); }
+
+function networkOrCache(request, url) {
+  return new Promise((resolve) => {
+    let answered = false;
+    const answer = (response) => {
+      if (answered || !response) return false;
+      answered = true;
+      resolve(response);
+      return true;
+    };
+    const fromCopy = () => caches.match(copyKey(url))
+      .then((hit) => hit || caches.match("/"));
+
+    const timer = setTimeout(() => {
+      fromCopy().then((hit) => answer(hit));
+    }, NETWORK_WAIT_MS);
+
+    fetch(request)
       .then((response) => {
-        // Successful responses update the cache, so that the old version does
+        clearTimeout(timer);
+        // Successful responses update the copy, so that the old version does
         // not get stuck after an update.
         if (response.ok) {
           const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+          caches.open(CACHE).then((cache) => cache.put(copyKey(url), copy));
         }
-        return response;
+        answer(response);
       })
-      .catch(() => caches.match(event.request)
-        .then((hit) => hit || caches.match("/"))));
-});
+      .catch(() => {
+        clearTimeout(timer);
+        fromCopy().then((hit) => {
+          if (!answer(hit)) answer(Response.error());
+        });
+      });
+  });
+}
 
 /* ---------- Notifications ----------
  *

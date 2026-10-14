@@ -182,6 +182,12 @@ window.joltLive = (function () {
   }
 
   function link(sessionId, attempt = 1) {
+    if (isLocalSession(sessionId)) {
+      // Recording without network: nothing to connect to yet. The points are
+      // collected and go out as soon as the server can be reached.
+      showConnection("offline – wird nachgeliefert", "#e8804f");
+      return;
+    }
     if (socket) {
       // Detach the old listener before closing: otherwise this very close
       // triggers a reconnect itself.
@@ -2074,6 +2080,42 @@ window.joltLive = (function () {
 
   function bufferStorage(id) { return "jolt-puffer-" + id; }
 
+  function isLocalSession(id) {
+    return !!(window.joltPending && window.joltPending.isLocal(id));
+  }
+
+  // Not more often than every 15 s: with every point a request that times out
+  // would otherwise run back to back.
+  const MATERIALIZE_EVERY_MS = 15000;
+  let materializeTried = 0;
+
+  /* A recording that was started without network becomes a real one as soon
+   * as the server can be reached. True when the session now has a real id. */
+  async function materializeCurrent(force) {
+    const local = K.state.sessionId;
+    if (!isLocalSession(local)) return true;
+    if (!force && Date.now() - materializeTried < MATERIALIZE_EVERY_MS) return false;
+    materializeTried = Date.now();
+    let result;
+    try { result = await window.joltPending.materialize(K.api); }
+    catch (failure) {
+      K.report("Aufzeichnung: " + failure.message, "fehler");
+      return false;
+    }
+    if (!result) return false;
+    const real = result.session_id;
+    window.joltPending.renameBuffer(local, real);
+    if (bufferSession === local) bufferSession = real;
+    K.state.sessionId = real;
+    K.sessionRemember(real);
+    window.joltPending.release();
+    K.state.tripsStale = true;
+    K.report("Verbindung da – die Aufzeichnung läuft jetzt auf dem Server.",
+             "hinweis");
+    link(real);
+    return true;
+  }
+
   function bufferFor(id) {
     if (bufferSession === id) return;
     bufferSession = id;
@@ -2113,6 +2155,15 @@ window.joltLive = (function () {
   async function sendBuffer() {
     do {
       bufferAgain = false;
+      if (isLocalSession(K.state.sessionId) && !(await materializeCurrent())) {
+        if (!withoutGridReported) {
+          withoutGridReported = true;
+          K.report("Kein Netz – die Aufzeichnung läuft lokal und wird "
+            + "nachgeliefert.", "hinweis");
+        }
+        saveBuffer();
+        return;
+      }
       const id = K.state.sessionId;
       while (id && buffer.length && K.state.sessionId === id) {
         const batch = buffer.slice(0, batchSize);
@@ -2233,6 +2284,16 @@ window.joltLive = (function () {
     field.blur();
     try {
       const place = await fetchLocation();
+      if (isLocalSession(K.state.sessionId)) {
+        bufferAppend({ lat: place.lat, lon: place.lon, soc: soc,
+                       speed_kmh: place.speed_kmh,
+                       timestamp: new Date().toISOString() });
+        saveBuffer();
+        bufferProcess();
+        K.report("Ladestand gemerkt – wird übertragen, sobald es Netz gibt.",
+                 "hinweis");
+        return;
+      }
       const state = await K.api(`/api/live/${K.state.sessionId}/point`,
         { method: "POST", body: { lat: place.lat, lon: place.lon, soc: soc,
                                   speed_kmh: place.speed_kmh } });
@@ -2262,22 +2323,38 @@ window.joltLive = (function () {
     // What is still in the queue belongs to the trip - and after
     // ending the server accepts nothing more.
     bufferFor(K.state.sessionId);
-    if (buffer.length) await bufferProcess();
-    if (buffer.length) {
+    if (buffer.length || isLocalSession(K.state.sessionId)) {
+      if (isLocalSession(K.state.sessionId)) await materializeCurrent(true);
+      if (buffer.length) await bufferProcess();
+    }
+    // Still without a real session: the end and the remaining points are
+    // carried out later by `joltPending.watch`.
+    const endLater = isLocalSession(K.state.sessionId);
+    if (endLater) {
+      window.joltPending.requestEnd();
+      saveBuffer();
+      K.report("Kein Netz – die Fahrt wird beendet und übertragen, sobald "
+        + "wieder Verbindung besteht. Die Daten sind auf dem Gerät gesichert.",
+        "warnung");
+    } else if (buffer.length) {
       K.report(buffer.length + " Messpunkte konnten nicht mehr übertragen "
         + "werden - kein Netz.", "warnung");
     }
     let result = null;
-    try {
-      result = await K.api(`/api/live/${K.state.sessionId}/end`,
-                             { method: "POST" });
-    } catch (failure) { /* an already ended trip is not a problem */ }
+    if (!endLater) {
+      try {
+        result = await K.api(`/api/live/${K.state.sessionId}/end`,
+                               { method: "POST" });
+      } catch (failure) { /* an already ended trip is not a problem */ }
+    }
     // The trips view has cached the list; a trip that has just
     // ended belongs in it.
     K.state.tripsStale = true;
     positionGiveUp();
     buffer = [];
-    saveBuffer();
+    // The points of a recording that is still waiting for the network stay
+    // in storage - they are all there is.
+    if (!endLater) saveBuffer();
     bufferSession = null;
     withoutGridReported = false;
     supplied_later = 0;
@@ -2474,9 +2551,36 @@ window.joltLive = (function () {
     }
   }
 
+  /* After a reload: the recording that is still waiting for the network. */
+  function resumeLocal(id) {
+    const rec = window.joltPending.load();
+    if (!rec || rec.id !== id || rec.end_requested) {
+      K.sessionRemember(null);
+      return;
+    }
+    K.state.sessionId = id;
+    const wanted = rec.body && rec.body.vehicle_id;
+    K.state.recVehicle = (K.state.vehicles || []).find((f) => f.id === wanted)
+      || K.state.recVehicle;
+    drivingStateStart("steht");
+    bufferFor(id);
+    if (buffer.length) bufferProcess();
+    const empty = document.getElementById("live-empty");
+    const contents = document.getElementById("live-content");
+    if (empty) empty.hidden = true;
+    if (contents) contents.hidden = false;
+    link(id);
+    positionTrace();
+    showDongle();
+    if (window.joltApp) window.joltApp.showView("live");
+    K.report("Die Aufzeichnung läuft weiter – sie wartet noch auf Netz und "
+      + "wird nachgeliefert.", "hinweis");
+  }
+
   async function resumeSession(attempt = 1) {
     const id = K.rememberedSession();
     if (!id || K.state.sessionId) return;
+    if (isLocalSession(id)) { resumeLocal(id); return; }
     let state;
     try {
       state = await K.api(`/api/live/${id}`);
@@ -2553,6 +2657,13 @@ window.joltLive = (function () {
     K.at("dongle-on", "click", connectDongle);
     // Only when the vehicle list is up - otherwise the battery size is missing.
     setTimeout(resumeSession, 800);
+    // A recording that was ended without network is delivered here.
+    if (window.joltPending) {
+      window.joltPending.watch(K.api, () => {
+        K.state.tripsStale = true;
+        K.report("Die Offline-Aufzeichnung ist übertragen und beendet.", "hinweis");
+      });
+    }
     K.at("dongle-pause", "click", donglePausieren);
     setInterval(examineVoltage, VOLTAGE_TICK_MS);
     const autoCheckbox = document.getElementById("dongle-car");

@@ -7,6 +7,8 @@
 const fs = require("fs");
 const vm = require("vm");
 
+const pendingSource = fs.readFileSync(
+  require("path").join(__dirname, "..", "frontend", "pending.js"), "utf8");
 const source = fs.readFileSync(
   require("path").join(__dirname, "..", "frontend", "live.js"), "utf8");
 
@@ -41,6 +43,7 @@ const K0 = {
       rejectedRequests++;
       const e = new Error("HTTP 422"); e.status = 422; throw e;
     }
+    if (fs_path === "/api/live/recording") return { session_id: 99, trip_id: 5 };
     posts.push({ fs_path, body: opt.body });
     return { kind: "zustand", n: posts.length };
   },
@@ -68,9 +71,11 @@ const context = {
     setItem: (k, v) => { storage[k] = v; },
     removeItem: (k) => { delete storage[k]; } },
   WebSocket: function () {},
+  location: { protocol: "https:", host: "jolt.test" },
 };
 context.window.localStorage = context.localStorage;
 vm.createContext(context);
+vm.runInContext(pendingSource, context);
 vm.runInContext(source, context);
 const live = timeframe.joltLive;
 // showState needs the DOM - without effect for the test.
@@ -224,6 +229,30 @@ async function point(pace = null) {
   verify(youngest().speed_kmh === null, "NaN auch nicht");
   await point(250 / 3.6);
   verify(youngest().speed_kmh !== null, "250 km/h sind noch gueltig");
+
+  console.log("\nAufzeichnung ohne Netz gestartet");
+  grid = false;
+  const started = await timeframe.joltPending.start(K.api,
+    { vehicle_id: 1, lat: 52, lon: 10, soc: 50, name: "offline" });
+  K0.state.sessionId = started.session_id;
+  const beforeLocal = posts.length;
+  await point(); await point(); await point();
+  verify(posts.length === beforeLocal
+         && JSON.parse(storage["jolt-puffer-" + started.session_id] || "[]").length === 3,
+         "ohne Netz liegen die Punkte unter der lokalen Nummer gesichert");
+  verify(reports.some((m) => /läuft lokal/.test(m)),
+         "und der Nutzer erfährt, dass lokal aufgezeichnet wird");
+  grid = true;
+  await point();
+  const landed = posts.slice(beforeLocal);
+  verify(K0.state.sessionId === 99 && landed.length === 1
+         && landed[0].fs_path === "/api/live/99/points"
+         && landed[0].body.points.length === 4,
+         "mit Netz wird die Aufzeichnung angelegt und alle Punkte gehen an die echte Sitzung",
+         JSON.stringify(landed.map((p) => [p.fs_path, p.body.points.length])));
+  verify(!storage["jolt-puffer-" + started.session_id] && !storage["jolt-puffer-99"]
+         && !storage["jolt-aufz-offen"],
+         "danach ist auf dem Gerät nichts mehr übrig");
 
   Date.now = realNow;
   console.log(failure ? `\n${failure} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");

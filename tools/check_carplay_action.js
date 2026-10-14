@@ -16,6 +16,9 @@ const vm = require("vm");
 const source = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "trips.js"), "utf8");
 
+const pendingSource = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "pending.js"), "utf8");
+
 let failure = 0;
 function verify(ok, text, detail) {
   console.log((ok ? "  ok    " : "  FEHLT ") + text + (ok ? "" : "  -> " + detail));
@@ -51,6 +54,8 @@ function build(o) {
     actionResult: async (a) => { calls.result.push(a); },
   };
   const timeframe = {
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    addEventListener() {},
     jolt: K,
     joltBlePlugin: o.browser ? undefined
       : { JoltDisplay: plugin, Capacitor: { isNativePlatform: () => true } },
@@ -64,7 +69,7 @@ function build(o) {
     },
   };
   const context = {
-    window: timeframe, console: { log() {} }, setTimeout, Promise, Date, JSON, Math, Number, String,
+    window: timeframe, console: { log() {} }, Request, Response, clearTimeout, setTimeout, Promise, Date, JSON, Math, Number, String,
     document: { getElementById: (id) => elemente[id] || empty(),
                 querySelector: () => empty(), createElement: () => empty(),
                 addEventListener() {} },
@@ -77,6 +82,7 @@ function build(o) {
                     removeItem() {} },
   };
   vm.createContext(context);
+  vm.runInContext(pendingSource, context);
   vm.runInContext(source, context);
   timeframe.joltTrips.set_up();
   return { f: timeframe, calls, K, elemente };

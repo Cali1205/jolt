@@ -117,6 +117,11 @@ jobs:
       - name: Check recording start
         run: node tools/check_recording.js
 
+      # Recording that starts and ends without network, and is delivered
+      # later with its real start time.
+      - name: Check recording without network
+        run: node tools/check_pending.js
+
       # The traffic tile of the chosen route: the traffic is only in the
       # response of the last planning run, not on the saved trip.
       - name: Check traffic tile

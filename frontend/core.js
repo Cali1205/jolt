@@ -32,6 +32,11 @@ window.jolt = (function () {
     tripsStale: false,
   };
 
+  const DEFAULT_TIMEOUT_MS = 20000;
+  // Planning calls route, query chargers and optimise: they may take a while
+  // on a good connection too, and cutting them off would only repeat the work.
+  const SLOW_TIMEOUT_MS = 120000;
+  const SLOW_PATHS = /^\/api\/(route|chargers\/along|trips\/\d+\/charge-plan|live\/start)/;
   const TOKEN_KEY = "jolt-token";
   const SESSION_KEY = "jolt-sitzung";
 
@@ -57,6 +62,8 @@ window.jolt = (function () {
   function rememberedSession() {
     try {
       const raw = localStorage.getItem(SESSION_KEY);
+      // A recording started without network has a local id (text).
+      if (raw && raw.startsWith("local-")) return raw;
       return raw ? Number(raw) : null;
     } catch (e) { return null; }
   }
@@ -80,10 +87,21 @@ window.jolt = (function () {
       opt.body = JSON.stringify(opt.body);
     }
 
+    // A stalled connection must not hold the screen for a minute: every call
+    // has a time limit and counts as "server unreachable", like a lost
+    // network. Callers may ask for a shorter or longer one with `timeout`.
+    const timeout = opt.timeout
+      || (SLOW_PATHS.test(fs_path) ? SLOW_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
+    delete opt.timeout;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeout);
+    opt.signal = abort.signal;
+
     let response;
     try {
       response = await fetch(fs_path, opt);
     } catch (e) {
+      clearTimeout(timer);
       // No `status`: whoever buffers uses it to tell "network gone" from
       // "server rejected".
       throw new Error("Server nicht erreichbar.");
@@ -91,6 +109,7 @@ window.jolt = (function () {
 
     let data = null;
     try { data = await response.json(); } catch (e) { /* empty response */ }
+    clearTimeout(timer);
 
     if (!response.ok) {
       const reason = (data && (data.detail || data.message))

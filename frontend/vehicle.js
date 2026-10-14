@@ -220,12 +220,31 @@ window.joltVehicle = (function () {
 
   /* ---------- Loading and saving ---------- */
 
+  const CACHE_KEY = "jolt-fahrzeuge";
+
+  /* The list from the last time the server answered. A recording needs the
+   * vehicle - without this copy it could not be started without network. */
+  function cachedVehicles() {
+    try {
+      const list = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      return Array.isArray(list) && list.length ? list : null;
+    } catch (e) { return null; }
+  }
+
   async function load() {
     try {
-      K.state.vehicles = await K.api("/api/vehicles");
+      K.state.vehicles = await K.api("/api/vehicles", { timeout: 8000 });
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(K.state.vehicles)); }
+      catch (e) { /* without storage, simply without a copy */ }
     } catch (failure) {
-      K.report("Fahrzeuge: " + failure.message, "fehler");
-      return;
+      const copy = failure.status ? null : cachedVehicles();
+      if (!copy) {
+        K.report("Fahrzeuge: " + failure.message, "fehler");
+        return;
+      }
+      K.state.vehicles = copy;
+      K.report("Kein Netz – Fahrzeuge vom letzten Mal. Aufzeichnen geht trotzdem.",
+               "hinweis");
     }
 
     for (const id of ["vehicle-choice", "vehicle-list", "rec-vehicle"]) {

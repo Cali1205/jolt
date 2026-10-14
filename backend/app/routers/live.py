@@ -317,6 +317,10 @@ class RecordingStart(BaseModel):
     lon: float = Field(ge=-180, le=180)
     soc: float | None = Field(default=None, ge=0, le=100)
     name: str = Field(default="", max_length=120)
+    # When the recording really began, if the device had no network at the
+    # start and delivers it later. Also makes the call idempotent: a retry
+    # after a lost response finds the recording it already created.
+    started_at: datetime | None = None
 
 
 @router.post("/recording", dependencies=[Depends(deps.current_session)])
@@ -336,6 +340,19 @@ def start_recording(start: RecordingStart,
     vehicle = db.get(models.Vehicle, start.vehicle_id)
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
+
+    started = _examine_time(start.started_at)
+    if started is not None:
+        # The same start delivered twice (the first response was lost on a bad
+        # connection) must not create a second recording.
+        existing = (db.query(models.LiveSession)
+                    .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
+                    .filter(models.Trip.vehicle_id == vehicle.id,
+                            models.Trip.recording.is_(True),
+                            models.LiveSession.started_at == started).first())
+        if existing is not None:
+            return {"session_id": existing.id, "trip_id": existing.trip_id,
+                    "recording": True}
 
     # A session of the same vehicle that is still running gives way - but it
     # is **finished** and not silently dropped.
@@ -373,6 +390,8 @@ def start_recording(start: RecordingStart,
     db.flush()
 
     session = models.LiveSession(trip_id=trip.id)
+    if started is not None:
+        session.started_at = started
     db.add(session)
     db.commit()
 
@@ -389,7 +408,7 @@ def start_recording(start: RecordingStart,
     if start.soc is not None:
         try:
             live_session.record_sample(db, session, start.lat, start.lon,
-                                             soc=start.soc)
+                                             soc=start.soc, timestamp=started)
         except Exception as failure:      # noqa: BLE001
             # The trip must not fail because of this - someone is sitting in
             # the car.

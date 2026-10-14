@@ -21,6 +21,16 @@ The detailed concept with the reasoning behind every decision is in
   efficiency, heating by time rather than by distance. The difference between
   110 and 130 km/h is 40 % more air drag, not 18; a planner has to be able to
   model that, otherwise it is cosmetics.
+- **Recording without network** — starting, recording and ending a trip does
+  not depend on reception. The start asks the server for six seconds; if it
+  does not answer, the recording runs locally (`frontend/pending.js`) and is
+  created on the server with its real start time as soon as the network is
+  back, then the collected points follow (the same start sent twice finds the
+  recording it already made). Ending without network is remembered and
+  carried out later, in the background. Every API call has a time limit
+  (20 s) instead of the browser's minute, the vehicle list is kept for the
+  next start, and the service worker serves the app from its copy when the
+  network does not answer within 2.5 s. Planning still needs the server.
 - **Vehicle profiles with charging curve** — including templates, so nobody has
   to guess a drag coefficient (cw) on day one.
 - **Import chargers** from the official register of the Bundesnetzagentur
@@ -371,6 +381,8 @@ installation.
 | `VAPID_SUBJECT` | `mailto:` or `https:` — whom the push service can reach. |
 | `TRUSTED_PROXIES` | IPs of the reverse proxy that may set `X-Forwarded-For`. |
 | `RATE_LIMIT_PER_MIN` | Requests per minute and IP (default 120). |
+| `POINTS_LIMIT_PER_MIN` | The same for the measurement paths (`/api/live/report`, `/{id}/point(s)`), default 600. |
+| `WS_LIMIT_PER_MIN` | New WebSocket connections per minute and IP (default 30). |
 | `ENABLE_API_DOCS` | `1` enables `/api/docs`. Default: off. |
 
 ---
@@ -386,6 +398,7 @@ All scripts run without a network, without Postgres and without API keys:
 ./tools/check_replanning.py  # live: triggers one by one, replanning across the whole chain
 ./tools/check_push.py       # Web Push: keys, encryption, subscriptions, cleanup
 node tools/check_buffer.js  # measurement-point queue in the frontend: dead zone, resubmission
+node tools/check_pending.js # recording started/ended without network, delivered later
 ./tools/check_backend.py    # whole chain: schema, import, route, corridor, charging plan, live
 ```
 
