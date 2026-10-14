@@ -57,6 +57,14 @@ set_text NSLocationAlwaysAndWhenInUseUsageDescription \
 /usr/libexec/PlistBuddy -c "Delete :NSSupportsLiveActivities" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivities bool true" "$PLIST"
 
+# **App-bound domains.** Service workers run in an iOS web view only for the
+# domains listed here (together with `limitsNavigationsToAppBoundDomains` in
+# capacitor.config.json). With one, the app opens from its copy on poor
+# reception instead of waiting for the server - see frontend/sw.js.
+/usr/libexec/PlistBuddy -c "Delete :WKAppBoundDomains" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string jolt.the-smarthome.de" "$PLIST"
+
 /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string bluetooth-central" "$PLIST"
@@ -64,4 +72,4 @@ set_text NSLocationAlwaysAndWhenInUseUsageDescription \
 
 echo "Info.plist updated:"
 /usr/libexec/PlistBuddy -c "Print" "$PLIST" | grep -E \
-  "NSBluetooth|NSLocation|NSSupportsLive|UIBackgroundModes|ITSApp" -A 2 || true
+  "NSBluetooth|NSLocation|NSSupportsLive|UIBackgroundModes|ITSApp|WKAppBound" -A 2 || true
