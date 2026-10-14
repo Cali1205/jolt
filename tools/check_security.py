@@ -378,6 +378,46 @@ def part_92() -> None:
            "Auslesen der Punkte (GET) unterliegt dem Limit")
 
 
+def part_122() -> None:
+    """Bug scan #122: measurement paths limited, body rules, WebSocket, search text."""
+    verify.section("Messpfade und Anfragegröße")
+    client = TestClient(app)
+    security._points_hit.clear()
+    old = security.POINTS_MAX
+    security.POINTS_MAX = 3
+    codes = [client.post("/api/live/report", json={}).status_code for _ in range(5)]
+    verify(codes[3:] == [429, 429] and 429 not in codes[:3],
+           "die Messpfade haben ein eigenes, großzügiges Limit", str(codes))
+    security.POINTS_MAX = old
+    security._points_hit.clear()
+
+    response = client.post("/api/live/report", content=b"{}",
+                           headers={"content-length": "abc"})
+    verify(response.status_code in (400, 422),
+           "eine unlesbare Content-Length wird nicht als 0 behandelt",
+           f"HTTP {response.status_code}")
+    response = client.post("/api/live/report", content=iter([b"{}"]))
+    verify(response.status_code == 411,
+           "ein Body ohne Längenangabe (chunked) wird abgewiesen",
+           f"HTTP {response.status_code}")
+
+    security._ws_hit.clear()
+    old = security.WS_MAX
+    security.WS_MAX = 2
+    ok = [security.websocket_allowed(_Request("10.1.1.1")) for _ in range(4)]
+    verify(ok == [True, True, False, False],
+           "neue WebSockets je IP und Minute sind begrenzt", str(ok))
+    security.WS_MAX = old
+    security._ws_hit.clear()
+
+    security._hit.clear()
+    header = {"X-Token": client.post("/api/login",
+                                   json={"password": PASSWORD}).json()["token"]}
+    response = client.get("/api/places", params={"text": "x" * 500}, headers=header)
+    verify(response.status_code == 422, "ein überlanger Suchtext wird abgelehnt",
+           f"HTTP {response.status_code}")
+
+
 def main() -> int:
     part_password()
     part_client_ip()
@@ -387,6 +427,7 @@ def main() -> int:
     part_live()
     part_55()
     part_92()
+    part_122()
     return verify.balance()
 
 

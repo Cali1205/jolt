@@ -87,7 +87,8 @@ class ORS:
                       **({"options": {"avoid_features": ["tollways"]}}
                          if toll_free else {})})
         except requests.RequestException as failure:
-            raise RoutingError(f"Routing nicht erreichbar: {failure}") from failure
+            log.warning("ORS not reachable: %s", failure)
+            raise RoutingError("Routing nicht erreichbar.") from failure
 
         if response.status_code == 401:
             raise RoutingError("ORS_API_KEY wird abgelehnt - Schlüssel prüfen.")
@@ -95,8 +96,9 @@ class ORS:
             raise RoutingError(
                 "Tageskontingent von openrouteservice erschöpft (2.500 Anfragen).")
         if response.status_code >= 400:
-            raise RoutingError(f"Routing meldet HTTP {response.status_code}: "
-                                f"{response.text[:200]}")
+            log.warning("ORS answered HTTP %s: %s", response.status_code,
+                        response.text[:200])
+            raise RoutingError(f"Routing meldet HTTP {response.status_code}.")
 
         data = response.json()
         features = data.get("features") or []

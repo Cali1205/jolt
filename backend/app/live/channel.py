@@ -21,6 +21,7 @@ _lock = asyncio.Lock()
 
 
 MAX_PER_SESSION = 10
+SEND_TIMEOUT_S = 2.0
 
 
 async def sign_in(session_id: int, websocket) -> bool:
@@ -51,7 +52,9 @@ async def send(session_id: int, msg: dict) -> int:
     tot = []
     for connection in open_ones:
         try:
-            await connection.send_json(msg)
+            # A viewer with a full buffer must not hold up the car logger,
+            # whose response waits for this loop.
+            await asyncio.wait_for(connection.send_json(msg), timeout=SEND_TIMEOUT_S)
         except Exception as failure:      # noqa: BLE001 - every cause is the same
             log.debug("Live connection removed (%s).", failure)
             tot.append(connection)
