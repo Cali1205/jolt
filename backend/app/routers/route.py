@@ -135,7 +135,7 @@ class Routenanfrage(BaseModel):
 
 
 @router.get("/places")
-def search_places(text: str = Query(min_length=2), country: str = ""):
+def search_places(text: str = Query(min_length=2, max_length=200), country: str = ""):
     try:
         hit = routing.provider().seek(text, country)
     except RoutingError as failure:

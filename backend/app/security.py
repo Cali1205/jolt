@@ -30,6 +30,15 @@ LOGIN_MAX = int(os.environ.get("LOGIN_LIMIT_PER_15MIN", "10"))
 _lock = threading.Lock()
 _hit: dict[str, deque] = defaultdict(deque)
 _login_hit: dict[str, deque] = defaultdict(deque)
+# The exempt measurement paths get a limit of their own: generous (a logger
+# sends about one request per second per path), but not unlimited - the body
+# is parsed before the token or session is checked.
+_points_hit: dict[str, deque] = defaultdict(deque)
+POINTS_MAX = int(os.environ.get("POINTS_LIMIT_PER_MIN", "600"))
+# New WebSocket handshakes per IP and minute; a socket waits up to 10 s for
+# its token, so unauthenticated sockets would otherwise pile up.
+_ws_hit: dict[str, deque] = defaultdict(deque)
+WS_MAX = int(os.environ.get("WS_LIMIT_PER_MIN", "30"))
 # Failed attempts with a wrong logger token at /api/live/report. The path is
 # exempt from the general limit (it receives measurement points every second),
 # so guessing tokens needs a limit of its own.
@@ -161,6 +170,11 @@ def report_locked(request: Request) -> bool:
         return len(queue) >= REPORT_ERROR_MAX
 
 
+def websocket_allowed(websocket) -> bool:
+    """False if this IP opened too many WebSockets in the last minute."""
+    return _count(_ws_hit, client_ip(websocket), 60, WS_MAX)
+
+
 def count_report_error(request: Request) -> None:
     """Record a failed attempt - only wrong tokens, not every report."""
     with _lock:
@@ -171,13 +185,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if path.startswith("/api/"):
-            try:
-                size = int(request.headers.get("content-length") or 0)
-            except ValueError:
-                size = 0
-            if size > MAX_BODY_BYTES:
+            refusal = self._refuse_body(request)
+            if refusal is not None:
+                return self._header_rows(request, refusal)
+        if path.startswith("/api/") and is_exempt(path, request.method):
+            if not _count(_points_hit, client_ip(request), GLOBAL_WINDOW, POINTS_MAX):
                 return self._header_rows(request, JSONResponse(
-                    {"detail": "Anfrage zu groß."}, status_code=413))
+                    {"detail": "Zu viele Anfragen."}, status_code=429))
         if path.startswith("/api/") and not is_exempt(path, request.method):
             if not _count(_hit, client_ip(request), GLOBAL_WINDOW, GLOBAL_MAX):
                 # Return a response instead of raising `HTTPException`:
@@ -188,6 +202,24 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 return self._header_rows(request, response)
 
         return self._header_rows(request, await call_next(request))
+
+    @staticmethod
+    def _refuse_body(request: Request):
+        """The size limit needs a declared length: without one (chunked) or with
+        an unreadable one the limit could not be enforced before parsing."""
+        declared = request.headers.get("content-length")
+        if declared is None:
+            if (request.method in ("POST", "PUT", "PATCH")
+                    and "chunked" in request.headers.get("transfer-encoding", "").lower()):
+                return JSONResponse({"detail": "Content-Length fehlt."}, status_code=411)
+            return None
+        try:
+            size = int(declared)
+        except ValueError:
+            return JSONResponse({"detail": "Content-Length ungültig."}, status_code=400)
+        if size > MAX_BODY_BYTES:
+            return JSONResponse({"detail": "Anfrage zu groß."}, status_code=413)
+        return None
 
     @staticmethod
     def _header_rows(request: Request, response):

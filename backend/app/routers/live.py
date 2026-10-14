@@ -622,6 +622,9 @@ async def live_channel(websocket: WebSocket, session_id: int):
     distributor and gets to see anything. Without a password this does not
     apply, the response `{"typ": "bereit"}` (kind: ready) comes anyway.
     """
+    if not security.websocket_allowed(websocket):
+        await websocket.close(code=4429)
+        return
     await websocket.accept()
     if deps.password_set():
         try:
