@@ -54,6 +54,18 @@ def part_app_id() -> None:
            "widerspricht", str(old))
 
 
+def part_app_bound() -> None:
+    verify.section("Service Worker in der App")
+    config = json.loads(load("capacitor.config.json"))
+    host = config.get("server", {}).get("url", "").split("//")[-1].split("/")[0]
+    verify(config.get("ios", {}).get("limitsNavigationsToAppBoundDomains") is True,
+           "die App begrenzt die Navigation auf ihre Domain - Voraussetzung für "
+           "den Service Worker im Web-View")
+    verify(host and host in load("tools", "ios_info_plist.sh")
+           and "WKAppBoundDomains" in load("tools", "ios_info_plist.sh"),
+           "und die Info.plist nennt genau die Domain der Server-URL", host)
+
+
 def part_symbol() -> None:
     verify.section("App-Symbol")
     with open(os.path.join(ROOT, "tools", "ios-app-icon.png"), "rb") as f:
@@ -448,6 +460,7 @@ def part_carplay() -> None:
 def main() -> int:
     part_app_id()
     part_symbol()
+    part_app_bound()
     part_scripts()
     part_signature()
     part_workflows()
