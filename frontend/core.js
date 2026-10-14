@@ -36,7 +36,7 @@ window.jolt = (function () {
   // Planning calls route, query chargers and optimise: they may take a while
   // on a good connection too, and cutting them off would only repeat the work.
   const SLOW_TIMEOUT_MS = 120000;
-  const SLOW_PATHS = /^\/api\/(route|chargers\/along|trips\/\d+\/charge-plan|live\/start)/;
+  const SLOW_PATHS = /^\/api\/(route|chargers\/along|trips\/\d+\/charge-plan|live\/start)/;
   const TOKEN_KEY = "jolt-token";
   const SESSION_KEY = "jolt-sitzung";
 
