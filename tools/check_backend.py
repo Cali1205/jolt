@@ -861,6 +861,26 @@ def main() -> int:
            str(empty["actual_soc"]))
     client.post(f"/api/live/{without['session_id']}/end")
 
+    # Offline start: the device delivers the real start time later, and a
+    # repeated delivery (lost response) must not create a second recording.
+    _delta = __import__("datetime").timedelta
+    when = (_dz.now(_tzz.utc) - _delta(minutes=7)).isoformat()
+    body = {"vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
+            "soc": 71.0, "name": "Offline", "started_at": when}
+    late = client.post("/api/live/recording", json=body).json()
+    again = client.post("/api/live/recording", json=body).json()
+    verify(again["session_id"] == late["session_id"],
+           "derselbe verspätete Start liefert dieselbe Aufzeichnung, keine zweite",
+           f"{late} / {again}")
+    late_points = client.get(f"/api/live/{late['session_id']}/points").json()["points"]
+    verify(len(late_points) == 1 and late_points[0]["soc"] == 71.0,
+           "und der Startpunkt trägt den Startladestand", str(late_points))
+    old = (_dz.now(_tzz.utc) - _delta(days=5)).isoformat()
+    verify(client.post("/api/live/recording",
+                       json={**body, "started_at": old}).status_code == 422,
+           "ein Start von vor mehr als zwei Tagen wird abgelehnt")
+    client.post(f"/api/live/{late['session_id']}/end")
+
     print("\nLadepunkte im Korridor")
     corridor = client.get(f"/api/chargers/along/{trip_id}",
                           params={"min_kw": 100, "radius_km": 25}).json()

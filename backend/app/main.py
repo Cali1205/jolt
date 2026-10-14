@@ -121,7 +121,8 @@ def _with_version(html: str, files) -> str:
 # cleverness that silently misses at the next restructuring.
 INDEX_FILES = ("ble-plugin.js", "obd-ble-native.js", "readings.js",
                  "obd-core.js",
-                 "core.js", "map.js", "route.js", "tiles.js", "display.js", "live.js",
+                 "core.js", "map.js", "route.js", "tiles.js", "display.js", "pending.js",
+                 "live.js",
                  "settings.js",
                  "trips.js", "vehicle.js", "app.js")
 

@@ -16,6 +16,9 @@ const vm = require("vm");
 const source = fs.readFileSync(
   path.join(__dirname, "..", "frontend", "trips.js"), "utf8");
 
+const pendingSource = fs.readFileSync(
+  path.join(__dirname, "..", "frontend", "pending.js"), "utf8");
+
 let failure = 0;
 function verify(ok, text, detail) {
   console.log((ok ? "  ok    " : "  FEHLT ") + text + (ok ? "" : "  -> " + detail));
@@ -62,6 +65,8 @@ async function cycle(scenario) {
     sessionRemember() {},
   };
   const timeframe = {
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    addEventListener() {},
     jolt: K, joltObd: obd,
     joltApp: { showView() {} },
     joltLive: {
@@ -74,7 +79,7 @@ async function cycle(scenario) {
     },
   };
   const context = {
-    window: timeframe, console: { log() {} }, setTimeout, Promise, Date, JSON, Math, Number,
+    window: timeframe, console: { log() {} }, Request, Response, clearTimeout, setTimeout, Promise, Date, JSON, Math, Number,
     document: { getElementById: (id) => elemente[id] || empty(),
                 querySelector: () => empty(), createElement: () => empty(),
                 addEventListener() {} },
@@ -83,6 +88,7 @@ async function cycle(scenario) {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   };
   vm.createContext(context);
+  vm.runInContext(pendingSource, context);
   vm.runInContext(source, context);
   await timeframe.joltTrips.startRecording();
   return { calls, sent, reports, as_of: elemente["rec-status"].textContent,

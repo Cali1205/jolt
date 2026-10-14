@@ -409,12 +409,11 @@ window.joltTrips = (function () {
       }
 
       as_of("Fahrt anlegen …");
-      const response = await K.api("/api/live/recording", {
-        method: "POST",
-        body: { vehicle_id: id, lat: city.latitude, lon: city.longitude,
-                soc: soc,
-                name: document.getElementById("rec-name").value },
-      });
+      // Without network the recording starts locally and is created on the
+      // server later (`pending.js`) - the start must not depend on reception.
+      const response = await window.joltPending.start(K.api, {
+        vehicle_id: id, lat: city.latitude, lon: city.longitude,
+        soc: soc, name: document.getElementById("rec-name").value });
       K.state.sessionId = response.session_id;
       K.sessionRemember(response.session_id);
       K.state.recVehicle =
@@ -432,6 +431,10 @@ window.joltTrips = (function () {
       // off saw nothing.
       window.joltLive.drivingStateStart("faehrt");
       window.joltLive.positionTrace();
+      if (response.pending) {
+        K.report("Kein Netz – die Aufzeichnung läuft auf dem Gerät und wird "
+          + "nachgeliefert, sobald wieder Verbindung besteht.", "warnung");
+      }
       if (withDongle) {
         window.joltLive.dongleUse();
         K.report(soc !== null

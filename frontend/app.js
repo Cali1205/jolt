@@ -54,11 +54,24 @@ window.joltApp = (function () {
     window.joltVehicle.set_up();
     window.joltSettings.set_up();
 
-    let status;
+    // First, and without waiting for the network: the worker is what makes
+    // the next start independent of reception.
+    const workerReady = registerWorker();
+
+    let status = null;
     try {
-      status = await K.api("/api/status");
+      status = await K.api("/api/status", { timeout: 8000 });
     } catch (failure) {
-      K.report("Server nicht erreichbar.", "fehler");
+      // No network (or a very bad one): carry on with what the device has.
+      // Recording does not need the server to start; planning does.
+      K.report("Kein Netz – jolt arbeitet mit dem, was auf dem Gerät liegt. "
+        + "Aufzeichnen geht trotzdem, Planen erst mit Verbindung.", "warnung");
+      await window.joltVehicle.load();
+      window.addEventListener("online", () => {
+        window.joltVehicle.templatesCharging();
+        window.joltVehicle.load();
+      }, { once: true });
+      await workerReady;
       return;
     }
     if (status.demo_routing) {
@@ -74,18 +87,20 @@ window.joltApp = (function () {
 
     await window.joltVehicle.templatesCharging();
     await window.joltVehicle.load();
+    await workerReady;
+  }
 
-    if ("serviceWorker" in navigator) {
-      // The registration is kept because the subscription for the
-      // notifications depends on it (see live.js). Without it there would be
-      // no way to register the push receiver.
-      try {
-        K.state.serviceWorker = await navigator.serviceWorker.register("/sw.js");
-      } catch (failure) {
-        // Without a service worker everything keeps running, just without the
-        // offline shell and without notifications when the screen is dark.
-        K.state.serviceWorker = null;
-      }
+  async function registerWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    // The registration is kept because the subscription for the
+    // notifications depends on it (see live.js). Without it there would be
+    // no way to register the push receiver.
+    try {
+      K.state.serviceWorker = await navigator.serviceWorker.register("/sw.js");
+    } catch (failure) {
+      // Without a service worker everything keeps running, just without the
+      // offline shell and without notifications when the screen is dark.
+      K.state.serviceWorker = null;
     }
   }
 
