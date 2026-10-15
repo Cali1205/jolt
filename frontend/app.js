@@ -85,8 +85,9 @@ window.joltApp = (function () {
       await sign_in();
     }
 
-    await window.joltVehicle.templatesCharging();
-    await window.joltVehicle.load();
+    // Independent of each other: one round trip instead of two in a row.
+    await Promise.all([window.joltVehicle.templatesCharging(),
+                       window.joltVehicle.load()]);
     await workerReady;
   }
 

@@ -9,7 +9,7 @@
  */
 // Count up with every change to the shell: the name is the only lever by
 // which an old cache is discarded (see "activate").
-const CACHE = "jolt-v27";
+const CACHE = "jolt-v28";
 const SCAFFOLD = [
   "/", "/static/core.js", "/static/map.js", "/static/route.js",
   "/static/tiles.js", "/static/display.js", "/static/pending.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
@@ -41,8 +41,25 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;   // map tiles
   if (url.pathname.startsWith("/api/")) return;      // never cache
 
-  event.respondWith(networkOrCache(event.request, url));
+  // The shell comes from the copy at once and is refreshed in the
+  // background: the start does not wait for fifteen requests through the
+  // tunnel. A change is there from the next start on (the cache name above
+  // discards old copies). Whatever is not stored yet takes the old way.
+  event.respondWith(
+    caches.match(copyKey(url)).then((hit) => {
+      if (!hit) return networkOrCache(event.request, url);
+      refreshCopy(event.request, url);
+      return hit;
+    }));
 });
+
+function refreshCopy(request, url) {
+  fetch(request).then((response) => {
+    if (response.ok) {
+      caches.open(CACHE).then((cache) => cache.put(copyKey(url), response));
+    }
+  }).catch(() => { /* no network: the copy stays */ });
+}
 
 /* How long the network gets before the copy on the device is used.
  *
