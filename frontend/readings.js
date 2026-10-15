@@ -429,14 +429,10 @@ window.joltReadings = {
      * vehicle control unit like the auxiliary load, so no address switch).
      * Torque times speed is the mechanical power at the wheel: together with
      * the pack power it splits the consumption into drive and losses, and in B
-     * mode it shows how much is given back. The front axle only exists on
-     * the all-wheel versions, hence rare - on a rear-drive car it stays
-     * empty and drops out. (The source flips the sign in reverse.) */
+     * mode it shows how much is given back. (The source flips the sign in
+     * reverse.) */
     { name: "torque_rear_nm", title: "Drehmoment hinten", unit: "Nm", put: 0,
       did: "22033B", address: "VEHICLE",
-      downhill: 0, len_total: 2, sign: true, min: -1500, max: 1500 },
-    { name: "torque_front_nm", title: "Drehmoment vorn", unit: "Nm", put: 0,
-      did: "220335", address: "VEHICLE", rarely: 20,
       downhill: 0, len_total: 2, sign: true, min: -1500, max: 1500 },
 
     /* The charging state the BMS side reports (codingABI): 01 precondition
@@ -591,9 +587,6 @@ window.joltReadings = {
     { name: "defl_fr_t_c", title: "Ausströmer vorne rechts", unit: "°C", put: 1,
       did: "22260D", address: "CLIMATE", rarely: 9,
       downhill: 0, len_total: 1, factor: 0.333, min: 0, max: 100 },
-    { name: "defl_rear_t_c", title: "Ausströmer hinten", unit: "°C", put: 1,
-      did: "22263D", address: "CLIMATE", rarely: 9,
-      downhill: 0, len_total: 1, factor: 0.333, min: 0, max: 100 },
     { name: "t_flap_fl_pct", title: "Temperaturklappe links", unit: "%", put: 1,
       did: "222622", address: "CLIMATE", rarely: 9,
       downhill: 2, len_total: 1, factor: 0.5, min: 0, max: 100 },
@@ -618,12 +611,6 @@ window.joltReadings = {
     { name: "hv_charge_v", title: "HV Ladespannung", unit: "V", put: 1,
       did: "221E39", address: "BMS", rarely: 11,
       downhill: 0, len_total: 2, sign: true, factor: 0.03125, min: -1000, max: 1000 },
-    { name: "min_discharge_v_raw", title: "Entladespannung min (roh)", unit: null, put: 0,
-      did: "225170", address: "BMS", rarely: 11,
-      downhill: 0, len_total: 2 },
-    { name: "max_charge_v_raw", title: "Ladespannung max (roh)", unit: null, put: 0,
-      did: "225171", address: "BMS", rarely: 11,
-      downhill: 0, len_total: 2 },
     { name: "batt_ptc_v", title: "Batterieheizer Spannung", unit: "V", put: 1,
       did: "221621", address: "BMS", rarely: 12,
       downhill: 0, len_total: 1, divider: 10, min: 0, max: 500 },
@@ -690,9 +677,6 @@ window.joltReadings = {
     { name: "batt_mod_t_18", title: "Akkumodul 18 Temperatur", unit: "°C", put: 1,
       did: "227426", address: "BMS", rarely: 12,
       downhill: 0, len_total: 2, divider: 8, offset: -40, min: -40, max: 100 },
-    { name: "motor_pwr_limit_w", title: "Motor Leistungsgrenze", unit: "W", put: 0,
-      did: "2215D1", address: "AKKU11", rarely: 13,
-      downhill: 1, len_total: 2, factor: 50, min: 0, max: 500000 },
     { name: "aux12_resistance_mohm", title: "12-V-Batterie Widerstand", unit: "mΩ", put: 1,
       did: "222A0E", address: "AKKU11", rarely: 14,
       downhill: 0, len_total: 1, factor: 0.2, min: 0, max: 100 },
