@@ -56,6 +56,18 @@ def part_password() -> None:
            "ein falsches Passwort mit Umlaut ergibt 401, nicht 500",
            f"HTTP {response.status_code}")
 
+    # Bug scan #127: successful logins must not use up the guessing limit.
+    security._login_hit.clear()
+    codes = [client.post("/api/login", json={"password": PASSWORD}).status_code
+             for _ in range(security.LOGIN_MAX + 3)]
+    verify(codes == [200] * len(codes),
+           "erfolgreiche Anmeldungen zählen nicht gegen das Limit", str(codes))
+    codes = [client.post("/api/login", json={"password": "falsch"}).status_code
+             for _ in range(security.LOGIN_MAX + 1)]
+    verify(codes[-1] == 429 and codes[0] == 401,
+           "falsche Passwörter schon - danach 429", str(codes))
+    security._login_hit.clear()
+
 
 def part_limit() -> None:
     verify.section("Rate-Limit")

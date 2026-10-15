@@ -15,6 +15,7 @@ from fastapi import (APIRouter, Depends, HTTPException, Query, Request,
                      WebSocket, WebSocketDisconnect)
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .. import deps, models, push, security
@@ -161,7 +162,12 @@ def _session_lock(session_id: int) -> asyncio.Lock:
 
 def _record_locked(db: Session, session: models.LiveSession,
                    point: sources.RawPoint, new_plan: bool):
-    db.refresh(session)
+    # FOR UPDATE: `finish` holds the same row lock, so a point cannot slip in
+    # between its `running` check and its commit.
+    db.refresh(session, with_for_update=True)
+    # The session may have ended while this point waited for the lock.
+    if not session.running:
+        raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
     return live_session.record_sample(
         db, session, point.lat, point.lon, point.soc,
         point.speed_kmh, point.outside_temp_c, timestamp=point.timestamp,
@@ -480,7 +486,11 @@ async def report_logger(report: LoggerReport, request: Request,
 @router.get("/{session_id}", dependencies=[Depends(deps.current_session)])
 def read_state(session_id: int, db: Session = Depends(get_db)):
     session = _fetch_session(db, session_id)
-    last = session.points[-1] if session.points else None
+    last = (db.query(models.LivePoint)
+            .filter_by(session_id=session.id)
+            .order_by(models.LivePoint.id.desc()).first())
+    count = (db.query(func.count(models.LivePoint.id))
+             .filter_by(session_id=session.id).scalar())
     return {"session_id": session.id, "trip_id": session.trip_id,
             "running": session.running, "hint": session.hint,
             "consumption_factor": round(session.consumption_factor, 3),
@@ -489,7 +499,7 @@ def read_state(session_id: int, db: Session = Depends(get_db)):
             # not have to wait for the next measurement point.
             "plan": session.plan,
             "viewer": channel.viewer(session_id),
-            "points": len(session.points),
+            "points": count,
             "last": None if not last else {
                 "lat": last.lat, "lon": last.lon, "soc": last.soc,
                 "km_on_route": last.km_on_route,

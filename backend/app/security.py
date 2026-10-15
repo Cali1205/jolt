@@ -70,7 +70,7 @@ CSP = ("default-src 'self'; "
        "https://*.tile.openstreetmap.org; "
        "style-src 'self' 'unsafe-inline'; "
        "script-src 'self'; "
-       "connect-src 'self' ws: wss:; "
+       "connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 
 
@@ -153,9 +153,26 @@ def _remove_expired(buckets: dict, now: float, window_s: int,
 
 
 def login_limit(request: Request) -> None:
-    """Separate, tight limit for the login - against guessing."""
-    if not _count(_login_hit, client_ip(request), LOGIN_WINDOW, LOGIN_MAX):
-        raise HTTPException(429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
+    """Separate, tight limit for the login - against guessing.
+
+    Only failed attempts count (`count_login_failure`): behind a proxy
+    without TRUSTED_PROXIES all clients share one counter, and successful
+    logins must not lock everyone out.
+    """
+    now = time.time()
+    with _lock:
+        _remove_expired(_login_hit, now, LOGIN_WINDOW, None)
+        queue = _login_hit.get(client_ip(request))
+        if queue:
+            _expired(queue, now, LOGIN_WINDOW)
+            if len(queue) >= LOGIN_MAX:
+                raise HTTPException(
+                    429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
+
+
+def count_login_failure(request: Request) -> None:
+    with _lock:
+        _login_hit[client_ip(request)].append(time.time())
 
 
 def report_locked(request: Request) -> bool:

@@ -49,15 +49,18 @@ async def send(session_id: int, msg: dict) -> int:
     async with _lock:
         open_ones = list(_connections.get(session_id, ()))
 
-    tot = []
-    for connection in open_ones:
+    async def deliver(connection):
         try:
-            # A viewer with a full buffer must not hold up the car logger,
-            # whose response waits for this loop.
             await asyncio.wait_for(connection.send_json(msg), timeout=SEND_TIMEOUT_S)
         except Exception as failure:      # noqa: BLE001 - every cause is the same
             log.debug("Live connection removed (%s).", failure)
-            tot.append(connection)
+            return connection
+        return None
+
+    # Concurrently: stalled viewers must not add up their timeouts, the car
+    # logger's response waits for this.
+    results = await asyncio.gather(*(deliver(c) for c in open_ones))
+    tot = [c for c in results if c is not None]
 
     for connection in tot:
         await sign_out(session_id, connection)
