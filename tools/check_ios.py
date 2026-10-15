@@ -357,9 +357,9 @@ def part_live_activity() -> None:
            "die Live Activity bekommt die Bilder nicht - sie darf höchstens 4 KB tragen")
     verify("CPListImageRowItem.maximumImageSize" in scene,
            "Bilder werden auf die grösste Grösse gebracht, die CarPlay für Bildzeilen zulässt")
-    verify("CPTabBarTemplate(templates: [rows, board])" in scene
+    verify("CPTabBarTemplate(templates: [first, rows, board])" in scene
            and "CPGridButton" not in scene,
-           "die Übersicht (Bilder) ist der erste Reiter - damit startet CarPlay - und es gibt keine Kachelansicht mehr")
+           "die Seite „Fahrt“ (drei Zeilen) ist der erste Reiter - damit startet CarPlay -, danach Übersicht (Bilder) und Tabelle; keine Kachelansicht")
     verify("self?.endAsk()" in scene and "self?.launch()" in scene and "control: true" in scene,
            "die Steuer-Kachel startet und beendet die Aufzeichnung (mit Rückfrage beim Beenden)")
     verify(all(f"func {n}(" in scene for n in

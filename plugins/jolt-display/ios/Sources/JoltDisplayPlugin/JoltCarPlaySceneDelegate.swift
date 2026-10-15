@@ -9,7 +9,8 @@ import UIKit
 /// is shown is what the UI's display model supplies - the same one that
 /// also feeds the Live Activity:
 ///
-///   Tabs "Übersicht" (CPListImageRowItem, opens first) and "Tabelle"
+///   Tabs "Fahrt" (three rows: consumption, auxiliary loads, plan; opens
+///   first), "Übersicht" (CPListImageRowItem) and "Tabelle"
 ///   (CPInformationTemplate), both with the same eight slots at most:
 ///     charge level, arrival, reserve, consumption (average of the trip
 ///     above the bars), auxiliary loads, regeneration, charging stops, and
@@ -26,6 +27,7 @@ import UIKit
 @objc(JoltCarPlaySceneDelegate)
 public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var iface: CPInterfaceController?
+    private var focus: CPListTemplate?
     private var imagesList: CPListTemplate?
     private var table: CPInformationTemplate?
     private var observerId: UUID?
@@ -49,6 +51,16 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         let model = JoltDisplayStore.shared.latest
         let entries = self.entries(model)
 
+        // The first page: three rows, nothing else - consumption, auxiliary
+        // loads and whether the trip is on plan. A row is as large as the car
+        // draws list text, which the image rows cannot be (they are capped).
+        let first = CPListTemplate(
+            title: "jolt", sections: [CPListSection(items: focusRows(model))])
+        first.tabTitle = "Fahrt"
+        first.tabImage = UIImage(systemName: "gauge.with.dots.needle.67percent")
+        first.trailingNavigationBarButtons = toolbar(model)
+        focus = first
+
         let rows = CPListTemplate(title: "jolt", sections: imageRows(entries))
         rows.tabTitle = "Übersicht"
         rows.tabImage = UIImage(systemName: "photo.on.rectangle")
@@ -63,7 +75,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         table = board
 
         // The overview comes first: that is the view the app opens with.
-        let tab = CPTabBarTemplate(templates: [rows, board])
+        let tab = CPTabBarTemplate(templates: [first, rows, board])
         interfaceController.setRootTemplate(tab, animated: false, completion: nil)
 
         observerId = JoltDisplayStore.shared.observe { [weak self] model in
@@ -92,6 +104,7 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         }
         resultId = nil
         running = nil
+        focus = nil
         imagesList = nil
         table = nil
         iface = nil
@@ -495,6 +508,43 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
         push("Nebenverbraucher", points)
     }
 
+    // MARK: - First page
+
+    /// Consumption, auxiliary loads, plan. Fixed order; a missing value stays
+    /// a row with a dash, so that nothing moves while driving. A tap opens the
+    /// same detail page as the tile does.
+    private func focusRows(_ raw_model: JoltDisplay?) -> [CPListItem] {
+        guard let model = fresh(raw_model) else {
+            return [CPListItem(text: "Keine laufende Fahrt", detailText: nil)]
+        }
+        func row(_ title: String, _ val: String?, _ detail: String?,
+                 _ open: @escaping () -> Void) -> CPListItem {
+            let item = CPListItem(text: "\(title)  \(val ?? "–")", detailText: detail)
+            item.handler = { _, finalize in open(); finalize() }
+            return item
+        }
+
+        let history = model.history
+        let consumption = history?.trip?.text
+            ?? (history?.timeframe ?? []).first(where: { $0.kwh100 != nil })?.text
+        var parts: [String] = []
+        if let aux = model.aux {
+            if let text = aux.heatingText { parts.append("Heizung \(text)") }
+            if let text = aux.climateText { parts.append("Klima \(text)") }
+            if let text = aux.batterieText { parts.append("Akku \(text)") }
+        }
+        let aux = model.aux
+        let plan = model.arrival.map { $0.text } ?? (model.stopList == nil ? "kein Plan" : nil)
+        return [
+            row("Verbrauch", consumption, nil) { [weak self] in self?.showConsumption(model) },
+            row("Nebenverbraucher",
+                aux?.text ?? aux?.heatingText ?? aux?.climateText ?? aux?.batterieText,
+                parts.isEmpty ? nil : parts.joined(separator: " · ")) { [weak self] in
+                self?.showAux(model) },
+            row("Plan", plan, "gegenüber der Planung") { [weak self] in self?.showArrival(model) },
+        ]
+    }
+
     // MARK: - Drawing tiles
 
     private func tile(title: String, val: String, minor: String?,
@@ -660,6 +710,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
 
     private func show(_ model: JoltDisplay?) {
         let entries = self.entries(model)
+        focus?.updateSections([CPListSection(items: focusRows(model))])
+        focus?.trailingNavigationBarButtons = toolbar(model)
         imagesList?.updateSections(imageRows(entries))
         imagesList?.trailingNavigationBarButtons = toolbar(model)
         table?.items = tablesRows(entries)
