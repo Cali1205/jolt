@@ -221,8 +221,43 @@ def part_dispatch():
         verify(result["failure"] == 1 and result["sent"] == 1,
                "ein geworfener Fehler bricht den Versand an die anderen nicht ab",
                str(result))
+
+        # Bug scan #132: a subscription that keeps failing is dropped at last.
+        sub = db.query(models.PushSubscription).filter_by(
+            endpoint=disturbed.endpoint).one()
+        sub.failure = push.PRUNE_AFTER - 1
+        db.commit()
+        result = push.send(db, "jolt", "und noch einer", dispatcher=dispatcher)
+        left = {a.endpoint for a in db.query(models.PushSubscription).all()}
+        verify(disturbed.endpoint not in left and lebt.endpoint in left,
+               "ein Abo, das immer wieder scheitert, wird entfernt - ein "
+               "funktionierendes bleibt", str(result))
     finally:
         db.close()
+
+    # Background sending: one at a time, the newest waiting message wins.
+    import threading
+    import time
+    delivered: list[str] = []
+    gate = threading.Event()
+    real_send, real_configured = push.send, push.actual_configured
+
+    def slow_send(db, title, text, url="/", **kw):
+        delivered.append(text)
+        gate.wait(2)
+
+    push.send, push.actual_configured = slow_send, lambda: True
+    try:
+        for n in range(5):
+            push.send_background(SessionLocal, "jolt", f"Plan {n}")
+            time.sleep(0.05)
+        gate.set()
+        time.sleep(0.5)
+    finally:
+        push.send, push.actual_configured = real_send, real_configured
+    verify(delivered == ["Plan 0", "Plan 4"],
+           "im Hintergrund sendet immer nur einer; was dazwischen kommt, "
+           "wird durch die neueste Meldung ersetzt", str(delivered))
 
 
 def part_without_key():

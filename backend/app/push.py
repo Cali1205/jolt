@@ -48,6 +48,8 @@ TIME_LIMIT_S = 10
 
 # Responses after which a subscription is gone for good.
 TOT = (404, 410)
+# A subscription that failed this many sends in a row is removed.
+PRUNE_AFTER = 10
 
 
 # ---------------------------------------------------------------------------
@@ -268,13 +270,27 @@ def send(db, title: str, text: str, url: str = "/", dispatcher=None) -> dict:
             failure += 1
             subscription.failure = (subscription.failure or 0) + 1
 
+    for subscription in db.query(models.PushSubscription).all():
+        if (subscription.failure or 0) >= PRUNE_AFTER and subscription not in tot:
+            tot.append(subscription)
     for subscription in tot:
-        log.info("Push subscription removed (unsubscribed): %s", subscription.endpoint[:60])
+        log.info("Push subscription removed (unsubscribed or failing): %s",
+                 subscription.endpoint[:60])
         db.delete(subscription)
     db.commit()
 
     return {"sent": sent, "removed": len(tot), "failure": failure,
             "skipped": False}
+
+
+_background_lock = threading.Lock()
+_running = False
+_waiting: tuple | None = None
+
+
+def _set_running(value: bool) -> None:
+    global _running
+    _running = value
 
 
 def send_background(db_factory, title: str, text: str, url: str = "/") -> None:
@@ -288,13 +304,30 @@ def send_background(db_factory, title: str, text: str, url: str = "/") -> None:
     if not actual_configured():
         return
 
+    # One sender at a time: two concurrent runs would notify twice and race
+    # on the failure counters. A message that arrives meanwhile replaces the
+    # waiting one - the newest plan change is the one that counts.
+    global _waiting
+    with _background_lock:
+        _waiting = (title, text, url)
+        if _running:
+            return
+        _set_running(True)
+
     def cycle():
-        db = db_factory()
-        try:
-            send(db, title, text, url)
-        except Exception as failure:      # noqa: BLE001
-            log.warning("Push in the background failed: %s", failure)
-        finally:
-            db.close()
+        global _waiting
+        while True:
+            with _background_lock:
+                message, _waiting = _waiting, None
+                if message is None:
+                    _set_running(False)
+                    return
+            db = db_factory()
+            try:
+                send(db, *message)
+            except Exception as failure:      # noqa: BLE001
+                log.warning("Push in the background failed: %s", failure)
+            finally:
+                db.close()
 
     threading.Thread(target=cycle, daemon=True, name="jolt-push").start()
