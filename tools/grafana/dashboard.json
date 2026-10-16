@@ -28,6 +28,19 @@
     "sort": 0,
     "includeAll": false,
     "multi": false
+   },
+   {
+    "name": "colour",
+    "label": "Farbe",
+    "type": "custom",
+    "query": "Tempo : speed_kmh, Leistung : power_kw, Ladestand : soc, Abweichung vom Plan : (soc - plan_soc), Nebenverbraucher : aux_load_kw, Drehmoment : torque_rear_nm, Höhe : elevation_m, Akkutemperatur : batt_temp_max_c, Zellspannung min : cell_min_v, Außentemperatur : outside_temp_c",
+    "refresh": 0,
+    "current": {
+     "text": "Tempo",
+     "value": "speed_kmh"
+    },
+    "includeAll": false,
+    "multi": false
    }
   ]
  },
@@ -290,7 +303,7 @@
   {
    "id": 5,
    "type": "geomap",
-   "title": "Route (Farbe = Tempo)",
+   "title": "Route (Farbe = ${colour:text})",
    "gridPos": {
     "x": 0,
     "y": 14,
@@ -303,7 +316,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT lat, lon, speed_kmh, time FROM grafana_points WHERE session_id = ${session} AND lat IS NOT NULL ORDER BY time",
+     "rawSql": "SELECT lat, lon, ${colour} AS value, time FROM grafana_points WHERE session_id = ${session} AND lat IS NOT NULL AND ${colour} IS NOT NULL ORDER BY time",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -345,7 +358,7 @@
          "max": 6
         },
         "color": {
-         "field": "speed_kmh",
+         "field": "value",
          "fixed": "dark-green"
         },
         "opacity": 0.9,
@@ -362,13 +375,11 @@
     "defaults": {
      "color": {
       "mode": "continuous-GrYlRd"
-     },
-     "min": 0,
-     "max": 120,
-     "unit": "velocitykmh"
+     }
     },
     "overrides": []
-   }
+   },
+   "description": "Der Wert für die Farbe der Punkte ist oben über „Farbe“ wählbar; die Skala läuft vom kleinsten zum größten Wert der Fahrt (grün = klein, rot = groß)."
   },
   {
    "id": 6,

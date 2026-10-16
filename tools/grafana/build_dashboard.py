@@ -19,6 +19,11 @@ UID = "jolt-trips"
 OUT = Path(__file__).with_name("dashboard.json")
 
 _next_id = [0]
+COLOUR_CHOICES = ("Tempo : speed_kmh, Leistung : power_kw, Ladestand : soc, "
+                  "Abweichung vom Plan : (soc - plan_soc), Nebenverbraucher : aux_load_kw, "
+                  "Drehmoment : torque_rear_nm, Höhe : elevation_m, "
+                  "Akkutemperatur : batt_temp_max_c, Zellspannung min : cell_min_v, "
+                  "Außentemperatur : outside_temp_c")
 AXIS_LABELS = {"kwatt": "kW", "watt": "W", "celsius": "°C", "velocitykmh": "km/h",
                "lengthm": "m", "volt": "V", "percent": "%"}
 
@@ -153,9 +158,10 @@ FROM grafana_sessions WHERE id = ${session}""")],
                  "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}}))
 
     panels.append(_panel(
-        "geomap", "Route (Farbe = Tempo)", 0, 14, 12, 12,
-        [sql("SELECT lat, lon, speed_kmh, time FROM grafana_points "
-             "WHERE session_id = ${session} AND lat IS NOT NULL ORDER BY time")],
+        "geomap", "Route (Farbe = ${colour:text})", 0, 14, 12, 12,
+        [sql("SELECT lat, lon, ${colour} AS value, time FROM grafana_points "
+             "WHERE session_id = ${session} AND lat IS NOT NULL "
+             "AND ${colour} IS NOT NULL ORDER BY time")],
         options={
             "view": {"id": "fit", "allLayers": True, "zoom": 12},
             "controls": {"showZoom": True, "mouseWheelZoom": True},
@@ -164,12 +170,14 @@ FROM grafana_sessions WHERE id = ${session}""")],
                 "mode": "coords", "latitude": "lat", "longitude": "lon"},
                 "config": {"showLegend": True, "style": {
                     "size": {"fixed": 4, "min": 2, "max": 6},
-                    "color": {"field": "speed_kmh", "fixed": "dark-green"},
+                    "color": {"field": "value", "fixed": "dark-green"},
                     "opacity": 0.9,
                     "symbol": {"mode": "fixed", "fixed": "img/icons/marker/circle.svg"}}}}]},
-        field_config={"defaults": {"color": {"mode": "continuous-GrYlRd"},
-                                   "min": 0, "max": 120, "unit": "velocitykmh"},
-                      "overrides": []}))
+        field_config={"defaults": {"color": {"mode": "continuous-GrYlRd"}},
+                      "overrides": []},
+        description="Der Wert für die Farbe der Punkte ist oben über „Farbe“ wählbar; "
+                    "die Skala läuft vom kleinsten zum größten Wert der Fahrt "
+                    "(grün = klein, rot = groß)."))
 
     panels.append(series(
         "Tempo und Leistung", 12, 14, 12, 6,
@@ -225,6 +233,10 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
                       " || '  ' || coalesce(round(km_odometer)::text, '?') || ' km' AS __text "
                       "FROM grafana_sessions ORDER BY id DESC"),
             "definition": "grafana_sessions", "refresh": 2, "sort": 0,
+            "includeAll": False, "multi": False}, {
+            "name": "colour", "label": "Farbe", "type": "custom",
+            "query": COLOUR_CHOICES, "refresh": 0,
+            "current": {"text": "Tempo", "value": "speed_kmh"},
             "includeAll": False, "multi": False}]},
         "panels": panels,
         "links": [],
@@ -252,6 +264,7 @@ def push(url: str, token_file: str, dash: dict) -> None:
     for panel in dash["panels"]:
         for target in panel["targets"]:
             query = target["rawSql"].replace("${session}", str(session)).replace(
+                "${colour}", "speed_kmh").replace(
                 "$__timeFilter(time)", "time > now() - interval '30 days'")
             result = call("/api/ds/query", {"queries": [{
                 "refId": "A", "datasource": DS, "format": target["format"],
