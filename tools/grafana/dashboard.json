@@ -1,0 +1,753 @@
+{
+ "uid": "jolt-trips",
+ "title": "jolt Fahrten",
+ "tags": [
+  "jolt"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 41,
+ "version": 1,
+ "refresh": "",
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "session",
+    "label": "Fahrt",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT id AS __value, '#' || id || '  ' || to_char(time, 'DD.MM. HH24:MI') || '  ' || coalesce(round(km_odometer)::text, '?') || ' km' AS __text FROM grafana_sessions ORDER BY id DESC",
+    "definition": "grafana_sessions",
+    "refresh": 2,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "table",
+   "title": "Fahrten (ID anklicken: Fahrt unten anzeigen)",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 14,
+    "h": 10
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "\nSELECT id, time AS \"Start\", round((extract(epoch FROM duration) / 60)::numeric) AS \"Min\",\n       round(km_odometer::numeric) AS \"km\", round(net_kwh::numeric, 2) AS \"kWh netto\",\n       round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(soc_start::numeric, 1) AS \"SoC Start\", round(soc_end::numeric, 1) AS \"SoC Ende\",\n       round(outside_c::numeric, 1) AS \"Außen °C\", round(speed_max_kmh::numeric) AS \"vmax\",\n       round(aux_avg_kw::numeric, 2) AS \"Neben kW\", points AS \"Punkte\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM coalesce(last_point, time)) * 1000 + 60000)::bigint AS bis\nFROM grafana_sessions ORDER BY id DESC LIMIT 200",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "id"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Fahrt anzeigen",
+          "url": "/d/jolt-trips?orgId=1&var-session=${__data.fields.id}&from=${__data.fields.von}&to=${__data.fields.bis}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(von|bis)$"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "kWh/100 km"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "green",
+           "value": null
+          },
+          {
+           "color": "yellow",
+           "value": 20
+          },
+          {
+           "color": "red",
+           "value": 24
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Alle Fahrten",
+   "gridPos": {
+    "x": 14,
+    "y": 0,
+    "w": 10,
+    "h": 4
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "\nSELECT count(*) AS \"Fahrten\", round(sum(km_odometer)::numeric) AS \"km\",\n       round((100 * sum(net_kwh) FILTER (WHERE km_odometer >= 3)\n              / nullif(sum(km_odometer) FILTER (WHERE km_odometer >= 3), 0))::numeric, 1)\n         AS \"Ø kWh/100 km\"\nFROM grafana_sessions",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "description": "Ø nur über Fahrten ab 3 km (der Kilometerzähler ist ganzzahlig)."
+  },
+  {
+   "id": 3,
+   "type": "barchart",
+   "title": "Verbrauch je Fahrt (letzte 40, ab 3 km) und Außentemperatur",
+   "gridPos": {
+    "x": 14,
+    "y": 4,
+    "w": 10,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "\nSELECT '#' || id AS \"Fahrt\", round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(outside_c::numeric, 1) AS \"Außen °C\"\nFROM (SELECT * FROM grafana_sessions WHERE kwh_per_100km IS NOT NULL\n      ORDER BY id DESC LIMIT 40) t ORDER BY id",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Fahrt",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "xTickLabelRotation": -45,
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 70
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Außen °C"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       },
+       {
+        "id": "unit",
+        "value": "celsius"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Fahrt ${session}",
+   "gridPos": {
+    "x": 0,
+    "y": 10,
+    "w": 24,
+    "h": 4
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "\nSELECT round(km_odometer::numeric) AS \"km\", round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(net_kwh::numeric, 2) AS \"kWh netto\", round((soc_start - soc_end)::numeric, 1) AS \"SoC verbraucht\",\n       round(aux_avg_kw::numeric, 2) AS \"Ø Neben kW\", round(speed_max_kmh::numeric) AS \"vmax km/h\",\n       round(outside_c::numeric, 1) AS \"Außen °C\",\n       round((extract(epoch FROM duration) / 60)::numeric) AS \"Dauer min\"\nFROM grafana_sessions WHERE id = ${session}",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 5,
+   "type": "geomap",
+   "title": "Route (Farbe = Tempo)",
+   "gridPos": {
+    "x": 0,
+    "y": 14,
+    "w": 12,
+    "h": 12
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT lat, lon, speed_kmh, time FROM grafana_points WHERE session_id = ${session} AND lat IS NOT NULL ORDER BY time",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "view": {
+     "id": "fit",
+     "allLayers": true,
+     "zoom": 12
+    },
+    "controls": {
+     "showZoom": true,
+     "mouseWheelZoom": true
+    },
+    "basemap": {
+     "type": "osm-standard",
+     "name": "Basemap"
+    },
+    "layers": [
+     {
+      "type": "markers",
+      "name": "Route",
+      "location": {
+       "mode": "coords",
+       "latitude": "lat",
+       "longitude": "lon"
+      },
+      "config": {
+       "showLegend": true,
+       "style": {
+        "size": {
+         "fixed": 4,
+         "min": 2,
+         "max": 6
+        },
+        "color": {
+         "field": "speed_kmh",
+         "fixed": "dark-green"
+        },
+        "opacity": 0.9,
+        "symbol": {
+         "mode": "fixed",
+         "fixed": "img/icons/marker/circle.svg"
+        }
+       }
+      }
+     }
+    ]
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "continuous-GrYlRd"
+     },
+     "min": 0,
+     "max": 120,
+     "unit": "velocitykmh"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Tempo und Leistung",
+   "gridPos": {
+    "x": 12,
+    "y": 14,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, speed_kmh AS \"Tempo km/h\", power_kw AS \"Leistung kW\" FROM grafana_points WHERE session_id = ${session} AND TRUE ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 600000
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "\"Leistung kW\""
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "kwatt"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Leistung: Entladung positiv, Rekuperation negativ."
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "Ladestand gegen Plan",
+   "gridPos": {
+    "x": 12,
+    "y": 20,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, soc AS \"Ladestand %\", plan_soc AS \"Plan %\" FROM grafana_points WHERE session_id = ${session} AND TRUE ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 600000
+     },
+     "unit": "percent"
+    },
+    "overrides": []
+   },
+   "description": "Liegt der Ladestand unter der Plan-Linie, verbraucht die Fahrt mehr als geplant."
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Verbrauch (30-s-Mittel)",
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "\nSELECT date_bin('30 seconds', time, TIMESTAMP '2000-01-01') AS time,\n       round((avg(power_kw) / avg(speed_kmh) * 100)::numeric, 1) AS \"kWh/100 km\"\nFROM grafana_points\nWHERE session_id = ${session} AND speed_kmh IS NOT NULL AND power_kw IS NOT NULL\nGROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "auto",
+      "spanNulls": 600000
+     },
+     "unit": "none"
+    },
+    "overrides": []
+   },
+   "description": "Mittlere Leistung durch mittleres Tempo je 30 s, nur über 15 km/h. Negative Werte sind Rekuperation."
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Nebenverbraucher",
+   "gridPos": {
+    "x": 12,
+    "y": 26,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, aux_load_kw AS \"Neben kW\", compressor_w AS \"Kompressor W\" FROM grafana_points WHERE session_id = ${session} AND TRUE ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 600000
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "\"Kompressor W\""
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "watt"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "Höhe und Tempo",
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, elevation_m AS \"Höhe m\", speed_kmh AS \"Tempo km/h\" FROM grafana_points WHERE session_id = ${session} AND TRUE ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 600000
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "\"Tempo km/h\""
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "velocitykmh"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 11,
+   "type": "timeseries",
+   "title": "Zellspannung und Akkutemperatur",
+   "gridPos": {
+    "x": 12,
+    "y": 32,
+    "w": 12,
+    "h": 6
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, cell_min_v AS \"Zelle min V\", cell_max_v AS \"Zelle max V\", batt_temp_min_c AS \"Akku min °C\", batt_temp_max_c AS \"Akku max °C\" FROM grafana_points WHERE session_id = ${session} AND TRUE ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 600000
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "\"Akku min °C\""
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "celsius"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "\"Akku max °C\""
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "celsius"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Zeilen mit Messwerten gibt es nur in jedem 2.-6. Punkt (rotierende Abfrage)."
+  }
+ ],
+ "links": []
+}
