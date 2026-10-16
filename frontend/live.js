@@ -709,7 +709,7 @@ window.joltLive = (function () {
   function sanitize(text) {
     const helper = document.createElement("div");
     helper.textContent = text || "";
-    return helper.innerHTML;
+    return helper.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   /* Where the measurement point was - [lon, lat], or null.
