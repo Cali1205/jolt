@@ -412,14 +412,16 @@
       "lineWidth": 2,
       "fillOpacity": 8,
       "showPoints": "never",
-      "spanNulls": 600000
-     }
+      "spanNulls": 600000,
+      "axisLabel": "km/h"
+     },
+     "unit": "velocitykmh"
     },
     "overrides": [
      {
       "matcher": {
        "id": "byName",
-       "options": "\"Leistung kW\""
+       "options": "Leistung kW"
       },
       "properties": [
        {
@@ -429,6 +431,10 @@
        {
         "id": "custom.axisPlacement",
         "value": "right"
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "kW"
        }
       ]
      }
@@ -478,7 +484,8 @@
       "lineWidth": 2,
       "fillOpacity": 8,
       "showPoints": "never",
-      "spanNulls": 600000
+      "spanNulls": 600000,
+      "axisLabel": "%"
      },
      "unit": "percent"
     },
@@ -578,14 +585,16 @@
       "lineWidth": 2,
       "fillOpacity": 8,
       "showPoints": "never",
-      "spanNulls": 600000
-     }
+      "spanNulls": 600000,
+      "axisLabel": "kW"
+     },
+     "unit": "kwatt"
     },
     "overrides": [
      {
       "matcher": {
        "id": "byName",
-       "options": "\"Kompressor W\""
+       "options": "Kompressor W"
       },
       "properties": [
        {
@@ -595,6 +604,10 @@
        {
         "id": "custom.axisPlacement",
         "value": "right"
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "W"
        }
       ]
      }
@@ -643,14 +656,16 @@
       "lineWidth": 2,
       "fillOpacity": 8,
       "showPoints": "never",
-      "spanNulls": 600000
-     }
+      "spanNulls": 600000,
+      "axisLabel": "m"
+     },
+     "unit": "lengthm"
     },
     "overrides": [
      {
       "matcher": {
        "id": "byName",
-       "options": "\"Tempo km/h\""
+       "options": "Tempo km/h"
       },
       "properties": [
        {
@@ -660,6 +675,10 @@
        {
         "id": "custom.axisPlacement",
         "value": "right"
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "km/h"
        }
       ]
      }
@@ -708,14 +727,16 @@
       "lineWidth": 2,
       "fillOpacity": 8,
       "showPoints": "never",
-      "spanNulls": 600000
-     }
+      "spanNulls": 600000,
+      "axisLabel": "V"
+     },
+     "unit": "volt"
     },
     "overrides": [
      {
       "matcher": {
        "id": "byName",
-       "options": "\"Akku min °C\""
+       "options": "Akku min °C"
       },
       "properties": [
        {
@@ -725,13 +746,17 @@
        {
         "id": "custom.axisPlacement",
         "value": "right"
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "°C"
        }
       ]
      },
      {
       "matcher": {
        "id": "byName",
-       "options": "\"Akku max °C\""
+       "options": "Akku max °C"
       },
       "properties": [
        {
@@ -741,6 +766,10 @@
        {
         "id": "custom.axisPlacement",
         "value": "right"
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "°C"
        }
       ]
      }

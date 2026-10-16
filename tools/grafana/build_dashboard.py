@@ -19,6 +19,8 @@ UID = "jolt-trips"
 OUT = Path(__file__).with_name("dashboard.json")
 
 _next_id = [0]
+AXIS_LABELS = {"kwatt": "kW", "watt": "W", "celsius": "°C", "velocitykmh": "km/h",
+               "lengthm": "m", "volt": "V", "percent": "%"}
 
 
 def _panel(kind, title, x, y, w, h, targets, options=None, field_config=None,
@@ -54,15 +56,18 @@ def series(title, x, y, w, h, columns, axes=None, unit=None, description=None,
     overrides = []
     for column, (axis_unit, side) in (axes or {}).items():
         overrides.append({
-            "matcher": {"id": "byName", "options": column.split(" AS ")[-1]},
+            "matcher": {"id": "byName",
+                        "options": column.split(" AS ")[-1].strip('"')},
             "properties": [
                 {"id": "unit", "value": axis_unit},
                 {"id": "custom.axisPlacement", "value": side},
+                {"id": "custom.axisLabel", "value": AXIS_LABELS.get(axis_unit, "")},
             ]})
     defaults = {"custom": {"lineWidth": 2, "fillOpacity": 8, "showPoints": "never",
                            "spanNulls": 600000}}
     if unit:
         defaults["unit"] = unit
+        defaults["custom"]["axisLabel"] = AXIS_LABELS.get(unit, "")
     return _panel(
         "timeseries", title, x, y, w, h, [sql(query, "time_series")],
         options={"legend": {"displayMode": "list", "placement": "bottom"},
@@ -169,7 +174,7 @@ FROM grafana_sessions WHERE id = ${session}""")],
     panels.append(series(
         "Tempo und Leistung", 12, 14, 12, 6,
         ["speed_kmh AS \"Tempo km/h\"", "power_kw AS \"Leistung kW\""],
-        axes={"power_kw AS \"Leistung kW\"": ("kwatt", "right")},
+        unit="velocitykmh", axes={"power_kw AS \"Leistung kW\"": ("kwatt", "right")},
         description="Leistung: Entladung positiv, Rekuperation negativ."))
 
     panels.append(series(
@@ -195,18 +200,18 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
     panels.append(series(
         "Nebenverbraucher", 12, 26, 12, 6,
         ["aux_load_kw AS \"Neben kW\"", "compressor_w AS \"Kompressor W\""],
-        axes={"compressor_w AS \"Kompressor W\"": ("watt", "right")}))
+        unit="kwatt", axes={"compressor_w AS \"Kompressor W\"": ("watt", "right")}))
 
     panels.append(series(
         "Höhe und Tempo", 0, 32, 12, 6,
         ["elevation_m AS \"Höhe m\"", "speed_kmh AS \"Tempo km/h\""],
-        axes={"speed_kmh AS \"Tempo km/h\"": ("velocitykmh", "right")}))
+        unit="lengthm", axes={"speed_kmh AS \"Tempo km/h\"": ("velocitykmh", "right")}))
 
     panels.append(series(
         "Zellspannung und Akkutemperatur", 12, 32, 12, 6,
         ["cell_min_v AS \"Zelle min V\"", "cell_max_v AS \"Zelle max V\"",
          "batt_temp_min_c AS \"Akku min °C\"", "batt_temp_max_c AS \"Akku max °C\""],
-        axes={"batt_temp_min_c AS \"Akku min °C\"": ("celsius", "right"),
+        unit="volt", axes={"batt_temp_min_c AS \"Akku min °C\"": ("celsius", "right"),
               "batt_temp_max_c AS \"Akku max °C\"": ("celsius", "right")},
         description="Zeilen mit Messwerten gibt es nur in jedem 2.-6. Punkt (rotierende Abfrage)."))
 
