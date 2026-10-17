@@ -19,6 +19,7 @@ UID = "jolt-trips"
 OUT = Path(__file__).with_name("dashboard.json")
 
 _next_id = [0]
+EXTRA_SUBSTITUTIONS: dict = {}   # set by build_analysis.py for its own variables
 COLOUR_CHOICES = ("Tempo : speed_kmh, Leistung : power_kw, Ladestand : soc, "
                   "Abweichung vom Plan : (soc - plan_soc), Nebenverbraucher : aux_load_kw, "
                   "Drehmoment : torque_rear_nm, Höhe : elevation_m, "
@@ -277,7 +278,9 @@ def push(url: str, token_file: str, dash: dict) -> None:
         for target in panel["targets"]:
             query = target["rawSql"].replace("${session}", str(session)).replace(
                 "${colour}", "speed_kmh").replace(
-                "$__timeFilter(time)", "time > now() - interval '30 days'")
+                "$__timeFilter(time)", "time > now() - interval '90 days'")
+            for key, value in EXTRA_SUBSTITUTIONS.items():
+                query = query.replace(key, value)
             result = call("/api/ds/query", {"queries": [{
                 "refId": "A", "datasource": DS, "format": target["format"],
                 "rawSql": query}], "from": "now-7d", "to": "now"})["results"]["A"]
