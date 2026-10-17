@@ -157,8 +157,20 @@ FROM grafana_sessions WHERE id = ${session}""")],
         options={"colorMode": "none", "graphMode": "none", "textMode": "value_and_name",
                  "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}}))
 
+    # Grafana variables only live in the bar at the top; a row of links right
+    # above the map sets the same variable and keeps trip and time range.
+    choices = [c.split(" : ") for c in COLOUR_CHOICES.split(", ")]
+    base = "/d/" + UID + "?orgId=1&var-session=${session}&${__url_time_range}&var-colour="
+    bar = "**Farbe:** " + "  ·  ".join(f"[{label}]({base}{value})" for label, value in choices)
     panels.append(_panel(
-        "geomap", "Route (Farbe = ${colour:text})", 0, 14, 12, 12,
+        "text", "", 0, 14, 12, 2, [],
+        options={"mode": "markdown", "content": bar,
+                 "code": {"showLineNumbers": False, "wrap": True}}))
+    panels[-1].pop("datasource")
+    panels[-1]["transparent"] = True
+
+    panels.append(_panel(
+        "geomap", "Route (Farbe = ${colour:text})", 0, 16, 12, 10,
         [sql("SELECT lat, lon, ${colour} AS value, time FROM grafana_points "
              "WHERE session_id = ${session} AND lat IS NOT NULL "
              "AND ${colour} IS NOT NULL ORDER BY time")],
@@ -234,7 +246,7 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
                       "FROM grafana_sessions ORDER BY id DESC"),
             "definition": "grafana_sessions", "refresh": 2, "sort": 0,
             "includeAll": False, "multi": False}, {
-            "name": "colour", "label": "Farbe", "type": "custom",
+            "name": "colour", "label": "Farbe", "type": "custom", "hide": 2,
             "query": COLOUR_CHOICES, "refresh": 0,
             "current": {"text": "Tempo", "value": "speed_kmh"},
             "includeAll": False, "multi": False}]},
