@@ -118,23 +118,13 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT ${tx} AS \"${tx:text}\", ${ty} AS \"${ty:text}\" FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL ORDER BY 1",
+     "rawSql": "WITH d AS (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${tx:text}\", y AS \"${ty:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
       "uid": "jolt-pg"
      },
      "refId": "A",
-     "editorMode": "code"
-    },
-    {
-     "rawSql": "WITH d AS (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x0 AS \"${tx:text}\", a + b * x0 AS \"Trend\" FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, a + b * x1 FROM r WHERE b IS NOT NULL",
-     "format": "table",
-     "datasource": {
-      "type": "grafana-postgresql-datasource",
-      "uid": "jolt-pg"
-     },
-     "refId": "B",
      "editorMode": "code"
     }
    ],
@@ -162,8 +152,8 @@
     "overrides": [
      {
       "matcher": {
-       "id": "byFrameRefID",
-       "options": "B"
+       "id": "byName",
+       "options": "Trend"
       },
       "properties": [
        {
@@ -278,23 +268,13 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT ${wx} AS \"${wx:text}\", ${wy} AS \"${wy:text}\" FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL ORDER BY 1",
+     "rawSql": "WITH d AS (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${wx:text}\", y AS \"${wy:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
       "uid": "jolt-pg"
      },
      "refId": "A",
-     "editorMode": "code"
-    },
-    {
-     "rawSql": "WITH d AS (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x0 AS \"${wx:text}\", a + b * x0 AS \"Trend\" FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, a + b * x1 FROM r WHERE b IS NOT NULL",
-     "format": "table",
-     "datasource": {
-      "type": "grafana-postgresql-datasource",
-      "uid": "jolt-pg"
-     },
-     "refId": "B",
      "editorMode": "code"
     }
    ],
@@ -322,8 +302,8 @@
     "overrides": [
      {
       "matcher": {
-       "id": "byFrameRefID",
-       "options": "B"
+       "id": "byName",
+       "options": "Trend"
       },
       "properties": [
        {

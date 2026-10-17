@@ -52,21 +52,20 @@ def scatter(title, x, y, w, h, table, xv, yv, where):
     """Points plus a fitted straight line (second query)."""
     data = (f"SELECT ${{{xv}}} AS x, ${{{yv}}} AS y FROM {table} "
             f"WHERE {where} AND ${{{xv}}} IS NOT NULL AND ${{{yv}}} IS NOT NULL")
-    points = (f'SELECT ${{{xv}}} AS "${{{xv}:text}}", ${{{yv}}} AS "${{{yv}:text}}" '
-              f"FROM {table} WHERE {where} AND ${{{xv}}} IS NOT NULL "
-              f"AND ${{{yv}}} IS NOT NULL ORDER BY 1")
-    line = (f"WITH d AS ({data}), r AS (SELECT regr_slope(y, x) AS b, "
-            f"regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) "
-            f'SELECT x0 AS "${{{xv}:text}}", a + b * x0 AS "Trend" FROM r WHERE b IS NOT NULL '
-            f'UNION ALL SELECT x1, a + b * x1 FROM r WHERE b IS NOT NULL')
+    xl, yl = f'"${{{xv}:text}}"', f'"${{{yv}:text}}"'
+    query = (f"WITH d AS ({data}), r AS (SELECT regr_slope(y, x) AS b, "
+             f"regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) "
+             f"SELECT x AS {xl}, y AS {yl}, NULL::float AS \"Trend\" FROM d "
+             f"UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL "
+             f"UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1")
     return _panel(
-        "xychart", title, x, y, w, h, [sql(points), sql(line)],
+        "xychart", title, x, y, w, h, [sql(query)],
         options={"seriesMapping": "auto", "legend": {"displayMode": "list", "placement": "bottom",
                                                       "showLegend": True},
                  "tooltip": {"mode": "single"}},
         field_config={"defaults": {"custom": {"show": "points", "pointSize": {"fixed": 7},
                                               "lineWidth": 2}},
-                      "overrides": [{"matcher": {"id": "byFrameRefID", "options": "B"},
+                      "overrides": [{"matcher": {"id": "byName", "options": "Trend"},
                                      "properties": [{"id": "custom.show", "value": "lines"},
                                                     {"id": "color", "value": {
                                                         "mode": "fixed", "fixedColor": "orange"}}]}]},
