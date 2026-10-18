@@ -324,6 +324,131 @@ window.joltTrips = (function () {
   // from the UI and has to display the reason itself.
   let lastStartError = "";
 
+  /* Starting a recording, in the order it happens: connect the dongle, pick the
+   * vehicle, get the position, ask the car for the charge level, create the
+   * trip, show it. Each step is a function of its own below. */
+
+  /* Try the dongle first; it is no reason to abort if it is not there.
+   * `present`: connected and answering. `later`: not connected, but worth
+   * knocking again, because the car is often only switched on now. */
+  async function connectForStart(as_of) {
+    const dongle = { present: false, later: false };
+    if (!(window.joltObd && window.joltObd.obtainable())) return dongle;
+    as_of("Verbinde mit dem OBD2-Dongle …");
+    try {
+      window.joltObd.set_up((t) => console.log("[obd]", t));
+      // First without a dialog: if the dongle has been allowed once
+      // before, it connects without a touch.
+      await window.joltObd.attach();
+      if (await window.joltLive.handshakeSafe()) dongle.present = true;
+    } catch (failure) {
+      // No reason to abort - only one to carry on without the dongle.
+      console.log("[obd] Verbindung nicht zustande gekommen:", failure);
+    }
+    if (!dongle.present) {
+      as_of("Ohne Dongle – der Ladestand kommt von Hand.");
+      dongle.later = true;
+    }
+    return dongle;
+  }
+
+  /* The choice from this section, not the one from the planning view -
+   * and **no** fallback to the first vehicle in the list. That was the
+   * bug: it silently assigned the trip to the "Allgemeines E-Auto"
+   * (generic EV), and everything was calculated with it afterwards -
+   * battery size, mass, drag. Better not to record at all than for the
+   * wrong car. */
+  function chosenVehicleId() {
+    const choice = document.getElementById("rec-vehicle");
+    return choice && choice.value ? Number(choice.value) : null;
+  }
+
+  function currentPosition() {
+    return new Promise((fulfil, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Dieses Gerät liefert keinen Standort."));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (p) => fulfil(p.coords),
+        // Without a start position there would be no first point of the route.
+        (f) => reject(new Error("Standort: " + f.message)),
+        { enableHighAccuracy: true, timeout: 10000 });
+    });
+  }
+
+  /* With a dongle, pass the real start charge level right away - better than
+   * the 100 % the server otherwise assumes. */
+  async function startCharge(dongle) {
+    if (!dongle.present) return null;
+    try {
+      const reading = window.joltObd.socFromResponse(
+        await window.joltObd.command("22028C"));
+      if (reading) return Math.round(reading.hmi * 10) / 10;
+    } catch (failure) {
+      /* No answer to the first query does **not** mean "no
+       * dongle". A car that is still asleep does not answer - the
+       * dongle is there anyway, and as soon as it drives, the values come.
+       *
+       * Here `withDongle = false` used to stand. With that the whole
+       * recording ran without vehicle values although the dongle was
+       * connected: on 5 Oct a trip (session 6) delivered only GPS for
+       * three minutes until someone restarted by hand. Only if the
+       * connection itself is gone does the dongle count as absent. */
+      if (!window.joltObd.linked()) {
+        dongle.present = false;
+        dongle.later = true;
+      } else {
+        console.log("[obd] Startladestand ohne Antwort:", failure);
+      }
+    }
+    return null;
+  }
+
+  function enterLiveView(response, id) {
+    K.state.sessionId = response.session_id;
+    K.sessionRemember(response.session_id);
+    K.state.recVehicle =
+      (K.state.vehicles || []).find((f) => f.id === id) || null;
+    // The new recording belongs in the list.
+    K.state.tripsStale = true;
+    window.joltApp.showView("live");
+    document.getElementById("live-empty").hidden = true;
+    document.getElementById("live-content").hidden = false;
+    window.joltLive.link(response.session_id);
+    // Whoever starts the recording is sitting in the car: reading is allowed
+    // until the phone says the car is stationary. Without that it began in the
+    // state "steht" (standing) and only read from 15 km/h - i.e. never at a
+    // standstill. The live display stayed empty, and anyone who did not drive
+    // off saw nothing.
+    window.joltLive.drivingStateStart("faehrt");
+    window.joltLive.positionTrace();
+  }
+
+  function announceStart(dongle, soc, response) {
+    if (response.pending) {
+      K.report("Kein Netz – die Aufzeichnung läuft auf dem Gerät und wird "
+        + "nachgeliefert, sobald wieder Verbindung besteht.", "warnung");
+    }
+    if (dongle.present) {
+      window.joltLive.dongleUse();
+      K.report(soc !== null
+        ? "Aufzeichnung läuft, Ladestand kommt aus dem Auto."
+        : "Aufzeichnung läuft. Das Auto antwortet noch nicht – jolt liest "
+          + "den Ladestand, sobald du fährst.", "hinweis");
+      return;
+    }
+    if (dongle.later) {
+      // The dongle may still come: the car is often only switched on now.
+      // jolt knocks on its own instead of waiting for the button - and
+      // gives up after a few attempts.
+      window.joltLive.dongleUse();
+      window.joltLive.reconnectDongle();
+    }
+    K.report("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
+      + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
+  }
+
   async function startRecording() {
     lastStartError = "";
     const btn = document.getElementById("rec-start");
@@ -333,80 +458,17 @@ window.joltTrips = (function () {
     };
     btn.disabled = true;
     try {
-      let withDongle = false;
-      let dongleLater = false;   // not connected, but Bluetooth is there
-      if (window.joltObd && window.joltObd.obtainable()) {
-        as_of("Verbinde mit dem OBD2-Dongle …");
-        try {
-          window.joltObd.set_up((t) => console.log("[obd]", t));
-          // First without a dialog: if the dongle has been allowed once
-          // before, it connects without a touch.
-          await window.joltObd.attach();
-          if (await window.joltLive.handshakeSafe()) withDongle = true;
-        } catch (failure) {
-          // No reason to abort - only one to carry on without the dongle.
-          console.log("[obd] Verbindung nicht zustande gekommen:", failure);
-        }
-        if (!withDongle) {
-          as_of("Ohne Dongle – der Ladestand kommt von Hand.");
-          dongleLater = true;
-        }
-      }
-
-      // The choice from this section, not the one from the planning view -
-      // and **no** fallback to the first vehicle in the list. That was the
-      // bug: it silently assigned the trip to the "Allgemeines E-Auto"
-      // (generic EV), and everything was calculated with it afterwards -
-      // battery size, mass, drag. Better not to record at all than for the
-      // wrong car.
-      const choice = document.getElementById("rec-vehicle");
-      const id = choice && choice.value ? Number(choice.value) : null;
+      const dongle = await connectForStart(as_of);
+      const id = chosenVehicleId();
       if (!id) {
         K.report("Erst ein Fahrzeug wählen – ohne das gehört die "
                  + "Aufzeichnung niemandem.", "fehler");
         lastStartError = "Kein Fahrzeug gewählt – in jolt einmal auswählen.";
         return false;
       }
-
       as_of("Standort holen …");
-      const city = await new Promise((fulfil, reject) => {
-        if (!navigator.geolocation) {
-          reject(new Error("Dieses Gerät liefert keinen Standort."));
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          (p) => fulfil(p.coords),
-          // Without a start position there would be no first point of the route.
-          (f) => reject(new Error("Standort: " + f.message)),
-          { enableHighAccuracy: true, timeout: 10000 });
-      });
-
-      // With a dongle, pass the real start charge level right away - better than
-      // the 100 % the server otherwise assumes.
-      let soc = null;
-      if (withDongle) {
-        try {
-          const reading = window.joltObd.socFromResponse(
-            await window.joltObd.command("22028C"));
-          if (reading) soc = Math.round(reading.hmi * 10) / 10;
-        } catch (failure) {
-          /* No answer to the first query does **not** mean "no
-           * dongle". A car that is still asleep does not answer - the
-           * dongle is there anyway, and as soon as it drives, the values come.
-           *
-           * Here `withDongle = false` used to stand. With that the whole
-           * recording ran without vehicle values although the dongle was
-           * connected: on 5 Oct a trip (session 6) delivered only GPS for
-           * three minutes until someone restarted by hand. Only if the
-           * connection itself is gone does the dongle count as absent. */
-          if (!window.joltObd.linked()) {
-            withDongle = false;
-            dongleLater = true;
-          } else {
-            console.log("[obd] Startladestand ohne Antwort:", failure);
-          }
-        }
-      }
+      const city = await currentPosition();
+      const soc = await startCharge(dongle);
 
       as_of("Fahrt anlegen …");
       // Without network the recording starts locally and is created on the
@@ -414,44 +476,8 @@ window.joltTrips = (function () {
       const response = await window.joltPending.start(K.api, {
         vehicle_id: id, lat: city.latitude, lon: city.longitude,
         soc: soc, name: document.getElementById("rec-name").value });
-      K.state.sessionId = response.session_id;
-      K.sessionRemember(response.session_id);
-      K.state.recVehicle =
-        (K.state.vehicles || []).find((f) => f.id === id) || null;
-      // The new recording belongs in the list.
-      K.state.tripsStale = true;
-      window.joltApp.showView("live");
-      document.getElementById("live-empty").hidden = true;
-      document.getElementById("live-content").hidden = false;
-      window.joltLive.link(response.session_id);
-      // Whoever starts the recording is sitting in the car: reading is allowed
-      // until the phone says the car is stationary. Without that it began in the
-      // state "steht" (standing) and only read from 15 km/h - i.e. never at a
-      // standstill. The live display stayed empty, and anyone who did not drive
-      // off saw nothing.
-      window.joltLive.drivingStateStart("faehrt");
-      window.joltLive.positionTrace();
-      if (response.pending) {
-        K.report("Kein Netz – die Aufzeichnung läuft auf dem Gerät und wird "
-          + "nachgeliefert, sobald wieder Verbindung besteht.", "warnung");
-      }
-      if (withDongle) {
-        window.joltLive.dongleUse();
-        K.report(soc !== null
-          ? "Aufzeichnung läuft, Ladestand kommt aus dem Auto."
-          : "Aufzeichnung läuft. Das Auto antwortet noch nicht – jolt liest "
-            + "den Ladestand, sobald du fährst.", "hinweis");
-      } else {
-        if (dongleLater) {
-          // The dongle may still come: the car is often only switched on now.
-          // jolt knocks on its own instead of waiting for the button - and
-          // gives up after a few attempts.
-          window.joltLive.dongleUse();
-          window.joltLive.reconnectDongle();
-        }
-        K.report("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
-          + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
-      }
+      enterLiveView(response, id);
+      announceStart(dongle, soc, response);
       // The last recorded vehicle applies again next time -
       // also for the start from CarPlay, where one cannot choose any.
       try { localStorage.setItem("jolt-aufz-fahrzeug", String(id)); } catch (e) { /* without memory */ }
