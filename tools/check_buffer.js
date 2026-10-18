@@ -77,7 +77,7 @@ context.window.localStorage = context.localStorage;
 vm.createContext(context);
 vm.runInContext(pendingSource, context);
 // The modules live.js calls into.
-for (const name of ["awake.js", "notify.js", "consumption.js", "drive-state.js", "buffer.js"]) {
+for (const name of ["awake.js", "notify.js", "consumption.js", "drive-state.js", "buffer.js", "history-chart.js"]) {
   vm.runInContext(require("fs").readFileSync(
     require("path").join(__dirname, "..", "frontend", name), "utf8"), context);
 }
