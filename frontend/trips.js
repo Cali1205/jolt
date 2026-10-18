@@ -495,7 +495,64 @@ window.joltTrips = (function () {
     } catch (e) { /* no plugin, no CarPlay */ }
   }
 
+  /* ---------- Starting on its own ----------
+   *
+   * Triggers: CarPlay connects, or the Shortcut for the car's Wi-Fi opens
+   * `jolt://auto` (both only with ignition on). The trigger alone does not
+   * start anything: the dongle has to be reachable and the 12 V voltage has
+   * to be up - the DC/DC converter only runs when the car is on or charging.
+   * `ATRV` is measured by the dongle's own chip and sends nothing onto the
+   * bus, so waiting for it does not wake the car. The converter needs a few
+   * seconds after switching on, hence a few attempts. */
+  const AUTO_KEY = "jolt-auto-aufzeichnung";
+  const AUTO_VOLT = 13.0;
+  const AUTO_WAIT_MS = 180000;
+  const AUTO_TICK_MS = 5000;
+  let autoBusy = false;
+
+  function autoEnabled() {
+    try { return localStorage.getItem(AUTO_KEY) !== "0"; }
+    catch (e) { return true; }
+  }
+
+  async function autoStart() {
+    if (!autoEnabled() || autoBusy || K.state.sessionId) return false;
+    const O = window.joltObd;
+    if (!O || !O.obtainable() || typeof O.voltage !== "function") return false;
+    autoBusy = true;
+    try {
+      const deadline = Date.now() + AUTO_WAIT_MS;
+      let volt = null;
+      while (Date.now() < deadline && !K.state.sessionId) {
+        try {
+          O.set_up((t) => console.log("[obd]", t));
+          await O.attach();
+          if (O.linked()) {
+            volt = await O.voltage();
+            if (typeof volt === "number" && volt >= AUTO_VOLT) break;
+          }
+        } catch (failure) {
+          console.log("[auto] Dongle noch nicht da:", failure);
+        }
+        volt = null;
+        await new Promise((r) => setTimeout(r, AUTO_TICK_MS));
+      }
+      if (K.state.sessionId) return true;
+      if (volt === null) {
+        // No dongle or the voltage stayed low: not a drive, nothing to record.
+        try { O.detach(); } catch (e) { /* already disconnected */ }
+        return false;
+      }
+      K.report("Auto erkannt (" + volt.toFixed(1) + " V) – jolt startet die "
+               + "Aufzeichnung.", "hinweis");
+      return await startRecording();
+    } finally {
+      autoBusy = false;
+    }
+  }
+
   async function carplayAction(action) {
+    if (action === "auto") return autoStart();
     const p = carplayPlugin();
     let ok = false, text = "";
     try {
@@ -559,6 +616,14 @@ window.joltTrips = (function () {
 
   function set_up() {
     K.at("rec-start", "click", startRecording);
+    const autoSwitch = document.getElementById("rec-auto");
+    if (autoSwitch) {
+      autoSwitch.checked = autoEnabled();
+      autoSwitch.addEventListener("change", () => {
+        try { localStorage.setItem(AUTO_KEY, autoSwitch.checked ? "1" : "0"); }
+        catch (e) { /* this session only */ }
+      });
+    }
     K.at("trip-back", "click", closeDetail);
     carplayConnect();
     dongleHint();

@@ -42,7 +42,7 @@ function build(o) {
   const calls = { api: [], listener: {}, ready: [], result: [], finish: 0, saved: {} };
   const K = {
     state: { sessionId: o.running ? 7 : null, vehicles: [{ id: 1 }], tripsStale: false },
-    report() {},
+    report(t, k) { if (process.env.DBG) console.log("REPORT", k, t); },
     at(id, event, f) { return (elemente[id] || empty()); },
     api: async (fs_path, opt) => { calls.api.push({ fs_path, body: opt && opt.body });
                                 return { session_id: 9, trip_id: 3 }; },
@@ -60,7 +60,12 @@ function build(o) {
     joltBlePlugin: o.browser ? undefined
       : { JoltDisplay: plugin, Capacitor: { isNativePlatform: () => true } },
     joltApp: { showView() {} },
-    joltObd: { obtainable: () => false },
+    joltObd: o.obd ? {
+      obtainable: () => true, set_up() {}, attach: async () => true,
+      linked: () => !o.obd.away, detach() { calls.detach = (calls.detach || 0) + 1; },
+      voltage: async () => { calls.volts = (calls.volts || 0) + 1;
+                             return o.obd.volts[Math.min(calls.volts - 1, o.obd.volts.length - 1)]; },
+    } : { obtainable: () => false },
     joltLive: {
       link: () => { K.state.sessionId = 9; },
       positionTrace() {}, drivingStateStart() {}, dongleUse() {},
@@ -68,8 +73,13 @@ function build(o) {
       finish: async () => { calls.finish++; if (!o.endStuck) K.state.sessionId = null; },
     },
   };
+  // With a dongle mock the time is simulated: waiting minutes costs nothing.
+  let clock = 0;
+  class fakeDate extends Date { static now() { return clock; } }
+  const fakeTimeout = (f, ms) => { clock += ms; return setTimeout(f, 0); };
   const context = {
-    window: timeframe, console: { log() {} }, Request, Response, clearTimeout, setTimeout, Promise, Date, JSON, Math, Number, String,
+    window: timeframe, console: { log() {} }, Request, Response, clearTimeout,
+    setTimeout: o.obd ? fakeTimeout : setTimeout, Promise, Date: o.obd ? fakeDate : Date, JSON, Math, Number, String,
     document: { getElementById: (id) => elemente[id] || empty(),
                 querySelector: () => empty(), createElement: () => empty(),
                 addEventListener() {} },
@@ -78,8 +88,8 @@ function build(o) {
         if (o.noLocation) no({ message: "Standort nicht erlaubt" });
         else ok({ coords: { latitude: 48.47, longitude: 9.14 } });
       } } },
-    localStorage: { getItem: () => null, setItem: (k, v) => { calls.saved[k] = v; },
-                    removeItem() {} },
+    localStorage: { getItem: (k) => (o.autoOff && k === "jolt-auto-aufzeichnung" ? "0" : null),
+                    setItem: (k, v) => { calls.saved[k] = v; }, removeItem() {} },
   };
   vm.createContext(context);
   vm.runInContext(pendingSource, context);
@@ -157,6 +167,32 @@ function build(o) {
   await t.calls.listener.carplayAction({ action: "beenden" });
   verify(t.calls.finish === 0 && t.calls.result[0].ok === true,
          "ohne laufende Aufzeichnung gibt es nichts zu beenden");
+
+  console.log("\nAutomatisch starten (CarPlay verbindet / jolt://auto)");
+  t = build({ obd: { volts: [13.8] } });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 1 && t.calls.api[0].fs_path === "/api/live/recording",
+         "hohe 12-V-Spannung: die Aufzeichnung startet", JSON.stringify(t.calls.api));
+  verify(t.calls.result.length === 0,
+         "und CarPlay bekommt dazu keine Meldung (es hat nichts angefordert)");
+  t = build({ obd: { volts: [12.5, 12.6, 13.9] } });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 1 && t.calls.volts === 3,
+         "erst niedrig, dann hoch (Wandler laeuft an): wartet und startet dann",
+         JSON.stringify(t.calls.volts));
+  t = build({ obd: { volts: [12.5] } });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 0 && t.calls.detach === 1,
+         "Spannung bleibt niedrig (Auto steht, Handy nur in Reichweite): keine Aufzeichnung, Dongle getrennt");
+  t = build({ obd: { volts: [13.8], away: true } });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 0, "kein Dongle in Reichweite: keine Aufzeichnung");
+  t = build({ obd: { volts: [13.8] }, autoOff: true });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 0, "Schalter aus: keine Aufzeichnung");
+  t = build({ obd: { volts: [13.8] }, running: true });
+  await t.calls.listener.carplayAction({ action: "auto" });
+  verify(t.calls.api.length === 0, "laeuft schon eine Aufzeichnung, startet keine zweite");
 
   console.log("\nUnsinn");
   t = build();

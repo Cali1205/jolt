@@ -449,6 +449,20 @@ def part_carplay() -> None:
                "plugins", "jolt-display", "ios", "Sources", "JoltDisplayPlugin",
                "JoltDisplayStore.swift"),
            "ohne geladene Oberflaeche (Kaltstart) wird keine Aktion versprochen - CarPlay sagt es")
+    # Starting on its own: CarPlay connects or `jolt://auto` opens -> the same
+    # action name "auto" in the scene, store, plugin and UI.
+    store = load("plugins", "jolt-display", "ios", "Sources", "JoltDisplayPlugin",
+                 "JoltDisplayStore.swift")
+    verify("requestAuto()" in delegate and "func requestAuto" in store
+           and "if (action === \"auto\")" in trips,
+           "CarPlay-Verbindung loest die Aktion auto aus, die Oberflaeche kennt sie")
+    verify("pendingAuto" in store and "retainUntilConsumed" in plugin,
+           "ein Auto-Start vor der geladenen Oberflaeche geht nicht verloren")
+    verify(".capacitorOpenURL" in plugin and 'url.host == "auto"' in plugin
+           and "CFBundleURLSchemes" in load("tools", "ios_info_plist.sh"),
+           "jolt://auto (Kurzbefehl fuers Auto-WLAN) kommt im Plugin an")
+    verify("AUTO_VOLT" in trips and "O.voltage" in trips and "rec-auto" in trips,
+           "Auto-Start prueft die 12-V-Spannung und hat einen Schalter")
     verify("asyncAfter" in delegate and "Keine Antwort von jolt" in delegate,
            "antwortet die Oberflaeche nicht, bleibt 'wird gestartet' nicht ewig stehen")
 
