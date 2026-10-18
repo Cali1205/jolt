@@ -91,7 +91,7 @@
         </div>
       </div>
 
-      <div class="reihe">
+      <div class="reihe umbruch">
         <div>
           <label for="vehicle-choice">Fahrzeug</label>
           <select id="vehicle-choice"></select>
@@ -421,11 +421,10 @@
       <!-- The curves. They answer a different question than the numbers above:
            not "how is it going" but "is it getting better or worse" -
            and one looks at them for that, instead of glancing in passing. -->
-      <div class="karte-block">
+      <div class="karte-block" id="live-curves">
         <canvas id="live-history"></canvas>
-        <div class="karte-fuss">
-          <span id="live-history-foot">Soll und Ist über die Strecke</span>
-          <span id="live-hint-short"></span>
+        <div class="karte-fuss" id="live-history-foot">
+          <span>Soll und Ist über die Strecke</span>
         </div>
         <canvas id="live-consumption" hidden></canvas>
         <div class="karte-fuss" id="live-consumption-foot" hidden>

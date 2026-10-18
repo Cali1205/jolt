@@ -19,7 +19,8 @@ function verify(ok, text, extra) {
 }
 
 function makeBox() {
-  const box = { dataset: {}, className: "", textContent: "", parent: null,
+  const box = { dataset: {}, className: "", textContent: "", parent: null, handlers: {},
+                addEventListener(name, f) { this.handlers[name] = f; },
                 remove() { if (this.parent) this.parent.children = this.parent.children.filter((c) => c !== this); } };
   return box;
 }
@@ -59,6 +60,25 @@ verify(container.children.length === 3, "gleicher Text in anderer Art ist eine e
 
 first.remove();
 verify(!container.children.includes(first), "die Meldung lässt sich wieder wegnehmen (Auto antwortet wieder)");
+
+// A tap closes a message; at most three stay, the oldest non-error goes first.
+const tapped = K.report("Zum Wegtippen", "hinweis");
+tapped.handlers.click();
+verify(!container.children.includes(tapped), "ein Tippen schliesst die Meldung");
+
+container.children.length = 0;
+K.report("Fehler A", "fehler");
+K.report("Hinweis B", "hinweis");
+K.report("Hinweis C", "hinweis");
+K.report("Hinweis D", "hinweis");
+verify(container.children.length === 3 && container.children[0].textContent === "Fehler A"
+       && !container.children.some((c) => c.textContent === "Hinweis B"),
+       "hoechstens drei Meldungen: der aelteste Hinweis geht zuerst, der Fehler bleibt",
+       container.children.map((c) => c.textContent).join(" | "));
+K.report("Fehler E", "fehler");
+K.report("Fehler F", "fehler");
+verify(container.children.length === 3 && container.children.filter((c) => c.dataset.kind === "fehler").length >= 2,
+       "bei lauter Fehlern geht erst der aelteste, nie die neuesten");
 
 if (failure) { console.log("\n" + failure + " Pruefung(en) fehlgeschlagen."); process.exit(1); }
 console.log("\nAlle Pruefungen bestanden.");
