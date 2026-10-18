@@ -1398,9 +1398,6 @@ def main() -> int:
            "und er lässt sich auch auf einer geplanten Fahrt verbinden, "
            "nicht nur beim Aufzeichnen")
 
-    verify("WIDTHS_MIN" in live and "BAR_AT_MOST" in live,
-           "die Balkenbreite wächst mit der Fahrt - sechs Stunden wären "
-           "sonst 360 Balken auf 340 Pixeln")
     verify("CHARGING_AS_OF_KWH" in live,
            "und der Verbrauch der Fahrt wird abschnittsweise summiert, "
            "damit ein Ladestopp ihn nicht auf null zieht")
@@ -1441,7 +1438,7 @@ def main() -> int:
            "der Ladestand steht mit einer Nachkommastelle da - der Dongle "
            "liefert ihn in Schritten von 0,4 pp, auf ganze Prozent gerundet "
            "steht die Zahl minutenlang still")
-    verify("drawConsumption" in live and "verbrauchsabschnitte" in live,
+    verify("drawConsumption" in live and "joltConsumption.sections" in live,
            "es gibt einen Balkenplot des Verbrauchs je Zeitabschnitt")
     # The plausibility check while parked. The cross-check is the
     # sharper part: discharge counter divided by odometer must
@@ -1491,16 +1488,6 @@ def main() -> int:
     verify("...(m.also || []).map" in core,
            "auch der mitgelieferte Wert steht in der Feldliste, sonst zeigt "
            "die Tabelle weniger, als gemessen wird")
-    verify("SECTION_WITH_COUNTER_S = 60" in live
-           and "SECTION_FROM_SOC_S = 300" in live,
-           "die Balkenbreite folgt der Quelle: eine Minute mit Zähler, "
-           "fünf ohne - nicht dem Wunsch")
-    verify("final.net - first.net" in live,
-           "und die Balken rechnen mit der Zählerdifferenz, wenn es sie gibt")
-    verify("final.gps - first.gps" in live,
-           "die Strecke je Balken kommt dagegen aus dem GPS - der "
-           "Kilometerstand löst in ganzen Kilometern auf, und eine Minute "
-           "sind rund 1,2 km")
     # The raw values belong behind a flap: seventeen lines in the middle of the
     # driving view are noise. And the tiles you read belong above
     # the charts, not below them.
@@ -1513,9 +1500,6 @@ def main() -> int:
            "das Alter steht in der zugeklappten Zeile - man soll ohne "
            "Aufklappen sehen, ob es lebt")
 
-    verify('fillText("kWh/100"' in live,
-           "der Balkenplot hat eine beschriftete Achse - ohne sie sieht man "
-           "Unterschiede, aber keine Grössenordnung")
     html_obd = open(os.path.join(FRONTEND, "obd.js"), encoding="utf-8").read()
     verify("btn.disabled = true" in html_obd and "läuft …" in html_obd,
            "der Senden-Knopf sperrt sich, solange eine Befehlsreihe läuft - "

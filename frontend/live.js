@@ -143,7 +143,7 @@ window.joltLive = (function () {
       window.joltApp.showView("live");
       // Ask once at the start, where the question means something - and not
       // at the first changed plan, where it gets in the way.
-      notificationsSetUp();
+      window.joltNotify.subscribe();
       showDongle();
       K.report(withDongle
         ? "Live-Fahrt läuft – Ladestand und Zähler kommen aus dem Auto."
@@ -597,7 +597,7 @@ window.joltLive = (function () {
 
     if (!plan.feasible) {
       listEl.innerHTML = `<li class="leer" style="color:#e2596a">${
-        sanitize(plan.reason || "Kein Ladeplan möglich.")}</li>`;
+        K.esc(plan.reason || "Kein Ladeplan möglich.")}</li>`;
       return;
     }
     if (!plan.stops || !plan.stops.length) {
@@ -610,7 +610,7 @@ window.joltLive = (function () {
       const entry = document.createElement("li");
       entry.innerHTML = `
         <div class="haupt">
-          <div class="titel">${i + 1}. ${sanitize(s.name || s.operator
+          <div class="titel">${i + 1}. ${K.esc(s.name || s.operator
             || "Ladepunkt")}</div>
           <div class="unter">km ${K.num(s.km_on_route)} ·
             ${K.num(s.arrival_soc)} % → ${K.num(s.departure_soc)} % ·
@@ -629,87 +629,7 @@ window.joltLive = (function () {
       box.textContent = text || "Der Ladeplan hat sich geändert.";
       box.hidden = false;
     }
-    notify(text || "Der Ladeplan hat sich geändert.");
-  }
-
-  function notify(text) {
-    // Without granted permission we neither ask nor notify:
-    // whoever has the view open sees the message anyway. We ask
-    // once at the start of the trip, where the question also means something.
-    try {
-      if (!("Notification" in window) || Notification.permission !== "granted") {
-        return;
-      }
-      new Notification("jolt – Ladeplan geändert", { body: text, day: "jolt-plan" });
-    } catch (e) { /* depending on browser and context not allowed - then so be it */ }
-  }
-
-  /* ---------- Notifications to the phone ---------- */
-
-  /* Ask once at the start of the trip and register the device.
-   *
-   * The route via the push service is the only one that reaches a phone with
-   * a dark screen: the WebSocket connection goes to sleep with it. Hence
-   * a real subscription here and not just the permission for the Notification API.
-   *
-   * If any step fails, the trip runs anyway - then just with
-   * the message in the open view. */
-  async function notificationsSetUp() {
-    try {
-      if (!("Notification" in window) || !("PushManager" in window)) return;
-
-      const key = await K.api("/api/push/key");
-      if (!key.configured) return;   // no VAPID key on the server
-
-      if (Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-      if (Notification.permission !== "granted") return;
-
-      const registration = K.state.serviceWorker
-        || (navigator.serviceWorker && await navigator.serviceWorker.ready);
-      if (!registration || !registration.pushManager) return;
-
-      // Reuse an existing subscription. Creating a new one would return
-      // the same endpoint, but costs a detour.
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: keyAsBytes(key.public_key),
-        });
-      }
-
-      const subscriptionJson = subscription.toJSON();
-      await K.api("/api/push/subscription", { method: "POST", body: {
-        endpoint: subscriptionJson.endpoint,
-        p256dh: subscriptionJson.keys.p256dh,
-        auth: subscriptionJson.keys.auth,
-        device: navigator.userAgent.slice(0, 120),
-      }});
-    } catch (failure) {
-      // Deliberately only to the log: whoever is just setting off does not want to read an error
-      // message about a side function.
-      if (window.console) console.warn("Benachrichtigungen:", failure.message);
-    }
-  }
-
-  /* The public key arrives as base64url and must be passed as a
-   * Uint8Array - the browser does not accept the string. */
-  function keyAsBytes(text) {
-    const filled = (text + "=".repeat((4 - text.length % 4) % 4))
-      .replace(/-/g, "+").replace(/_/g, "/");
-    const raw = atob(filled);
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    return bytes;
-  }
-
-  /* The names come from third-party data sources and end up in innerHTML. */
-  function sanitize(text) {
-    const helper = document.createElement("div");
-    helper.textContent = text || "";
-    return helper.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    window.joltNotify.show(text || "Der Ladeplan hat sich geändert.");
   }
 
   /* Where the measurement point was - [lon, lat], or null.
@@ -793,7 +713,7 @@ window.joltLive = (function () {
 
   function webTrace() {
     if (!navigator.geolocation) return;
-    screenAwakeHold();
+    window.joltAwake.hold();
     awake = navigator.geolocation.watchPosition(
       (pos) => locationInput(pos.coords, pos.timestamp),
       // A GPS error on the road is no reason to bother the user -
@@ -837,7 +757,7 @@ window.joltLive = (function () {
     // permission prompt, and until then no second start may slip in.
     awake = "nativ";
     const cycle = ++nativeRun;
-    screenAwakeHold();
+    window.joltAwake.hold();
     let id;
     try {
       id = await plugin.addWatcher({
@@ -907,156 +827,7 @@ window.joltLive = (function () {
     }
     awake = null;
     locationErrorReported = false;
-    screenRelease();
-  }
-
-  /* ---------- The screen must stay on ---------- */
-
-  /* Without this iOS turns the screen off after a minute, and with the
-   * screen the page sleeps: `watchPosition` delivers nothing any more, the
-   * Bluetooth loop stands still, and on waking up the piece in between is missing.
-   *
-   * The diagnostics page under /obd had this from the start, this view
-   * did not - and recording happens here. In the first real test drive
-   * there is exactly for that reason a gap of eight minutes with a single
-   * measurement point in it.
-   *
-   * The lock is lost as soon as the page goes to the background, and
-   * does not come back by itself; hence it is acquired again on
-   * returning. */
-  let wake_lock = null;
-  let keepAwakeVideo = null;
-
-  /* On iOS the Wake Lock API remains unreliable in a page launched as an
-   * app from the home screen ("standalone", see manifest.json) -
-   * sometimes the lock is not granted at all, sometimes it drops after a short
-   * time by itself without triggering a "release" event. A
-   * silent, invisible video running in an endless loop on the other hand
-   * keeps the screen awake reliably - the same technique NoSleep.js
-   * uses. Both paths run in parallel, neither harms the other.
-   *
-   * An empty canvas as the source (`captureStream()`) was not enough: iOS
-   * apparently did not consistently count that as real playback, the
-   * screen went off anyway. An actual, if tiny,
-   * video (1 second, 2x2 pixels, black, no sound - 1.5 kB) works more
-   * reliably. Embedded instead of as a separate file, so nothing has to be
-   * loaded from the network before the lock takes effect. */
-  const KEEP_AWAKE_MP4 = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMXbW9vdgAAAGxtdmhkAAAA"
-    + "AAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAB"
-    + "AAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAkF0"
-    + "cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAA"
-    + "AAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0"
-    + "cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAG5bWRpYQAAACBtZGhkAAAAAAAA"
-    + "AAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABW"
-    + "aWRlb0hhbmRsZXIAAAABZG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAA"
-    + "HGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASRzdGJsAAAAwHN0c2QAAAAAAAAAAQAA"
-    + "ALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAIAAgBIAAAASAAAAAAAAAABFUxh"
-    + "dmM1OS4zNy4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdk"
-    + "AAqs2V+IiMBEAAADAAQAAAMACDxIllgBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAA"
-    + "AQAAABRidHJ0AAAAAAAAFigAABYoAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0"
-    + "c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAsUAAAABAAAAFHN0Y28A"
-    + "AAAAAAAAAQAAA0cAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGly"
-    + "YXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjU5"
-    + "LjI3LjEwMAAAAAhmcmVlAAACzW1kYXQAAAKtBgX//6ncRem95tlIt5Ys2CDZI+7veDI2"
-    + "NCAtIGNvcmUgMTY0IHIzMDk1IGJhZWU0MDAgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVj"
-    + "IC0gQ29weWxlZnQgMjAwMy0yMDIyIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2"
-    + "NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5"
-    + "c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAg"
-    + "bWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRj"
-    + "dD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zm"
-    + "c2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRz"
-    + "PTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29u"
-    + "c3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIgYl9hZGFwdD0xIGJf"
-    + "Ymlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9MiBrZXlp"
-    + "bnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNf"
-    + "bG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFw"
-    + "bWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAA"
-    + "ABBliIQAFf/+98nvwKbr29+B";
-
-  /* Positioned outside the visible area (negative coordinates)
-   * it did not hold - presumably a video that is not in the
-   * visible area at all does not count as real playback for iOS. Now
-   * it actually sits in the top left corner, just a single, almost
-   * transparent pixel in size - that goes unnoticed, but counts. */
-  function fetchVideoKeepAwake() {
-    if (keepAwakeVideo) return keepAwakeVideo;
-    const video = document.createElement("video");
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    video.setAttribute("webkit-playsinline", "");
-    video.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;"
-      + "opacity:0.01;pointer-events:none;z-index:-1;";
-    video.src = KEEP_AWAKE_MP4;
-    document.body.appendChild(video);
-    keepAwakeVideo = video;
-    return video;
-  }
-
-  /* Both paths report back, instead of only writing to the invisible console log -
-   * at the wheel nobody can get at the console, and without a
-   * visible response a failure could only be guessed at rather than seen. */
-  /* In the iOS app this is one line, and it holds.
-   *
-   * `isIdleTimerDisabled` simply tells the system not to let the lock
-   * timer run - no Wake Lock that gets revoked, no video that has to
-   * count as playback. The path below stays in place anyway:
-   * the UI also keeps running in the browser, and there is nothing
-   * better there than Wake Lock and the video workaround. */
-  async function nativeAwakeHold() {
-    const h = window.joltBlePlugin;
-    if (!h || !h.Capacitor || !h.Capacitor.isNativePlatform()) return false;
-    try {
-      await h.KeepAwake.keepAwake();
-      return true;
-    } catch (failure) {
-      console.log("[live] KeepAwake ging nicht:", failure.message);
-      return false;
-    }
-  }
-
-  async function screenAwakeHold() {
-    if (await nativeAwakeHold()) return;
-    let hint = "";
-    if (!wake_lock && "wakeLock" in navigator) {
-      try {
-        wake_lock = await navigator.wakeLock.request("screen");
-        wake_lock.addEventListener("release", () => { wake_lock = null; });
-      } catch (failure) {
-        hint = "Wake Lock: " + failure.message;
-      }
-    } else if (!("wakeLock" in navigator)) {
-      hint = "Wake Lock: vom Browser nicht unterstützt";
-    }
-    try {
-      await fetchVideoKeepAwake().play();
-    } catch (failure) {
-      hint += (hint ? " / " : "") + "Video: " + failure.message;
-    }
-    if (hint) {
-      console.log("[live] Bildschirm wachhalten:", hint);
-      K.report("Bildschirm bleibt evtl. nicht an (" + hint + ") - "
-        + "sicherheitshalber Automatische Sperre in den iOS-Einstellungen "
-        + "auf „Nie” stellen.", "warnung");
-    }
-  }
-
-  function screenRelease() {
-    // After the trip the phone should lock normally again. The
-    // native path is withdrawn first; the two below do no
-    // harm if they never took hold in the first place.
-    const h = window.joltBlePlugin;
-    if (h && h.Capacitor && h.Capacitor.isNativePlatform()) {
-      h.KeepAwake.allowSleep().catch(() => {});
-    }
-    if (wake_lock) {
-      try { wake_lock.release(); } catch (e) {}
-      wake_lock = null;
-    }
-    if (keepAwakeVideo) {
-      try { keepAwakeVideo.pause(); } catch (e) {}
-    }
+    window.joltAwake.release();
   }
 
   /* Back in the foreground: catch up on what was left lying in the background.
@@ -1068,7 +839,7 @@ window.joltLive = (function () {
    * until the next drop comes - and it never does. */
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !K.state.sessionId) return;
-    screenAwakeHold();
+    window.joltAwake.hold();
     // `donglePause` belongs in both conditions: at the charger the
     // car is locked, and a connection that jolt brings back on its own
     // here sets off the alarm. Today `dongle` already covers the case
@@ -1649,7 +1420,7 @@ window.joltLive = (function () {
   function valuesRemember(raw) {
     const now = Date.now();
     // For the consumption plot: odometer and state of charge with a timestamp.
-    // The power is deliberately not included - see verbrauchsabschnitte().
+    // The power is deliberately not included - see joltConsumption.sections().
     if (typeof raw.odometer_km === "number") {
       /* `netto` is the counter reading: discharged minus charged. Its
        * difference over a stretch of driving **is** the energy used -
@@ -1713,8 +1484,7 @@ window.joltLive = (function () {
   const CHARGING_AS_OF_KWH = 0.05;
 
   function runningConsumption(raw, soc) {
-    const car = K.state.recVehicle
-      || (K.state.trip && K.state.trip.vehicle);
+    const car = vehicleOnRoad();
     const battery = car && (car.capacity_kwh || car.battery_net_kwh);
     if (consumption_track.length < 2) return null;
 
@@ -1750,180 +1520,15 @@ window.joltLive = (function () {
 
   /* ---------- Consumption per time section ---------- */
 
-  /* **Where the energy comes from, and what that means for the bar width.**
-   *
-   * First draft: sum up power (voltage times current) over time.
-   * Wrong - the current changes every second,
-   * reporting happens every twelve seconds. Five samples per minute are
-   * not an integral but a survey; on the country road 25 % error,
-   * in the city 59 %.
-   *
-   * Second draft: from the **state of charge**. Its quantisation error is
-   * absolutely bounded (one step, 0.44 pp = 339 Wh), so relatively the
-   * smaller the longer the section - from five minutes on everywhere under
-   * 3 %. But only from five minutes on.
-   *
-   * Now: the vehicle's **energy counters**. Their difference is the
-   * energy used, with 0.117 Wh resolution - almost three thousand times
-   * finer than the state of charge. With that a bar per minute is no longer an
-   * estimate but a measurement (0.05 % instead of 136 %).
-   *
-   * The bar width therefore follows the source, and not the wish:
-   * one minute with the counter, five without.
-   */
-  const SECTION_WITH_COUNTER_S = 60;
-  const SECTION_FROM_SOC_S = 300;
-  /* On a long trip the minute becomes too fine.
-   *
-   * A bar per minute is just right over half an hour - over
-   * six hours it would be 360 bars on roughly 340 pixels, i.e. 0.9 pixels
-   * per bar. That is no longer a chart but a texture.
-   *
-   * So the section width grows with the trip, but only to round
-   * values: two minutes you still read as two minutes, 87 seconds you do not.
-   * Accuracy does not suffer - with the counters even the
-   * minute is far above the resolution limit, wider only gets better. */
-  const WIDTHS_MIN = [1, 2, 5, 10, 15, 30, 60];
-  const BAR_AT_MOST = 60;
-
-  function widthChoose(duration_ms, min_s) {
-    for (const min of WIDTHS_MIN) {
-      if (min * 60 < min_s) continue;
-      if (duration_ms / (min * 60000) <= BAR_AT_MOST) return min * 60000;
-    }
-    return WIDTHS_MIN[WIDTHS_MIN.length - 1] * 60000;
-  }
-  // Below this distance kWh/100 km makes no sense - the car was standing.
-  const BAR_MIN_KM = 0.3;
-
-  /* **The distance per bar comes from the GPS, the energy from the counters.**
-   *
-   * That sounds like a step backwards - for the **total distance** of a
-   * recording the odometer is precisely the better source, because
-   * it neither cuts off bends nor knows dead spots. Over a single
-   * minute this reverses: it resolves in whole kilometres, and one
-   * minute at seventy km/h is 1.2 km. What gets measured is 1 or 2 -
-   * forty percent error on the denominator. The GPS track, with a report
-   * every twelve seconds, cuts off only a few percent.
-   *
-   * Noticed on a real trip: the kilometre column per minute stood
-   * constantly at 0 or 1, and the bars fluctuated accordingly.
-   *
-   * The energy stays with the counters - there the resolution is 0.117 Wh
-   * and thus no issue. Each quantity from the source that knows
-   * it best. */
-  function consumption_sections() {
-    const points = consumption_track.filter((p) => typeof p.gps === "number");
-    if (points.length < 2) return null;
-    const withCounter = points.every((p) => typeof p.net === "number");
-    const car = K.state.recVehicle
-      || (K.state.trip && K.state.trip.vehicle) || {};
-    const battery = car.capacity_kwh || car.battery_net_kwh;
-    if (!withCounter && !battery) return null;
-
-    const onset = points[0].timestamp;
-    const bucketWidth = widthChoose(
-      points[points.length - 1].timestamp - onset,
-      withCounter ? SECTION_WITH_COUNTER_S : SECTION_FROM_SOC_S);
-    const buckets = new Map();
-    for (const p of points) {
-      const n = Math.floor((p.timestamp - onset) / bucketWidth);
-      if (!buckets.has(n)) buckets.set(n, []);
-      buckets.get(n).push(p);
-    }
-
-    const bar = [];
-    for (const [n, group] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
-      if (group.length < 2) continue;
-      const first = group[0], final = group[group.length - 1];
-      const km = final.gps - first.gps;
-      if (km < BAR_MIN_KM) continue;
-      const kwh = withCounter ? (final.net - first.net)
-        : ((first.soc !== null && final.soc !== null)
-           ? (first.soc - final.soc) / 100 * battery : null);
-      if (kwh === null || !Number.isFinite(kwh)) continue;
-      bar.push({ n, kwh100: kwh / km * 100, km });
-    }
-    return bar.length ? { bar, bucketWidth, withCounter } : null;
+  function vehicleOnRoad() {
+    return K.state.recVehicle || (K.state.trip && K.state.trip.vehicle) || {};
   }
 
   function drawConsumption() {
-    const canvas = document.getElementById("live-consumption");
-    const foot = document.getElementById("live-consumption-foot");
-    if (!canvas || !foot) return;
-    const sections = consumption_sections();
-    if (!sections) { canvas.hidden = true; foot.hidden = true; return; }
-    canvas.hidden = false; foot.hidden = false;
-
-    const dpr = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth, height = canvas.clientHeight;
-    if (!width || !height) return;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-
-    const vals = sections.bar.map((b) => b.kwh100);
-    // The scale generous upwards, so that an outlier does not flatten the other
-    // bars, and with a zero line: recuperation goes
-    // below zero, and that is exactly what you should see.
-    const upper = Math.max(40, ...vals) * 1.1;
-    const bottom = Math.min(0, ...vals) * 1.1;
-    const span = upper - bottom || 1;
-    const edge = 6, footHeight = 16;
-    const area = height - footHeight - edge;
-    const y = (v) => edge + (upper - v) / span * area;
-
-    /* Labelled axis. Without it a bar chart is a shape without a
-     * message - you see that one minute was more expensive than another, but
-     * not whether it is twenty or forty kWh/100 km. And that is
-     * the number you compare with your own feeling.
-     *
-     * Labels go on the left, into the area: a separate column
-     * for it would be too expensive on the phone. Three lines suffice - zero, a
-     * round value in between and the maximum. */
-    const axis = 30;
-    const split = [0];
-    const step = upper > 60 ? 25 : (upper > 25 ? 10 : 5);
-    for (let w = step; w < upper; w += step) split.push(w);
-    for (let w = -step; w > bottom; w -= step) split.push(w);
-
-    ctx.font = "10px system-ui, sans-serif";
-    ctx.textBaseline = "middle";
-    for (const w of split) {
-      const yy = y(w);
-      ctx.strokeStyle = w === 0 ? "#3a4652" : "#222c36";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(axis, yy); ctx.lineTo(width - edge, yy);
-      ctx.stroke();
-      ctx.fillStyle = "#8a97a5";
-      ctx.textAlign = "right";
-      ctx.fillText(String(w), axis - 4, yy);
-    }
-    // The unit once at the top left, not on every tick.
-    ctx.fillStyle = "#8a97a5";
-    ctx.textAlign = "left";
-    ctx.fillText("kWh/100", axis + 3, edge + 4);
-
-    const field = width - edge - axis;
-    const b = Math.max(2, field / sections.bar.length - 2);
-    sections.bar.forEach((bar, i) => {
-      const x = axis + i * (field / sections.bar.length);
-      const high = y(bar.kwh100) - y(0);
-      // Colour by height: what lies clearly above the average stands out.
-      ctx.fillStyle = bar.kwh100 < 0 ? "#57c98a"
-        : (bar.kwh100 > 35 ? "#e8804f" : "#ffc93c");
-      ctx.fillRect(x, high < 0 ? y(bar.kwh100) : y(0),
-                     b, Math.max(1, Math.abs(high)));
-    });
-
-    const average = vals.reduce((a, v) => a + v, 0) / vals.length;
-    foot.children[0].textContent =
-      `Verbrauch je ${sections.bucketWidth / 60000} min`
-      + (sections.withCounter ? "" : " (aus dem Ladestand)");
-    foot.children[1].textContent = `Ø ${K.num(average, 1)} kWh/100`;
+    window.joltConsumption.draw(
+      document.getElementById("live-consumption"),
+      document.getElementById("live-consumption-foot"),
+      consumption_track, vehicleOnRoad());
   }
 
   function ageText(seconds) {
@@ -2687,7 +2292,7 @@ window.joltLive = (function () {
   return { set_up, launch, finish, link, positionTrace,
            dongleUse, drawHistory,
            driving_state: () => driveState, drivingStateStart, readAllowed, connectDongle,
-           examineVoltage, notificationsSetUp, handshakeSafe,
+           examineVoltage, handshakeSafe,
            reconnectDongle,
            setAuto: (on) => { autoMode = !!on; } };
 })();
