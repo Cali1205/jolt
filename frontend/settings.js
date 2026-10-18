@@ -132,8 +132,8 @@ window.joltSettings = (function () {
   }
 
   async function activatePush() {
-    if (!window.joltLive || !window.joltLive.notificationsSetUp) return;
-    await window.joltLive.notificationsSetUp();
+    if (!window.joltNotify) return;
+    await window.joltNotify.subscribe();
     await showPush();
   }
 

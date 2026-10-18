@@ -76,6 +76,11 @@ const context = {
 context.window.localStorage = context.localStorage;
 vm.createContext(context);
 vm.runInContext(pendingSource, context);
+// The modules live.js calls into.
+for (const name of ["awake.js", "notify.js", "consumption.js"]) {
+  vm.runInContext(require("fs").readFileSync(
+    require("path").join(__dirname, "..", "frontend", name), "utf8"), context);
+}
 vm.runInContext(source, context);
 const live = timeframe.joltLive;
 // showState needs the DOM - without effect for the test.

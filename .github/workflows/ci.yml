@@ -155,6 +155,8 @@ jobs:
         run: node tools/check_listen.js
 
       # Starting and stopping a recording from the CarPlay list.
+      - name: Check consumption chart
+        run: node tools/check_consumption.js
       - name: Check CarPlay actions
         run: node tools/check_carplay_action.js
 

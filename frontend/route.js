@@ -209,11 +209,11 @@ window.joltRoute = (function () {
    * options. */
   function accessHint(k) {
     const parts = [];
-    if (k.access && !/^public$/i.test(k.access)) parts.push(sanitize(k.access));
+    if (k.access && !/^public$/i.test(k.access)) parts.push(K.esc(k.access));
     if (k.membership_required) parts.push("Mitgliedschaft nötig");
     const h = k.hints || {};
-    if (h.cost) parts.push(sanitize(String(h.cost).slice(0, 40)));
-    if (h.access) parts.push(sanitize(String(h.access).slice(0, 60)));
+    if (h.cost) parts.push(K.esc(String(h.cost).slice(0, 40)));
+    if (h.access) parts.push(K.esc(String(h.access).slice(0, 60)));
     return parts.length ? ` · <span style="color:var(--warnung)">${parts.join(" · ")}</span>` : "";
   }
 
@@ -440,7 +440,7 @@ window.joltRoute = (function () {
 
   function drawPlan(plan, planList, vals) {
     if (!plan.feasible) {
-      planList.innerHTML = `<li class="leer">${sanitize(plan.reason)}</li>`;
+      planList.innerHTML = `<li class="leer">${K.esc(plan.reason)}</li>`;
       const hide = document.getElementById("plan-details");
       if (hide) hide.hidden = true;
       return;
@@ -485,7 +485,7 @@ window.joltRoute = (function () {
       // none.
       const tight = (s.point_count || 1) < 4;
       const detour_alt = s.detour_alt
-        ? `<div class="unter">Ausweich: ${sanitize(s.detour_alt.name
+        ? `<div class="unter">Ausweich: ${K.esc(s.detour_alt.name
             || s.detour_alt.operator || "Ladepunkt")} bei km
             ${K.num(s.detour_alt.km_on_route)} – Ankunft mit
             ${K.num(s.detour_alt.arrival_soc)} %</div>`
@@ -499,7 +499,7 @@ window.joltRoute = (function () {
       entry.innerHTML = `
         <div class="stopp-kopf">
           <span class="stopp-nr">${i + 1}</span>
-          <div class="titel">${sanitize(s.name || s.operator
+          <div class="titel">${K.esc(s.name || s.operator
             || "Ladepunkt")}</div>
           <div class="stopp-dauer">${K.duration(s.charge_time_minutes)}</div>
         </div>
@@ -534,11 +534,11 @@ window.joltRoute = (function () {
         ? ' · <span style="color:#e2596a">als belegt gemeldet</span>' : "";
       entry.innerHTML = `
         <div class="haupt">
-          <div class="titel">${sanitize(k.name || k.operator || "Ladepunkt")}</div>
+          <div class="titel">${K.esc(k.name || k.operator || "Ladepunkt")}</div>
           <div class="unter">km ${K.num(k.km_on_route)} · Umweg
             ${K.num(k.detour_minutes, 1)} min · ${k.point_count} Ladepunkte${
               accessHint(k)}
-            · ${sanitize(k.connector_types)}${occupied}</div>
+            · ${K.esc(k.connector_types)}${occupied}</div>
         </div>
         <div class="kw">${K.num(k.max_kw)} kW</div>`;
 
@@ -563,13 +563,6 @@ window.joltRoute = (function () {
       entry.appendChild(btn);
       chargerList.appendChild(entry);
     }
-  }
-
-  /* The names come from third-party data sources and end up in innerHTML. */
-  function sanitize(text) {
-    const helper = document.createElement("div");
-    helper.textContent = text || "";
-    return helper.innerHTML;
   }
 
   /* ---------- Payload ---------- */
