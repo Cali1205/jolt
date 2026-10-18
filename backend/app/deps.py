@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from fastapi import Header, HTTPException
 from sqlalchemy.orm import Session
 
-from . import models
+from . import models, security
 from .database import SessionLocal, get_db
 from fastapi import Depends
 
@@ -50,7 +50,7 @@ def examine_password(user_input: str) -> bool:
 
 def create_session(db: Session, device: str = "") -> str:
     token = secrets.token_urlsafe(32)
-    db.add(models.AuthSession(token=token, device=device[:120]))
+    db.add(models.AuthSession(token=security.token_hash(token), device=device[:120]))
     db.commit()
     return token
 
@@ -65,7 +65,7 @@ def examine_session(x_token: str, db: Session) -> models.AuthSession:
     if not x_token:
         raise HTTPException(401, "Nicht angemeldet.")
 
-    session = db.query(models.AuthSession).filter_by(token=x_token).one_or_none()
+    session = db.query(models.AuthSession).filter_by(token=security.token_hash(x_token)).one_or_none()
     if not session:
         raise HTTPException(401, "Sitzung unbekannt - bitte neu anmelden.")
 

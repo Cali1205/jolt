@@ -4,6 +4,7 @@ Contains security headers and an IP-based rate limit. Deliberately without an
 external dependency: an instance with a handful of devices gets by with an
 in-memory counter, and that cannot fail on its own.
 """
+import hashlib
 import logging
 import os
 import re
@@ -152,39 +153,67 @@ def _remove_expired(buckets: dict, now: float, window_s: int,
         del buckets[key]
 
 
+def token_hash(token: str) -> str:
+    """What the database stores of a token: SHA-256 as hex (64 characters).
+
+    The tokens are random 256-bit values, so a plain hash is enough (no salt
+    or slow function needed), and the lookup stays an equality query on an
+    index. A leaked dump or backup then holds no usable login or logger key.
+    """
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
 def login_limit(request: Request) -> None:
     """Separate, tight limit for the login - against guessing.
 
-    Only failed attempts count (`count_login_failure`): behind a proxy
-    without TRUSTED_PROXIES all clients share one counter, and successful
-    logins must not lock everyone out.
+    The attempt is **reserved** here, under the lock: a burst of parallel
+    requests would otherwise all pass the check before the first failure is
+    recorded. A successful login gives the slot back (`release_login`), so
+    only failures count - behind a proxy without TRUSTED_PROXIES all clients
+    share one counter, and successful logins must not lock everyone out.
     """
     now = time.time()
     with _lock:
         _remove_expired(_login_hit, now, LOGIN_WINDOW, None)
+        queue = _login_hit[client_ip(request)]
+        _expired(queue, now, LOGIN_WINDOW)
+        if len(queue) >= LOGIN_MAX:
+            raise HTTPException(
+                429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
+        queue.append(now)
+
+
+def release_login(request: Request) -> None:
+    """The login worked (or there is no password): give the reserved slot back."""
+    with _lock:
         queue = _login_hit.get(client_ip(request))
         if queue:
-            _expired(queue, now, LOGIN_WINDOW)
-            if len(queue) >= LOGIN_MAX:
-                raise HTTPException(
-                    429, "Zu viele Anmeldeversuche. Später erneut versuchen.")
-
-
-def count_login_failure(request: Request) -> None:
-    with _lock:
-        _login_hit[client_ip(request)].append(time.time())
+            queue.pop()
 
 
 def report_locked(request: Request) -> bool:
-    """True if this address has sent a wrong logger token too often."""
+    """True if this address has sent a wrong logger token too often.
+
+    Otherwise the attempt is reserved (see `login_limit`); a valid token
+    gives it back with `count_report_ok`.
+    """
     now = time.time()
     with _lock:
         _remove_expired(_report_error, now, LOGIN_WINDOW, None)
-        queue = _report_error.get(client_ip(request))
-        if not queue:
-            return False
+        queue = _report_error[client_ip(request)]
         _expired(queue, now, LOGIN_WINDOW)
-        return len(queue) >= REPORT_ERROR_MAX
+        if len(queue) >= REPORT_ERROR_MAX:
+            return True
+        queue.append(now)
+        return False
+
+
+def count_report_ok(request: Request) -> None:
+    """The token was valid: give the reserved slot back."""
+    with _lock:
+        queue = _report_error.get(client_ip(request))
+        if queue:
+            queue.pop()
 
 
 def websocket_allowed(websocket) -> bool:
@@ -193,9 +222,7 @@ def websocket_allowed(websocket) -> bool:
 
 
 def count_report_error(request: Request) -> None:
-    """Record a failed attempt - only wrong tokens, not every report."""
-    with _lock:
-        _report_error[client_ip(request)].append(time.time())
+    """Kept for callers: a wrong token keeps the slot reserved by `report_locked`."""
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from .. import deps, models, routing, version
 from ..database import get_db
-from ..security import count_login_failure, login_limit
+from ..security import login_limit, release_login
 
 router = APIRouter(prefix="/api", tags=["access"])
 
@@ -31,10 +31,11 @@ def status():
 def login(records: SignIn, request: Request, db: Session = Depends(get_db)):
     login_limit(request)
     if not deps.password_set():
+        release_login(request)
         return {"token": "", "hint": "Kein Passwort gesetzt - Zugang offen."}
     if not deps.examine_password(records.password):
-        count_login_failure(request)
         raise HTTPException(401, "Passwort stimmt nicht.")
+    release_login(request)
     return {"token": deps.create_session(db, records.device)}
 
 
