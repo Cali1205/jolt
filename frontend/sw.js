@@ -9,10 +9,10 @@
  */
 // Count up with every change to the shell: the name is the only lever by
 // which an old cache is discarded (see "activate").
-const CACHE = "jolt-v31";
+const CACHE = "jolt-v32";
 const SCAFFOLD = [
   "/", "/static/app.css", "/static/motion.css", "/static/core.js", "/static/map.js", "/static/route.js",
-  "/static/tiles.js", "/static/display.js", "/static/pending.js", "/static/awake.js", "/static/notify.js", "/static/consumption.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
+  "/static/tiles.js", "/static/display.js", "/static/pending.js", "/static/awake.js", "/static/notify.js", "/static/consumption.js", "/static/drive-state.js", "/static/live.js", "/static/trips.js", "/static/vehicle.js",
   "/static/settings.js", "/static/app.js",
   // The OBD2 diagnostics page: Bluetooth needs no network, and an
   // underground car park is exactly the place where one opens it.

@@ -130,7 +130,7 @@ window.joltLive = (function () {
       K.sessionRemember(response.session_id);
       // Whoever starts the trip is sitting in the car: reading is allowed
       // until the phone says the car is standing.
-      drivingStateStart("faehrt");
+      drive.reset("faehrt");
       document.getElementById("live-empty").hidden = true;
       document.getElementById("live-content").hidden = false;
       plan = response.plan || null;
@@ -694,7 +694,7 @@ window.joltLive = (function () {
   function locationInput(coords, timeMs) {
     // Before the throttling: the state machine wants to see every fix, not every
     // twelfth.
-    examineDrivingState(coords, timeMs);
+    drive.examine(coords, timeMs);
     const now = Date.now();
     // Do not report every GPS update: the device delivers every
     // second, and the tracking averages over kilometres anyway.
@@ -894,188 +894,52 @@ window.joltLive = (function () {
    * Not detectable: whoever locks before ten seconds have passed
    * can still trigger a query in the first moment. Only
    * a signal from the car itself would be certain. */
-  const FAST_KMH = 15;
-  const STAND_KMH = 3;
-  const STANDING_TIME_MS = 10000;
-  const PARK_TIME_MS = 180000;
-  const PATH_M = 25;
-  // If someone tapped "Dongle verbinden" ("connect dongle") by hand, they want to read while standing.
-  const MANUAL_MS = 600000;
+  const VOLTAGE_TICK_MS = 2000;
   // No dongle in range (bicycle, bus): after this many failed attempts
   // it stops until the vehicle has stopped again.
   const AGAIN_ATTEMPTS_MAX = 8;
   const AGAIN_ATTEMPTS_DRIVING = 40;
 
-  let autoMode = true;
-  try { autoMode = localStorage.getItem("jolt-dongle-auto") !== "0"; }
-  catch (e) { /* without storage the default applies */ }
-
-  let driveState = "steht";     // "faehrt" | "steht" | "geparkt"
-  let standSince = null;
-  let standCity = null;
-  let fastSequence = 0;
-  let asOfSeen = true;
-  let manualUntil = 0;
-  let latestPosition = null;
-  let latestSpeed = null;
+  const drive = window.joltDriveState.create({
+    sessionActive: () => !!K.state.sessionId,
+    onPark(reason) {
+      if (dongle && window.joltObd) {
+        try { window.joltObd.detach(); } catch (e) { /* already disconnected */ }
+        K.report(reason + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
+          + "So löst ein abgeschlossenes Auto keinen Alarm aus.", "hinweis");
+      }
+      showDongle();
+    },
+    onDrive(wasParked) {
+      if (wasParked && dongle) {
+        K.report("Fahrt erkannt – jolt verbindet den Dongle wieder.", "hinweis");
+      }
+      reconnectDongle();
+      showDongle();
+    },
+  });
 
   function readAllowed() {
     if (donglePause) return false;
     // While listening in (settings) nothing may be queried.
     if (window.joltObd && window.joltObd.listens && window.joltObd.listens()) return false;
-    if (!autoMode) return true;
-    return driveState === "faehrt" || Date.now() < manualUntil;
+    return drive.motionAllows();
   }
 
-  function drivingStateStart(state) {
-    driveState = state;
-    standSince = null; standCity = null; fastSequence = 0;
-    asOfSeen = true; manualUntil = 0; latestPosition = null;
-    voltageBasis = []; voltageSequence = 0;
-  }
-
-  function distanceM(a, b) {
-    const R = 6371000, rad = Math.PI / 180;
-    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
-    const h = Math.sin(dLat / 2) ** 2
-      + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(h));
-  }
-
-  /* The speed from the fix - or from two fixes if the device
-   * provides none (regularly the case in the browser on iOS). */
-  function speedKmh(coords, place, timeMs) {
-    const prior = latestPosition;
-    latestPosition = { lat: place.lat, lon: place.lon, timestamp: timeMs };
-    if (typeof coords.speed === "number" && coords.speed >= 0) {
-      return coords.speed * 3.6;
-    }
-    if (!prior) return null;
-    const dt = (timeMs - prior.timestamp) / 1000;
-    if (dt < 1 || dt > 30) return null;
-    return distanceM(prior, place) / dt * 3.6;
-  }
-
-  function examineDrivingState(coords, timeMs) {
-    if (!autoMode || !K.state.sessionId) return;
-    const now = Date.now();
-    const place = { lat: coords.latitude, lon: coords.longitude };
-    const v = speedKmh(coords, place, timeMs || now);
-    if (v === null) return;
-    latestSpeed = v;
-
-    if (v >= FAST_KMH) {
-      standSince = null; standCity = null;
-      fastSequence++;
-      if (fastSequence >= 2 && driveState !== "faehrt") driveBegins();
-      return;
-    }
-    fastSequence = 0;
-    if (v < STAND_KMH) asOfSeen = true;
-    if (now < manualUntil || driveState === "geparkt") return;
-
-    if (v < STAND_KMH) {
-      if (standSince === null) { standSince = now; standCity = place; }
-      const as_of = now - standSince;
-      if (as_of >= PARK_TIME_MS) statePark("Das Auto steht seit drei Minuten");
-      else if (as_of >= STANDING_TIME_MS && driveState === "faehrt") driveState = "steht";
-    } else if (standCity && distanceM(standCity, place) > PATH_M) {
-      // Slow and far from the stopping place: you got out and are walking.
-      statePark("Du bist vom Auto weggegangen");
-    }
-  }
-
-  /* The car is off - you can tell from the 12 V voltage, without asking.
-   *
-   * `ATRV` is measured by the ELM chip itself, nothing goes onto the CAN bus (see
-   * `obd-core.js: spannung`). As long as the car is on or charging, the
-   * DC/DC converter keeps the voltage up; when it goes off it falls within
-   * seconds. That happens **before** locking - you switch off,
-   * get out and lock - and it is thus the signal that the
-   * phone's movement cannot provide.
-   *
-   * There is deliberately no fixed threshold: how high the voltage is
-   * with the converter running differs from car to car. The comparison
-   * is against the average of the last drive, and only while standing - a
-   * drop during the drive is not a parking position. Whoever has never driven
-   * has no basis; then the rules about standing and distance apply.
-   *
-   * If the car charges locked, the voltage stays up, and the
-   * rules stay as they are. That is fine too: the query is then precisely
-   * *not* the problem, as long as nothing is being asked any more. */
-  const VOLTAGE_TICK_MS = 2000;
-  const VOLTAGE_CASE_V = 0.7;
-  const VOLTAGE_SEQUENCE = 2;
-  const VOLTAGE_BASIS = 5;
-  let voltageBasis = [];
-  let voltageSequence = 0;
   let voltageRunning = false;
-  let latestVoltage = null;
-  let latestVoltageTime = 0;
-
-  function avg(values) {
-    const sorted = [...values].sort((a, b) => a - b);
-    const m = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2;
-  }
 
   async function examineVoltage() {
-    if (voltageRunning || !K.state.sessionId || !dongle || !autoMode
-        || driveState === "geparkt" || donglePause || !window.joltObd
+    if (voltageRunning || !K.state.sessionId || !dongle || !drive.auto()
+        || drive.state() === "geparkt" || donglePause || !window.joltObd
         || !window.joltObd.linked() || !window.joltObd.voltage) return;
     voltageRunning = true;
     try {
       const v = await window.joltObd.voltage();
       if (typeof v !== "number" || !(v > 5 && v < 30)) return;
-      latestVoltage = v;
-      latestVoltageTime = Date.now();
-      if (latestSpeed !== null && latestSpeed >= FAST_KMH) {
-        voltageBasis.push(v);
-        if (voltageBasis.length > 40) voltageBasis.shift();
-        voltageSequence = 0;
-        return;
-      }
-      if (Date.now() < manualUntil || voltageBasis.length < VOLTAGE_BASIS) return;
-      if (v < avg(voltageBasis) - VOLTAGE_CASE_V) {
-        if (++voltageSequence >= VOLTAGE_SEQUENCE) {
-          statePark("Die 12-V-Spannung ist gefallen, das Auto ist aus");
-        }
-      } else {
-        voltageSequence = 0;
-      }
+      drive.voltageSample(v);
     } finally {
       voltageRunning = false;
     }
-  }
-
-  function statePark(reason) {
-    if (driveState === "geparkt") return;
-    // Set the state first, then disconnect: `trennen()` triggers the
-    // connection drop, and its handling asks `readAllowed()`.
-    driveState = "geparkt";
-    standSince = null; standCity = null;
-    asOfSeen = false;
-    voltageBasis = []; voltageSequence = 0;
-    if (dongle && window.joltObd) {
-      try { window.joltObd.detach(); } catch (e) { /* already disconnected */ }
-      K.report(reason + " – jolt fragt das Auto nicht mehr, bis du losfährst. "
-        + "So löst ein abgeschlossenes Auto keinen Alarm aus.", "hinweis");
-    }
-    showDongle();
-  }
-
-  function driveBegins() {
-    // After a failed attempt without a dongle only again once the vehicle has stopped -
-    // otherwise a bicycle ride would try to connect all the way.
-    if (driveState === "geparkt" && !asOfSeen) return;
-    const wasParked = driveState === "geparkt";
-    driveState = "faehrt";
-    standSince = null; standCity = null;
-    if (wasParked && dongle) {
-      K.report("Fahrt erkannt – jolt verbindet den Dongle wieder.", "hinweis");
-    }
-    reconnectDongle();
-    showDongle();
   }
 
   /* Fetch the dongle when it is missing - as long as the car is moving, but not
@@ -1092,12 +956,9 @@ window.joltLive = (function () {
       // stop without vehicle values and reconnecting by hand. So it keeps
       // knocking for a good twelve minutes (every 20 s, costs little).
       // When standing - and on the bus without a dongle - it stays at eight attempts.
-      const driving = latestSpeed !== null
-                      && latestSpeed >= FAST_KMH;
-      const bound = driving ? AGAIN_ATTEMPTS_DRIVING : AGAIN_ATTEMPTS_MAX;
-      if (autoMode && ++attempts > bound) {
-        driveState = "geparkt";
-        asOfSeen = false;
+      const bound = drive.driving() ? AGAIN_ATTEMPTS_DRIVING : AGAIN_ATTEMPTS_MAX;
+      if (drive.auto() && ++attempts > bound) {
+        drive.giveUp();
         K.report("Kein Dongle in Reichweite – jolt versucht es erst nach dem "
           + "nächsten Halt wieder.", "hinweis");
         showDongle();
@@ -1226,8 +1087,7 @@ window.joltLive = (function () {
       }
       donglePause = false;
       // Whoever connects by hand wants to read - even while standing, for ten minutes.
-      manualUntil = Date.now() + MANUAL_MS;
-      if (driveState === "geparkt") driveState = "steht";
+      drive.manualConnect();
       dongleUse();
       await window.joltObd.attach();
       if (!window.joltObd.linked()) throw new Error("keine Verbindung");
@@ -1607,9 +1467,8 @@ window.joltLive = (function () {
         const raw = await window.joltObd.readRecord(readRound++);
         // Record the 12 V voltage along, as long as it is fresh: that way
         // you can later check how far it falls when switching off.
-        if (latestVoltage !== null && Date.now() - latestVoltageTime < 15000) {
-          raw.batt_v = latestVoltage;
-        }
+        const volt = drive.freshVoltage();
+        if (volt !== null) raw.batt_v = volt;
         if (typeof raw.elevation_m !== "number" && typeof coords.altitude === "number") {
           raw.elevation_m = Math.round(coords.altitude);
         }
@@ -1643,9 +1502,9 @@ window.joltLive = (function () {
     // is asked, but `ATRV` is still measured - and that is exactly where it falls when
     // the car goes off. Without this line the drop would be recorded nowhere, and the
     // threshold could not be checked against a real trip.
-    if (!payload.raw_values && latestVoltage !== null
-        && Date.now() - latestVoltageTime < 15000) {
-      payload.raw_values = { batt_v: latestVoltage };
+    const freshVolt = drive.freshVoltage();
+    if (!payload.raw_values && freshVolt !== null) {
+      payload.raw_values = { batt_v: freshVolt };
     }
     bufferAppend(payload);
     bufferProcess();
@@ -1982,7 +1841,7 @@ window.joltLive = (function () {
     }
     K.state.sessionId = null;
     K.sessionRemember(null);
-    drivingStateStart("steht");
+    drive.reset("steht");
     // The trip is over: the display in the car should disappear.
     try { if (window.joltDisplay) window.joltDisplay.finish(); }
     catch (e) { console.log("[anzeige]", e && e.message); }
@@ -2167,7 +2026,7 @@ window.joltLive = (function () {
     const wanted = rec.body && rec.body.vehicle_id;
     K.state.recVehicle = (K.state.vehicles || []).find((f) => f.id === wanted)
       || K.state.recVehicle;
-    drivingStateStart("steht");
+    drive.reset("steht");
     bufferFor(id);
     if (buffer.length) bufferProcess();
     const empty = document.getElementById("live-empty");
@@ -2214,7 +2073,7 @@ window.joltLive = (function () {
     K.state.sessionId = id;
     // After a reload it is unknown where the car is and whether it is
     // unlocked. So ask only once driving happens.
-    drivingStateStart("steht");
+    drive.reset("steht");
     bufferFor(id);
     if (buffer.length) bufferProcess();
     /* Fetch the trip too. The live view needs it for the
@@ -2273,13 +2132,10 @@ window.joltLive = (function () {
     setInterval(examineVoltage, VOLTAGE_TICK_MS);
     const autoCheckbox = document.getElementById("dongle-car");
     if (autoCheckbox) {
-      autoCheckbox.checked = autoMode;
+      autoCheckbox.checked = drive.auto();
       autoCheckbox.addEventListener("change", () => {
-        autoMode = autoCheckbox.checked;
-        try { localStorage.setItem("jolt-dongle-auto", autoMode ? "1" : "0"); }
-        catch (e) { /* this session only */ }
-        if (autoMode) driveState = "steht";
-        else reconnectDongle();
+        drive.chooseAuto(autoCheckbox.checked);
+        if (!drive.auto()) reconnectDongle();
       });
     }
     // On the phone the Enter key is a shorter way than aiming at
@@ -2291,8 +2147,8 @@ window.joltLive = (function () {
 
   return { set_up, launch, finish, link, positionTrace,
            dongleUse, drawHistory,
-           driving_state: () => driveState, drivingStateStart, readAllowed, connectDongle,
+           driving_state: drive.state, drivingStateStart: drive.reset, readAllowed, connectDongle,
            examineVoltage, handshakeSafe,
            reconnectDongle,
-           setAuto: (on) => { autoMode = !!on; } };
+           setAuto: drive.setAuto };
 })();
