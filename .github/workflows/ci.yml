@@ -159,6 +159,8 @@ jobs:
         run: node tools/check_consumption.js
       - name: Check history chart
         run: node tools/check_history_chart.js
+      - name: Check live state view
+        run: node tools/check_live_state.js
       - name: Check CarPlay actions
         run: node tools/check_carplay_action.js
 

@@ -225,40 +225,18 @@ window.joltLive = (function () {
     };
   }
 
+  /* What the view does with every state message, in the order it happens. The
+   * steps are functions of their own below; this one only lines them up. */
   function showState(z) {
-    // The display model for everything outside this UI (CarPlay,
-    // widget): a few numbers, throttled. An error there must never drag
-    // the display here down with it.
-    try {
-      if (window.joltDisplay) {
-        window.joltDisplay.report(z, { track: consumption_track, vals: valuesAsOf,
-                                       aux: aux_load, plan: z.plan || plan });
-      }
-    }
-    catch (e) { console.log("[anzeige]", e && e.message); }
+    reportToDisplay(z);
     const trip = K.state.trip;
     const reserve = trip ? trip.vehicle.reserve_soc : 10;
-
-    // A newly computed plan arrives with the state. Only if it really
-    // differs is it pointed out - a plan that announces itself
-    // every thirty seconds is no plan.
-    if (z.plan) {
-      plan = z.plan;
-      drawPlan();
-      if (z.plan_changed) reportChange(z.change);
-    }
+    adoptPlan(z);
 
     // The last known state of charge as a suggestion for the next report: at
     // a charge point the new value is higher, on the road lower - in both
     // cases the last value is a shorter way than a fixed number.
     socFieldPrefill(z.actual_soc);
-
-    const deviationVariety = z.deviation_pp === null ? ""
-      : (z.deviation_pp <= -5 ? "schlecht"
-        : (z.deviation_pp <= -2 ? "warnung" : "gut"));
-    const forecastVariety = z.forecast_soc_at_target === null ? ""
-      : (z.forecast_soc_at_target < reserve ? "schlecht"
-        : (z.forecast_soc_at_target < reserve + 10 ? "warnung" : "gut"));
 
     /* The answer first, and the answer is not the state of charge.
      *
@@ -267,10 +245,47 @@ window.joltLive = (function () {
      * charging plan exists, the next stop is the nearer and therefore more
      * urgent answer; without a plan the destination counts. */
     showResponse(z, reserve);
+    drawValues(z);
 
-    /* Below it only what changes a decision. State of charge and
-     * deviation deliberately sit here and not above: they are evidence, not
-     * the answer - you read them when you want to follow up the big number. */
+    const place = followTrack(z);
+    drawHistory();
+    drawConsumption();
+    autoRow(z);
+    showDongle();
+    drawBar(z, reserve);
+    drawMap(z, trip, place);
+  }
+
+  /* The display model for everything outside this UI (CarPlay,
+   * widget): a few numbers, throttled. An error there must never drag
+   * the display here down with it. */
+  function reportToDisplay(z) {
+    try {
+      if (window.joltDisplay) {
+        window.joltDisplay.report(z, { track: consumption_track, vals: valuesAsOf,
+                                       aux: aux_load, plan: z.plan || plan });
+      }
+    }
+    catch (e) { console.log("[anzeige]", e && e.message); }
+  }
+
+  /* A newly computed plan arrives with the state. Only if it really
+   * differs is it pointed out - a plan that announces itself
+   * every thirty seconds is no plan. */
+  function adoptPlan(z) {
+    if (!z.plan) return;
+    plan = z.plan;
+    drawPlan();
+    if (z.plan_changed) reportChange(z.change);
+  }
+
+  /* Below the answer only what changes a decision. State of charge and
+   * deviation deliberately sit here and not above: they are evidence, not
+   * the answer - you read them when you want to follow up the big number. */
+  function drawValues(z) {
+    const deviationVariety = z.deviation_pp === null ? ""
+      : (z.deviation_pp <= -5 ? "schlecht"
+        : (z.deviation_pp <= -2 ? "warnung" : "gut"));
     document.getElementById("live-values").innerHTML = [
       // One decimal place: the dongle delivers the state of charge in steps
       // of 0.4 percentage points (one byte divided by 2.5). Rounded to whole
@@ -294,12 +309,17 @@ window.joltLive = (function () {
         (z.arrival_shift_min || 0) >= 10 ? "warnung" : ""),
       K.valueTile("Noch", K.num(z.remaining_km) + " km"),
     ].join("");
+  }
 
-    /* Every measurement point arrives here **twice**: once as the reply to
-     * our own POST, once via the WebSocket, which mirrors it back to all
-     * viewers - and our own browser is one of them. Without this
-     * check every point would appear twice in the history and in the track;
-     * over a long distance that would be a thousand entries too many. */
+  /* Grow the driven track, the distance and the history by this message, and
+   * return where the car is ([lon, lat] or null).
+   *
+   * Every measurement point arrives here **twice**: once as the reply to
+   * our own POST, once via the WebSocket, which mirrors it back to all
+   * viewers - and our own browser is one of them. Without this
+   * check every point would appear twice in the history and in the track;
+   * over a long distance that would be a thousand entries too many. */
+  function followTrack(z) {
     // Position and distance **before** the history: the history point should
     // know how far had been driven when it came into being.
     const place = measurement_site(z);
@@ -332,11 +352,10 @@ window.joltLive = (function () {
       history.push({ km: z.km_on_route || 0, driven_km: drivenKm,
                      soc: z.actual_soc, reported: z.soc_reported !== false });
     }
-    drawHistory();
-    drawConsumption();
-    autoRow(z);
-    showDongle();
+    return place;
+  }
 
+  function drawBar(z, reserve) {
     const bar = document.getElementById("live-bars");
     bar.style.width = Math.max(0, Math.min(100, z.actual_soc)) + "%";
     bar.style.background = z.actual_soc <= reserve ? "#e2596a"
@@ -345,44 +364,38 @@ window.joltLive = (function () {
     const hint = document.getElementById("live-hint");
     hint.textContent = z.reason || "im Plan";
     hint.style.color = z.replanning_required ? "#e8804f" : "";
+  }
 
-    // The reserve marker moves along: that is the actual message of the
-    // live function - not "you are using more", but "it is now only enough
-    // as far as there".
-    /* Serve the map **without** a planned route too.
-     *
-     * This used to be `if (fahrt && ...)`, and `K.zustand.fahrt` is only set
-     * if a route was computed beforehand. A recording has
-     * none - so the whole block was skipped and the map stayed
-     * empty although the position had long been coming in. The own position
-     * has nothing to do with whether a route exists.
-     */
-    if (window.joltMap) {
-      const here = place || [z_lon(z), z_lat(z)];
-      const marker = [{ lat: here[1], lon: here[0], kind: "auto", text: "hier" }];
-      // In a recording the driven track is what there is to see:
-      // it grows along and shows that data is really being written.
-      // It is filled further up, together with the distance.
-      if (!trip) {
-        window.joltMap.setRoute(track);
-        // The map follows the track by itself (map.js) until someone
-        // touches it - then it stays where it is. Earlier only the first
-        // point was centred, and the growing route had to be followed
-        // by hand.
+  /* The reserve marker moves along: that is the actual message of the
+   * live function - not "you are using more", but "it is now only enough
+   * as far as there".
+   *
+   * Serve the map **without** a planned route too. This used to be
+   * `if (fahrt && ...)`, and `K.zustand.fahrt` is only set if a route was
+   * computed beforehand. A recording has none - so the whole block was
+   * skipped and the map stayed empty although the position had long been
+   * coming in. The own position has nothing to do with whether a route
+   * exists. */
+  function drawMap(z, trip, place) {
+    if (!window.joltMap) return;
+    const here = place || [z_lon(z), z_lat(z)];
+    const marker = [{ lat: here[1], lon: here[0], kind: "auto", text: "hier" }];
+    // In a recording the driven track is what there is to see:
+    // it grows along and shows that data is really being written.
+    // The map follows it by itself (map.js) until someone touches it.
+    if (!trip) window.joltMap.setRoute(track);
+    if (trip && z.reserve_at_km !== null && trip.profile) {
+      const hit = trip.profile.find((p) => p.km >= z.reserve_at_km);
+      if (hit) {
+        marker.push({ lat: hit.lat, lon: hit.lon, kind: "reserve",
+                      text: "Reserve " + K.num(z.reserve_at_km) + " km" });
       }
-      if (trip && z.reserve_at_km !== null && trip.profile) {
-        const hit = trip.profile.find((p) => p.km >= z.reserve_at_km);
-        if (hit) {
-          marker.push({ lat: hit.lat, lon: hit.lon, kind: "reserve",
-                        text: "Reserve " + K.num(z.reserve_at_km) + " km" });
-        }
-      }
-      for (const stop of (plan && plan.stops) || []) {
-        marker.push({ lat: stop.lat, lon: stop.lon, kind: "stopp",
-                      text: K.duration(stop.charge_time_minutes) });
-      }
-      window.joltMap.setMarker(marker);
     }
+    for (const stop of (plan && plan.stops) || []) {
+      marker.push({ lat: stop.lat, lon: stop.lon, kind: "stopp",
+                    text: K.duration(stop.charge_time_minutes) });
+    }
+    window.joltMap.setMarker(marker);
   }
 
 

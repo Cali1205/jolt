@@ -39,13 +39,14 @@ function build(o) {
     get: (z, n) => (n === Symbol.toPrimitive ? () => "" : n === "style" ? {} : empty()),
     apply: () => empty(), set: () => true });
 
-  const calls = { api: [], listener: {}, ready: [], result: [], finish: 0, saved: {} };
+  const calls = { api: [], listener: {}, ready: [], result: [], finish: 0, saved: {},
+                  reports: [], dongleUse: 0, reconnect: 0, driving: [], pending: !!o.pending };
   const K = {
     state: { sessionId: o.running ? 7 : null, vehicles: [{ id: 1 }], tripsStale: false },
-    report(t, k) { if (process.env.DBG) console.log("REPORT", k, t); },
+    report(t, k) { calls.reports.push(t); if (process.env.DBG) console.log("REPORT", k, t); },
     at(id, event, f) { return (elemente[id] || empty()); },
     api: async (fs_path, opt) => { calls.api.push({ fs_path, body: opt && opt.body });
-                                return { session_id: 9, trip_id: 3 }; },
+                                return { session_id: 9, trip_id: 3, pending: calls.pending }; },
     sessionRemember() {},
   };
   const plugin = {
@@ -62,14 +63,18 @@ function build(o) {
     joltApp: { showView() {} },
     joltObd: o.obd ? {
       obtainable: () => true, set_up() {}, attach: async () => true,
-      linked: () => !o.obd.away, detach() { calls.detach = (calls.detach || 0) + 1; },
+      linked: () => !o.obd.away && !o.obd.lost,
+      socFromResponse: (r) => (r === "soc" ? { hmi: o.obd.hmi } : null),
+      command: async () => { if (o.obd.commandFails) throw new Error("keine Antwort"); return "soc"; }, detach() { calls.detach = (calls.detach || 0) + 1; },
       voltage: async () => { calls.volts = (calls.volts || 0) + 1;
                              return o.obd.volts[Math.min(calls.volts - 1, o.obd.volts.length - 1)]; },
     } : { obtainable: () => false },
     joltLive: {
       link: () => { K.state.sessionId = 9; },
-      positionTrace() {}, drivingStateStart() {}, dongleUse() {},
-      reconnectDongle() {}, handshakeSafe: async () => false,
+      positionTrace() {}, drivingStateStart(x) { calls.driving.push(x); },
+      dongleUse() { calls.dongleUse++; },
+      reconnectDongle() { calls.reconnect++; },
+      handshakeSafe: async () => !!(o.obd && o.obd.handshake),
       finish: async () => { calls.finish++; if (!o.endStuck) K.state.sessionId = null; },
     },
   };
@@ -193,6 +198,39 @@ function build(o) {
   t = build({ obd: { volts: [13.8] }, running: true });
   await t.calls.listener.carplayAction({ action: "auto" });
   verify(t.calls.api.length === 0, "laeuft schon eine Aufzeichnung, startet keine zweite");
+
+  console.log("\nStart mit Dongle (die Phasen von startRecording)");
+  const startBody = (t) => (t.calls.api.find((a) => a.fs_path === "/api/live/recording") || {}).body || {};
+  t = build({ obd: { volts: [13.8], handshake: true, hmi: 63.04 } });
+  await t.calls.listener.carplayAction({ action: "starten" });
+  verify(startBody(t).soc === 63 && t.calls.dongleUse === 1 && t.calls.reconnect === 0
+         && t.calls.reports.some((r) => /Ladestand kommt aus dem Auto/.test(r))
+         && t.calls.driving.join() === "faehrt",
+         "Dongle da, Antwort da: Start-Ladestand wird mitgegeben, gelesen wird sofort",
+         JSON.stringify([startBody(t), t.calls.dongleUse, t.calls.reconnect, t.calls.reports]));
+  t = build({ obd: { volts: [13.8], handshake: true, hmi: 63, commandFails: true } });
+  await t.calls.listener.carplayAction({ action: "starten" });
+  verify(startBody(t).soc === null && t.calls.dongleUse === 1 && t.calls.reconnect === 0
+         && t.calls.reports.some((r) => /antwortet noch nicht/.test(r)),
+         "Dongle da, Auto schweigt (schlaeft noch): der Dongle zaehlt weiter als vorhanden",
+         JSON.stringify([startBody(t), t.calls.dongleUse, t.calls.reconnect, t.calls.reports]));
+  t = build({ obd: { volts: [13.8], handshake: true, hmi: 63, commandFails: true, lost: true } });
+  await t.calls.listener.carplayAction({ action: "starten" });
+  verify(t.calls.dongleUse === 1 && t.calls.reconnect === 1
+         && t.calls.reports.some((r) => /unterwegs gelegentlich melden/.test(r)),
+         "Verbindung ist weg: der Dongle gilt als abwesend, jolt klopft von selbst wieder an",
+         JSON.stringify([t.calls.dongleUse, t.calls.reconnect, t.calls.reports]));
+  t = build({ obd: { volts: [13.8], handshake: false } });
+  await t.calls.listener.carplayAction({ action: "starten" });
+  verify(startBody(t).soc === null && t.calls.dongleUse === 1 && t.calls.reconnect === 1
+         && t.elemente["rec-status"].textContent === "",
+         "Dongle antwortet nicht: ohne Ladestand starten, spaeter erneut versuchen, Statuszeile leer",
+         JSON.stringify([startBody(t), t.calls.dongleUse, t.calls.reconnect]));
+  t = build();
+  await t.calls.listener.carplayAction({ action: "starten" });
+  verify(t.calls.dongleUse === 0 && t.calls.reconnect === 0
+         && t.calls.reports.some((r) => /unterwegs gelegentlich melden/.test(r)),
+         "kein Bluetooth im Browser: kein Dongle-Versuch, Ladestand kommt von Hand");
 
   console.log("\nUnsinn");
   t = build();
