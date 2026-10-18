@@ -77,7 +77,7 @@ const context = {
 };
 vm.createContext(context);
 // The modules live.js calls into.
-for (const name of ["awake.js", "notify.js", "consumption.js"]) {
+for (const name of ["awake.js", "notify.js", "consumption.js", "drive-state.js"]) {
   vm.runInContext(require("fs").readFileSync(
     require("path").join(__dirname, "..", "frontend", name), "utf8"), context);
 }
