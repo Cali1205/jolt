@@ -39,6 +39,12 @@ main > section:not([hidden]) { animation: ein var(--mittel) var(--ease) both; }
 /* Rows that are built by script (trips, charging stops). */
 .fahrt, .stopps li { animation: ein var(--mittel) var(--ease) both; }
 
+/* The sheet: the backdrop fades in, the sheet rises. */
+@keyframes hoch { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes blende { from { opacity: 0; } to { opacity: 1; } }
+.sheet-hintergrund { animation: blende var(--mittel) var(--ease) both; }
+.sheet { animation: hoch .32s var(--ease) both; }
+
 /* Messages slide in; a repeated one just changes its count. */
 .meldung { animation: herein var(--mittel) var(--ease) both; }
 

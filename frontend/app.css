@@ -126,6 +126,17 @@ button.tat:disabled { opacity: .55; cursor: default; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
 p.leer:empty { display: none; }
+
+/* The confirmation sheet (sheet.js): comes up from the bottom, the harmless button last. */
+.sheet-hintergrund { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end;
+  justify-content: center; background: rgba(5, 8, 11, .62); }
+.sheet { width: 100%; max-width: 560px; background: var(--flaeche); border-top: 1px solid var(--rand);
+  border-radius: 18px 18px 0 0; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); }
+.sheet-griff { width: 36px; height: 4px; border-radius: 2px; background: var(--rand); margin: 0 auto 14px; }
+.sheet h3 { margin: 0 0 6px; font-size: 18px; }
+.sheet p { margin: 0 0 14px; color: var(--gedaempft); font-size: 14px; white-space: pre-line; }
+.sheet .tat { width: 100%; margin: 8px 0 0; }
+button.tat.gefahr { background: var(--schlecht); color: #fff; }
 .formgitter { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .formgitter .feld-breit, .formgitter .hilfe { grid-column: 1 / -1; }
 .formgitter .feld { min-width: 0; }

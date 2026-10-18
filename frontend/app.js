@@ -43,7 +43,10 @@ window.joltApp = (function () {
 
   async function launch() {
     for (const btn of document.querySelectorAll("nav button")) {
-      btn.addEventListener("click", () => showView(btn.dataset.view));
+      btn.addEventListener("click", () => {
+        if (window.joltHaptic) window.joltHaptic.tap();
+        showView(btn.dataset.view);
+      });
     }
 
     window.joltMap.create("map");
