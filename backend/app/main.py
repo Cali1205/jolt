@@ -119,7 +119,7 @@ def _with_version(html: str, files) -> str:
 # The files that index.html includes. Listed explicitly and not guessed from
 # the HTML: a search expression over foreign text is exactly the kind of
 # cleverness that silently misses at the next restructuring.
-INDEX_FILES = ("ble-plugin.js", "obd-ble-native.js", "readings.js",
+INDEX_FILES = ("app.css", "motion.css", "ble-plugin.js", "obd-ble-native.js", "readings.js",
                  "obd-core.js",
                  "core.js", "map.js", "route.js", "tiles.js", "display.js", "pending.js",
                  "live.js",
