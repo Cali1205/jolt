@@ -74,6 +74,7 @@ window.joltRoute = (function () {
 
     K.reportsClear();
     btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
     btn.textContent = "rechnet …";
     try {
       // A computed route is stored as a trip - the list in the "Fahrten" tab
@@ -114,6 +115,7 @@ window.joltRoute = (function () {
       K.report("Route: " + failure.message, "fehler");
     } finally {
       btn.disabled = false;
+      btn.removeAttribute("aria-busy");
       btn.textContent = "Route rechnen";
     }
   }

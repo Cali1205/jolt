@@ -1,0 +1,74 @@
+/* Everything that moves lives here, so app.css stays about layout and colour.
+ * Short, soft, never in the way: nothing runs longer than about 0.3 s, and
+ * with "reduce motion" switched on in the system nothing moves at all. */
+:root {
+  --ease: cubic-bezier(.22, .8, .3, 1);
+  --kurz: .14s;
+  --mittel: .26s;
+}
+
+/* No double-tap zoom delay and no grey flash on taps. */
+button, summary, select, label, nav, input[type="range"], input[type="checkbox"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes ein {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes herein {
+  from { opacity: 0; transform: translateY(-6px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes schimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* A view appears instead of snapping in. */
+main > section:not([hidden]) { animation: ein var(--mittel) var(--ease) both; }
+
+/* Cards of a result arrive one after the other. */
+#result:not([hidden]) > .karte-block { animation: ein var(--mittel) var(--ease) both; }
+#result:not([hidden]) > .karte-block:nth-child(2) { animation-delay: .04s; }
+#result:not([hidden]) > .karte-block:nth-child(3) { animation-delay: .08s; }
+#result:not([hidden]) > .karte-block:nth-child(4) { animation-delay: .12s; }
+#result:not([hidden]) > .karte-block:nth-child(n+5) { animation-delay: .16s; }
+
+/* Rows that are built by script (trips, charging stops). */
+.fahrt, .stopps li { animation: ein var(--mittel) var(--ease) both; }
+
+/* Messages slide in; a repeated one just changes its count. */
+.meldung { animation: herein var(--mittel) var(--ease) both; }
+
+/* Press feedback: everything tappable gives a little. */
+button, summary, nav button {
+  transition: transform var(--kurz) var(--ease), background-color .18s, color .18s,
+              border-color .18s, opacity .18s, box-shadow .18s;
+}
+button:active:not(:disabled), summary:active { transform: scale(.97); }
+button.tat:active:not(:disabled) { transform: scale(.985); }
+nav button svg { transition: transform var(--mittel) var(--ease), stroke-width .18s; }
+nav button[aria-selected="true"] svg { transform: translateY(-2px) scale(1.08); }
+
+/* Foldable blocks open softly. */
+details.opt[open] > :not(summary), details[open] > .hilfe { animation: ein var(--mittel) var(--ease) both; }
+details.opt > summary::after { transition: transform var(--mittel) var(--ease); }
+
+/* Working: the button shimmers until the answer is there. */
+button.tat[aria-busy="true"] {
+  background-image: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .35) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: schimmer 1.2s linear infinite;
+}
+
+/* Sliders and switches follow the finger without lag. */
+input.schalter, input.schalter::after { transition: background-color .2s, transform .2s var(--ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-delay: 0s !important;
+    animation-iteration-count: 1 !important; transition-duration: .001ms !important;
+  }
+}
