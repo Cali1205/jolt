@@ -2,6 +2,7 @@
  * Whatever is exported here ends up as window.joltBlePlugin in frontend/ble-plugin.js. */
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import { KeepAwake } from '@capacitor-community/keep-awake';
+import { Haptics } from '@capacitor/haptics';
 import { Capacitor } from '@capacitor/core';
 
 /* The background location plugin has no JS part of its own, only the
@@ -15,4 +16,4 @@ const BackgroundGeolocation = Capacitor.registerPlugin('BackgroundGeolocation');
  * lives in plugins/jolt-display. */
 const JoltDisplay = Capacitor.registerPlugin('JoltDisplay');
 
-window.joltBlePlugin = { BleClient, KeepAwake, Capacitor, BackgroundGeolocation, JoltDisplay };
+window.joltBlePlugin = { BleClient, KeepAwake, Haptics, Capacitor, BackgroundGeolocation, JoltDisplay };

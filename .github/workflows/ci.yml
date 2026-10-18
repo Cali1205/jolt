@@ -161,6 +161,10 @@ jobs:
         run: node tools/check_history_chart.js
       - name: Check live state view
         run: node tools/check_live_state.js
+      - name: Check confirmation sheet
+        run: node tools/check_sheet.js
+      - name: Check haptic feedback
+        run: node tools/check_haptics.js
       - name: Check CarPlay actions
         run: node tools/check_carplay_action.js
 

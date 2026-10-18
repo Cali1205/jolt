@@ -146,6 +146,7 @@ window.jolt = (function () {
       box.dataset.kind = kind;
       box.textContent = text;
       box.title = "Tippen zum Schließen";
+      if (window.joltHaptic) window.joltHaptic.report(kind);
       box.addEventListener("click", () => { clearTimeout(box._timer); box.remove(); });
     }
     container.appendChild(box);

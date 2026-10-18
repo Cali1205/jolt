@@ -76,7 +76,7 @@ function build(options) {
   };
   const timeframe = {
     jolt: K, joltObd: O,
-    confirm: () => true, navigator: { clipboard: { writeText: async () => {} } },
+    confirm: () => true, joltSheet: { confirm: async () => true }, navigator: { clipboard: { writeText: async () => {} } },
     document: {
       getElementById: element,
       createElement: () => ({ set textContent(t) { this._t = t; }, get innerHTML() { return this._t || ""; } }),

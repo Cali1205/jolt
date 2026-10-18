@@ -296,8 +296,9 @@ window.joltTrips = (function () {
    * measurement that took place exactly once - unlike a planned route,
    * which can be recalculated. */
   async function remove(id, label) {
-    if (!window.confirm(`„${label}" löschen?\n\nEine aufgezeichnete `
-                        + "Fahrt lässt sich nicht wiederherstellen.")) {
+    if (!await window.joltSheet.confirm({ title: `„${label}" löschen?`,
+        text: "Eine aufgezeichnete Fahrt lässt sich nicht wiederherstellen.",
+        ok: "Löschen", danger: true })) {
       return;
     }
     try {
@@ -481,6 +482,7 @@ window.joltTrips = (function () {
         vehicle_id: id, lat: city.latitude, lon: city.longitude,
         soc: soc, name: document.getElementById("rec-name").value });
       enterLiveView(response, id);
+      if (window.joltHaptic) window.joltHaptic.good();
       announceStart(dongle, soc, response);
       // The last recorded vehicle applies again next time -
       // also for the start from CarPlay, where one cannot choose any.

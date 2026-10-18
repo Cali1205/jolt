@@ -216,9 +216,10 @@ window.joltSettings = (function () {
     O.detach();
   }
 
-  function forget() {
-    if (!window.confirm("Das gemerkte Gerät vergessen? Beim nächsten Verbinden "
-        + "fragt jolt wieder, welcher Dongle es sein soll.")) return;
+  async function forget() {
+    if (!await window.joltSheet.confirm({ title: "Gemerktes Gerät vergessen?",
+        text: "Beim nächsten Verbinden fragt jolt wieder, welcher Dongle es sein soll.",
+        ok: "Vergessen", danger: true })) return;
     O.forget();
     K.report("Gerät vergessen.", "hinweis");
   }
@@ -507,9 +508,10 @@ window.joltSettings = (function () {
     }
   }
 
-  function discardBuffer() {
-    if (!window.confirm("Die wartenden Messpunkte unwiderruflich verwerfen? "
-        + "Sie sind dann für die Auswertung verloren.")) return;
+  async function discardBuffer() {
+    if (!await window.joltSheet.confirm({ title: "Wartende Messpunkte verwerfen?",
+        text: "Sie sind dann für die Auswertung unwiderruflich verloren.",
+        ok: "Verwerfen", danger: true })) return;
     for (const k of bufferKey()) {
       try { localStorage.removeItem(k); } catch (failure) { /* never mind */ }
     }

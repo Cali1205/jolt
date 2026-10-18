@@ -1555,6 +1555,7 @@ window.joltLive = (function () {
     // The trips view has cached the list; a trip that has just
     // ended belongs in it.
     K.state.tripsStale = true;
+    if (window.joltHaptic) window.joltHaptic.good();
     positionGiveUp();
     queue.end(endLater);
     dongle = false;
@@ -1851,7 +1852,14 @@ window.joltLive = (function () {
     K.sliderCouple("jam", "jam-output");
     K.at("live-start", "click", launch);
     K.at("simulate", "click", simulate);
-    K.at("live-end", "click", finish);
+    // A tap by mistake must not end a recording that cannot be resumed.
+    K.at("live-end", "click", async () => {
+      if (!K.state.sessionId) return;
+      if (await window.joltSheet.confirm({ title: "Fahrt beenden?",
+          text: "Die Aufzeichnung wird abgeschlossen und ausgewertet.", ok: "Beenden", danger: true })) {
+        finish();
+      }
+    });
     K.at("soc-report", "click", reportSoc);
     K.at("dongle-on", "click", connectDongle);
     // Only when the vehicle list is up - otherwise the battery size is missing.
