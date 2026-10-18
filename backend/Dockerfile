@@ -15,4 +15,9 @@ COPY tools ./tools
 # Last, so that a new commit does not invalidate the layers above.
 ARG GIT_SHA=dev
 ENV GIT_SHA=$GIT_SHA
+# Not as root: a bug that allows writing files or running code then does not
+# own the container. Nothing is written to /srv at runtime (data lives in
+# Postgres).
+RUN useradd --system --no-create-home --uid 10001 jolt
+USER jolt
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

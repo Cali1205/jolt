@@ -138,7 +138,7 @@ def _fetch_active_session(db: Session, session_id: int) -> models.LiveSession:
 
 def _vehicle_to_token(db: Session, token: str):
     return (db.query(models.Vehicle)
-            .filter(models.Vehicle.logger_token == token).one_or_none())
+            .filter(models.Vehicle.logger_token == security.token_hash(token)).one_or_none())
 
 
 def _active_session_to_vehicle(db: Session, vehicle_id: int):
@@ -456,8 +456,8 @@ async def report_logger(report: LoggerReport, request: Request,
         # A wrong token is an error - otherwise one could not tell whether
         # the logger is set up wrongly or whether there is just no trip
         # running at the moment.
-        security.count_report_error(request)
         raise HTTPException(401, "Logger-Token unbekannt.")
+    security.count_report_ok(request)
 
     try:
         translator = sources.find(report.format)

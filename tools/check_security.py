@@ -68,6 +68,42 @@ def part_password() -> None:
            "falsche Passwörter schon - danach 429", str(codes))
     security._login_hit.clear()
 
+    # Bug scan #135, point 1: the attempt is reserved *before* the password
+    # check, so parallel requests cannot all slip through.
+    class _R:
+        client = type("c", (), {"host": "9.9.9.9"})()
+        headers: dict = {}
+    security._login_hit.clear()
+    passed = 0
+    for _ in range(security.LOGIN_MAX + 5):
+        try:
+            security.login_limit(_R)
+            passed += 1
+        except Exception:
+            pass
+    verify(passed == security.LOGIN_MAX,
+           "Reservierung: ohne Antwort dazwischen kommen nur LOGIN_MAX Versuche durch", str(passed))
+    security._login_hit.clear()
+    security.login_limit(_R)
+    security.release_login(_R)
+    verify(len(security._login_hit["9.9.9.9"]) == 0,
+           "ein erfolgreicher Login gibt den Platz zurueck")
+    security._login_hit.clear()
+
+    # Point 3: tokens are stored as hashes.
+    from app import models
+    from app.database import SessionLocal
+    token = client.post("/api/login", json={"password": PASSWORD}).json()["token"]
+    db = SessionLocal()
+    try:
+        rows = [r.token for r in db.query(models.AuthSession).all()]
+    finally:
+        db.close()
+    verify(token not in rows and security.token_hash(token) in rows,
+           "die Datenbank enthaelt nur den Hash des Sitzungs-Tokens")
+    verify(client.get("/api/vehicles", headers={"X-Token": token}).status_code == 200,
+           "und die Anmeldung mit dem Original-Token funktioniert weiter")
+
 
 def part_limit() -> None:
     verify.section("Rate-Limit")

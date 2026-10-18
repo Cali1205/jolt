@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from .. import deps, models
+from .. import deps, models, security
 from ..timestamp import utc_iso
 from ..database import get_db
 from ..charging import curves
@@ -220,9 +220,10 @@ def renew_logger_token(vehicle_id: int, db: Session = Depends(get_db)):
     vehicle = db.get(models.Vehicle, vehicle_id)
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
-    vehicle.logger_token = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(32)
+    vehicle.logger_token = security.token_hash(token)
     db.commit()
-    return {"logger_token": vehicle.logger_token,
+    return {"logger_token": token,
             "hint": "Dieses Token wird nur einmal angezeigt."}
 
 
