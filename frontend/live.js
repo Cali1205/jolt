@@ -1506,43 +1506,21 @@ window.joltLive = (function () {
     if (!payload.raw_values && freshVolt !== null) {
       payload.raw_values = { batt_v: freshVolt };
     }
-    bufferAppend(payload);
-    bufferProcess();
+    queue.append(payload);
+    queue.process();
   }
 
   /* ---------- Buffering measurement points ---------- */
 
-  /* Every measurement point goes into a queue first and from there to the
-   * server - never directly. If the network drops, the points stay put and
-   * go out together on the next attempt, with their measurement time.
-   *
-   * Before, `reportPosition` swallowed the failed POST. For a planned
-   * trip that is harmless, the next point comes. For a recording it is
-   * data loss: after twenty minutes without network up to 13 % of the route
-   * was missing, and the learned factor shifted by up to 35 % -
-   * invisibly, in a number that stays on the vehicle permanently.
-   *
-   * There is only ever **one** send operation. Two simultaneous ones could
-   * overtake each other, and the server would get newer points before older ones.
-   *
-   * The queue is also kept in localStorage: if iOS reloads the page in the
-   * background, the points should not vanish with it. The limit
-   * protects against memory that grows forever; then the oldest go. */
-  const BUFFER_MAX = 2000;
-  const BATCH_MAX = 100;
-  // How many points the next batch has. Equal to BATCH_MAX, unless the
-  // server has just rejected a batch: then it is halved until the
-  // one bad point is identified.
-  let batchSize = BATCH_MAX;
-  let buffer = [];
-  let bufferSession = null;
-  let bufferRun = null;
-  let bufferAgain = false;
-  let withoutGridReported = false;
-  let supplied_later = 0;
-  let rejected = 0;              // individual points rejected by the server
-
-  function bufferStorage(id) { return "jolt-puffer-" + id; }
+  // The queue itself lives in buffer.js.
+  const queue = window.joltBuffer.create({
+    sessionId: () => K.state.sessionId,
+    api: (...args) => K.api(...args),
+    report: (...args) => K.report(...args),
+    isLocal: (id) => isLocalSession(id),
+    materialize: () => materializeCurrent(),
+    onState: (state) => showState(state),
+  });
 
   function isLocalSession(id) {
     return !!(window.joltPending && window.joltPending.isLocal(id));
@@ -1569,7 +1547,7 @@ window.joltLive = (function () {
     if (!result) return false;
     const real = result.session_id;
     window.joltPending.renameBuffer(local, real);
-    if (bufferSession === local) bufferSession = real;
+    queue.rename(local, real);
     K.state.sessionId = real;
     K.sessionRemember(real);
     window.joltPending.release();
@@ -1580,127 +1558,6 @@ window.joltLive = (function () {
     return true;
   }
 
-  function bufferFor(id) {
-    if (bufferSession === id) return;
-    bufferSession = id;
-    buffer = [];
-    try {
-      const raw = JSON.parse(localStorage.getItem(bufferStorage(id)) || "[]");
-      if (Array.isArray(raw)) buffer = raw;
-    } catch (e) { /* no storage or corrupted: carry on without */ }
-  }
-
-  function saveBuffer() {
-    if (bufferSession === null) return;
-    try {
-      if (buffer.length) {
-        localStorage.setItem(bufferStorage(bufferSession), JSON.stringify(buffer));
-      } else {
-        localStorage.removeItem(bufferStorage(bufferSession));
-      }
-    } catch (e) { /* full or blocked: then it just stays in memory */ }
-  }
-
-  function bufferAppend(point) {
-    bufferFor(K.state.sessionId);
-    buffer.push(point);
-    if (buffer.length > BUFFER_MAX) buffer.splice(0, buffer.length - BUFFER_MAX);
-    // It is only saved when something piles up - normally the
-    // point is on the server a second later.
-    if (buffer.length > 1) saveBuffer();
-  }
-
-  function bufferProcess() {
-    if (bufferRun) { bufferAgain = true; return bufferRun; }
-    bufferRun = sendBuffer().finally(() => { bufferRun = null; });
-    return bufferRun;
-  }
-
-  async function sendBuffer() {
-    do {
-      bufferAgain = false;
-      if (isLocalSession(K.state.sessionId) && !(await materializeCurrent())) {
-        if (!withoutGridReported) {
-          withoutGridReported = true;
-          K.report("Kein Netz – die Aufzeichnung läuft lokal und wird "
-            + "nachgeliefert.", "hinweis");
-        }
-        saveBuffer();
-        return;
-      }
-      const id = K.state.sessionId;
-      while (id && buffer.length && K.state.sessionId === id) {
-        const batch = buffer.slice(0, batchSize);
-        let state;
-        try {
-          state = await K.api(`/api/live/${id}/points`,
-            { method: "POST", body: { points: batch } });
-        } catch (failure) {
-          const status = failure.status;
-          if (status === 404 || status === 409) {
-            // The session no longer exists or has ended: sending on
-            // would mean fetching the same rejection for all eternity.
-            buffer = [];
-          } else if (status === 422) {
-            // The server considers the batch invalid - a point in it, say
-            // with a timestamp from more than two days ago. The whole
-            // batch would never be accepted and would clog everything behind it.
-            //
-            // Here the batch used to be discarded: up to ninety-nine good ones
-            // because of one bad point. Now it is halved until the
-            // one point is identified; only it gets thrown out. For a hundred
-            // points that costs at most seven further requests.
-            if (batch.length > 1) {
-              batchSize = Math.ceil(batch.length / 2);
-            } else {
-              buffer.splice(0, 1);
-              batchSize = BATCH_MAX;
-              rejected += 1;
-            }
-          } else if (!withoutGridReported) {
-            withoutGridReported = true;
-            K.report("Keine Verbindung zu jolt – die Messpunkte werden "
-              + "gesammelt und nachgereicht.", "hinweis");
-          }
-          saveBuffer();
-          // Network gone, server overloaded or logged out: leave it lying, the
-          // next point or the return of the network tries again.
-          if (status !== 404 && status !== 409 && status !== 422) return;
-          continue;
-        }
-        buffer.splice(0, batch.length);
-        saveBuffer();
-        if (withoutGridReported) supplied_later += batch.length;
-        // Show the state only when the batch has reached the present.
-        // In the middle of catching up it would be the one from ten minutes ago.
-        if (!buffer.length) {
-          if (withoutGridReported) {
-            withoutGridReported = false;
-            K.report("Verbindung wieder da – " + supplied_later
-              + " Messpunkte nachgereicht.", "hinweis");
-            supplied_later = 0;
-          }
-          showState(state);
-        }
-      }
-    } while (bufferAgain);
-    // After a rejection it continues in small batches until the bad
-    // point is found (then the size is full again) - or until nothing
-    // is waiting any more. Growing after every success would hit the bad point
-    // again and again: for 13 points that cost seven rejected requests
-    // instead of four.
-    batchSize = BATCH_MAX;
-    if (rejected > 0) {
-      K.report(`${rejected} Messpunkt${rejected === 1 ? " wurde" : "e wurden"} `
-        + "vom Server abgelehnt und verworfen - die übrigen sind angekommen.",
-        "hinweis");
-      rejected = 0;
-    }
-  }
-
-  window.addEventListener("online", () => {
-    if (K.state.sessionId) bufferProcess();
-  });
 
   function fetchLocation() {
     return new Promise((fulfil, reject) => {
@@ -1749,11 +1606,11 @@ window.joltLive = (function () {
     try {
       const place = await fetchLocation();
       if (isLocalSession(K.state.sessionId)) {
-        bufferAppend({ lat: place.lat, lon: place.lon, soc: soc,
+        queue.append({ lat: place.lat, lon: place.lon, soc: soc,
                        speed_kmh: place.speed_kmh,
                        timestamp: new Date().toISOString() });
-        saveBuffer();
-        bufferProcess();
+        queue.save();
+        queue.process();
         K.report("Ladestand gemerkt – wird übertragen, sobald es Netz gibt.",
                  "hinweis");
         return;
@@ -1786,22 +1643,22 @@ window.joltLive = (function () {
     if (!K.state.sessionId) return;
     // What is still in the queue belongs to the trip - and after
     // ending the server accepts nothing more.
-    bufferFor(K.state.sessionId);
-    if (buffer.length || isLocalSession(K.state.sessionId)) {
+    queue.forSession(K.state.sessionId);
+    if (queue.length() || isLocalSession(K.state.sessionId)) {
       if (isLocalSession(K.state.sessionId)) await materializeCurrent(true);
-      if (buffer.length) await bufferProcess();
+      if (queue.length()) await queue.process();
     }
     // Still without a real session: the end and the remaining points are
     // carried out later by `joltPending.watch`.
     const endLater = isLocalSession(K.state.sessionId);
     if (endLater) {
       window.joltPending.requestEnd();
-      saveBuffer();
+      queue.save();
       K.report("Kein Netz – die Fahrt wird beendet und übertragen, sobald "
         + "wieder Verbindung besteht. Die Daten sind auf dem Gerät gesichert.",
         "warnung");
-    } else if (buffer.length) {
-      K.report(buffer.length + " Messpunkte konnten nicht mehr übertragen "
+    } else if (queue.length()) {
+      K.report(queue.length() + " Messpunkte konnten nicht mehr übertragen "
         + "werden - kein Netz.", "warnung");
     }
     let result = null;
@@ -1815,13 +1672,7 @@ window.joltLive = (function () {
     // ended belongs in it.
     K.state.tripsStale = true;
     positionGiveUp();
-    buffer = [];
-    // The points of a recording that is still waiting for the network stay
-    // in storage - they are all there is.
-    if (!endLater) saveBuffer();
-    bufferSession = null;
-    withoutGridReported = false;
-    supplied_later = 0;
+    queue.end(endLater);
     dongle = false;
     track = [];
     drivenKm = 0;
@@ -2027,8 +1878,8 @@ window.joltLive = (function () {
     K.state.recVehicle = (K.state.vehicles || []).find((f) => f.id === wanted)
       || K.state.recVehicle;
     drive.reset("steht");
-    bufferFor(id);
-    if (buffer.length) bufferProcess();
+    queue.forSession(id);
+    if (queue.length()) queue.process();
     const empty = document.getElementById("live-empty");
     const contents = document.getElementById("live-content");
     if (empty) empty.hidden = true;
@@ -2074,8 +1925,8 @@ window.joltLive = (function () {
     // After a reload it is unknown where the car is and whether it is
     // unlocked. So ask only once driving happens.
     drive.reset("steht");
-    bufferFor(id);
-    if (buffer.length) bufferProcess();
+    queue.forSession(id);
+    if (queue.length()) queue.process();
     /* Fetch the trip too. The live view needs it for the
      * energy profile, the reserve marker and the planned curve; without it
      * it shows only half the truth. For a recording it does not exist
