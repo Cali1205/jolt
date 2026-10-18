@@ -1311,6 +1311,7 @@ def main() -> int:
     # there. Comments are dropped beforehand so that a word in one does not count
     # as a field.
     core = open(os.path.join(FRONTEND, "obd-core.js"), encoding="utf-8").read()
+    decode = open(os.path.join(FRONTEND, "obd-decode.js"), encoding="utf-8").read()
     table = open(os.path.join(FRONTEND, "readings.js"),
                    encoding="utf-8").read()
     table = re.sub(r"/\*.*?\*/", "", table, flags=re.S)
@@ -1425,10 +1426,10 @@ def main() -> int:
                for h in ("17FC007B", "17FC0076", "17FC00B9", "746", "710")),
            "jede Zieladresse bringt ihren eigenen Flow-Control-Kopf mit")
 
-    verify("function multiframe" in core,
+    verify("function multiframe" in decode,
            "lange Antworten werden aus mehreren CAN-Rahmen zusammengesetzt - "
            "ohne das landen Köpfe und Steuerbytes als Nutzdaten im Ergebnis")
-    verify("hex.slice(3) : hex.slice(8)" in core,
+    verify("hex.slice(3) : hex.slice(8)" in decode,
            "und zwar für beide Rahmenbreiten: acht Kopfzeichen bei 29 Bit, "
            "drei bei 11 - der Klimakompressor sitzt auf der 11-Bit-Seite")
     verify("min: 10, max: 200" in entry("battery_kwh"),
@@ -1467,7 +1468,7 @@ def main() -> int:
            "an jedem Byte an")
 
     verify("sign: true" in entry("discharge_kwh")
-           and "Math.pow(2, len_total * 8 - 1)" in core,
+           and "Math.pow(2, len_total * 8 - 1)" in decode,
            "der Entladezähler wird vorzeichenbehaftet gelesen - unsigned "
            "ergab am Fahrzeug 482 961 statt 17 439 kWh")
     verify("discharge_kwh: [100, 100000" in obd_js,

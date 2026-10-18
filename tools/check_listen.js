@@ -98,7 +98,7 @@ function environment(bluetooth) {
   };
   timeframe.window = timeframe;
   const context = vm.createContext(timeframe);
-  for (const file of ["obd-ble-native.js", "readings.js", "obd-core.js"]) {
+  for (const file of ["obd-ble-native.js", "readings.js", "obd-decode.js", "obd-core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(FRONTEND, file), "utf8"),
                     context, { filename: file });
   }

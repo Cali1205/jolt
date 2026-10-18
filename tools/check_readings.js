@@ -107,7 +107,7 @@ function newCharging() {
   };
   timeframe.window = timeframe;
   const context = vm.createContext(timeframe);
-  for (const file of ["readings.js", "obd-ble-native.js", "obd-core.js"]) {
+  for (const file of ["readings.js", "obd-ble-native.js", "obd-decode.js", "obd-core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(FRONTEND, file), "utf8"),
                     context, { filename: file });
   }
