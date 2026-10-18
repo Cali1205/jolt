@@ -451,9 +451,17 @@ window.joltLive = (function () {
 
   /* ---------- The history ---------- */
 
+  /* An empty black box looks broken. The curve appears with the first
+   * measurements, or at once if there is a planned route to show. */
   function drawHistory() {
-    window.joltHistoryChart.draw(document.getElementById("live-history"),
-                                   K.state.trip, history, plan);
+    const canvas = document.getElementById("live-history");
+    const foot = document.getElementById("live-history-foot");
+    const trip = K.state.trip;
+    const planned = !!(trip && trip.profile && trip.profile.length > 1);
+    const show = history.length > 1 || planned;
+    if (canvas) canvas.hidden = !show;
+    if (foot) foot.hidden = !show;
+    if (show) window.joltHistoryChart.draw(canvas, trip, history, plan);
   }
 
   /* ---------- The charging plan on the road ---------- */

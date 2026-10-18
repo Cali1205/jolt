@@ -4,6 +4,11 @@
   --akzent: #ffc93c; --gut: #57c98a; --warnung: #e8804f; --schlecht: #e2596a;
 }
 * { box-sizing: border-box; }
+/* `hidden` must always win: a rule such as `display: block` on a canvas otherwise
+   shows an element that was meant to be gone (an empty black box). */
+[hidden] { display: none !important; }
+/* The block of curves and raw values shows nothing while all of its content is hidden. */
+#live-curves:not(:has(> :not([hidden]))) { display: none; }
 html { background: var(--grund); color-scheme: dark; }
 body {
   margin: 0; background: var(--grund); color: var(--text);
@@ -71,6 +76,9 @@ button.tat.neben { background: var(--flaeche); color: var(--text);
 button.tat:disabled { opacity: .55; cursor: default; }
 .reihe { display: flex; gap: 10px; }
 .reihe > * { flex: 1; min-width: 0; }
+/* Two fields that each need more than half of a phone: wrap instead of cutting the text. */
+.reihe.umbruch { flex-wrap: wrap; }
+.reihe.umbruch > * { flex: 1 1 170px; }
 .werte { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
 .wert { background: #0c1116; border: 1px solid var(--rand); border-radius: 10px; padding: 10px 12px; }
 .wert .zahl { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
@@ -109,11 +117,15 @@ button.tat:disabled { opacity: .55; cursor: default; }
   white-space: nowrap; }
 .liste .unter { font-size: 12px; color: var(--gedaempft); }
 .liste .kw { font-variant-numeric: tabular-nums; color: var(--akzent); font-weight: 600; }
-.meldung { padding: 10px 12px; border-radius: 10px; font-size: 13px; margin: 10px 0; }
+.meldung { position: relative; padding: 10px 32px 10px 12px; border-radius: 10px; font-size: 13px;
+  margin: 10px 0; cursor: pointer; }
+.meldung::after { content: "×"; position: absolute; right: 12px; top: 8px; font-size: 16px;
+  line-height: 1; opacity: .55; }
 .meldung.fehler { background: #33161b; border: 1px solid #5d2731; color: #ffbfc8; }
 .meldung.hinweis { background: #14202b; border: 1px solid #24384a; color: #a9c6dd; }
 .meldung.warnung { background: #33260f; border: 1px solid #5b441a; color: #f0cf9a; }
 .leer { color: var(--gedaempft); font-size: 13px; padding: 12px 0; }
+p.leer:empty { display: none; }
 .formgitter { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .formgitter .feld-breit, .formgitter .hilfe { grid-column: 1 / -1; }
 .formgitter .feld { min-width: 0; }

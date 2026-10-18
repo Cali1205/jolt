@@ -77,9 +77,12 @@ window.joltTrips = (function () {
    * (consumption, kilometres) are big, the rest are chips. */
   function row(trip) {
     const chip = (text) => `<span class="chip">${text}</span>`;
-    const chips = [chip(K.duration(trip.drive_time_minutes)),
-      chip(num(trip.kwh_total, 0) + " kWh"),
-      chip(num(trip.outside_temp_c, 0) + " °C"),
+    // A trip that has not been evaluated yet (a recording under way) has no
+    // figures: then no chip, instead of "kWh" and "°C" with nothing in front.
+    const has = (value) => typeof value === "number" && Number.isFinite(value);
+    const chips = [has(trip.drive_time_minutes) ? chip(K.duration(trip.drive_time_minutes)) : "",
+      has(trip.kwh_total) ? chip(num(trip.kwh_total, 0) + " kWh") : "",
+      has(trip.outside_temp_c) ? chip(num(trip.outside_temp_c, 0) + " °C") : "",
       trip.payload_kg ? chip(num(trip.payload_kg, 0) + " kg") : "",
       trip.speed_factor ? chip("Tempo " + Math.round(trip.speed_factor * 100) + " %") : "",
       (trip.soc_at_target === null || trip.soc_at_target === undefined)
@@ -92,8 +95,9 @@ window.joltTrips = (function () {
           <div class="unter">${date(trip.created_at)} · ${trip.vehicle || ""} ${brands(trip)}</div>
         </div>
         <div class="fahrt-zahlen">
-          <div class="stark">${num(trip.consumption_kwh_100km, 1)}<small> kWh/100</small></div>
-          <div class="unter">${num(trip.distance_km, 0)} km</div>
+          <div class="stark">${has(trip.consumption_kwh_100km)
+            ? num(trip.consumption_kwh_100km, 1) + "<small> kWh/100</small>" : "–"}</div>
+          <div class="unter">${has(trip.distance_km) ? num(trip.distance_km, 0) + " km" : ""}</div>
         </div>
       </div>
       <div class="chips" style="margin-top:8px">${chips}</div>

@@ -145,14 +145,31 @@ window.jolt = (function () {
       box.dataset.text = text;
       box.dataset.kind = kind;
       box.textContent = text;
+      box.title = "Tippen zum Schließen";
+      box.addEventListener("click", () => { clearTimeout(box._timer); box.remove(); });
     }
     container.appendChild(box);
+    trimReports(container);
     // Errors stay until the next attempt runs - a message that disappears
     // after three seconds was never read on the road.
     if (kind !== "fehler") {
       box._timer = setTimeout(() => box.remove(), 6000);
     }
     return box;
+  }
+
+  /* A stack of messages must not push the content off the screen: at most
+   * three stay, the oldest goes first - an error only when nothing else is
+   * left to drop, because that one should be read. */
+  const REPORTS_MAX = 3;
+  function trimReports(container) {
+    const boxes = Array.from(container.children);
+    while (boxes.length > REPORTS_MAX) {
+      const drop = boxes.find((b) => b.dataset.kind !== "fehler") || boxes[0];
+      clearTimeout(drop._timer);
+      drop.remove();
+      boxes.splice(boxes.indexOf(drop), 1);
+    }
   }
 
   function reportsClear() {
