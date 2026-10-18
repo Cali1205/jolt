@@ -71,6 +71,8 @@ function build(options) {
     report: (t, variety) => reports.push({ t, variety }),
     at: (id, event, f) => { element(id).addEventListener(event, f); return element(id); },
     api: async () => ({}), num: (x) => String(x),
+    esc: (t) => String(t === null || t === undefined ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;"),
   };
   const timeframe = {
     jolt: K, joltObd: O,

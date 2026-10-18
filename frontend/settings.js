@@ -25,13 +25,6 @@ window.joltSettings = (function () {
 
   /* ---------- Helpers ---------- */
 
-  /* Device names and texts from the log come from outside. */
-  function esc(text) {
-    const helper = document.createElement("div");
-    helper.textContent = text === null || text === undefined ? "" : String(text);
-    return helper.innerHTML;
-  }
-
   /* "vor 12 s", "vor 3 min" - for the age of a value. */
   function age(timestamp) {
     if (!timestamp) return "–";
@@ -47,7 +40,7 @@ window.joltSettings = (function () {
   }
 
   function row(name, value, kind) {
-    return `<dt>${esc(name)}</dt><dd${kind ? ` class="${kind}"` : ""}>${value}</dd>`;
+    return `<dt>${K.esc(name)}</dt><dd${kind ? ` class="${kind}"` : ""}>${value}</dd>`;
   }
 
   function time_of_day(ms) {
@@ -65,10 +58,10 @@ window.joltSettings = (function () {
   async function showServer() {
     const as_of = el("status");
     const rows = [];
-    rows.push(row("Code-Stand", esc(as_of ? as_of.textContent : "–")));
+    rows.push(row("Code-Stand", K.esc(as_of ? as_of.textContent : "–")));
     try {
       status = await K.api("/api/status");
-      rows.push(row("Version", esc("v" + status.version + " · Build " + status.build)));
+      rows.push(row("Version", K.esc("v" + status.version + " · Build " + status.build)));
       rows.push(row("Routing",
         status.demo_routing ? "Demo – erfundene Routen" : "echt (OpenRouteService)",
         status.demo_routing ? "warnung" : "gut"));
@@ -79,7 +72,7 @@ window.joltSettings = (function () {
       rows.push(row("Server", "nicht erreichbar", "schlecht"));
     }
     rows.push(row("Angemeldet", K.token() ? "ja, auf diesem Gerät" : "nein"));
-    rows.push(row("Oberfläche", esc(location.origin)));
+    rows.push(row("Oberfläche", K.esc(location.origin)));
     el("settings-server").innerHTML = rows.join("");
     el("settings-sign-out").hidden = !K.token();
   }
@@ -240,7 +233,7 @@ window.joltSettings = (function () {
       d.transport === "keiner" ? "schlecht" : "gut"));
     z.push(row("Zustand", d.linked ? "verbunden" : "getrennt",
       d.linked ? "gut" : "warnung"));
-    z.push(row("Gerät", esc(v.device || d.rememberedDevice || "–")));
+    z.push(row("Gerät", K.esc(v.device || d.rememberedDevice || "–")));
     z.push(row("Verbunden seit", v.since ? `${age(v.since)} (${time_of_day(v.since)})` : "–"));
     z.push(row("Letzte Antwort", age(d.commands.lastReception),
       d.linked && d.commands.lastReception
@@ -250,11 +243,11 @@ window.joltSettings = (function () {
       v.dropouts > 2 ? "warnung" : ""));
     if (d.changeFailed.length) {
       z.push(row("Protokollwechsel gescheitert",
-        esc(d.changeFailed.join(", ")) + " – in dieser Sitzung nicht mehr versucht",
+        K.esc(d.changeFailed.join(", ")) + " – in dieser Sitzung nicht mehr versucht",
         "schlecht"));
     }
     if (d.tablesError.length) {
-      z.push(row("Fehler in readings.js", esc(d.tablesError.join(" · ")), "schlecht"));
+      z.push(row("Fehler in readings.js", K.esc(d.tablesError.join(" · ")), "schlecht"));
     }
     el("diag-connection").innerHTML = z.join("");
 
@@ -284,7 +277,7 @@ window.joltSettings = (function () {
       const required = field.required ? " <small>(Pflicht)</small>" : "";
       if (!count) {
         // Companion or never read.
-        rows.push(`<tr><td>${esc(field.title)}${required}</td><td class="still">${text}</td>`
+        rows.push(`<tr><td>${K.esc(field.title)}${required}</td><td class="still">${text}</td>`
           + `<td class="still">${age(as_of)}</td>`
           + `<td class="still">·</td><td class="still">·</td><td class="still">·</td>`
           + `<td class="still">·</td></tr>`);
@@ -292,7 +285,7 @@ window.joltSettings = (function () {
       }
       const total = count.ok + count.empty + count.failure;
       const failures = count.failure;
-      rows.push(`<tr><td>${esc(field.title)}${required}</td><td>${text}</td>`
+      rows.push(`<tr><td>${K.esc(field.title)}${required}</td><td>${text}</td>`
         + `<td>${age(as_of)}</td>`
         + `<td>${count.ok}</td>`
         + `<td class="${count.empty ? "warnung" : "still"}">${count.empty}</td>`
@@ -336,7 +329,7 @@ window.joltSettings = (function () {
         : (z.variety === "raus" ? "raus" : ""));
       const arrow = z.variety === "raus" ? "→ " : (z.variety === "rein" ? "← " : "  ");
       return `<span class="zeit">${time_of_day(z.timestamp)}</span> `
-        + `<span class="${category}">${arrow}${esc(z.text)}</span>`;
+        + `<span class="${category}">${arrow}${K.esc(z.text)}</span>`;
     }).join("\n") || "(noch nichts protokolliert – erst verbinden)";
     if (bottom) container.scrollTop = container.scrollHeight;
   }
