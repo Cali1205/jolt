@@ -33,6 +33,14 @@ public final class JoltDisplayStore {
     public static let actionName = Notification.Name("JoltCarPlayAction")
 
     public private(set) var bridgeActive = false
+
+    /// A request to start on its own ("auto": CarPlay connected, or the
+    /// Shortcut for the car's Wi-Fi opened `jolt://auto`) that arrived before
+    /// the UI was up. The plugin hands it over as soon as it loads. Only a
+    /// fresh one counts: whoever opens jolt twenty minutes later is not
+    /// getting in the car.
+    private var pendingAuto: Date?
+    private let pendingAutoSeconds: TimeInterval = 600
     /// The vehicle the recording starts with (last used).
     public private(set) var vehicleName: String?
     private var resultObserver: [UUID: (String, Bool, String) -> Void] = [:]
@@ -77,7 +85,27 @@ public final class JoltDisplayStore {
     public func reportBridge(_ active: Bool) {
         mutex.lock()
         bridgeActive = active
+        let waiting = active ? pendingAuto : nil
+        if active { pendingAuto = nil }
         mutex.unlock()
+        if let since = waiting, Date().timeIntervalSince(since) < pendingAutoSeconds {
+            NotificationCenter.default.post(
+                name: JoltDisplayStore.actionName, object: nil, userInfo: ["action": "auto"])
+        }
+    }
+
+    /// "Someone got into the car": start the recording on its own, if the
+    /// UI agrees (switch on, dongle there, 12 V up - decided in trips.js). Without a
+    /// running UI the request is kept and handed over on loading.
+    public func requestAuto() {
+        mutex.lock()
+        let possible = bridgeActive
+        if !possible { pendingAuto = Date() }
+        mutex.unlock()
+        if possible {
+            NotificationCenter.default.post(
+                name: JoltDisplayStore.actionName, object: nil, userInfo: ["action": "auto"])
+        }
     }
 
     public func setVehicle(_ name: String?) {

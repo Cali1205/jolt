@@ -917,6 +917,15 @@ table.kurve input { padding: 6px 8px; }
       <input type="text" id="rec-name" placeholder="Bezeichnung, z. B. „Zur Arbeit“">
       <button class="tat" id="rec-start">Aufzeichnung starten</button>
       <p class="leer" id="rec-status"></p>
+      <div class="schalter-zeile">
+        <label for="rec-auto">Beim Einsteigen automatisch aufzeichnen
+          <button type="button" class="info" data-info="help-rec-auto" aria-expanded="false" aria-label="Erklärung">i</button></label>
+        <input type="checkbox" id="rec-auto" class="schalter" checked>
+      </div>
+      <p class="hilfe" id="help-rec-auto" hidden>Startet, wenn CarPlay verbindet
+        (oder der Kurzbefehl für das Auto-WLAN <code>jolt://auto</code> öffnet),
+        der Dongle erreichbar ist und die 12-V-Spannung hoch ist. Mit dem
+        zuletzt aufgezeichneten Fahrzeug.</p>
 
       <h2>Gefahrene Fahrten</h2>
       <div id="trips-list"></div>

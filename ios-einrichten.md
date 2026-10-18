@@ -266,3 +266,24 @@ without a running trip it shows "Keine laufende Fahrt" (No trip in progress).
 
 Both items can only be built sensibly once the app is on the phone: whether a
 background plugin really keeps running under iOS can only be shown by a drive.
+
+## Recording starts on its own when you get in
+
+Two triggers, both only with the ignition on (the Wi-Fi of the ID.Buzz and
+CarPlay are only up then):
+
+1. **CarPlay connects.** Nothing to set up; the switch *Beim Einsteigen
+   automatisch aufzeichnen* in the Fahrten tab turns it on and off.
+2. **The car's Wi-Fi.** In the Shortcuts app: *Automation → New → Wi-Fi*, pick
+   the car's network, *Run immediately*, action *Open URLs* with
+   `jolt://auto`. Opening an app from the lock screen may need a first
+   unlock — if so, iOS shows a notification to tap.
+
+A trigger alone does not record. jolt connects the dongle and reads the 12 V
+voltage (`ATRV`, nothing goes onto the CAN bus) for up to three minutes; only
+at 13.0 V or more (DC/DC converter running) does the recording start, with the
+last used vehicle. Otherwise it disconnects again. The limit is
+`AUTO_VOLT` in `frontend/trips.js`; adjust it once real values are known.
+
+Open point: whether the web view stays alive long enough in the background
+after a start by CarPlay — the first TestFlight build is the test.

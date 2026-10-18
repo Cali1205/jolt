@@ -47,6 +47,8 @@ public class JoltCarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDe
     ) {
         iface = interfaceController
         record(JoltDisplayStore.shared.latest)
+        // CarPlay connects when you get in: the recording may start on its own.
+        JoltDisplayStore.shared.requestAuto()
         // The same values in two arrangements: image rows and table (text only).
         let model = JoltDisplayStore.shared.latest
         let entries = self.entries(model)

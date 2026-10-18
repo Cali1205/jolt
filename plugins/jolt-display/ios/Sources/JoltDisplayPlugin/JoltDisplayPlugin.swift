@@ -32,13 +32,27 @@ public class JoltDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
     /// as a notification and go to the JavaScript (trips.js) as the event
     /// "carplayAction".
     public override func load() {
-        JoltDisplayStore.shared.reportBridge(true)
         NotificationCenter.default.addObserver(
             forName: JoltDisplayStore.actionName, object: nil, queue: .main
         ) { [weak self] report in
             guard let action = report.userInfo?["action"] as? String else { return }
-            self?.notifyListeners("carplayAction", data: ["action": action])
+            // `retainUntilConsumed`: a request that arrives while the page is
+            // still loading is not lost, it is delivered when the page listens.
+            self?.notifyListeners("carplayAction", data: ["action": action],
+                                  retainUntilConsumed: true)
         }
+        // The Shortcut "when joining the car's Wi-Fi: open URL jolt://auto"
+        // arrives here as an opened URL.
+        NotificationCenter.default.addObserver(
+            forName: .capacitorOpenURL, object: nil, queue: .main
+        ) { report in
+            guard let info = report.object as? [String: Any],
+                  let url = info["url"] as? URL,
+                  url.scheme == "jolt", url.host == "auto" else { return }
+            JoltDisplayStore.shared.requestAuto()
+        }
+        // Last: this also hands over a request that was waiting.
+        JoltDisplayStore.shared.reportBridge(true)
     }
 
     /// How long a display counts as fresh without a new report. The UI

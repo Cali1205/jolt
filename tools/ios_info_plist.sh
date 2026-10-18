@@ -65,6 +65,15 @@ set_text NSLocationAlwaysAndWhenInUseUsageDescription \
 /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string jolt.the-smarthome.de" "$PLIST"
 
+# **URL scheme `jolt://`.** The Shortcut "when joining the car's Wi-Fi" opens
+# `jolt://auto`; the plugin turns that into the automatic start of the recording.
+/usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes: dict" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string de.thesmarthome.jolt" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes: string jolt" "$PLIST"
+
 /usr/libexec/PlistBuddy -c "Delete :UIBackgroundModes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes: string bluetooth-central" "$PLIST"
