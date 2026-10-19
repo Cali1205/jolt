@@ -363,8 +363,11 @@ on the same host (a database, a dashboard) should be bound to `127.0.0.1` or to
 a VPN address the same way.
 
 The secrets matter more once the app is public. `APP_PASSWORT` and the
-database password should be long random values (20 characters or more), for
-example `openssl rand -base64 24`.
+database password should be long random values (20 characters or more).
+`tools/rotate_secrets.sh` renews both (and the password of `grafana_ro`) on the
+host and refuses to run during a trip:
+`ssh root@host 'DRY_RUN=1 bash -s' < tools/rotate_secrets.sh` shows what it would do,
+without `DRY_RUN` it does it and prints the new login password once.
 
 ### Import chargers
 
