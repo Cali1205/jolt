@@ -119,7 +119,7 @@ def _with_version(html: str, files) -> str:
 # The files that index.html includes. Listed explicitly and not guessed from
 # the HTML: a search expression over foreign text is exactly the kind of
 # cleverness that silently misses at the next restructuring.
-INDEX_FILES = ("app.css", "motion.css", "ble-plugin.js", "obd-ble-native.js", "platforms/meb.js",
+INDEX_FILES = ("app.css", "motion.css", "ble-plugin.js", "obd-ble-native.js", "platforms/meb.js", "platforms/obd2.js",
                  "obd-decode.js", "obd-core.js",
                  "core.js", "map.js", "route.js", "tiles.js", "display.js", "pending.js", "haptics.js", "sheet.js", "awake.js", "notify.js", "consumption.js", "drive-state.js", "buffer.js", "history-chart.js",
                  "live.js",
@@ -213,14 +213,14 @@ def obd_page():
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as file:
         html = _with_version(file.read(), ("ble-plugin.js", "obd-ble-native.js",
-                                           "platforms/meb.js", "obd-decode.js", "obd-core.js",
+                                           "platforms/meb.js", "platforms/obd2.js", "obd-decode.js", "obd-core.js",
                                            "obd.js", "obd.css"))
     # The same mark visible on the page: twice "which version is this
     # actually" was the answer to a supposed Bluetooth error, and both times it
     # could only be established from outside with difficulty.
     newest = 0
     for name in ("obd.html", "ble-plugin.js", "obd-ble-native.js",
-                 "platforms/meb.js", "obd-decode.js", "obd-core.js", "obd.js", "obd.css"):
+                 "platforms/meb.js", "platforms/obd2.js", "obd-decode.js", "obd-core.js", "obd.js", "obd.css"):
         try:
             newest = max(newest,
                           int(os.path.getmtime(os.path.join(FRONTEND, name))))

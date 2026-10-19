@@ -17,7 +17,7 @@ const SCAFFOLD = [
   // The OBD2 diagnostics page: Bluetooth needs no network, and an
   // underground car park is exactly the place where one opens it.
   "/obd", "/static/ble-plugin.js", "/static/obd-ble-native.js",
-  "/static/platforms/meb.js", "/static/obd-decode.js", "/static/obd-core.js", "/static/obd.js", "/static/obd.css",
+  "/static/platforms/meb.js", "/static/platforms/obd2.js", "/static/obd-decode.js", "/static/obd-core.js", "/static/obd.js", "/static/obd.css",
   "/manifest.json",
 ];
 
