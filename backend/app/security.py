@@ -5,12 +5,14 @@ external dependency: an instance with a handful of devices gets by with an
 in-memory counter, and that cannot fail on its own.
 """
 import hashlib
+import ipaddress
 import logging
 import os
 import re
 import threading
 import time
 from collections import defaultdict, deque
+from functools import lru_cache
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -19,9 +21,33 @@ from starlette.responses import JSONResponse
 log = logging.getLogger(__name__)
 
 # Only proxies from this list may set the client IP. Without the check any
-# client could forge the header and bypass the rate limit.
+# client could forge the header and bypass the rate limit. Entries are single
+# addresses or networks ("172.24.0.0/16"): behind a tunnel container the peer
+# is whatever address Docker gave it, and the network it lives in is the stable
+# thing to name.
 TRUSTED_PROXIES = {p.strip() for p in
                    os.environ.get("TRUSTED_PROXIES", "").split(",") if p.strip()}
+
+
+@lru_cache(maxsize=256)
+def _network(entry: str):
+    try:
+        return ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        log.warning("TRUSTED_PROXIES: %r is neither an address nor a network, ignored.", entry)
+        return None
+
+
+def is_trusted(address: str) -> bool:
+    """Is this peer or forwarded address one of the trusted proxies?"""
+    if address in TRUSTED_PROXIES:
+        return True
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return any(net is not None and ip.version == net.version and ip in net
+               for net in map(_network, TRUSTED_PROXIES))
 
 GLOBAL_WINDOW = 60
 GLOBAL_MAX = int(os.environ.get("RATE_LIMIT_PER_MIN", "120"))
@@ -101,11 +127,11 @@ def client_ip(request: Request) -> str:
                     "all clients count as %s, so the login and logger-token "
                     "locks apply to everyone at once. Set TRUSTED_PROXIES to "
                     "the proxy address.", peer)
-    if peer in TRUSTED_PROXIES:
+    if is_trusted(peer):
         forwarded = request.headers.get("x-forwarded-for", "")
         entries = [e.strip() for e in forwarded.split(",") if e.strip()]
         for entry in reversed(entries):
-            if entry not in TRUSTED_PROXIES:
+            if not is_trusted(entry):
                 return entry
     return peer
 
@@ -227,7 +253,10 @@ def count_report_error(request: Request) -> None:
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
+        # The path the router sees, not `request.url.path`: Starlette rebuilds
+        # the URL from the Host header, so a forged Host such as "x/y" moved
+        # the path and the limits below were skipped (starlette before 1.x).
+        path = request.scope["path"]
         if path.startswith("/api/"):
             refusal = self._refuse_body(request)
             if refusal is not None:
@@ -270,6 +299,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
+        # What the page may ask the device for: position and Bluetooth, nothing else.
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(self), bluetooth=(self), camera=(), microphone=(), "
+            "payment=(), usb=()")
         response.headers["Content-Security-Policy"] = CSP
         if request.url.scheme == "https" or request.headers.get(
                 "x-forwarded-proto") == "https":
