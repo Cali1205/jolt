@@ -6,9 +6,11 @@ services:
     environment:
       POSTGRES_DB: jolt
       POSTGRES_USER: jolt
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Bitte DB_PASSWORD in .env setzen}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     volumes:
-      - /mnt/user/appdata/jolt-db:/var/lib/postgresql/data
+      # JOLT_DATA (default ./data, next to this file) holds the database and
+      # the nightly dumps.
+      - ${JOLT_DATA:-./data}/db:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jolt"]
       interval: 10s
@@ -16,9 +18,8 @@ services:
       retries: 5
 
   jolt-app:
-    # Built by GitHub Actions on every merge to main (.github/workflows/ci.yml)
-    # and pulled by Watchtower below. `docker compose build` still works for
-    # a local image.
+    # Built by GitHub Actions on every merge to main (.github/workflows/ci.yml).
+    # `docker compose build` builds the same image from this checkout instead.
     image: ghcr.io/cali1205/jolt:latest
     build:
       context: .
@@ -35,31 +36,39 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://jolt:${DB_PASSWORD}@jolt-db:5432/jolt
-      # Zugang: leer lassen heisst "kein Login" - nur fuer den Betrieb in einem
-      # Netz, in das ohnehin niemand sonst hineinkommt.
+      # Login password. Empty means no login at all - only for a network
+      # nobody else can reach.
       APP_PASSWORT: ${APP_PASSWORT:-}
-      # Routing: ohne Schluessel laesst sich keine Route rechnen.
-      # Kostenloser Schluessel: https://openrouteservice.org/dev/#/signup
-      ORS_API_KEY: ${ORS_API_KEY:?Bitte ORS_API_KEY in .env setzen}
-      # TomTom als Berater fuer Alternativen und Verkehr (optional). Ohne
-      # Schluessel laeuft die Planung wie bisher; gespeichert wird davon nichts.
+      # Routing. Without a key no real route can be calculated.
+      # Free key: https://openrouteservice.org/dev/#/signup
+      ORS_API_KEY: ${ORS_API_KEY:?Set ORS_API_KEY in .env}
+      # Optional: TomTom suggests alternatives and adds traffic. Nothing from
+      # TomTom is stored.
       TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
-      # Open Charge Map nur fuer den Import ausserhalb Deutschlands noetig.
+      # Optional: Open Charge Map, only for importing chargers outside Germany.
       OCM_API_KEY: ${OCM_API_KEY:-}
-      # Haertung fuer einen exponierten Host
+      # Reverse proxy or tunnel that may set X-Forwarded-For (addresses or
+      # networks). Without it every visitor shares the proxy's rate limit.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
       LOGIN_LIMIT_PER_15MIN: ${LOGIN_LIMIT_PER_15MIN:-10}
+      POINTS_LIMIT_PER_MIN: ${POINTS_LIMIT_PER_MIN:-600}
+      WS_LIMIT_PER_MIN: ${WS_LIMIT_PER_MIN:-30}
       ENABLE_API_DOCS: ${ENABLE_API_DOCS:-}
-      # Benachrichtigungen aufs Telefon: ohne diese drei bleibt die Funktion
-      # aus, siehe tools/push_keyname.py.
+      # Push notifications. Without these three the feature is off; generate
+      # them with tools/push_keyname.py.
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    # Only on this host by default. Docker publishes ports past the host
+    # firewall, so 0.0.0.0 here would put jolt on the internet without HTTPS.
+    # Set JOLT_BIND to a LAN or VPN address to reach it from other machines.
     ports:
-      - "8322:8000"
-    # Hinter einem Reverse Proxy: jolt.<domain> -> host-ip:8322
+      - "${JOLT_BIND:-127.0.0.1}:${JOLT_PORT:-8322}:8000"
 
+  # Optional automatic updates: starts only with COMPOSE_PROFILES=autoupdate
+  # in .env. It needs the Docker socket, which is root on the host - weigh
+  # that before switching it on.
   # (nickfedor fork: the original containrrr image no longer talks to current
   # Docker versions.) Looks for a new jolt-app image every 10 minutes and
   # restarts only that container (jolt-db has no label and is left alone). A
@@ -69,10 +78,11 @@ services:
   # (six-field cron, with seconds), the time zone with TZ.
   # Optional trigger: with WATCHTOWER_HTTP_API_ENDPOINTS=update and a token, a
   # POST to /v1/update starts a run at once (the CI does that after pushing
-  # the image, see README). Polling keeps running next to it.
+  # the image, see docs/deploy.md). Polling keeps running next to it.
   watchtower:
     image: nickfedor/watchtower:latest
     container_name: jolt-watchtower
+    profiles: ["autoupdate"]
     restart: unless-stopped
     environment:
       WATCHTOWER_LABEL_ENABLE: "true"
@@ -85,7 +95,7 @@ services:
       TZ: ${TZ:-Europe/Berlin}
     ports:
       # Only used when the HTTP API is switched on.
-      - "8099:8080"
+      - "127.0.0.1:8099:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
@@ -107,7 +117,7 @@ services:
       KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
-      - /mnt/user/appdata/jolt-backups:/backups
+      - ${JOLT_DATA:-./data}/backups:/backups
     entrypoint:
       - sh
       - -c

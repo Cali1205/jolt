@@ -3,7 +3,7 @@
 This document walks you once through everything Apple requires before
 `.github/workflows/ios-testflight.yml` can send a signed app to TestFlight.
 **No Mac is needed.** Everything below runs in the browser and with `openssl`
-on any machine — including the unRAID server.
+on any machine.
 
 After that, day-to-day use is one click: *Actions → iOS TestFlight → Run workflow*.
 
@@ -22,14 +22,25 @@ After that, day-to-day use is one click: *Actions → iOS TestFlight → Run wor
   the container as before and needs **no** new app build. You only have to
   upload again when the shell changes — plugins, permissions, icon.
 
-## Bundle ID
+## Making it your own app
 
-The app ID is **`de.thesmarthome.jolt`** (without a hyphen). Apple allows
-hyphens, but Capacitor rejects them (`cap add ios` aborts with "Invalid
-App ID") — with the originally planned ID (hyphen in "the-smarthome") the
-iOS run on `main` therefore never turned green. The ID lives in exactly one place: `capacitor.config.json`.
-The workflow reads it from there; you only need to change it if you want a
-different one — then enter the same one in step 2.
+The app is a shell around **your** jolt server, signed with **your** Apple
+account. In a fork, change two values in `capacitor.config.json` before the
+first run; everything else (the workflow, `tools/ios_info_plist.sh`, the
+widget) reads them from there:
+
+- `appId`: a bundle ID in a domain you own, for example `org.example.jolt`.
+  Letters, digits and dots only: Apple allows hyphens, but Capacitor rejects
+  them (`cap add ios` aborts with "Invalid App ID").
+- `server.url` and `server.allowNavigation`: the HTTPS address of your jolt
+  server ([deploy.md](deploy.md)). The app loads its interface from there, so
+  a change to the web app reaches the phone without a new build.
+
+Use the same bundle ID in step 2. The steps below use this repository's own
+ID, **`de.thesmarthome.jolt`**, as the example. CarPlay needs an entitlement
+Apple grants per developer account; you have to request it yourself
+([carplay-application.md](carplay-application.md)), and without it the app
+works without CarPlay.
 
 ---
 

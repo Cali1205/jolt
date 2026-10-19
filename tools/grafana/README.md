@@ -5,8 +5,9 @@ Read-only view of the recordings in Grafana (tested with 13.2).
 1. `setup.sql`: creates the views `grafana_points` / `grafana_sessions` and the
    role `grafana_ro` (sees only these views, read-only). Run once:
    `docker exec -i jolt-db psql -U jolt -d jolt -v pw="'<password>'" < tools/grafana/setup.sql`
-2. The database port has to be reachable from Grafana. In the production
-   compose file `jolt-db` has `ports: ["<LAN address>:5432:5432"]` (LAN only).
+2. The database port has to be reachable from Grafana. `docker-compose.yml`
+   does not publish it; add `ports: ["<LAN or VPN address>:5432:5432"]` to
+   `jolt-db`, never `0.0.0.0` (Docker publishes past the host firewall).
 3. In Grafana a PostgreSQL data source with the uid `jolt-pg` (user
    `grafana_ro`, database `jolt`, TLS off).
 4. `python tools/grafana/build_dashboard.py --push <grafana url> <token file>`

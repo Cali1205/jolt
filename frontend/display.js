@@ -1,7 +1,7 @@
 /* The display model: the state of the trip as a few numbers and texts.
  *
  * For everything that is not the UI itself - a Live Activity, a CarPlay
- * dashboard, a widget, a CarPlay template (see konzept-ios-app.md, section
+ * dashboard, a widget, a CarPlay template (see docs/ios-concept.md, section
  * "CarPlay"). These displays have room for five lines, not for a chart, and
  * they calculate nothing: they show what is stored here.
  *
