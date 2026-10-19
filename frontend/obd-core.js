@@ -598,10 +598,14 @@ function command(text, limit_ms = 15000, internal = false) {
    * remembered address and the failed protocol switches belong to the old
    * platform and are dropped here. */
   function usePlatform(id) {
-    let next = PLATFORMS[id];
+    // No id: a vehicle from before platforms existed. That is a MEB, no reason
+    // to complain.
+    let next = PLATFORMS[id == null ? DEFAULT_PLATFORM : id];
     if (!next) {
-      report(`Unbekannte Plattform "${id}" - es bleibt bei ${DEFAULT_PLATFORM}.`);
-      console.warn(`[obd] unknown platform "${id}"`);
+      if (id != null) {
+        report(`Unbekannte Plattform "${id}" - es bleibt bei ${DEFAULT_PLATFORM}.`);
+        console.warn(`[obd] unknown platform "${id}"`);
+      }
       next = PLATFORMS[DEFAULT_PLATFORM] || EMPTY_PROFILE;
     }
     const changed = !profile || profile.id !== next.id;
@@ -610,6 +614,9 @@ function command(text, limit_ms = 15000, internal = false) {
       READINGS = resolve(profile);
       latestAddress = null;
       changeFailed.clear();
+      // Counters are per reading name; the same name on another platform is
+      // another query and would inherit the old one's numbers.
+      counter.readings = {};
     }
     try { localStorage.setItem(PLATFORM_KEY, profile.id); } catch (failure) { /* private mode */ }
     return changed;
@@ -1030,6 +1037,7 @@ function command(text, limit_ms = 15000, internal = false) {
         culpritResponses,
         rememberedDevice: deviceRemembered ? (deviceRemembered.name || "(ohne Namen)") : null,
         changeFailed: Array.from(changeFailed),
+        platform: { id: profile.id, title: profile.title },
         tablesError: TABLE_ERROR,
         latestAddress: latestAddress ? latestAddress.sh : null,
         ...counter,
@@ -1083,7 +1091,9 @@ function command(text, limit_ms = 15000, internal = false) {
     link,
     attach,
     reconnect,
-    handshake: () => locked(() => series(profile.handshake)),
+    // The handshake ends on its own address and filter, whatever the last
+    // read round had set - so the remembered address no longer holds.
+    handshake: () => locked(() => { latestAddress = null; return series(profile.handshake); }),
     listen: (options) => locked(() => listen(options)),
     listens: () => listenActive,
     seriesError: () => seriesError.slice(),

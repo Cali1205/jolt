@@ -225,6 +225,24 @@
    *
    * The choice stays in the browser. Whoever sits in the car wants to make
    * it once and never again. */
+  let vehicleList = [];
+
+  function showPlatform() {
+    el("platform-obd").textContent = "Plattform: " + (O.platform().title || O.platform().id);
+  }
+
+  /* The platform of the chosen vehicle decides which readings the tables
+   * below list and what the handshake sends. A vehicle without one (old data)
+   * is a MEB. */
+  function useVehiclePlatform() {
+    const selection = el("vehicle-choice-obd");
+    const vehicle = vehicleList.find((f) => String(f.id) === selection.value);
+    if (!vehicle) return;
+    O.usePlatform(vehicle.platform);
+    showPlatform();
+    showTableError();
+  }
+
   async function vehiclesCharging() {
     const selection = el("vehicle-choice-obd");
     if (!selection) return;
@@ -233,6 +251,7 @@
                                   { headers: { "X-Token": joltToken() } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const vehicles = await response.json();
+      vehicleList = vehicles;
       let remembered = null;
       try { remembered = localStorage.getItem("jolt-obd-fahrzeug"); } catch (e) {}
       selection.innerHTML = vehicles
@@ -240,9 +259,11 @@
       if (remembered && vehicles.some((f) => String(f.id) === remembered)) {
         selection.value = remembered;
       }
+      useVehiclePlatform();
       selection.addEventListener("change", () => {
         try { localStorage.setItem("jolt-obd-fahrzeug", selection.value); }
         catch (e) {}
+        useVehiclePlatform();
       });
     } catch (failure) {
       log("Fahrzeugliste: " + failure.message
@@ -753,17 +774,21 @@
     el("connect").disabled = true;
   }
 
-  /* Errors in readings.js belong on the page, not only in the console. A
-   * mistyped address name looks like a silent control unit at the car -
-   * and then one searches in the wrong place. */
-  if (O.TABLE_ERROR && O.TABLE_ERROR.length) {
-    const box = el("unsuitable");
-    box.hidden = false;
+  /* Errors in the platform profile belong on the page, not only in the
+   * console. A mistyped address name looks like a silent control unit at the
+   * car - and then one searches in the wrong place. Shown again after every
+   * platform switch, because each profile has its own table. */
+  function showTableError() {
+    const box = el("profile-error");
+    box.hidden = !(O.TABLE_ERROR && O.TABLE_ERROR.length);
+    if (box.hidden) return;
     box.innerHTML = "<strong>Fehler in der Messwert-Tabelle "
-      + "(readings.js):</strong><ul><li>"
+      + `(Profil ${esc(O.platform().id)}):</strong><ul><li>`
       + O.TABLE_ERROR.map((t) => t.replace(/[<&]/g, "")).join("</li><li>")
       + "</li></ul>";
   }
+  showTableError();
+  showPlatform();
   // The module reports everything here, and a dropout during a recording
   // is a reason to reconnect - otherwise not.
   O.set_up(log, () => { if (running) O.reconnect(1, () => running); });
