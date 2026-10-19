@@ -1,0 +1,2 @@
+# Shell scripts run on Linux hosts and are piped through ssh: keep LF on every machine.
+*.sh text eol=lf
