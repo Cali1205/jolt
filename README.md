@@ -146,3 +146,10 @@ All settings are environment variables, set in `.env` (see `.env.example`).
 Reading a car's diagnostics is at your own risk. jolt only sends read
 requests, but a dongle left in the socket can drain the 12 V battery, and
 asking a locked car can set off its alarm ([docs/obd.md](docs/obd.md)).
+
+## License
+
+jolt is free software under the [GNU Affero General Public License v3.0](LICENSE).
+You may use, change and run it, also for others; if you offer a changed
+version as a service to other people, you have to make its source code
+available to them as well.

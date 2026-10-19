@@ -2,6 +2,7 @@
   "name": "jolt-display",
   "version": "1.0.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "Passes the jolt display model (frontend/display.js) on as a Live Activity - visible on the lock screen and in the CarPlay dashboard.",
   "files": ["ios/Sources", "Package.swift"],
   "keywords": ["capacitor", "plugin", "native"],

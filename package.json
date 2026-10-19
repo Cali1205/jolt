@@ -2,6 +2,7 @@
   "name": "jolt",
   "version": "1.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "jolt als iOS-App: Capacitor-Huelle um die bestehende Oberflaeche, damit Bluetooth ueber CoreBluetooth statt ueber Bluefy laeuft.",
   "scripts": {
     "huelle": "esbuild tools/ble-shell-entry.js --bundle --format=iife --minify --target=es2019 --outfile=frontend/ble-plugin.js",
