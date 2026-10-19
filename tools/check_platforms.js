@@ -127,6 +127,27 @@ check(Decode.payload_bytes("17FE007B 04 62 02 8C B4", "22028C")[0] === 0xB4,
       "payload_bytes: Quittung 62028C");
 console.log(failure ? "  Abweichungen" : "  Standardantworten dekodiert");
 
+console.log("\nStellantis e-CMP:");
+const ecmp = registry.ecmp;
+function decodeEcmp(name, response) {
+  const row = ecmp.vals.find((v) => v.name === name);
+  return Decode.evaluate(response, { did: row.did, load: Decode.formula(row) });
+}
+const ecmpRaw = decodeEcmp("soc_raw", "694 05 62 D4 10 A0 00");
+check(ecmpRaw === 40960 && ecmp.soc.bms(ecmpRaw) === 80, `e-CMP soc_raw ${ecmpRaw}`);
+check(decodeEcmp("voltage_v", "694 05 62 D8 15 15 E0") === 350, "e-CMP voltage_v");
+check(decodeEcmp("current_a", "694 07 62 D8 16 00 01 38 80") === 50, "e-CMP current_a entladen");
+check(decodeEcmp("current_a", "694 07 62 D8 16 00 01 2C 00") === 0, "e-CMP current_a null");
+check(decodeEcmp("odometer_km", "694 07 62 D4 9C 00 BC 61 4E") === 12345.678, "e-CMP odometer_km");
+check(decodeEcmp("speed_kmh", "682 05 62 D4 02 01 F4") === 50, "e-CMP speed_kmh");
+check(decodeEcmp("outside_temp_c", "682 04 62 D4 34 F6") === -10, "e-CMP outside_temp_c vorzeichenbehaftet");
+check(decodeEcmp("batterie_c", "682 04 62 D8 EF 14") === 20, "e-CMP batterie_c");
+check(decodeEcmp("cell_min_v", "694 05 62 D8 6F 0E 74") === 3.7, "e-CMP cell_min_v");
+check(decodeEcmp("energy_content_kwh", "694 05 62 D8 65 0A 00") === 40, "e-CMP energy_content_kwh");
+check(decodeEcmp("soh_pct", "694 06 62 D8 60 01 05 DC") === 93.75, "e-CMP soh_pct");
+check(decodeEcmp("speed_kmh", "682 05 62 D4 02 0B B8") === null, "e-CMP 300 km/h verworfen");
+console.log(failure ? "  Abweichungen" : "  Antworten dekodiert");
+
 console.log("\nPlattformwahl:");
 O.usePlatform("meb");
 check(O.usePlatform("obd2") === true && O.platform().id === "obd2", "wechsel auf obd2");
@@ -176,6 +197,9 @@ async function main() {
     "0146": "7E8 03 41 46 5A", "01A6": "7E8 06 41 A6 00 00 30 39",
     "0142": "7E8 04 41 42 38 A4",
     "22028C": "17FE007B 04 62028C B4",
+    "22D410": "694 05 62 D4 10 A0 00", "22D815": "694 05 62 D8 15 15 E0",
+    "22D816": "694 07 62 D8 16 00 01 38 80", "22D49C": "694 07 62 D4 9C 00 BC 61 4E",
+    "22D402": "682 05 62 D4 02 01 F4", "22D434": "682 04 62 D4 34 F6",
   };
   const g = load(dongle(sent, car));
   const D = g.joltObd;
@@ -195,6 +219,22 @@ async function main() {
   check(record.soc_raw === 128 && record.speed_kmh === 50 && record.odometer_km === 1234.5
         && record.outside_temp_c === 50 && record.aux12_v === 14.5,
         `obd2: Satz ${JSON.stringify(record)}`);
+
+  D.usePlatform("ecmp");
+  sent.length = 0;
+  await D.handshake();
+  check(same(sent, registry.ecmp.handshake), `ecmp: Handshake ${sent.join(",")}`);
+  sent.length = 0;
+  const ecmpSoc = await D.readSoc();
+  check(same(sent, ["ATSH6B4", "ATFCSH6B4", "ATFCSD300000", "ATFCSM1",
+                    "ATCRA694", "22D410"]),
+        `ecmp: readSoc sendet ${sent.join(",")} (11 Bit, kein ATCP)`);
+  check(ecmpSoc && ecmpSoc.bms === 80 && ecmpSoc.hmi === 80,
+        `ecmp: readSoc liefert ${JSON.stringify(ecmpSoc)}`);
+  const ecmpRecord = await D.readRecord(0);
+  check(ecmpRecord.soc_raw === 40960 && ecmpRecord.current_a === 50
+        && ecmpRecord.speed_kmh === 50 && ecmpRecord.outside_temp_c === -10,
+        `ecmp: Satz ${JSON.stringify(ecmpRecord)}`);
 
   D.usePlatform("meb");
   sent.length = 0;
