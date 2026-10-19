@@ -29,13 +29,13 @@ window.joltVehicle = (function () {
     { name: "eta_drive", title: "Wirkungsgrad Antrieb", step: 0.01 },
     { name: "eta_regen", title: "Wirkungsgrad Rekuperation", step: 0.01 },
     { name: "p_aux_w", title: "Grundlast (W)", step: 10 },
-    { name: "waermepumpe", title: "Wärmepumpe", kind: "checkbox",
+    { name: "heat_pump", title: "Wärmepumpe", kind: "checkbox",
       hint: "Halbiert grob den Heizbedarf – im Winter der grösste "
         + "Einzelunterschied." },
     { name: "reserve_soc", title: "Reserve (%)", step: 1 },
     { name: "target_soc", title: "Ladestand am Ziel (%)", step: 1 },
     { name: "max_charge_power_kw", title: "Max. Ladeleistung (kW)", step: 1 },
-    { name: "steckertyp", title: "Steckertyp", kind: "auswahl",
+    { name: "connector_type", title: "Steckertyp", kind: "auswahl",
       vals: ["CCS", "Typ2", "CHAdeMO"] },
     { name: "preferred_operators", title: "Bevorzugte Ladeanbieter", kind: "liste",
       hint: "Namen oder Namensteile, durch Komma getrennt - z.B. "
@@ -47,7 +47,7 @@ window.joltVehicle = (function () {
    * physics of the car sits folded behind it. Hints are not gone but behind
    * an (i); numbers stand two to a row. */
   const PHYSICS = ["curb_mass_kg", "payload_kg", "c_w", "frontal_area_m2", "c_rr",
-                   "max_speed_kmh", "eta_drive", "eta_regen", "p_aux_w", "waermepumpe"];
+                   "max_speed_kmh", "eta_drive", "eta_regen", "p_aux_w", "heat_pump"];
 
   function fieldHtml(field) {
     const id = "veh-" + field.name;

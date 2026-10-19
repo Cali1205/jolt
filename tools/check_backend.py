@@ -1561,6 +1561,19 @@ def main() -> int:
     verify("Content-Security-Policy" in page.headers,
            "die Security-Header sitzen")
 
+    # The vehicle form sends its field names as JSON keys, and the API ignores
+    # keys it does not know. After the English rename the form still sent
+    # "waermepumpe" and "steckertyp": every save reset heat pump and connector
+    # to their defaults without an error anywhere.
+    from app.routers.vehicles import VehicleInput
+    form_source = open(os.path.join(FRONTEND, "vehicle.js"), encoding="utf-8").read()
+    fields_block = form_source.split("const FIELDS = [", 1)[1].split("];", 1)[0]
+    form_names = set(re.findall(r'\bname: "([a-z_0-9]+)"', fields_block))
+    unknown = sorted(form_names - set(VehicleInput.model_fields))
+    verify(form_names and not unknown,
+           "jedes Feld des Fahrzeugformulars ist ein Feld der API",
+           str(unknown))
+
     return verify.balance()
 
 
