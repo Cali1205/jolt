@@ -55,7 +55,7 @@ async function cycle(scenario) {
       if (scenario.connectionPath) linked = false;
       throw new Error("Zeitüberschreitung bei 22028C");
     },
-    socFromResponse: () => ({ hmi: 71.7 }),
+    readSoc: async () => { await obd.command(); return { hmi: 71.7 }; },
   };
   const K = {
     state: { sessionId: null, vehicles: [{ id: 1 }], tripsStale: false },

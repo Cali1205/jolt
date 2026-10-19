@@ -248,7 +248,7 @@ window.joltSettings = (function () {
         "schlecht"));
     }
     if (d.tablesError.length) {
-      z.push(row("Fehler in readings.js", K.esc(d.tablesError.join(" · ")), "schlecht"));
+      z.push(row("Fehler im Profil", K.esc(d.tablesError.join(" · ")), "schlecht"));
     }
     el("diag-connection").innerHTML = z.join("");
 

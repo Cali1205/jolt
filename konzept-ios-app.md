@@ -155,8 +155,8 @@ control).
 **The protocol** comes from `frontend/obd-core.js`. To be carried over are:
 
 - the address blocks `BMS`, `CLIMATE`, `AKKU11`, `VEHICLE`, `DCDC` with their
-  `cp`/`sh`/`cra`/`fcsh` values (they live in `frontend/readings.js`),
-- the `READINGS` list with seventeen entries (`vals` in `frontend/readings.js`):
+  `cp`/`sh`/`cra`/`fcsh` values (they live in `frontend/platforms/meb.js`),
+- the `READINGS` list with seventeen entries (`vals` in `frontend/platforms/meb.js`):
   data identifier, target address, byte formula, `required` flag,
 - the protocol switching: the climate and 11-bit battery devices only answer
   under `ATSP6`, everything else under `ATSP7`. This is exactly what made

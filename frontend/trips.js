@@ -387,8 +387,7 @@ window.joltTrips = (function () {
   async function startCharge(dongle) {
     if (!dongle.present) return null;
     try {
-      const reading = window.joltObd.socFromResponse(
-        await window.joltObd.command("22028C"));
+      const reading = await window.joltObd.readSoc();
       if (reading) return Math.round(reading.hmi * 10) / 10;
     } catch (failure) {
       /* No answer to the first query does **not** mean "no

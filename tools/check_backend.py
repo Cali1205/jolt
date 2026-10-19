@@ -1306,13 +1306,13 @@ def main() -> int:
 
     # Every value read out needs a label, otherwise the dashboard shows
     # "ptc_current_a" instead of "Heizstrom". The list sits as a table
-    # in readings.js, the interpreter in obd-core.js, and the UI
+    # in platforms/meb.js, the interpreter in obd-core.js, and the UI
     # obtains it via `FELDER` - otherwise a new data identifier never shows up
     # there. Comments are dropped beforehand so that a word in one does not count
     # as a field.
     core = open(os.path.join(FRONTEND, "obd-core.js"), encoding="utf-8").read()
     decode = open(os.path.join(FRONTEND, "obd-decode.js"), encoding="utf-8").read()
-    table = open(os.path.join(FRONTEND, "readings.js"),
+    table = open(os.path.join(FRONTEND, "platforms", "meb.js"),
                    encoding="utf-8").read()
     table = re.sub(r"/\*.*?\*/", "", table, flags=re.S)
     table = re.sub(r"^\s*//.*$", "", table, flags=re.M)
@@ -1335,7 +1335,7 @@ def main() -> int:
     verify(not missing_unit,
            "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
            "dastehen", str(missing_unit))
-    verify("FIELDS: READINGS.flatMap" in core,
+    verify("get FIELDS()" in core and "READINGS.flatMap" in core,
            "die Liste wird exportiert statt in der Oberfläche wiederholt")
     live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
     verify("joltObd.FIELDS" in live,

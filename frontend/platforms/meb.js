@@ -1,4 +1,39 @@
-/* What jolt reads from the vehicle - as a table, not as a program.
+/* Platform profile VW MEB: what jolt reads from the vehicle, as a table, not
+ * as a program.
+ *
+ * A platform profile is everything about a vehicle family that the dongle
+ * code must not know: how the ELM327 is set up, which control units exist,
+ * which requests they answer, and how the charge level is converted. One
+ * file per platform lives in `frontend/platforms/` and registers itself in
+ * `window.joltPlatforms`; the vehicle chooses one (`platform` on the
+ * vehicle), `obd-core.js` runs it. A new platform is a new file plus a
+ * script tag - no code in `obd-core.js`.
+ *
+ * ===================================================================
+ * What a profile has
+ * ===================================================================
+ *
+ *   id         Registry key and the value stored on the vehicle. Lower
+ *              case, `[a-z0-9_]{1,20}` - the backend checks that shape.
+ *   title      What the vehicle form shows in the platform choice.
+ *   handshake  The AT commands, in order, that set the dongle up for this
+ *              platform. Run on every connect.
+ *   protocol   The base `ATSP` number. After a query that switched the
+ *              protocol for one address (`trace_log`), the session returns
+ *              to it.
+ *   soc        How the raw value of the row `soc_raw` becomes a charge
+ *              level: `bms(raw)` gives percent as the battery reports it,
+ *              `hmi(bms)` the percent the dashboard shows. `hmi` is
+ *              optional and defaults to the `bms` value.
+ *   addresses  The control units, see below.
+ *   vals       The readings, see below.
+ *
+ * Names are the contract between a profile and the rest of the app
+ * (`soc_raw`, `speed_kmh`, `outside_temp_c`, `odometer_km`, `aux12_v`, ...):
+ * a profile may offer fewer readings, but must use the same name for the
+ * same quantity. The charge level is `soc_raw` on every platform and the
+ * only `required` row.
+ *
  *
  * Previously every conversion stood as its own JavaScript function in
  * `obd-core.js`. Whoever wanted to add a data identifier had to write
@@ -60,7 +95,8 @@
  *   min, max   Plausibility bounds; outside them the value counts as
  *              unusable and becomes null.
  *   required   true: Without this value the whole round is discarded.
- *              Exactly one entry has this - the charge level. (default false)
+ *              Exactly one entry has this - the charge level
+ *              `soc_raw`. (default false)
  *   rarely     Query only every n-th round. 0 means every one. (default 0)
  *   also       Further values from the **same** response, as a list. Each
  *              entry in it knows the same fields except `did`,
@@ -72,7 +108,78 @@
  * `(raw - 150000) / 100`, the battery temperature `raw / 2 - 40`. Whoever
  * mixes them up gets numbers that look plausible and are wrong.
  */
-window.joltReadings = {
+(window.joltPlatforms = window.joltPlatforms || {}).meb = {
+  id: "meb",
+  title: "VW MEB (ID.3, ID.4, ID.5, ID.7, ID.Buzz, Enyaq, Born, Q4 e-tron)",
+
+  /* The handshake - **confirmed at the vehicle** on 26.08.2026 on an
+   * ID.Buzz with a Vgate iCar Pro 2S (ELM327 v2.3).
+   *
+   * The MEB speaks diagnostics over 29-bit identifiers, not over the short
+   * 11-bit addresses of emissions diagnostics. Nothing answered on
+   * 7E0/7E2/7E5/7E6, and not because the control units were silent, but
+   * because the question was asked in the wrong address form.
+   *
+   * The basis comes from our own Android logger
+   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`). One thing had to
+   * be corrected, and it was the difference between NO DATA and an answer:
+   *
+   *   The logger sets `ATCP17` **and** gives `ATSH17FC007B` the full
+   *   address. These are mutually exclusive. `ATCP` sets the upper five
+   *   bits of the 29-bit identifier, `ATSH` supplies the lower 24 - which
+   *   is exactly why `ATCP` exists at all. 0x17FC007B breaks down into
+   *   0x17 on top and 0xFC007B below, so the correct command is
+   *   `ATSHFC007B`. The ELM acknowledges the long form with OK, but then
+   *   sends on a different identifier.
+   *
+   * Also `ATCAF1` instead of `ATCAF0`: with formatting switched off, the
+   * ISO-TP length byte would have to be put into the command by hand
+   * (`0322028C`). Automatic is less error-prone and handles multi-part
+   * responses right away.
+   *
+   * `ATH1` leaves the sender identifier in the response. One more byte to
+   * read costs nothing and, when in doubt, answers the question *who*
+   * replied - while searching, that was the most useful line of all.
+   *
+   * Confirmed response to 22028C:  17FE007B 04 62028C B4 */
+  handshake: [
+    "ATZ", "ATE0", "ATL0", "ATS0", "ATH1",
+    "ATSP7", "ATCP17", "ATCAF1", "ATST FF",
+    "ATSHFC007B", "ATCRA17FE007B",
+  ],
+  protocol: "7",
+
+  /* From the raw byte (`soc_raw`) to the two charge levels.
+   *
+   * The response to 22028C looks like this: `17FE007B 04 62028C B4` - the
+   * sender identifier (because of ATH1), the ISO-TP length byte, the
+   * acknowledgement `62` = `22` + `40`, the data identifier, then a single
+   * payload byte.
+   *
+   * Two numbers follow from this byte, and mixing them up is the most
+   * dangerous mistake at this spot:
+   *
+   *   SoC(BMS) = raw value / 2.5
+   *   SoC(HMI) = SoC(BMS) * 51/46 - 6.4
+   *
+   * The BMS value is the gross charge level of the battery. The display in
+   * the car does not show it - it converts it to the usable window, which
+   * leaves a buffer at the top and bottom (computationally: 0 % display at
+   * 5.8 % gross, 100 % display at 96 % gross).
+   *
+   * Confirmed at the vehicle: raw value 0xB4 = 180 gives 72.0 % gross and
+   * 73.4 % display - the car showed 74 %. With the divisor 2.55, as our own
+   * Android logger uses it, 71.9 % would result and the calculation would
+   * not work out. The divisor is 2.5.
+   *
+   * **jolt needs the HMI value.** `reserve_soc` and `target_soc` are meant
+   * for the display value, and that is a good one and a half points above
+   * the gross value here. Whoever reports the wrong one sets the reserve
+   * too optimistically - and exactly at the lower end, where it counts. */
+  soc: {
+    bms: (raw) => raw / 2.5,
+    hmi: (bms) => Math.min(100, Math.max(0, bms * 51 / 46 - 6.4)),
+  },
 
   /* ===================================================================
    * Target addresses
@@ -85,10 +192,12 @@ window.joltReadings = {
    * a completely different identifier and gets NO DATA - exactly the error
    * that held up the search for the charge level.
    *
-   *   cp         upper five bits of the 29-bit identifier (ATCP)
+   *   cp         upper five bits of the 29-bit identifier (ATCP). Optional:
+   *              only 29-bit platforms set it, otherwise ATCP is skipped.
    *   sh         send address (ATSH)
-   *   cra        receive filter (ATCRA)
-   *   fcsh       header for flow control on long responses
+   *   cra        receive filter (ATCRA). Optional: without it the bare
+   *              ATCRA resets the filter and any control unit may answer.
+   *   fcsh       optional: header for flow control on long responses
    *   trace_log  optional: ATSP number to switch to for this query. Only
    *              needed for 11-bit control units.
    */

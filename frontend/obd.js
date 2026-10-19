@@ -59,15 +59,11 @@
   async function readSoc() {
     el("soc-output").textContent = "…";
     try {
-      // Address and filters have been in place since the handshake; setting
-      // them again here would not repeat ATCP17 and ATCAF1 and would thereby
-      // destroy exactly what matters.
-      const response = await O.command("22028C");
-      const reading = O.socFromResponse(response);
+      const reading = await O.readSoc();
       if (reading === null) {
         el("soc-output").textContent = "?";
-        log("Antwort enthält kein 62028C - siehe oben. Entweder ist die "
-            + "Datenkennung eine andere, oder das Steuergerät antwortet "
+        log("Antwort enthält keinen Ladestand - siehe oben. Entweder ist "
+            + "die Datenkennung eine andere, oder das Steuergerät antwortet "
             + "nicht auf dieser Kennung.");
         return;
       }
@@ -153,7 +149,7 @@
       // then collects only positions without a charge level would be a lost
       // trip - and that would only be noticed at the destination.
       goAsOf("Ladestand lesen …");
-      const probe = O.socFromResponse(await O.command("22028C"));
+      const probe = await O.readSoc();
       if (!probe) throw new Error("Das Auto liefert keinen Ladestand");
       el("soc-output").textContent = Math.round(probe.hmi * 10) / 10 + " %";
 
@@ -515,7 +511,7 @@
    *    driven.
    */
   const RANGES = {
-    soc_raw: [0, 255, "Rohwert, geteilt durch 2,5 ergibt Prozent"],
+    soc_raw: [0, 255, "Rohwert der Plattform, siehe Umrechnung im Profil"],
     voltage_v: [250, 450, "Packspannung eines 400-V-Systems"],
     current_a: [-600, 600, "im Stand nahe null"],
     charge_limit_a: [0, 600],

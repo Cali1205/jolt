@@ -64,7 +64,7 @@ function build(o) {
     joltObd: o.obd ? {
       obtainable: () => true, set_up() {}, attach: async () => true,
       linked: () => !o.obd.away && !o.obd.lost,
-      socFromResponse: (r) => (r === "soc" ? { hmi: o.obd.hmi } : null),
+      readSoc: async () => { if (o.obd.commandFails) throw new Error("keine Antwort"); return { hmi: o.obd.hmi }; },
       command: async () => { if (o.obd.commandFails) throw new Error("keine Antwort"); return "soc"; }, detach() { calls.detach = (calls.detach || 0) + 1; },
       voltage: async () => { calls.volts = (calls.volts || 0) + 1;
                              return o.obd.volts[Math.min(calls.volts - 1, o.obd.volts.length - 1)]; },
