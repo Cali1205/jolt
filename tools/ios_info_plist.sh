@@ -21,6 +21,12 @@
 set -euo pipefail
 
 PLIST="${1:-ios/App/App/Info.plist}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Server and app ID come from capacitor.config.json, so a fork changes them
+# in one place.
+APP_ID="$(node -p "require('$ROOT/capacitor.config.json').appId")"
+HOST="$(node -p "new URL(require('$ROOT/capacitor.config.json').server.url).host")"
 
 if [ ! -f "$PLIST" ]; then
   echo "Info.plist not found: $PLIST" >&2
@@ -63,14 +69,14 @@ set_text NSLocationAlwaysAndWhenInUseUsageDescription \
 # reception instead of waiting for the server - see frontend/sw.js.
 /usr/libexec/PlistBuddy -c "Delete :WKAppBoundDomains" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains array" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string jolt.the-smarthome.de" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :WKAppBoundDomains: string $HOST" "$PLIST"
 
 # **URL scheme `jolt://`.** The Shortcut "when joining the car's Wi-Fi" opens
 # `jolt://auto`; the plugin turns that into the automatic start of the recording.
 /usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes: dict" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string de.thesmarthome.jolt" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string $APP_ID" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes: string jolt" "$PLIST"
 

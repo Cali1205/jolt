@@ -7,6 +7,8 @@ venv/
 *.sqlite3
 jolt_dev.db
 daten/
+/data/
+.env.bak-*
 .DS_Store
 .idea/
 .vscode/

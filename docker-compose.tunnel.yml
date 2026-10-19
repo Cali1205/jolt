@@ -1,12 +1,14 @@
 # Public access through a Cloudflare Tunnel that runs next to the app, and a
-# hardened app container. Use it on top of the main file:
+# hardened app container. Use it on top of the main file, best by putting
 #
-#   docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --no-deps jolt-app cloudflared
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.tunnel.yml
 #
+# into .env, so every docker compose command (and tools/rotate_secrets.sh)
+# includes it.
 # The tunnel dials out to Cloudflare, so no port of this host has to be open for
 # jolt. In the Cloudflare dashboard the public hostname points at
 # http://jolt-app:8000 (the service name, inside the compose network).
-# README, section "Public access".
+# docs/deploy.md, "Option A: Cloudflare Tunnel".
 services:
   jolt-app:
     # Nothing in the app writes to its own filesystem; /tmp is enough for the

@@ -44,10 +44,10 @@ def part_app_id() -> None:
     verify(valid,
            "die App-ID erfüllt Capacitors Regeln - sonst bricht `cap add ios` "
            "ab, ehe überhaupt etwas gebaut wird", app_id)
-    docs = load("ios-einrichten.md")
+    docs = load("docs", "ios-app.md")
     verify(app_id in docs,
            "und die Einrichtungsanleitung nennt genau diese ID", app_id)
-    old = [d for d in ("konzept-ios-app.md", "ios-einrichten.md")
+    old = [d for d in ("docs/ios-concept.md", "docs/ios-app.md")
             if "the-smarthome.jolt" in load(d)]
     verify(not old,
            "keine Anleitung nennt mehr eine ID, die der Konfiguration "
@@ -61,9 +61,12 @@ def part_app_bound() -> None:
     verify(config.get("ios", {}).get("limitsNavigationsToAppBoundDomains") is True,
            "die App begrenzt die Navigation auf ihre Domain - Voraussetzung für "
            "den Service Worker im Web-View")
-    verify(host and host in load("tools", "ios_info_plist.sh")
-           and "WKAppBoundDomains" in load("tools", "ios_info_plist.sh"),
-           "und die Info.plist nennt genau die Domain der Server-URL", host)
+    script = load("tools", "ios_info_plist.sh")
+    verify(host and "WKAppBoundDomains" in script
+           and "capacitor.config.json').server.url" in script
+           and host not in script,
+           "und die Info.plist nimmt die Domain aus der Server-URL, statt sie "
+           "ein zweites Mal fest zu nennen", host)
 
 
 def part_symbol() -> None:
@@ -178,7 +181,7 @@ def part_workflows() -> None:
 
     # Every referenced secret must be in the instructions - otherwise the
     # error message contains a name that nobody explains.
-    docs = load("ios-einrichten.md")
+    docs = load("docs", "ios-app.md")
     secrets = sorted(set(re.findall(r"secrets\.([A-Z0-9_]+)", fliegen)))
     verify(len(secrets) == 7,
            "der Ablauf kennt sieben Geheimnisse: vier für den automatischen "
@@ -466,7 +469,7 @@ def part_carplay() -> None:
     verify("asyncAfter" in delegate and "Keine Antwort von jolt" in delegate,
            "antwortet die Oberflaeche nicht, bleibt 'wird gestartet' nicht ewig stehen")
 
-    docs = load("ios-einrichten.md")
+    docs = load("docs", "ios-app.md")
     verify("CarPlay EV Charging" in docs and "CARPLAY_ENTITLEMENT" in docs,
            "die Anleitung erklaert, wie er im Portal eingeschaltet wird")
 
