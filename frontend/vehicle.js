@@ -37,6 +37,16 @@ window.joltVehicle = (function () {
     { name: "max_charge_power_kw", title: "Max. Ladeleistung (kW)", step: 1 },
     { name: "connector_type", title: "Steckertyp", kind: "auswahl",
       vals: ["CCS", "Typ2", "CHAdeMO"] },
+    /* The dongle profiles are the frontend's own knowledge (platforms/*.js),
+     * so the choice is built from them. A vehicle without the field - old
+     * cached data - is a MEB, the only thing the dongle could talk to before. */
+    { name: "platform", title: "Plattform (OBD2)", kind: "auswahl",
+      standard: "meb", wide: true,
+      vals: ((window.joltObd && window.joltObd.platforms()) || [])
+        .map((p) => ({ value: p.id, label: p.title })),
+      hint: "Bestimmt, welche Steuergeräte-Adressen und PIDs der Dongle "
+        + "abfragt. Unbekannte Fahrzeuge: Standard-OBD2 liefert nur, was der "
+        + "Gesetzgeber vorschreibt." },
     { name: "preferred_operators", title: "Bevorzugte Ladeanbieter", kind: "liste",
       hint: "Namen oder Namensteile, durch Komma getrennt - z.B. "
         + "\"EnBW, Ionity\". Kein Ausschluss anderer Anbieter, nur ein "
@@ -61,14 +71,18 @@ window.joltVehicle = (function () {
     let user_input;
     if (field.kind === "auswahl") {
       user_input = `<select id="${id}">`
-        + field.vals.map((w) => `<option value="${w}">${w}</option>`).join("")
+        + field.vals.map((w) => {
+          const option = typeof w === "string" ? { value: w, label: w } : w;
+          return `<option value="${K.esc(option.value)}">${K.esc(option.label)}</option>`;
+        }).join("")
         + `</select>`;
     } else if (field.kind === "text" || field.kind === "liste") {
       user_input = `<input type="text" id="${id}">`;
     } else {
       user_input = `<input type="number" id="${id}" step="${field.step}">`;
     }
-    const wide = field.kind === "text" || field.kind === "liste" ? " feld-breit" : "";
+    const wide = field.kind === "text" || field.kind === "liste" || field.wide
+      ? " feld-breit" : "";
     return `<div class="feld${wide}"><label for="${id}">${field.title}${info}</label>${user_input}${hint}</div>`;
   }
 
@@ -122,8 +136,16 @@ window.joltVehicle = (function () {
       if (!el) continue;
       if (field.kind === "checkbox") el.checked = !!vehicle[field.name];
       else if (field.kind === "liste") el.value = (vehicle[field.name] || []).join(", ");
-      else el.value = vehicle[field.name] !== undefined && vehicle[field.name] !== null
-        ? vehicle[field.name] : "";
+      else {
+        el.value = vehicle[field.name] !== undefined && vehicle[field.name] !== null
+          ? vehicle[field.name] : "";
+        // Old cached data has no platform, and a stored one the list does not
+        // know (from a newer version) would leave the select empty and fail
+        // the next save.
+        if (field.kind === "auswahl" && field.standard && el.value === "") {
+          el.value = field.standard;
+        }
+      }
     }
     fillCurve(vehicle.charge_curve || []);
   }

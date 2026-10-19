@@ -109,6 +109,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.88, "eta_regen": 0.70, "p_aux_w": 350.0,
      "heat_pump": True, "reserve_soc": 10.0, "target_soc": 20.0,
      "max_charge_power_kw": 120.0, "connector_type": "CCS",
+     "platform": "obd2",
      "charge_curve": [(0, 110), (10, 120), (30, 120), (50, 90),
                    (70, 60), (80, 45), (90, 28), (100, 8)]},
 
@@ -119,6 +120,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.87, "eta_regen": 0.70, "p_aux_w": 400.0,
      "heat_pump": True, "reserve_soc": 10.0, "target_soc": 20.0,
      "max_charge_power_kw": 135.0, "connector_type": "CCS",
+     "platform": "obd2",
      "charge_curve": [(0, 120), (10, 135), (35, 130), (50, 100),
                    (65, 75), (80, 50), (90, 30), (100, 8)]},
 
@@ -129,6 +131,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.90, "eta_regen": 0.73, "p_aux_w": 300.0,
      "heat_pump": True, "reserve_soc": 10.0, "target_soc": 20.0,
      "max_charge_power_kw": 250.0, "connector_type": "CCS",
+     "platform": "obd2",
      "charge_curve": [(0, 180), (10, 250), (25, 200), (40, 150),
                    (55, 110), (70, 75), (85, 45), (95, 20), (100, 8)]},
 
@@ -139,6 +142,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.89, "eta_regen": 0.72, "p_aux_w": 400.0,
      "heat_pump": True, "reserve_soc": 10.0, "target_soc": 20.0,
      "max_charge_power_kw": 235.0, "connector_type": "CCS",
+     "platform": "obd2",
      "charge_curve": [(0, 180), (10, 230), (45, 220), (55, 150),
                    (70, 100), (80, 60), (90, 35), (100, 10)]},
 
@@ -149,6 +153,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.87, "eta_regen": 0.68, "p_aux_w": 450.0,
      "heat_pump": True, "reserve_soc": 10.0, "target_soc": 20.0,
      "max_charge_power_kw": 170.0, "connector_type": "CCS",
+     "platform": "meb",
      "charge_curve": [(0, 140), (10, 170), (30, 165), (50, 120),
                    (65, 90), (80, 55), (90, 30), (100, 8)]},
 
@@ -159,6 +164,7 @@ TEMPLATES: list[dict] = [
      "eta_drive": 0.86, "eta_regen": 0.68, "p_aux_w": 300.0,
      "heat_pump": False, "reserve_soc": 12.0, "target_soc": 20.0,
      "max_charge_power_kw": 46.0, "connector_type": "CCS",
+     "platform": "obd2",
      "charge_curve": [(0, 44), (20, 46), (50, 44), (70, 35),
                    (80, 25), (90, 15), (100, 5)]},
 ]

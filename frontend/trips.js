@@ -368,6 +368,18 @@ window.joltTrips = (function () {
     return choice && choice.value ? Number(choice.value) : null;
   }
 
+  /* Which addresses and requests the dongle uses depends on the vehicle, so
+   * the profile is chosen before the handshake - the handshake is what puts
+   * the platform's AT setup onto the dongle. A vehicle without a platform
+   * (old cached data) is a MEB. */
+  function usePlatformOfChoice() {
+    const id = chosenVehicleId();
+    const O = window.joltObd;
+    if (!id || !O || !O.usePlatform) return;
+    const vehicle = (K.state.vehicles || []).find((v) => v.id === id);
+    O.usePlatform(vehicle ? vehicle.platform : null);
+  }
+
   function currentPosition() {
     return new Promise((fulfil, reject) => {
       if (!navigator.geolocation) {
@@ -387,8 +399,7 @@ window.joltTrips = (function () {
   async function startCharge(dongle) {
     if (!dongle.present) return null;
     try {
-      const reading = window.joltObd.socFromResponse(
-        await window.joltObd.command("22028C"));
+      const reading = await window.joltObd.readSoc();
       if (reading) return Math.round(reading.hmi * 10) / 10;
     } catch (failure) {
       /* No answer to the first query does **not** mean "no
@@ -463,6 +474,7 @@ window.joltTrips = (function () {
     };
     btn.disabled = true;
     try {
+      usePlatformOfChoice();
       const dongle = await connectForStart(as_of);
       const id = chosenVehicleId();
       if (!id) {
@@ -648,6 +660,7 @@ window.joltTrips = (function () {
 
   function set_up() {
     K.at("rec-start", "click", startRecording);
+    K.at("rec-vehicle", "change", usePlatformOfChoice);
     const autoSwitch = document.getElementById("rec-auto");
     if (autoSwitch) {
       autoSwitch.checked = autoEnabled();

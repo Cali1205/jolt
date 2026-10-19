@@ -36,6 +36,7 @@
   Dieser Browser kennt kein <code>navigator.bluetooth</code>. Auf dem iPhone
   diese Seite in <strong>Bluefy</strong> öffnen, auf Android in Chrome.
 </div>
+<div id="profile-error" class="kasten fehler" hidden></div>
 
 <div class="kasten" id="get-started">
   <h2>Losfahren</h2>
@@ -50,6 +51,7 @@
     schliesst eine Fahrt ab, die anderthalb Stunden schweigt.</p>
   <label for="vehicle-choice-obd">Fahrzeug</label>
   <select id="vehicle-choice-obd"></select>
+  <p class="hinweis" id="platform-obd"></p>
   <label style="display:flex;gap:8px;align-items:center">
     <input type="checkbox" id="auto" checked style="width:auto">
     <span>Von selbst starten, sobald das Auto fährt</span>
@@ -170,7 +172,9 @@
      emulation, then the core. -->
 <script src="/static/ble-plugin.js"></script>
 <script src="/static/obd-ble-native.js"></script>
-<script src="/static/readings.js"></script>
+<script src="/static/platforms/meb.js"></script>
+<script src="/static/platforms/obd2.js"></script>
+<script src="/static/platforms/ecmp.js"></script>
 <script src="/static/obd-decode.js"></script>
 <script src="/static/obd-core.js"></script>
 <script src="/static/obd.js"></script>

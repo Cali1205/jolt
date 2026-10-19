@@ -235,6 +235,7 @@ window.joltSettings = (function () {
     z.push(row("Zustand", d.linked ? "verbunden" : "getrennt",
       d.linked ? "gut" : "warnung"));
     z.push(row("Gerät", K.esc(v.device || d.rememberedDevice || "–")));
+    if (d.platform) z.push(row("Plattform", K.esc(d.platform.title || d.platform.id)));
     z.push(row("Verbunden seit", v.since ? `${age(v.since)} (${time_of_day(v.since)})` : "–"));
     z.push(row("Letzte Antwort", age(d.commands.lastReception),
       d.linked && d.commands.lastReception
@@ -248,7 +249,7 @@ window.joltSettings = (function () {
         "schlecht"));
     }
     if (d.tablesError.length) {
-      z.push(row("Fehler in readings.js", K.esc(d.tablesError.join(" · ")), "schlecht"));
+      z.push(row("Fehler im Profil", K.esc(d.tablesError.join(" · ")), "schlecht"));
     }
     el("diag-connection").innerHTML = z.join("");
 
@@ -259,7 +260,7 @@ window.joltSettings = (function () {
 
   /* ---------- Diagnostics: readings ---------- */
 
-  /* One row per measured quantity of the table (readings.js), with the
+  /* One row per measured quantity of the table (the platform profile), with the
    * values that come along in the same response. The module keeps counters
    * per main value; companions only show their last value. */
   function showReadings(d) {
@@ -359,6 +360,7 @@ window.joltSettings = (function () {
       .map((z) => `${time_of_day(z.timestamp)} ${z.variety === "raus" ? "->" : (z.variety === "rein" ? "<-" : "  ")} ${z.text}`);
     return [...header, "", "Verbindung / Zähler:", JSON.stringify({
       connection: d.connection, commands: d.commands, rounds: d.rounds,
+      platform: d.platform && d.platform.id,
       changeFailed: d.changeFailed, tablesError: d.tablesError,
       latestAddress: d.latestAddress }, null, 1),
       "", "Messwerte:", ...readings, "", "Protokoll (letzte 150 Zeilen):", ...log].join("\n");

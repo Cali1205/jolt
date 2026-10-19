@@ -1182,7 +1182,7 @@ window.joltLive = (function () {
         // The GPS distance is filled in in `showState` as soon as
         // the position of this point is known.
         gps: null,
-        soc: typeof raw.soc_raw === "number" ? raw.soc_raw / 2.5 : null });
+        soc: socBms(raw.soc_raw) });
       // Generous: 20,000 points at a twelve-second beat are roughly
       // 66 hours. With 3000 the first points would have dropped out after
       // ten hours - and with them the start of the trip.
@@ -1326,6 +1326,13 @@ window.joltLive = (function () {
   function speedOrNull(val) {
     return (typeof val === "number" && Number.isFinite(val)
             && val >= 0 && val <= 250) ? val : null;
+  }
+
+  /* The charge level the battery itself reports, for the chart. What the raw
+   * value means depends on the platform, so the conversion is the profile's. */
+  function socBms(raw) {
+    const soc = window.joltObd.socFromRaw(raw);
+    return soc ? soc.bms : null;
   }
 
   function temperatureOrNull(val) {
@@ -1720,7 +1727,7 @@ window.joltLive = (function () {
           // The GPS distance is already known here - unlike in live operation,
           // where it is filled in later together with the position.
           gps: drivenKm,
-          soc: typeof p.soc_raw === "number" ? p.soc_raw / 2.5 : null });
+          soc: socBms(p.soc_raw) });
       }
       if (p.soc !== null && p.soc !== undefined) {
         history.push({

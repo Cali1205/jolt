@@ -134,6 +134,30 @@ def main() -> int:
            "dieselben Ladestände beim Ändern zu behalten funktioniert",
            f"HTTP {changed.status_code}: {changed.text[:150]}")
 
+    # The OBD2 platform is stored per vehicle. The backend only guards the
+    # shape of the id; which platforms exist is decided by frontend/platforms/.
+    verify(vehicles[0]["platform"] == "obd2" and fresh["platform"] == "meb",
+           "die Plattform steht am Fahrzeug: die allgemeine Vorlage ist "
+           "Standard-OBD2, ein ohne Angabe angelegtes Fahrzeug bleibt MEB",
+           f"{vehicles[0]['platform']} / {fresh['platform']}")
+    own = {"name": fresh["name"], "battery_gross_kwh": 82.0,
+           "battery_net_kwh": 77.0, "platform": "obd2"}
+    stored = client.put(f"/api/vehicles/{fresh['id']}", json=own)
+    verify(stored.status_code == 200 and stored.json()["platform"] == "obd2"
+           and next(v for v in client.get("/api/vehicles").json()
+                    if v["id"] == fresh["id"])["platform"] == "obd2",
+           "die Plattform wird beim Ändern gespeichert und wieder geliefert")
+    broken = client.put(f"/api/vehicles/{fresh['id']}", json={**own, "platform": "Meb!"})
+    verify(broken.status_code == 422,
+           "eine Plattform mit unzulässigen Zeichen wird abgelehnt",
+           f"HTTP {broken.status_code}")
+    templates = {t["name"]: t["platform"]
+                 for t in client.get("/api/vehicles/templates").json()}
+    verify(templates["VW ID.Buzz Pro (82 kWh)"] == "meb"
+           and templates["Allgemeines E-Auto (60 kWh)"] == "obd2",
+           "nur die echte MEB-Vorlage trägt meb, die allgemeinen Standard-OBD2",
+           str(templates))
+
     print("\nLadesäulen-Import (Format der Bundesnetzagentur)")
     db = SessionLocal()
     try:
@@ -1306,13 +1330,13 @@ def main() -> int:
 
     # Every value read out needs a label, otherwise the dashboard shows
     # "ptc_current_a" instead of "Heizstrom". The list sits as a table
-    # in readings.js, the interpreter in obd-core.js, and the UI
+    # in platforms/meb.js, the interpreter in obd-core.js, and the UI
     # obtains it via `FELDER` - otherwise a new data identifier never shows up
     # there. Comments are dropped beforehand so that a word in one does not count
     # as a field.
     core = open(os.path.join(FRONTEND, "obd-core.js"), encoding="utf-8").read()
     decode = open(os.path.join(FRONTEND, "obd-decode.js"), encoding="utf-8").read()
-    table = open(os.path.join(FRONTEND, "readings.js"),
+    table = open(os.path.join(FRONTEND, "platforms", "meb.js"),
                    encoding="utf-8").read()
     table = re.sub(r"/\*.*?\*/", "", table, flags=re.S)
     table = re.sub(r"^\s*//.*$", "", table, flags=re.M)
@@ -1335,7 +1359,7 @@ def main() -> int:
     verify(not missing_unit,
            "und eine Einheit - auch wenn sie null ist, muss die Entscheidung "
            "dastehen", str(missing_unit))
-    verify("FIELDS: READINGS.flatMap" in core,
+    verify("get FIELDS()" in core and "READINGS.flatMap" in core,
            "die Liste wird exportiert statt in der Oberfläche wiederholt")
     live = open(os.path.join(FRONTEND, "live.js"), encoding="utf-8").read()
     verify("joltObd.FIELDS" in live,
@@ -1373,7 +1397,7 @@ def main() -> int:
            str(names))
     verify(names and names[-1] in ("outside_temp_c", "inside_temp_c"),
            "und ganz am Ende der Runde", str(names[-2:]))
-    verify("} finally {" in core and 'command("ATSP7")' in core,
+    verify("} finally {" in core and 'command(`ATSP${profile.protocol}`)' in core,
            "das Protokoll wird im finally zurückgesetzt - eine Sitzung, die "
            "im falschen Protokoll hängen bleibt, kostet jede weitere Runde")
     # The reconnection must not give up as long as the trip is running. With

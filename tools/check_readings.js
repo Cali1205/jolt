@@ -2,7 +2,7 @@
 /* The table must deliver the same numbers as the functions before it.
  *
  * Until this refactoring, every conversion was a function of its own in
- * obd-core.js. Now it is a row in readings.js, and an
+ * obd-core.js. Now it is a row in platforms/meb.js, and an
  * interpreter applies it. Precisely at such a changeover, signs,
  * scaling and byte order silently go wrong - `soc_raw` is one byte
  * divided by 2.5, the battery current `(Rohwert - 150000)/100` over four
@@ -107,7 +107,7 @@ function newCharging() {
   };
   timeframe.window = timeframe;
   const context = vm.createContext(timeframe);
-  for (const file of ["readings.js", "obd-ble-native.js", "obd-decode.js", "obd-core.js"]) {
+  for (const file of ["platforms/meb.js", "obd-ble-native.js", "obd-decode.js", "obd-core.js"]) {
     vm.runInContext(fs.readFileSync(path.join(FRONTEND, file), "utf8"),
                     context, { filename: file });
   }
@@ -133,7 +133,7 @@ function probe_sequences() {
   follow.push(measured);
   // The confirmed state of charge: raw value 0xB4.
   follow.push([0xB4]);
-  // The compressor measurement "on" from the comment in readings.js.
+  // The compressor measurement "on" from the comment in platforms/meb.js.
   follow.push([0x51, 0x24, 0xC0, 0x24, 0xC0, 0x0A, 0x3A, 0x0E, 0, 0, 0]);
 
   let seed = 20260912;
@@ -186,7 +186,7 @@ function main() {
   // The read functions live inside the module; they are reachable via the
   // detour the recording also takes. That is why the resolved table
   // is accessed directly here.
-  const table = f.window.joltReadings;
+  const table = f.window.joltPlatforms.meb;
   const fields = f.joltObd.FIELDS;
 
   // 1. Completeness: no value may have been lost in the refactoring.

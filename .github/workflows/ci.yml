@@ -96,6 +96,12 @@ jobs:
       - name: Check reading table against the old formulas
         run: node tools/check_readings.js
 
+      # The platform profiles (frontend/platforms/): MEB must still read
+      # exactly what it read before the profiles existed, and every profile
+      # has to resolve cleanly with the charge level as its one required row.
+      - name: Check platform profiles
+        run: node tools/check_platforms.js
+
       # The queue for data points in live.js runs against a server that goes
       # down - dead spot, resubmission, rejected batches.
       - name: Check data point queue

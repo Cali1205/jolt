@@ -97,43 +97,11 @@ window.joltObd = (function () {
      () => ({ acceptAllDevices: true })],
   ];
 
-  /* The handshake - **confirmed at the vehicle** on 26.08.2026 on an
-   * ID.Buzz with a Vgate iCar Pro 2S (ELM327 v2.3).
-   *
-   * The MEB speaks diagnostics over 29-bit identifiers, not over the short
-   * 11-bit addresses of emissions diagnostics. Nothing answered on
-   * 7E0/7E2/7E5/7E6, and not because the control units were silent, but
-   * because the question was asked in the wrong address form.
-   *
-   * The basis comes from our own Android logger
-   * (Cali1205/OBD2_Logger_Kotlin, core/Obd2.kt, `vwPre`). One thing had to
-   * be corrected, and it was the difference between NO DATA and an answer:
-   *
-   *   The logger sets `ATCP17` **and** gives `ATSH17FC007B` the full
-   *   address. These are mutually exclusive. `ATCP` sets the upper five
-   *   bits of the 29-bit identifier, `ATSH` supplies the lower 24 - which
-   *   is exactly why `ATCP` exists at all. 0x17FC007B breaks down into
-   *   0x17 on top and 0xFC007B below, so the correct command is
-   *   `ATSHFC007B`. The ELM acknowledges the long form with OK, but then
-   *   sends on a different identifier.
-   *
-   * Also `ATCAF1` instead of `ATCAF0`: with formatting switched off, the
-   * ISO-TP length byte would have to be put into the command by hand
-   * (`0322028C`). Automatic is less error-prone and handles multi-part
-   * responses right away.
-   *
-   * `ATH1` leaves the sender identifier in the response. One more byte to
-   * read costs nothing and, when in doubt, answers the question *who*
-   * replied - while searching, that was the most useful line of all.
-   *
-   * Confirmed response to 22028C:  17FE007B 04 62028C B4 */
-  const SEND_BMS = "FC007B";        // lower 24 bits; upper 5 via ATCP17
-  const BMS_RECEIVE = "17FE007B";   // receive filter: full identifier
-  const HANDSHAKE = [
-    "ATZ", "ATE0", "ATL0", "ATS0", "ATH1",
-    "ATSP7", "ATCP17", "ATCAF1", "ATST FF",
-    `ATSH${SEND_BMS}`, `ATCRA${BMS_RECEIVE}`,
-  ];
+  /* The handshake - which AT commands put the dongle into the vehicle's
+   * addressing scheme - belongs to the platform profile (`handshake` in
+   * frontend/platforms/*.js), together with the reasoning behind each
+   * command. It is re-run on every connect, so a changed platform takes
+   * effect with the next one. */
 
   let writeChar = null;      // characteristic for sending
   let deviceRemembered = null;  // for reconnecting after a dropout
@@ -319,7 +287,7 @@ window.joltObd = (function () {
         culpritResponses = 0;
         buffer = "";
         changeFailed.clear();
-        await series(HANDSHAKE);
+        await series(profile.handshake);
       });
       report("Wieder verbunden, Handshake erneuert.");
     } catch (failure) {
@@ -494,55 +462,29 @@ function command(text, limit_ms = 15000, internal = false) {
 
   /* ---------- Charge level ---------- */
 
-  /* From the raw byte to the two charge levels.
+  /* From the platform's raw value (`soc_raw`) to the two charge levels.
    *
-   * The response to 22028C looks like this: `17FE007B 04 62028C B4` - the
-   * sender identifier (because of ATH1), the ISO-TP length byte, the
-   * acknowledgement `62` = `22` + `40`, the data identifier, then a single
-   * payload byte.
+   * What the raw value means differs per platform: the MEB sends a byte
+   * that is 2.5 times the gross percentage, standard OBD2 a byte of 255
+   * steps. That knowledge lives in the profile (`soc.bms`, `soc.hmi`) and is
+   * only applied here. The recording stores the raw value, so old trips stay
+   * readable whichever platform recorded them.
    *
-   * Two numbers follow from this byte, and mixing them up is the most
-   * dangerous mistake at this spot:
-   *
-   *   SoC(BMS) = raw value / 2.5
-   *   SoC(HMI) = SoC(BMS) * 51/46 - 6.4
-   *
-   * The BMS value is the gross charge level of the battery. The display in
-   * the car does not show it - it converts it to the usable window, which
-   * leaves a buffer at the top and bottom (computationally: 0 % display at
-   * 5.8 % gross, 100 % display at 96 % gross).
-   *
-   * Confirmed at the vehicle: raw value 0xB4 = 180 gives 72.0 % gross and
-   * 73.4 % display - the car showed 74 %. With the divisor 2.55, as our own
-   * Android logger uses it, 71.9 % would result and the calculation would
-   * not work out. The divisor is 2.5.
-   *
-   * **jolt needs the HMI value.** `reserve_soc` and `target_soc` are meant
-   * for the display value, and that is a good one and a half points above
-   * the gross value here. Whoever reports the wrong one sets the reserve
-   * too optimistically - and exactly at the lower end, where it counts. */
-  /* From the raw byte the two charge levels. Kept separate from
-   * `socFromResponse`, because the recording already has the byte
-   * decomposed. */
-  function socFromRaw(byte) {
-    const bms = byte / 2.5;
-    return { raw: byte, bms,
-             hmi: Math.min(100, Math.max(0, bms * 51 / 46 - 6.4)) };
-  }
-
-  function socFromResponse(raw) {
-    const hex = raw.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
-    const index = hex.indexOf("62028C");
-    if (index < 0) return null;
-    const payload = hex.slice(index + 6);
-    if (payload.length < 2) return null;
-    return socFromRaw(parseInt(payload.slice(0, 2), 16));
+   * `bms` is the battery's own figure, `hmi` the one the dashboard shows;
+   * a platform that knows no dashboard conversion reports both the same.
+   * Null for anything that is not a number - a trip may have no charge
+   * level at all. */
+  function socFromRaw(raw) {
+    if (typeof raw !== "number" || Number.isNaN(raw)) return null;
+    const bms = profile.soc.bms(raw);
+    return { raw, bms, hmi: profile.soc.hmi ? profile.soc.hmi(bms) : bms };
   }
 
   /* ---------- What is read out ---------- */
 
-  /* The readings are in `readings.js` - data identifier, target address,
-   * byte position and conversion as a table with named fields.
+  /* The readings are in the platform profiles (`frontend/platforms/`) -
+   * data identifier, target address, byte position and conversion as a table
+   * with named fields.
    *
    * Previously every conversion stood here as its own function. That read
    * well, but meant: whoever wanted to add a data identifier wrote code in
@@ -550,13 +492,20 @@ function command(text, limit_ms = 15000, internal = false) {
    * table separates the two - the knowledge about the vehicle there, the
    * way to the dongle here.
    *
-   * The table is resolved exactly once, at load time. Whatever turns up in
-   * the process - a typo in an address name, a missing byte position -
-   * ends up in `TABLE_ERROR` and becomes visible on the diagnostics page,
-   * instead of appearing later as "keine Nutzdaten" at the car. */
+   * A profile is resolved when it is selected (`usePlatform`), not per
+   * query. Whatever turns up in the process - a typo in an address name, a
+   * missing byte position - ends up in `TABLE_ERROR` and becomes visible on
+   * the diagnostics page, instead of appearing later as "keine Nutzdaten" at
+   * the car. */
   const Decode = window.joltObdDecode;
-  const TABLE = window.joltReadings || { addresses: {}, vals: [] };
+  const PLATFORMS = window.joltPlatforms || {};
+  const DEFAULT_PLATFORM = "meb";
+  const PLATFORM_KEY = "jolt-platform";
+  /* Stays the same array for the whole session: the diagnostics hand it out
+   * and the check compares against it. */
   const TABLE_ERROR = [];
+  let profile = null;
+  let READINGS = [];
 
   /* What a row needs at minimum for it to become a query. */
   function examineRow(row, addresses, actualExtra) {
@@ -576,46 +525,107 @@ function command(text, limit_ms = 15000, internal = false) {
     }
   }
 
-  const READINGS = (TABLE.vals || []).map((row) => {
-    examineRow(row, TABLE.addresses || {}, false);
-    const extra = row.also || [];
-    for (const w of extra) examineRow(w, TABLE.addresses || {}, true);
+  function resolve(table) {
+    TABLE_ERROR.length = 0;
+    const addresses = table.addresses || {};
+    const readings = (table.vals || []).map((row) => {
+      examineRow(row, addresses, false);
+      const extra = row.also || [];
+      for (const w of extra) examineRow(w, addresses, true);
 
-    // `further` stays null instead of empty: `evaluate` uses it to tell
-    // whether a single value or a pair comes back.
-    let further = null;
-    if (extra.length) {
-      further = {};
-      for (const w of extra) further[w.name] = Decode.formula(w);
+      // `further` stays null instead of empty: `evaluate` uses it to tell
+      // whether a single value or a pair comes back.
+      let further = null;
+      if (extra.length) {
+        further = {};
+        for (const w of extra) further[w.name] = Decode.formula(w);
+      }
+
+      return {
+        name: row.name,
+        title: row.title || row.name,
+        unit: row.unit === undefined ? null : row.unit,
+        put: typeof row.put === "number" ? row.put : 1,
+        did: row.did,
+        address: addresses[row.address],
+        required: !!row.required,
+        rarely: row.rarely || 0,
+        load: Decode.formula(row),
+        further,
+        also: extra,
+      };
+    });
+
+    // The rest of the app reads the charge level under this one name, on
+    // every platform; a profile without it would record nothing usable.
+    const required = readings.filter((m) => m.required).map((m) => m.name);
+    if (required.length !== 1 || required[0] !== "soc_raw") {
+      TABLE_ERROR.push("Genau eine Pflichtzeile, und sie muss `soc_raw` sein "
+                       + `(gefunden: ${required.join(", ") || "keine"}).`);
     }
-
-    return {
-      name: row.name,
-      title: row.title || row.name,
-      unit: row.unit === undefined ? null : row.unit,
-      put: typeof row.put === "number" ? row.put : 1,
-      did: row.did,
-      address: (TABLE.addresses || {})[row.address],
-      required: !!row.required,
-      rarely: row.rarely || 0,
-      load: Decode.formula(row),
-      further,
-      also: extra,
-    };
-  });
-
-  if (TABLE_ERROR.length) {
-    // At load time, not only while driving: a typo in the table should stand
-    // out while someone is still sitting at the computer.
-    console.warn("[obd] Fehler in readings.js:\n  "
-                 + TABLE_ERROR.join("\n  "));
+    if (!table.soc || typeof table.soc.bms !== "function") {
+      TABLE_ERROR.push("`soc.bms` fehlt.");
+    }
+    if (!Array.isArray(table.handshake) || !table.handshake.length) {
+      TABLE_ERROR.push("`handshake` fehlt.");
+    }
+    if (TABLE_ERROR.length) {
+      // At selection time, not only while driving: a typo in the table
+      // should stand out while someone is still sitting at the computer.
+      console.warn(`[obd] Fehler im Profil ${table.id}:\n  `
+                   + TABLE_ERROR.join("\n  "));
+    }
+    return readings;
   }
-
 
   /* Addresses whose protocol switch went wrong. Once is enough: whoever
    * switches again every twentieth round and fails pays for the round trip
    * permanently without ever getting a value. */
   const changeFailed = new Set();
+
+  /* Only reached if no profile file was loaded at all; the diagnostics page
+   * then shows the errors of `resolve` instead of the app failing to start. */
+  const EMPTY_PROFILE = {
+    id: DEFAULT_PLATFORM, title: "", handshake: [], protocol: "7",
+    soc: { bms: (raw) => raw }, addresses: {}, vals: [],
+  };
+
+  /* Selects the platform the next handshake and every read round use.
+   *
+   * Returns true if the platform changed. The connection is not touched:
+   * the handshake is re-run on every connect (`attach`, `reconnect`,
+   * `handshake()`), which is when the new profile takes effect. The
+   * remembered address and the failed protocol switches belong to the old
+   * platform and are dropped here. */
+  function usePlatform(id) {
+    // No id: a vehicle from before platforms existed. That is a MEB, no reason
+    // to complain.
+    let next = PLATFORMS[id == null ? DEFAULT_PLATFORM : id];
+    if (!next) {
+      if (id != null) {
+        report(`Unbekannte Plattform "${id}" - es bleibt bei ${DEFAULT_PLATFORM}.`);
+        console.warn(`[obd] unknown platform "${id}"`);
+      }
+      next = PLATFORMS[DEFAULT_PLATFORM] || EMPTY_PROFILE;
+    }
+    const changed = !profile || profile.id !== next.id;
+    if (changed) {
+      profile = next;
+      READINGS = resolve(profile);
+      latestAddress = null;
+      changeFailed.clear();
+      // Counters are per reading name; the same name on another platform is
+      // another query and would inherit the old one's numbers.
+      counter.readings = {};
+    }
+    try { localStorage.setItem(PLATFORM_KEY, profile.id); } catch (failure) { /* private mode */ }
+    return changed;
+  }
+
+  let remembered = null;
+  try { remembered = localStorage.getItem(PLATFORM_KEY); } catch (failure) { /* private mode */ }
+  usePlatform(remembered || DEFAULT_PLATFORM);
+
 
   /* Flow control - the missing step for long responses.
    *
@@ -655,7 +665,7 @@ function command(text, limit_ms = 15000, internal = false) {
         await command(`ATSP${destination.trace_log}`);
         await command(`ATSH${destination.sh}`);
         await flowControl(destination);
-        await command(`ATCRA${destination.cra}`);
+        await command(`ATCRA${destination.cra || ""}`);
         return Decode.evaluate(await command(entry.did, 8000), entry);
       } catch (failure) {
         report(`Protokollwechsel auf ATSP${destination.trace_log} fehlgeschlagen - `
@@ -663,9 +673,9 @@ function command(text, limit_ms = 15000, internal = false) {
         changeFailed.add(destination.sh);
         return null;
       } finally {
-        // Back to the 29-bit protocol, and discard the remembered address: the
-        // next value sets ATCP, ATSH and ATCRA completely anew.
-        try { await command("ATSP7"); } catch (e) { /* see next round */ }
+        // Back to the platform's base protocol, and discard the remembered
+        // address: the next value sets ATCP, ATSH and ATCRA completely anew.
+        try { await command(`ATSP${profile.protocol}`); } catch (e) { /* see next round */ }
         latestAddress = null;
       }
     }
@@ -674,15 +684,29 @@ function command(text, limit_ms = 15000, internal = false) {
       // The priority bits belong to it: between battery (0x17…) and vehicle
       // (0x17…FC0076) the lower bits differ, and without switching the request
       // goes to an identifier nobody listens on.
-      if (!latestAddress || latestAddress.cp !== destination.cp) {
+      if (destination.cp
+          && (!latestAddress || latestAddress.cp !== destination.cp)) {
         await command(`ATCP${destination.cp}`);
       }
       await command(`ATSH${destination.sh}`);
       await flowControl(destination);
-      await command(`ATCRA${destination.cra}`);
+      // Without a `cra` the bare ATCRA resets the receive filter: any control
+      // unit may answer, which is what a functional request needs.
+      await command(`ATCRA${destination.cra || ""}`);
       latestAddress = destination;
     }
     return Decode.evaluate(await command(entry.did, 8000), entry);
+  }
+
+  /* The charge level on its own, read through the normal reading path.
+   *
+   * For the places that need one value without a round: starting and ending a
+   * charge. Throws like `command` if the dongle does not answer; null if it
+   * answered without a usable value. */
+  async function readSoc() {
+    const entry = READINGS.find((m) => m.name === "soc_raw");
+    if (!entry) return null;
+    return socFromRaw(await readReading(entry));
   }
 
   /* Read a complete record. Errors of single quantities are noted and
@@ -966,7 +990,7 @@ function command(text, limit_ms = 15000, internal = false) {
       listener = null;
       buffer = "";
       // Reset the dongle - AT commands only.
-      for (const b of HANDSHAKE) {
+      for (const b of profile.handshake) {
         try { await command(b, 5000, true); } catch (failure) { /* carry on */ }
       }
       latestAddress = null;
@@ -1013,6 +1037,7 @@ function command(text, limit_ms = 15000, internal = false) {
         culpritResponses,
         rememberedDevice: deviceRemembered ? (deviceRemembered.name || "(ohne Namen)") : null,
         changeFailed: Array.from(changeFailed),
+        platform: { id: profile.id, title: profile.title },
         tablesError: TABLE_ERROR,
         latestAddress: latestAddress ? latestAddress.sh : null,
         ...counter,
@@ -1066,7 +1091,9 @@ function command(text, limit_ms = 15000, internal = false) {
     link,
     attach,
     reconnect,
-    handshake: () => locked(() => series(HANDSHAKE)),
+    // The handshake ends on its own address and filter, whatever the last
+    // read round had set - so the remembered address no longer holds.
+    handshake: () => locked(() => { latestAddress = null; return series(profile.handshake); }),
     listen: (options) => locked(() => listen(options)),
     listens: () => listenActive,
     seriesError: () => seriesError.slice(),
@@ -1076,7 +1103,10 @@ function command(text, limit_ms = 15000, internal = false) {
     readRecord,
     voltage,
     socFromRaw,
-    socFromResponse,
+    readSoc,
+    usePlatform,
+    platform: () => ({ id: profile.id, title: profile.title }),
+    platforms: () => Object.values(PLATFORMS).map((p) => ({ id: p.id, title: p.title })),
     // For the diagnostics page: raw payload bytes of a response, including
     // multi-frame reassembly.
     payload_bytes: Decode.payload_bytes,
@@ -1090,21 +1120,23 @@ function command(text, limit_ms = 15000, internal = false) {
      *
      * `required` travels along: the charge level is the only value without
      * which a round is discarded, and that should be visible. */
-    FIELDS: READINGS.flatMap((m) => [
-      { name: m.name, title: m.title, unit: m.unit,
-        put: m.put, required: m.required, rarely: m.rarely },
-      // Values that come along from the same response belong in the table just
-      // the same - otherwise it shows less than is measured. Title, unit and
-      // decimals are in the table itself for them; if missing there, they
-      // inherit from the main value. That is why the compressor speed does not
-      // appear in watts.
-      ...(m.also || []).map((w) => ({
-        name: w.name,
-        title: w.title || w.name,
-        unit: w.unit === undefined ? m.unit : w.unit,
-        put: typeof w.put === "number" ? w.put : m.put,
-        required: false, rarely: m.rarely })),
-    ]),
+    get FIELDS() {
+      return READINGS.flatMap((m) => [
+        { name: m.name, title: m.title, unit: m.unit,
+          put: m.put, required: m.required, rarely: m.rarely },
+        // Values that come along from the same response belong in the table just
+        // the same - otherwise it shows less than is measured. Title, unit and
+        // decimals are in the table itself for them; if missing there, they
+        // inherit from the main value. That is why the compressor speed does not
+        // appear in watts.
+        ...(m.also || []).map((w) => ({
+          name: w.name,
+          title: w.title || w.name,
+          unit: w.unit === undefined ? m.unit : w.unit,
+          put: typeof w.put === "number" ? w.put : m.put,
+          required: false, rarely: m.rarely })),
+      ]);
+    },
 
     /* What was noticed when resolving the table - empty if everything is
      * fine. The diagnostics page displays it: a typo in an address name
