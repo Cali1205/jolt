@@ -1,7 +1,7 @@
 /* Turning the dongle's answer into numbers: the pure half of reading the car.
  *
  * No connection, no state. `formula` builds the conversion of a table row from
- * readings.js, `payload_bytes` cuts the payload out of a response (also one that
+ * a platform profile, `payload_bytes` cuts the payload out of a response (also one that
  * is spread over several CAN frames), `evaluate` does both for one reading.
  * The connection to the dongle stays in obd-core.js, which loads after this file.
  */
@@ -55,9 +55,18 @@ window.joltObdDecode = (function () {
     };
   }
 
-  /* Split a response into payload bytes. The acknowledgement is `62` + the
-   * two bytes of the data identifier; everything before it is sender
-   * identifier and ISO-TP header, everything after it is payload. */
+  /* The acknowledgement of a request: the service byte plus 0x40, then the
+   * rest of the request unchanged. `22028C` is answered with `62028C`
+   * (UDS), `015B` with `415B` (standard OBD2). */
+  function acknowledgement(request) {
+    const service = parseInt(request.slice(0, 2), 16) + 0x40;
+    return service.toString(16).toUpperCase().padStart(2, "0")
+           + request.slice(2).toUpperCase();
+  }
+
+  /* Split a response into payload bytes. Everything before the
+   * acknowledgement is sender identifier and ISO-TP header, everything after
+   * it is payload. */
   /* Reassemble a response that does not fit into one CAN frame.
    *
    * A frame holds eight bytes. Longer responses are sent by the control
@@ -100,10 +109,10 @@ window.joltObdDecode = (function () {
     return parts.join("").slice(0, expected * 2);
   }
 
-  function payload_bytes(raw, did) {
+  function payload_bytes(raw, request) {
     const joined = multiframe(raw);
     const hex = (joined || raw.replace(/[^0-9A-Fa-f]/g, "")).toUpperCase();
-    const ack = "62" + did.slice(2).toUpperCase();
+    const ack = acknowledgement(request);
     const index = hex.indexOf(ack);
     if (index < 0) return null;
     const rest = hex.slice(index + ack.length);
