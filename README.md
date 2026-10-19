@@ -320,6 +320,52 @@ The `jolt-backup` container writes a gzipped `pg_dump` to
 (`BACKUP_KEEP_DAYS`). Restore: `gunzip -c jolt-<date>.sql.gz | docker exec -i jolt-db psql -U jolt jolt`
 into an empty database.
 
+### Public access (Cloudflare Tunnel on the host)
+
+The safest way to reach jolt from outside is to open **no port** for it: a
+`cloudflared` container next to the app dials out to Cloudflare, and Cloudflare
+forwards the requests through that connection. The host keeps no listening
+port for jolt that anyone could scan, and Cloudflare's filters and rate limits
+sit in front. `docker-compose.tunnel.yml` adds the tunnel and hardens the app
+container (read-only root filesystem, no capabilities, no new privileges,
+process and memory limits). It is used on top of the main file.
+
+1. In Cloudflare, Zero Trust, Networks, Tunnels: create a tunnel (type
+   *Cloudflared*), call it `jolt` and copy its token.
+2. In the project folder on the host, add to `.env`:
+   `TUNNEL_TOKEN=<token>` and `TRUSTED_PROXIES=<network of the compose project>`.
+   The network is `docker network inspect jolt_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`
+   (for example `172.24.0.0/16`). Without it every visitor would count as the
+   tunnel container and share one rate limit.
+3. Copy `docker-compose.tunnel.yml` next to `docker-compose.yml` and start both,
+   **not during a trip** (the app restarts):
+   `docker compose -f docker-compose.yml -f docker-compose.tunnel.yml up -d --no-deps jolt-app cloudflared`
+4. In the tunnel, add a public hostname: `jolt.<your domain>`, type `HTTP`,
+   URL `jolt-app:8000`. A hostname can belong to one tunnel only; if it still
+   points at an old tunnel (for example on another machine), remove it there
+   first. The optional hostname for Watchtower's `/v1/update` (see above) goes
+   the same way: URL `watchtower:8080`, behind a Cloudflare Access service token.
+5. Cloudflare settings: *Always Use HTTPS* on, minimum TLS version 1.2, and a
+   rate limiting rule for the path `/api/login` (the app counts failures per
+   address as well, this is the second wall). *Bot Fight Mode* can turn away
+   loggers that are not browsers (`/api/live/report`); if you switch it on,
+   test the logger afterwards.
+6. Check: `curl -sI https://jolt.<your domain>/` answers with the security
+   headers, `https://jolt.<your domain>/api/docs` with 404, and a wrong
+   password from your phone does not lock out a second device on another
+   network (each real address has its own counter).
+
+Keep the published port of `jolt-app` private (`<private address>:8322:8000`,
+or no `ports` entry at all). Docker publishes ports **past the host firewall**:
+`ufw` does not see them, and `0.0.0.0:8322` would be open to the whole
+internet. `docker ps` shows which ports are bound to `0.0.0.0`; anything else
+on the same host (a database, a dashboard) should be bound to `127.0.0.1` or to
+a VPN address the same way.
+
+The secrets matter more once the app is public. `APP_PASSWORT` and the
+database password should be long random values (20 characters or more), for
+example `openssl rand -base64 24`.
+
 ### Import chargers
 
 Download the file „Ladesäulenregister" (CSV) from the [charging station map of the
@@ -379,7 +425,8 @@ installation.
 | `VAPID_PRIVATE_KEY` | Web Push. If missing, notifications are off. |
 | `VAPID_PUBLIC_KEY` | The same key, public half — the browser needs it. |
 | `VAPID_SUBJECT` | `mailto:` or `https:` — whom the push service can reach. |
-| `TRUSTED_PROXIES` | IPs of the reverse proxy that may set `X-Forwarded-For`. |
+| `TRUSTED_PROXIES` | Addresses or networks (`172.24.0.0/16`) of the reverse proxy or tunnel that may set `X-Forwarded-For`. |
+| `TUNNEL_TOKEN` | Cloudflare tunnel token, used by `docker-compose.tunnel.yml`. |
 | `RATE_LIMIT_PER_MIN` | Requests per minute and IP (default 120). |
 | `POINTS_LIMIT_PER_MIN` | The same for the measurement paths (`/api/live/report`, `/{id}/point(s)`), default 600. |
 | `WS_LIMIT_PER_MIN` | New WebSocket connections per minute and IP (default 30). |

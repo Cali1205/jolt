@@ -123,6 +123,23 @@ def part_limit() -> None:
            "mit JSON-Meldung, wie der Rest der Schnittstelle")
     verify("X-Content-Type-Options" in response.headers,
            "und die Security-Header sitzen auch an der abgewiesenen Antwort")
+    verify("geolocation=(self)" in response.headers.get("Permissions-Policy", "")
+           and "camera=()" in response.headers.get("Permissions-Policy", ""),
+           "die Seite darf nur Standort und Bluetooth vom Geraet verlangen")
+
+    # Starlette rebuilt the URL from the Host header: "x/y" moved the path, and
+    # the checks that look at the path (limit, body size) were skipped.
+    security._hit.clear()
+    forged = {"Host": "x/y"}
+    codes = [client.get("/api/status", headers=forged).status_code for _ in range(8)]
+    verify(codes[:5] == [200] * 5 and all(c == 429 for c in codes[5:]),
+           "ein gefaelschter Host-Header umgeht das Anfrage-Limit nicht", str(codes))
+    big = "a" * (security.MAX_BODY_BYTES + 10)
+    refused = client.post("/api/login", content=big,
+                          headers={"Host": "x/y", "Content-Type": "application/json"})
+    verify(refused.status_code == 413,
+           "und auch nicht die Groessengrenze fuer Anfragen", str(refused.status_code))
+    security._hit.clear()
 
     security.GLOBAL_MAX = 100000
 
@@ -257,6 +274,16 @@ def part_client_ip() -> None:
                "von einem Absender, der kein Proxy ist, wird der Header ignoriert")
         verify(ip(_Request("172.18.0.2")) == "172.18.0.2",
                "ohne Header gilt die Verbindungsadresse")
+        security.TRUSTED_PROXIES.clear()
+        security.TRUSTED_PROXIES.update({"172.24.0.0/16", "nonsense"})
+        verify(ip(_Request("172.24.0.5", "6.6.6.6, 203.0.113.9")) == "203.0.113.9",
+               "ein Netz als Eintrag (Tunnel-Container mit wechselnder Adresse) gilt als vertraut")
+        verify(ip(_Request("172.24.0.5", "203.0.113.9, 172.24.0.77")) == "203.0.113.9",
+               "auch am Ende der Kette wird ein Teilnehmer des Netzes uebersprungen")
+        verify(ip(_Request("172.25.0.5", "6.6.6.6")) == "172.25.0.5",
+               "ein Absender ausserhalb des Netzes wird nicht vertraut")
+        verify(ip(_Request("2001:db8::1", "6.6.6.6")) == "2001:db8::1",
+               "eine IPv6-Adresse bleibt gegen ein IPv4-Netz unvertraut - und ein kaputter Eintrag stoert nicht")
     finally:
         security.TRUSTED_PROXIES.clear()
         security.TRUSTED_PROXIES.update(old)
