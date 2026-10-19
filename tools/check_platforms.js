@@ -20,11 +20,11 @@ const vm = require("vm");
 const FRONTEND = path.join(__dirname, "..", "frontend");
 const BASELINE = path.join(__dirname, "fixtures", "meb_platform_baseline.json");
 
-function load() {
+function load(bluetooth) {
   const storage = {};
   const timeframe = {
     console, TextEncoder, TextDecoder, DataView, Uint8Array,
-    setTimeout, clearTimeout, navigator: {},
+    setTimeout, clearTimeout, navigator: { bluetooth },
     localStorage: {
       getItem: (k) => (k in storage ? storage[k] : null),
       setItem: (k, v) => { storage[k] = String(v); },
@@ -137,8 +137,83 @@ check(O.usePlatform("gibt-es-nicht") === true && O.platform().id === "meb",
 check(O.platforms().map((p) => p.id).sort().join() === Object.keys(registry).sort().join(),
       "platforms() listet nicht alle Profile");
 
-if (failure) {
-  console.log(`\n${failure} Fehler.`);
-  process.exit(1);
+/* An ELM327 that answers what a car of the platform would answer and says
+ * OK to every AT command. `sent` collects what the app put on the wire. */
+function dongle(sent, responses) {
+  const listener = [];
+  const ch = {
+    uuid: "fff1",
+    properties: { write: true, writeWithoutResponse: true, notify: true },
+    addEventListener(t, fn) { listener.push(fn); },
+    removeEventListener() {},
+    async startNotifications() {},
+    async writeValueWithoutResponse(d) {
+      const t = new TextDecoder().decode(d).trim();
+      sent.push(t);
+      const a = responses[t] !== undefined ? responses[t]
+        : (t.startsWith("AT") ? "OK" : "NO DATA");
+      setTimeout(() => {
+        const val = new DataView(new TextEncoder().encode(a + "\r\r>").buffer);
+        for (const fn of listener) fn({ target: { value: val } });
+      }, 1);
+    },
+  };
+  const service = { uuid: "fff0", async getCharacteristics() { return [ch]; } };
+  const device = {
+    name: "IOS-Vlink", addEventListener() {},
+    gatt: { connected: true,
+      async connect() { return { async getPrimaryServices() { return [service]; } }; },
+      disconnect() { this.connected = false; } },
+  };
+  return { requestDevice: async () => device, getDevices: async () => [device] };
 }
-console.log("\nAlles in Ordnung.");
+
+async function main() {
+  console.log("\nDongle gegen simulierten Adapter:");
+  const sent = [];
+  const car = {
+    "015B": "7E8 03 41 5B 80", "010D": "7E8 03 41 0D 32",
+    "0146": "7E8 03 41 46 5A", "01A6": "7E8 06 41 A6 00 00 30 39",
+    "0142": "7E8 04 41 42 38 A4",
+    "22028C": "17FE007B 04 62028C B4",
+  };
+  const g = load(dongle(sent, car));
+  const D = g.joltObd;
+  await D.link();
+
+  D.usePlatform("obd2");
+  sent.length = 0;
+  await D.handshake();
+  check(same(sent, registry.obd2.handshake), `obd2: Handshake ${sent.join(",")}`);
+  sent.length = 0;
+  const soc = await D.readSoc();
+  check(same(sent, ["ATSH7DF", "ATCRA", "015B"]),
+        `obd2: readSoc sendet ${sent.join(",")} (kein ATCP, ATCRA leer)`);
+  check(soc && soc.raw === 128 && Math.abs(soc.bms - 50.196) < 0.01 && soc.hmi === soc.bms,
+        `obd2: readSoc liefert ${JSON.stringify(soc)}`);
+  const record = await D.readRecord(0);
+  check(record.soc_raw === 128 && record.speed_kmh === 50 && record.odometer_km === 1234.5
+        && record.outside_temp_c === 50 && record.aux12_v === 14.5,
+        `obd2: Satz ${JSON.stringify(record)}`);
+
+  D.usePlatform("meb");
+  sent.length = 0;
+  await D.handshake();
+  check(same(sent, registry.meb.handshake), `meb: Handshake ${sent.join(",")}`);
+  sent.length = 0;
+  const mebSoc = await D.readSoc();
+  check(same(sent, ["ATCP17", "ATSHFC007B", "ATFCSH17FC007B", "ATFCSD300000",
+                    "ATFCSM1", "ATCRA17FE007B", "22028C"]),
+        `meb: readSoc sendet ${sent.join(",")}`);
+  check(mebSoc && mebSoc.raw === 180 && mebSoc.bms === 72
+        && Math.abs(mebSoc.hmi - 73.4) < 0.05,
+        `meb: 0xB4 gibt 72,0 % brutto und 73,4 % Anzeige: ${JSON.stringify(mebSoc)}`);
+}
+
+main().then(() => {
+  if (failure) {
+    console.log(`\n${failure} Fehler.`);
+    process.exit(1);
+  }
+  console.log("\nAlles in Ordnung.");
+});
