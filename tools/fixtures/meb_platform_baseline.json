@@ -1,0 +1,5411 @@
+{
+ "addresses": {
+  "BMS": {
+   "cp": "17",
+   "sh": "FC007B",
+   "cra": "17FE007B",
+   "fcsh": "17FC007B"
+  },
+  "CLIMATE": {
+   "cp": "00",
+   "sh": "746",
+   "cra": "7B0",
+   "fcsh": "746",
+   "trace_log": "6"
+  },
+  "AKKU11": {
+   "cp": "00",
+   "sh": "710",
+   "cra": "77A",
+   "fcsh": "710",
+   "trace_log": "6"
+  },
+  "VEHICLE": {
+   "cp": "17",
+   "sh": "FC0076",
+   "cra": "17FE0076",
+   "fcsh": "17FC0076"
+  },
+  "DCDC": {
+   "cp": "17",
+   "sh": "FC00B9",
+   "cra": "17FE00B9",
+   "fcsh": "17FC00B9"
+  },
+  "CHARGER": {
+   "cp": "00",
+   "sh": "744",
+   "cra": "7AE",
+   "fcsh": "744",
+   "trace_log": "6"
+  }
+ },
+ "rows": [
+  {
+   "order": 0,
+   "name": "soc_raw",
+   "did": "22028C",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": true,
+   "spec": {
+    "name": "soc_raw",
+    "title": "Rohwert SoC",
+    "unit": null,
+    "put": 0,
+    "did": "22028C",
+    "address": "BMS",
+    "required": true,
+    "downhill": 0,
+    "len_total": 1
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 02 8C 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1
+    },
+    {
+     "response": "17FE007B 10 1B 62 02 8C FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 255
+    },
+    {
+     "response": "17FE007B 10 1B 62 02 8C 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 02 8C B4",
+     "value": 180
+    },
+    {
+     "response": "17FE007B 10 13 62 02 8C F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 247
+    },
+    {
+     "response": "17FE007B 10 1B 62 02 8C 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 11
+    }
+   ]
+  },
+  {
+   "order": 1,
+   "name": "voltage_v",
+   "did": "221E3B",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "voltage_v",
+    "title": "Spannung",
+    "unit": "V",
+    "put": 1,
+    "did": "221E3B",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 4
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 3B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 64.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 16383.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 3B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 3B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 15813
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 716
+    }
+   ]
+  },
+  {
+   "order": 2,
+   "name": "current_a",
+   "did": "221E3D",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "current_a",
+    "title": "Strom",
+    "unit": "A",
+    "put": 1,
+    "did": "221E3D",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 4,
+    "pre_offset": -150000,
+    "divider": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 3D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 167590.6
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 42948172.95
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -1500
+    },
+    {
+     "response": "17FE007B 04 62 1E 3D B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 3D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 41451407.65
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 3D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 1875669.86
+    }
+   ]
+  },
+  {
+   "order": 3,
+   "name": "discharge_kwh",
+   "did": "221E32",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "discharge_kwh",
+    "title": "Entladen gesamt",
+    "unit": "kWh",
+    "put": 2,
+    "did": "221E32",
+    "address": "BMS",
+    "downhill": 12,
+    "len_total": 4,
+    "sign": true,
+    "divider": 8583.07,
+    "amount": true,
+    "also": [
+     {
+      "name": "charged_kwh",
+      "title": "Geladen gesamt",
+      "unit": "kWh",
+      "put": 2,
+      "downhill": 8,
+      "len_total": 4,
+      "divider": 8583.07
+     }
+    ]
+   },
+   "also": [
+    "charged_kwh"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 32 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 25518.27819183579,
+      "further": {
+       "charged_kwh": 17668.868
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 32 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": 0.0001165084288022817,
+      "further": {
+       "charged_kwh": 500399.891
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 32 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "charged_kwh": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 1E 32 B4",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 32 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": 17438.57745538601,
+      "further": {
+       "charged_kwh": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 32 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": 109614.6728385065,
+      "further": {
+       "charged_kwh": 100364.712
+      }
+     }
+    }
+   ]
+  },
+  {
+   "order": 4,
+   "name": "charge_limit_a",
+   "did": "221E1B",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "charge_limit_a",
+    "title": "Ladegrenze",
+    "unit": "A",
+    "put": 0,
+    "did": "221E1B",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 5
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 1B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 51.6
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 13107
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 1B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 1B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 12650.4
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 572.8
+    }
+   ]
+  },
+  {
+   "order": 5,
+   "name": "mode",
+   "did": "227448",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "mode",
+    "title": "Betriebsart",
+    "unit": null,
+    "put": 0,
+    "did": "227448",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 1
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 74 48 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 48 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 255
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 48 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 74 48 B4",
+     "value": 180
+    },
+    {
+     "response": "17FE007B 10 13 62 74 48 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 247
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 48 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 11
+    }
+   ]
+  },
+  {
+   "order": 6,
+   "name": "ptc_current_a",
+   "did": "221620",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "ptc_current_a",
+    "title": "Batterieheizung",
+    "unit": "A",
+    "put": 1,
+    "did": "221620",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 4,
+    "min": 0,
+    "max": 40
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 16 20 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.25
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 20 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 20 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 16 20 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 16 20 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 20 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 2.75
+    }
+   ]
+  },
+  {
+   "order": 7,
+   "name": "speed_kmh",
+   "did": "22F40D",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "speed_kmh",
+    "title": "Tempo",
+    "unit": "km/h",
+    "put": 0,
+    "did": "22F40D",
+    "address": "BMS",
+    "downhill": 0,
+    "len_total": 1
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 F4 0D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1
+    },
+    {
+     "response": "17FE007B 10 1B 62 F4 0D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 255
+    },
+    {
+     "response": "17FE007B 10 1B 62 F4 0D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 F4 0D B4",
+     "value": 180
+    },
+    {
+     "response": "17FE007B 10 13 62 F4 0D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 247
+    },
+    {
+     "response": "17FE007B 10 1B 62 F4 0D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 11
+    }
+   ]
+  },
+  {
+   "order": 8,
+   "name": "aux_load_kw",
+   "did": "220364",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "aux_load_kw",
+    "title": "Nebenverbraucher",
+    "unit": "kW",
+    "put": 2,
+    "did": "220364",
+    "address": "VEHICLE",
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 10
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 03 64 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 64 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 6553.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 64 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 03 64 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 03 64 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 6325.2
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 64 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 286.4
+    }
+   ]
+  },
+  {
+   "order": 9,
+   "name": "odometer_km",
+   "did": "22295A",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "odometer_km",
+    "title": "Kilometerstand",
+    "unit": "km",
+    "put": 0,
+    "did": "22295A",
+    "address": "VEHICLE",
+    "downhill": 0,
+    "len_total": 3
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 29 5A 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 66051
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 5A FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 16777215
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 5A 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 29 5A B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 29 5A F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 16192542
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 5A 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 733269
+    }
+   ]
+  },
+  {
+   "order": 10,
+   "name": "dcdc_current_a",
+   "did": "22465B",
+   "address": "DCDC",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC00B9",
+    "cra": "17FE00B9",
+    "fcsh": "17FC00B9"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "dcdc_current_a",
+    "title": "DC/DC-Strom",
+    "unit": "A",
+    "put": 1,
+    "did": "22465B",
+    "address": "DCDC",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 16
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 46 5B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 16.125
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 4095.9375
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 46 5B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 46 5B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 3953.25
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 179
+    }
+   ]
+  },
+  {
+   "order": 11,
+   "name": "battery_kwh",
+   "did": "222AB2",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 40,
+   "required": false,
+   "spec": {
+    "name": "battery_kwh",
+    "title": "Akkukapazität",
+    "unit": "kWh",
+    "put": 1,
+    "did": "222AB2",
+    "address": "AKKU11",
+    "rarely": 40,
+    "downhill": 0,
+    "len_total": 4,
+    "divider": 1310770,
+    "min": 10,
+    "max": 200
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A B2 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 12.9000968896145
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B2 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B2 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": null
+    },
+    {
+     "response": "17FE007B 04 62 2A B2 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 2A B2 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B2 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 143.21123156617867
+    }
+   ]
+  },
+  {
+   "order": 12,
+   "name": "range_km",
+   "did": "222AB6",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "range_km",
+    "title": "Reichweite (Auto)",
+    "unit": "km",
+    "put": 0,
+    "did": "222AB6",
+    "address": "AKKU11",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "min": 0,
+    "max": 999
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A B6 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 258
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B6 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B6 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 2A B6 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 2A B6 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B6 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 13,
+   "name": "batterie_c",
+   "did": "222A0B",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "batterie_c",
+    "title": "Batterietemperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "222A0B",
+    "address": "BMS",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 2,
+    "offset": -40
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A 0B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -39.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 87.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 2A 0B B4",
+     "value": 50
+    },
+    {
+     "response": "17FE007B 10 13 62 2A 0B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 83.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -34.5
+    }
+   ]
+  },
+  {
+   "order": 14,
+   "name": "compressor_w",
+   "did": "220800",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 4,
+   "required": false,
+   "spec": {
+    "name": "compressor_w",
+    "title": "Klimakompressor",
+    "unit": "W",
+    "put": 0,
+    "did": "220800",
+    "address": "CLIMATE",
+    "rarely": 4,
+    "downhill": 5,
+    "len_total": 2,
+    "min": 0,
+    "max": 8000,
+    "also": [
+     {
+      "name": "compressor_upm",
+      "title": "Kompressor-Drehzahl",
+      "unit": "/min",
+      "put": 0,
+      "downhill": 3,
+      "len_total": 2
+     },
+     {
+      "name": "compressor_at",
+      "title": "Kompressor an",
+      "unit": null,
+      "put": 0,
+      "downhill": 0,
+      "len_total": 1,
+      "mask": 1
+     }
+    ]
+   },
+   "also": [
+    "compressor_upm",
+    "compressor_at"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 08 00 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 1543,
+      "further": {
+       "compressor_upm": 1029,
+       "compressor_at": 1
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 00 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {
+       "compressor_upm": 65535,
+       "compressor_at": 1
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 00 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "compressor_upm": 0,
+       "compressor_at": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 08 00 B4",
+     "value": {
+      "val": null,
+      "further": {
+       "compressor_at": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 08 00 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": 0,
+      "further": {
+       "compressor_upm": 3328,
+       "compressor_at": 1
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 00 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": null,
+      "further": {
+       "compressor_upm": 31391,
+       "compressor_at": 1
+      }
+     }
+    }
+   ]
+  },
+  {
+   "order": 15,
+   "name": "batt_temp_max_c",
+   "did": "221E0E",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "batt_temp_max_c",
+    "title": "Batterie heissester Punkt",
+    "unit": "°C",
+    "put": 1,
+    "did": "221E0E",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 64,
+    "min": -40,
+    "max": 90
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 0E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 4.03125
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 0E B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 0E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 44.75
+    }
+   ]
+  },
+  {
+   "order": 16,
+   "name": "batt_temp_min_c",
+   "did": "221E0F",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "batt_temp_min_c",
+    "title": "Batterie kaeltester Punkt",
+    "unit": "°C",
+    "put": 1,
+    "did": "221E0F",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 64,
+    "min": -40,
+    "max": 90
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 0F 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 4.03125
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0F FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0F 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 0F B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 0F F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 0F 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 44.75
+    }
+   ]
+  },
+  {
+   "order": 17,
+   "name": "coolant_in_c",
+   "did": "22189D",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "coolant_in_c",
+    "title": "Kuehlmittel Eingang",
+    "unit": "°C",
+    "put": 1,
+    "did": "22189D",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 2,
+    "len_total": 2,
+    "divider": 64,
+    "min": -40,
+    "max": 90,
+    "also": [
+     {
+      "name": "coolant_out_c",
+      "title": "Kuehlmittel Ausgang",
+      "unit": "°C",
+      "put": 1,
+      "downhill": 0,
+      "len_total": 2,
+      "divider": 64,
+      "min": -40,
+      "max": 90
+     }
+    ]
+   },
+   "also": [
+    "coolant_out_c"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 18 9D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 12.0625,
+      "further": {
+       "coolant_out_c": 4.031
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "coolant_out_c": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 18 9D B4",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 18 9D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": null,
+      "further": {
+       "coolant_out_c": 44.75
+      }
+     }
+    }
+   ]
+  },
+  {
+   "order": 18,
+   "name": "circ_pump_pct",
+   "did": "22743B",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "circ_pump_pct",
+    "title": "Umwaelzpumpe Batterie",
+    "unit": "%",
+    "put": 0,
+    "did": "22743B",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 1,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 74 3B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 3B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 3B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 74 3B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 74 3B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 3B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 11
+    }
+   ]
+  },
+  {
+   "order": 19,
+   "name": "discharge_limit_a",
+   "did": "221E1C",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "discharge_limit_a",
+    "title": "Entladegrenze",
+    "unit": "A",
+    "put": 0,
+    "did": "221E1C",
+    "address": "BMS",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 5
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 1C 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 51.6
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1C FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 13107
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1C 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 1C B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 1C F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 12650.4
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 1C 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 572.8
+    }
+   ]
+  },
+  {
+   "order": 20,
+   "name": "gear_raw",
+   "did": "22210E",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 2,
+   "required": false,
+   "spec": {
+    "name": "gear_raw",
+    "title": "Fahrstufe",
+    "unit": null,
+    "put": 0,
+    "did": "22210E",
+    "address": "VEHICLE",
+    "rarely": 2,
+    "downhill": 1,
+    "len_total": 1
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 21 0E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2
+    },
+    {
+     "response": "17FE007B 10 1B 62 21 0E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 255
+    },
+    {
+     "response": "17FE007B 10 1B 62 21 0E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 21 0E B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 21 0E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 20
+    },
+    {
+     "response": "17FE007B 10 1B 62 21 0E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 48
+    }
+   ]
+  },
+  {
+   "order": 21,
+   "name": "cell_max_v",
+   "did": "221E33",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "cell_max_v",
+    "title": "Zelle hoechste Spannung",
+    "unit": "V",
+    "put": 3,
+    "did": "221E33",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 4096,
+    "min": 2,
+    "max": 4.5
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 33 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 33 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 33 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": null
+    },
+    {
+     "response": "17FE007B 04 62 1E 33 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 33 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 33 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 22,
+   "name": "cell_min_v",
+   "did": "221E34",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "cell_min_v",
+    "title": "Zelle niedrigste Spannung",
+    "unit": "V",
+    "put": 3,
+    "did": "221E34",
+    "address": "BMS",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 4096,
+    "min": 2,
+    "max": 4.5
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 34 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 34 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 34 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": null
+    },
+    {
+     "response": "17FE007B 04 62 1E 34 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 34 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 34 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 23,
+   "name": "torque_rear_nm",
+   "did": "22033B",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 0,
+   "required": false,
+   "spec": {
+    "name": "torque_rear_nm",
+    "title": "Drehmoment hinten",
+    "unit": "Nm",
+    "put": 0,
+    "did": "22033B",
+    "address": "VEHICLE",
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "min": -1500,
+    "max": 1500
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 03 3B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 258
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 3B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -1
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 3B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 03 3B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 03 3B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 3B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 24,
+   "name": "charging_state_raw",
+   "did": "2215D5",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "charging_state_raw",
+    "title": "Ladezustand",
+    "unit": null,
+    "put": 0,
+    "did": "2215D5",
+    "address": "AKKU11",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 1
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 15 D5 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D5 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 255
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D5 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 15 D5 B4",
+     "value": 180
+    },
+    {
+     "response": "17FE007B 10 13 62 15 D5 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 247
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D5 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 11
+    }
+   ]
+  },
+  {
+   "order": 25,
+   "name": "energy_content_kwh",
+   "did": "222AB8",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "energy_content_kwh",
+    "title": "Energieinhalt Akku",
+    "unit": "kWh",
+    "put": 1,
+    "did": "222AB8",
+    "address": "AKKU11",
+    "rarely": 10,
+    "downhill": 2,
+    "len_total": 2,
+    "divider": 40,
+    "min": 0,
+    "max": 120
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A B8 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 19.3
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B8 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B8 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 2A B8 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 2A B8 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B8 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 26,
+   "name": "avg_csmp_cat0",
+   "did": "222AB7",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 40,
+   "required": false,
+   "spec": {
+    "name": "avg_csmp_cat0",
+    "title": "Verbrauch Auto Kat. 0",
+    "unit": null,
+    "put": 1,
+    "did": "222AB7",
+    "address": "AKKU11",
+    "rarely": 40,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 10,
+    "min": 0,
+    "max": 100,
+    "also": [
+     {
+      "name": "avg_csmp_cat1",
+      "title": "Verbrauch Auto Kat. 1",
+      "unit": null,
+      "put": 1,
+      "downhill": 2,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "avg_csmp_cat2",
+      "title": "Verbrauch Auto Kat. 2",
+      "unit": null,
+      "put": 1,
+      "downhill": 4,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "avg_csmp_cat3",
+      "title": "Verbrauch Auto Kat. 3",
+      "unit": null,
+      "put": 1,
+      "downhill": 6,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "avg_csmp_cat4",
+      "title": "Verbrauch Auto Kat. 4",
+      "unit": null,
+      "put": 1,
+      "downhill": 8,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "avg_csmp_cat5",
+      "title": "Verbrauch Auto Kat. 5",
+      "unit": null,
+      "put": 1,
+      "downhill": 10,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "avg_csmp_cat6",
+      "title": "Verbrauch Auto Kat. 6",
+      "unit": null,
+      "put": 1,
+      "downhill": 12,
+      "len_total": 2,
+      "divider": 10,
+      "min": 0,
+      "max": 100
+     }
+    ]
+   },
+   "also": [
+    "avg_csmp_cat1",
+    "avg_csmp_cat2",
+    "avg_csmp_cat3",
+    "avg_csmp_cat4",
+    "avg_csmp_cat5",
+    "avg_csmp_cat6"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A B7 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 25.8,
+      "further": {
+       "avg_csmp_cat1": 77.2
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B7 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B7 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "avg_csmp_cat1": 0,
+       "avg_csmp_cat2": 0,
+       "avg_csmp_cat3": 0,
+       "avg_csmp_cat4": 0,
+       "avg_csmp_cat5": 0,
+       "avg_csmp_cat6": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 2A B7 B4",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 2A B7 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": null,
+      "further": {
+       "avg_csmp_cat2": 0,
+       "avg_csmp_cat3": 0,
+       "avg_csmp_cat4": 0,
+       "avg_csmp_cat5": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A B7 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    }
+   ]
+  },
+  {
+   "order": 27,
+   "name": "soc_fine_pct",
+   "did": "223DEF",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 2,
+   "required": false,
+   "spec": {
+    "name": "soc_fine_pct",
+    "title": "Ladestand fein",
+    "unit": "%",
+    "put": 2,
+    "did": "223DEF",
+    "address": "VEHICLE",
+    "rarely": 2,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 100,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 3D EF 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D EF FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D EF 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 3D EF B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 3D EF F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D EF 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 28,
+   "name": "motor_batt_current_a",
+   "did": "22035E",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 2,
+   "required": false,
+   "spec": {
+    "name": "motor_batt_current_a",
+    "title": "Batteriestrom Motorsteuerung",
+    "unit": "A",
+    "put": 1,
+    "did": "22035E",
+    "address": "VEHICLE",
+    "rarely": 2,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 10,
+    "min": -1000,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 03 5E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 5E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 5E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 03 5E B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 03 5E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -228.4
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 5E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 286.4
+    }
+   ]
+  },
+  {
+   "order": 29,
+   "name": "hv_aux_current_a",
+   "did": "220360",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 5,
+   "required": false,
+   "spec": {
+    "name": "hv_aux_current_a",
+    "title": "HV-Nebenverbraucher Strom",
+    "unit": "A",
+    "put": 2,
+    "did": "220360",
+    "address": "VEHICLE",
+    "rarely": 5,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 100,
+    "min": -100,
+    "max": 300
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 03 60 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 60 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.01
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 60 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 03 60 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 03 60 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -22.84
+    },
+    {
+     "response": "17FE007B 10 1B 62 03 60 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 30,
+   "name": "compressor_rpm_b",
+   "did": "222603",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "compressor_rpm_b",
+    "title": "Kompressor Drehzahl (2226)",
+    "unit": "1/min",
+    "put": 0,
+    "did": "222603",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 1,
+    "factor": 100,
+    "min": 0,
+    "max": 10000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 03 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 100
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 03 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 03 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 03 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 03 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 03 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 1100
+    }
+   ]
+  },
+  {
+   "order": 31,
+   "name": "refrig_p_bar",
+   "did": "222605",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "refrig_p_bar",
+    "title": "Kältemitteldruck",
+    "unit": "bar",
+    "put": 1,
+    "did": "222605",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 1,
+    "factor": 0.2,
+    "min": 0,
+    "max": 60
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 05 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.2
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 05 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 51
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 05 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 05 B4",
+     "value": 36
+    },
+    {
+     "response": "17FE007B 10 13 62 26 05 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 49.400000000000006
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 05 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 2.2
+    }
+   ]
+  },
+  {
+   "order": 32,
+   "name": "refrig_p2_bar",
+   "did": "224EEF",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "refrig_p2_bar",
+    "title": "Kältemitteldruck Fühler 1",
+    "unit": "bar",
+    "put": 2,
+    "did": "224EEF",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 2,
+    "factor": 0.0088,
+    "min": 0,
+    "max": 60,
+    "also": [
+     {
+      "name": "refrig_t_c",
+      "title": "Kältemitteltemperatur Fühler 1",
+      "unit": "°C",
+      "put": 1,
+      "downhill": 2,
+      "len_total": 2,
+      "divider": 10,
+      "offset": -40,
+      "min": -40,
+      "max": 150
+     }
+    ]
+   },
+   "also": [
+    "refrig_t_c"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 4E EF 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 2.2704,
+      "further": {
+       "refrig_t_c": 37.2
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 4E EF FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 4E EF 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "refrig_t_c": -40
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 4E EF B4",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 4E EF F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 4E EF 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": 25.203200000000002,
+      "further": {}
+     }
+    }
+   ]
+  },
+  {
+   "order": 33,
+   "name": "evaporator_t_c",
+   "did": "222612",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "evaporator_t_c",
+    "title": "Verdampfer Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "222612",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 10,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 12 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 12 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 12 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 12 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 12 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 12 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 34,
+   "name": "aux12_v",
+   "did": "222AF7",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 20,
+   "required": false,
+   "spec": {
+    "name": "aux12_v",
+    "title": "12-V-Batterie Spannung",
+    "unit": "V",
+    "put": 2,
+    "did": "222AF7",
+    "address": "AKKU11",
+    "rarely": 20,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 1000,
+    "offset": 4,
+    "min": 8,
+    "max": 17,
+    "also": [
+     {
+      "name": "aux12_a",
+      "title": "12-V-Batterie Strom",
+      "unit": "A",
+      "put": 2,
+      "downhill": 2,
+      "len_total": 4,
+      "sign": true,
+      "divider": 1000,
+      "min": -200,
+      "max": 200
+     },
+     {
+      "name": "aux12_soc_pct",
+      "title": "12-V-Batterie Ladestand",
+      "unit": "%",
+      "put": 0,
+      "downhill": 7,
+      "len_total": 1,
+      "min": 0,
+      "max": 100
+     },
+     {
+      "name": "aux12_t_c",
+      "title": "12-V-Batterie Temperatur",
+      "unit": "°C",
+      "put": 0,
+      "downhill": 8,
+      "len_total": 1,
+      "offset": -40,
+      "min": -40,
+      "max": 100
+     }
+    ]
+   },
+   "also": [
+    "aux12_a",
+    "aux12_soc_pct",
+    "aux12_t_c"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A F7 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": null,
+      "further": {
+       "aux12_soc_pct": 8,
+       "aux12_t_c": -31
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A F7 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {
+       "aux12_a": -0.001
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A F7 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": null,
+      "further": {
+       "aux12_a": 0,
+       "aux12_soc_pct": 0,
+       "aux12_t_c": -40
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 2A F7 B4",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 2A F7 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": null,
+      "further": {
+       "aux12_soc_pct": 0,
+       "aux12_t_c": -40
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A F7 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": null,
+      "further": {
+       "aux12_soc_pct": 14,
+       "aux12_t_c": 11
+      }
+     }
+    }
+   ]
+  },
+  {
+   "order": 35,
+   "name": "dcdc_low_v",
+   "did": "222A53",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "dcdc_low_v",
+    "title": "DC/DC Spannung niederseitig",
+    "unit": "V",
+    "put": 1,
+    "did": "222A53",
+    "address": "AKKU11",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 10,
+    "min": 0,
+    "max": 20,
+    "also": [
+     {
+      "name": "dcdc2_current_a",
+      "title": "DC/DC Strom (2)",
+      "unit": "A",
+      "put": 1,
+      "downhill": 1,
+      "len_total": 2,
+      "offset": -511,
+      "min": -200,
+      "max": 300
+     }
+    ]
+   },
+   "also": [
+    "dcdc2_current_a"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A 53 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 0.1,
+      "further": {
+       "dcdc2_current_a": 4
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 53 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 53 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 04 62 2A 53 B4",
+     "value": {
+      "val": 18,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 2A 53 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": null,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 53 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": 1.1,
+      "further": {}
+     }
+    }
+   ]
+  },
+  {
+   "order": 36,
+   "name": "dcdc_v",
+   "did": "22465D",
+   "address": "DCDC",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC00B9",
+    "cra": "17FE00B9",
+    "fcsh": "17FC00B9"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "dcdc_v",
+    "title": "DC/DC Spannung",
+    "unit": "V",
+    "put": 2,
+    "did": "22465D",
+    "address": "DCDC",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 512,
+    "min": 8,
+    "max": 17
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 46 5D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": null
+    },
+    {
+     "response": "17FE007B 04 62 46 5D B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 46 5D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 5D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 37,
+   "name": "motor_rpm",
+   "did": "223DF8",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 6,
+   "required": false,
+   "spec": {
+    "name": "motor_rpm",
+    "title": "Motordrehzahl",
+    "unit": "1/min",
+    "put": 0,
+    "did": "223DF8",
+    "address": "VEHICLE",
+    "rarely": 6,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 2,
+    "min": -20000,
+    "max": 20000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 3D F8 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 129
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D F8 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D F8 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 3D F8 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 3D F8 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -1142
+    },
+    {
+     "response": "17FE007B 10 1B 62 3D F8 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 1432
+    }
+   ]
+  },
+  {
+   "order": 38,
+   "name": "accel_ms2",
+   "did": "224539",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 6,
+   "required": false,
+   "spec": {
+    "name": "accel_ms2",
+    "title": "Beschleunigung",
+    "unit": "m/s²",
+    "put": 2,
+    "did": "224539",
+    "address": "VEHICLE",
+    "rarely": 6,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 1000,
+    "min": -30,
+    "max": 30
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 45 39 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.258
+    },
+    {
+     "response": "17FE007B 10 1B 62 45 39 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.001
+    },
+    {
+     "response": "17FE007B 10 1B 62 45 39 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 45 39 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 45 39 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -2.284
+    },
+    {
+     "response": "17FE007B 10 1B 62 45 39 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 2.864
+    }
+   ]
+  },
+  {
+   "order": 39,
+   "name": "torque_req_nm",
+   "did": "2229D4",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 6,
+   "required": false,
+   "spec": {
+    "name": "torque_req_nm",
+    "title": "Drehmoment angefordert",
+    "unit": "Nm",
+    "put": 0,
+    "did": "2229D4",
+    "address": "VEHICLE",
+    "rarely": 6,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 10,
+    "min": -1500,
+    "max": 1500
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 29 D4 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 D4 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 D4 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 29 D4 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 29 D4 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -228.4
+    },
+    {
+     "response": "17FE007B 10 1B 62 29 D4 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 286.4
+    }
+   ]
+  },
+  {
+   "order": 40,
+   "name": "radiator_fan_pct",
+   "did": "222055",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 7,
+   "required": false,
+   "spec": {
+    "name": "radiator_fan_pct",
+    "title": "Kühlerlüfter",
+    "unit": "%",
+    "put": 0,
+    "did": "222055",
+    "address": "VEHICLE",
+    "rarely": 7,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 100,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 20 55 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 20 55 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 20 55 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 20 55 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 20 55 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 20 55 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 41,
+   "name": "coolant_pump_pct",
+   "did": "22276D",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 7,
+   "required": false,
+   "spec": {
+    "name": "coolant_pump_pct",
+    "title": "Kühlmittelpumpe",
+    "unit": "%",
+    "put": 0,
+    "did": "22276D",
+    "address": "VEHICLE",
+    "rarely": 7,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 100,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 27 6D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 27 6D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 27 6D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 27 6D B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 27 6D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 27 6D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 42,
+   "name": "dcdc_coolant_t_c",
+   "did": "2243B8",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 7,
+   "required": false,
+   "spec": {
+    "name": "dcdc_coolant_t_c",
+    "title": "Kühlmittel DC/DC",
+    "unit": "°C",
+    "put": 1,
+    "did": "2243B8",
+    "address": "VEHICLE",
+    "rarely": 7,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 10,
+    "min": -40,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 43 B8 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 43 B8 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 43 B8 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 43 B8 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 43 B8 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 43 B8 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 43,
+   "name": "hv_v_traction",
+   "did": "224675",
+   "address": "VEHICLE",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC0076",
+    "cra": "17FE0076",
+    "fcsh": "17FC0076"
+   },
+   "rarely": 7,
+   "required": false,
+   "spec": {
+    "name": "hv_v_traction",
+    "title": "Batteriespannung Fahrbetrieb",
+    "unit": "V",
+    "put": 1,
+    "did": "224675",
+    "address": "VEHICLE",
+    "rarely": 7,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "divider": 10,
+    "min": 0,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 46 75 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 75 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 75 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 46 75 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 46 75 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 46 75 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 286.4
+    }
+   ]
+  },
+  {
+   "order": 44,
+   "name": "outside_t_cabin_c",
+   "did": "22260A",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "outside_t_cabin_c",
+    "title": "Außentemperatur Kabinenfühler",
+    "unit": "°C",
+    "put": 1,
+    "did": "22260A",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 2,
+    "offset": -50,
+    "min": -50,
+    "max": 80
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 0A 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -49.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0A FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 77.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0A 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -50
+    },
+    {
+     "response": "17FE007B 04 62 26 0A B4",
+     "value": 40
+    },
+    {
+     "response": "17FE007B 10 13 62 26 0A F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 73.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0A 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -44.5
+    }
+   ]
+  },
+  {
+   "order": 45,
+   "name": "air_pollution",
+   "did": "2226ED",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 8,
+   "required": false,
+   "spec": {
+    "name": "air_pollution",
+    "title": "Luftgüte",
+    "unit": null,
+    "put": 1,
+    "did": "2226ED",
+    "address": "CLIMATE",
+    "rarely": 8,
+    "downhill": 0,
+    "len_total": 1,
+    "sign": true,
+    "divider": 10,
+    "min": -30,
+    "max": 30
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 ED 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 ED FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 ED 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 ED B4",
+     "value": -7.6
+    },
+    {
+     "response": "17FE007B 10 13 62 26 ED F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -0.9
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 ED 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 1.1
+    }
+   ]
+  },
+  {
+   "order": 46,
+   "name": "recirc_flap_pct",
+   "did": "22261E",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 9,
+   "required": false,
+   "spec": {
+    "name": "recirc_flap_pct",
+    "title": "Umluftklappe",
+    "unit": "%",
+    "put": 1,
+    "did": "22261E",
+    "address": "CLIMATE",
+    "rarely": 9,
+    "downhill": 2,
+    "len_total": 1,
+    "factor": 0.5,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 1E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 1E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 1E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 1E B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 1E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 15
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 1E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 42.5
+    }
+   ]
+  },
+  {
+   "order": 47,
+   "name": "defl_fl_t_c",
+   "did": "22260C",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 9,
+   "required": false,
+   "spec": {
+    "name": "defl_fl_t_c",
+    "title": "Ausströmer vorne links",
+    "unit": "°C",
+    "put": 1,
+    "did": "22260C",
+    "address": "CLIMATE",
+    "rarely": 9,
+    "downhill": 0,
+    "len_total": 1,
+    "factor": 0.333,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 0C 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.333
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0C FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 84.915
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0C 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 0C B4",
+     "value": 59.940000000000005
+    },
+    {
+     "response": "17FE007B 10 13 62 26 0C F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 82.251
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0C 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 3.6630000000000003
+    }
+   ]
+  },
+  {
+   "order": 48,
+   "name": "defl_fr_t_c",
+   "did": "22260D",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 9,
+   "required": false,
+   "spec": {
+    "name": "defl_fr_t_c",
+    "title": "Ausströmer vorne rechts",
+    "unit": "°C",
+    "put": 1,
+    "did": "22260D",
+    "address": "CLIMATE",
+    "rarely": 9,
+    "downhill": 0,
+    "len_total": 1,
+    "factor": 0.333,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 0D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.333
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 84.915
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 0D B4",
+     "value": 59.940000000000005
+    },
+    {
+     "response": "17FE007B 10 13 62 26 0D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 82.251
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 0D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 3.6630000000000003
+    }
+   ]
+  },
+  {
+   "order": 49,
+   "name": "t_flap_fl_pct",
+   "did": "222622",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 9,
+   "required": false,
+   "spec": {
+    "name": "t_flap_fl_pct",
+    "title": "Temperaturklappe links",
+    "unit": "%",
+    "put": 1,
+    "did": "222622",
+    "address": "CLIMATE",
+    "rarely": 9,
+    "downhill": 2,
+    "len_total": 1,
+    "factor": 0.5,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 22 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 22 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 22 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 22 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 22 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 15
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 22 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 42.5
+    }
+   ]
+  },
+  {
+   "order": 50,
+   "name": "t_flap_fr_pct",
+   "did": "222626",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 9,
+   "required": false,
+   "spec": {
+    "name": "t_flap_fr_pct",
+    "title": "Temperaturklappe rechts",
+    "unit": "%",
+    "put": 1,
+    "did": "222626",
+    "address": "CLIMATE",
+    "rarely": 9,
+    "downhill": 2,
+    "len_total": 1,
+    "factor": 0.5,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 26 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 1.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 26 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 26 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 26 26 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 26 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 15
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 26 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 42.5
+    }
+   ]
+  },
+  {
+   "order": 51,
+   "name": "cell_soc_max_pct",
+   "did": "221E2C",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "cell_soc_max_pct",
+    "title": "Zell-Ladestand höchster",
+    "unit": "%",
+    "put": 2,
+    "did": "221E2C",
+    "address": "BMS",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 100,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 2C 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2C FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2C 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 2C B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 2C F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2C 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 52,
+   "name": "cell_soc_min_pct",
+   "did": "221E2D",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "cell_soc_min_pct",
+    "title": "Zell-Ladestand niedrigster",
+    "unit": "%",
+    "put": 2,
+    "did": "221E2D",
+    "address": "BMS",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 100,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 2D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 2D B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 2D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 2D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 53,
+   "name": "hv_after_contacts_v",
+   "did": "22189B",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 10,
+   "required": false,
+   "spec": {
+    "name": "hv_after_contacts_v",
+    "title": "HV nach den Schützen",
+    "unit": "V",
+    "put": 1,
+    "did": "22189B",
+    "address": "BMS",
+    "rarely": 10,
+    "downhill": 0,
+    "len_total": 2,
+    "factor": 0.5,
+    "offset": -1000,
+    "min": 0,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 18 9B 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9B FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9B 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": null
+    },
+    {
+     "response": "17FE007B 04 62 18 9B B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 18 9B F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 18 9B 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 432
+    }
+   ]
+  },
+  {
+   "order": 54,
+   "name": "hv_before_v",
+   "did": "221E36",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 11,
+   "required": false,
+   "spec": {
+    "name": "hv_before_v",
+    "title": "HV vor dem Hauptschalter",
+    "unit": "V",
+    "put": 1,
+    "did": "221E36",
+    "address": "BMS",
+    "rarely": 11,
+    "downhill": 0,
+    "len_total": 2,
+    "factor": 0.03125,
+    "min": 0,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 36 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 8.0625
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 36 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 36 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 36 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 36 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 36 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 89.5
+    }
+   ]
+  },
+  {
+   "order": 55,
+   "name": "hv_after_v",
+   "did": "221E38",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 11,
+   "required": false,
+   "spec": {
+    "name": "hv_after_v",
+    "title": "HV nach dem Hauptschalter",
+    "unit": "V",
+    "put": 1,
+    "did": "221E38",
+    "address": "BMS",
+    "rarely": 11,
+    "downhill": 0,
+    "len_total": 2,
+    "factor": 0.03125,
+    "min": 0,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 38 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 8.0625
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 38 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 38 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 38 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 38 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 38 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 89.5
+    }
+   ]
+  },
+  {
+   "order": 56,
+   "name": "hv_charge_v",
+   "did": "221E39",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 11,
+   "required": false,
+   "spec": {
+    "name": "hv_charge_v",
+    "title": "HV Ladespannung",
+    "unit": "V",
+    "put": 1,
+    "did": "221E39",
+    "address": "BMS",
+    "rarely": 11,
+    "downhill": 0,
+    "len_total": 2,
+    "sign": true,
+    "factor": 0.03125,
+    "min": -1000,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E 39 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 8.0625
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 39 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": -0.03125
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 39 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 1E 39 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E 39 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": -71.375
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E 39 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 89.5
+    }
+   ]
+  },
+  {
+   "order": 57,
+   "name": "batt_ptc_v",
+   "did": "221621",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_ptc_v",
+    "title": "Batterieheizer Spannung",
+    "unit": "V",
+    "put": 1,
+    "did": "221621",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 10,
+    "min": 0,
+    "max": 500
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 16 21 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 21 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 25.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 21 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 16 21 B4",
+     "value": 18
+    },
+    {
+     "response": "17FE007B 10 13 62 16 21 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 24.7
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 21 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 1.1
+    }
+   ]
+  },
+  {
+   "order": 58,
+   "name": "batt_ecu_t_c",
+   "did": "221622",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_ecu_t_c",
+    "title": "Batterie-Steuergerät Temperatur",
+    "unit": "°C",
+    "put": 0,
+    "did": "221622",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 1,
+    "offset": -50,
+    "min": -50,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 16 22 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -49
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 22 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 22 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -50
+    },
+    {
+     "response": "17FE007B 04 62 16 22 B4",
+     "value": 130
+    },
+    {
+     "response": "17FE007B 10 13 62 16 22 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 22 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -39
+    }
+   ]
+  },
+  {
+   "order": 59,
+   "name": "batt_ptc_t1_c",
+   "did": "221623",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_ptc_t1_c",
+    "title": "Batterieheizer Temp. 1",
+    "unit": "°C",
+    "put": 0,
+    "did": "221623",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 1,
+    "offset": -50,
+    "min": -50,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 16 23 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -49
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 23 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 23 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -50
+    },
+    {
+     "response": "17FE007B 04 62 16 23 B4",
+     "value": 130
+    },
+    {
+     "response": "17FE007B 10 13 62 16 23 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 23 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -39
+    }
+   ]
+  },
+  {
+   "order": 60,
+   "name": "batt_ptc_t2_c",
+   "did": "221624",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_ptc_t2_c",
+    "title": "Batterieheizer Temp. 2",
+    "unit": "°C",
+    "put": 0,
+    "did": "221624",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 1,
+    "offset": -50,
+    "min": -50,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 16 24 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -49
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 24 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 24 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -50
+    },
+    {
+     "response": "17FE007B 04 62 16 24 B4",
+     "value": 130
+    },
+    {
+     "response": "17FE007B 10 13 62 16 24 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 16 24 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -39
+    }
+   ]
+  },
+  {
+   "order": 61,
+   "name": "batt_mod_t_01",
+   "did": "221EAE",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_01",
+    "title": "Akkumodul 1 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EAE",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E AE 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AE FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AE 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E AE B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E AE F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AE 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 62,
+   "name": "batt_mod_t_02",
+   "did": "221EAF",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_02",
+    "title": "Akkumodul 2 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EAF",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E AF 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AF FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AF 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E AF B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E AF F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E AF 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 63,
+   "name": "batt_mod_t_03",
+   "did": "221EB0",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_03",
+    "title": "Akkumodul 3 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB0",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B0 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B0 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B0 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B0 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B0 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B0 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 64,
+   "name": "batt_mod_t_04",
+   "did": "221EB1",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_04",
+    "title": "Akkumodul 4 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB1",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B1 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B1 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B1 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B1 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B1 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B1 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 65,
+   "name": "batt_mod_t_05",
+   "did": "221EB2",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_05",
+    "title": "Akkumodul 5 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB2",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B2 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B2 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B2 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B2 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B2 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B2 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 66,
+   "name": "batt_mod_t_06",
+   "did": "221EB3",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_06",
+    "title": "Akkumodul 6 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB3",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B3 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B3 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B3 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B3 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B3 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B3 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 67,
+   "name": "batt_mod_t_07",
+   "did": "221EB4",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_07",
+    "title": "Akkumodul 7 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB4",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B4 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B4 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B4 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B4 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B4 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B4 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 68,
+   "name": "batt_mod_t_08",
+   "did": "221EB5",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_08",
+    "title": "Akkumodul 8 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB5",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B5 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B5 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B5 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B5 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B5 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B5 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 69,
+   "name": "batt_mod_t_09",
+   "did": "221EB6",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_09",
+    "title": "Akkumodul 9 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB6",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B6 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B6 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B6 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B6 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B6 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B6 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 70,
+   "name": "batt_mod_t_10",
+   "did": "221EB7",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_10",
+    "title": "Akkumodul 10 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB7",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B7 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B7 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B7 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B7 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B7 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B7 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 71,
+   "name": "batt_mod_t_11",
+   "did": "221EB8",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_11",
+    "title": "Akkumodul 11 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB8",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B8 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B8 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B8 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B8 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B8 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B8 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 72,
+   "name": "batt_mod_t_12",
+   "did": "221EB9",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_12",
+    "title": "Akkumodul 12 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EB9",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E B9 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B9 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B9 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E B9 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E B9 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E B9 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 73,
+   "name": "batt_mod_t_13",
+   "did": "221EBA",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_13",
+    "title": "Akkumodul 13 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EBA",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E BA 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BA FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BA 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E BA B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E BA F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BA 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 74,
+   "name": "batt_mod_t_14",
+   "did": "221EBB",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_14",
+    "title": "Akkumodul 14 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EBB",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E BB 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BB FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BB 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E BB B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E BB F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BB 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 75,
+   "name": "batt_mod_t_15",
+   "did": "221EBC",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_15",
+    "title": "Akkumodul 15 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EBC",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E BC 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BC FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BC 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E BC B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E BC F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BC 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 76,
+   "name": "batt_mod_t_16",
+   "did": "221EBD",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_16",
+    "title": "Akkumodul 16 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221EBD",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1E BD 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BD FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BD 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 1E BD B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1E BD F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1E BD 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 77,
+   "name": "batt_mod_t_17",
+   "did": "227425",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_17",
+    "title": "Akkumodul 17 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "227425",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 74 25 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 25 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 25 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 74 25 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 74 25 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 25 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 78,
+   "name": "batt_mod_t_18",
+   "did": "227426",
+   "address": "BMS",
+   "addressDef": {
+    "cp": "17",
+    "sh": "FC007B",
+    "cra": "17FE007B",
+    "fcsh": "17FC007B"
+   },
+   "rarely": 12,
+   "required": false,
+   "spec": {
+    "name": "batt_mod_t_18",
+    "title": "Akkumodul 18 Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "227426",
+    "address": "BMS",
+    "rarely": 12,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 8,
+    "offset": -40,
+    "min": -40,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 74 26 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -7.75
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 26 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 26 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 74 26 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 74 26 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 74 26 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 79,
+   "name": "aux12_resistance_mohm",
+   "did": "222A0E",
+   "address": "AKKU11",
+   "addressDef": {
+    "cp": "00",
+    "sh": "710",
+    "cra": "77A",
+    "fcsh": "710",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "aux12_resistance_mohm",
+    "title": "12-V-Batterie Widerstand",
+    "unit": "mΩ",
+    "put": 1,
+    "did": "222A0E",
+    "address": "AKKU11",
+    "rarely": 14,
+    "downhill": 0,
+    "len_total": 1,
+    "factor": 0.2,
+    "min": 0,
+    "max": 100
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 2A 0E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 0.2
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 51
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 2A 0E B4",
+     "value": 36
+    },
+    {
+     "response": "17FE007B 10 13 62 2A 0E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 49.400000000000006
+    },
+    {
+     "response": "17FE007B 10 1B 62 2A 0E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 2.2
+    }
+   ]
+  },
+  {
+   "order": 80,
+   "name": "obc_hvdc_a",
+   "did": "22103D",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "obc_hvdc_a",
+    "title": "Ladegerät HV-Strom",
+    "unit": "A",
+    "put": 1,
+    "did": "22103D",
+    "address": "CHARGER",
+    "rarely": 14,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 10,
+    "min": -50,
+    "max": 500
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 10 3D 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 25.8
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3D FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3D 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 10 3D B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 10 3D F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3D 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 286.4
+    }
+   ]
+  },
+  {
+   "order": 81,
+   "name": "obc_cycle_kwh",
+   "did": "22103E",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "obc_cycle_kwh",
+    "title": "Ladegerät Zyklusenergie",
+    "unit": "kWh",
+    "put": 2,
+    "did": "22103E",
+    "address": "CHARGER",
+    "rarely": 14,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 100,
+    "min": 0,
+    "max": 1000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 10 3E 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 2.58
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3E FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 655.35
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3E 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 10 3E B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 10 3E F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 632.52
+    },
+    {
+     "response": "17FE007B 10 1B 62 10 3E 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 28.64
+    }
+   ]
+  },
+  {
+   "order": 82,
+   "name": "obc_efficiency_raw",
+   "did": "2215D6",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "obc_efficiency_raw",
+    "title": "Ladegerät Wirkungsgrad (roh)",
+    "unit": null,
+    "put": 1,
+    "did": "2215D6",
+    "address": "CHARGER",
+    "rarely": 14,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 10,
+    "offset": 75,
+    "min": 0,
+    "max": 200
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 15 D6 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 75.1
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D6 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 100.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D6 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 75
+    },
+    {
+     "response": "17FE007B 04 62 15 D6 B4",
+     "value": 93
+    },
+    {
+     "response": "17FE007B 10 13 62 15 D6 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 99.7
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 D6 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 76.1
+    }
+   ]
+  },
+  {
+   "order": 83,
+   "name": "obc_coolant_t_c",
+   "did": "2215E2",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "obc_coolant_t_c",
+    "title": "Ladegerät Kühlmittel",
+    "unit": "°C",
+    "put": 0,
+    "did": "2215E2",
+    "address": "CHARGER",
+    "rarely": 14,
+    "downhill": 0,
+    "len_total": 1,
+    "offset": -40,
+    "min": -40,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 15 E2 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -39
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 E2 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 E2 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 15 E2 B4",
+     "value": 140
+    },
+    {
+     "response": "17FE007B 10 13 62 15 E2 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 E2 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -29
+    }
+   ]
+  },
+  {
+   "order": 84,
+   "name": "obc_duration_min",
+   "did": "2215EE",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 40,
+   "required": false,
+   "spec": {
+    "name": "obc_duration_min",
+    "title": "Ladegerät Ladedauer gesamt",
+    "unit": "min",
+    "put": 0,
+    "did": "2215EE",
+    "address": "CHARGER",
+    "rarely": 40,
+    "downhill": 0,
+    "len_total": 4,
+    "min": 0,
+    "max": 100000000
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 15 EE 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 16909060
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 EE FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 EE 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": 0
+    },
+    {
+     "response": "17FE007B 04 62 15 EE B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 15 EE F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 15 EE 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 85,
+   "name": "obc_socket_t_c",
+   "did": "221DDA",
+   "address": "CHARGER",
+   "addressDef": {
+    "cp": "00",
+    "sh": "744",
+    "cra": "7AE",
+    "fcsh": "744",
+    "trace_log": "6"
+   },
+   "rarely": 14,
+   "required": false,
+   "spec": {
+    "name": "obc_socket_t_c",
+    "title": "Ladebuchse Temperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "221DDA",
+    "address": "CHARGER",
+    "rarely": 14,
+    "downhill": 1,
+    "len_total": 2,
+    "divider": 10,
+    "offset": -55,
+    "min": -55,
+    "max": 150
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 1D DA 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -3.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 1D DA FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1D DA 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -55
+    },
+    {
+     "response": "17FE007B 04 62 1D DA B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 1D DA F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 1B 62 1D DA 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": null
+    }
+   ]
+  },
+  {
+   "order": 86,
+   "name": "ptc_air_b0",
+   "did": "220801",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 4,
+   "required": false,
+   "spec": {
+    "name": "ptc_air_b0",
+    "title": "Zuheizer Byte 0",
+    "unit": null,
+    "put": 0,
+    "did": "220801",
+    "address": "CLIMATE",
+    "rarely": 4,
+    "downhill": 0,
+    "len_total": 1,
+    "also": [
+     {
+      "name": "ptc_air_b1",
+      "title": "Zuheizer Byte 1-2",
+      "unit": null,
+      "put": 0,
+      "downhill": 1,
+      "len_total": 2
+     },
+     {
+      "name": "ptc_air_b3",
+      "title": "Zuheizer Byte 3-4",
+      "unit": null,
+      "put": 0,
+      "downhill": 3,
+      "len_total": 2
+     },
+     {
+      "name": "ptc_air_b5",
+      "title": "Zuheizer Byte 5-6",
+      "unit": null,
+      "put": 0,
+      "downhill": 5,
+      "len_total": 2
+     }
+    ]
+   },
+   "also": [
+    "ptc_air_b1",
+    "ptc_air_b3",
+    "ptc_air_b5"
+   ],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 08 01 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": {
+      "val": 1,
+      "further": {
+       "ptc_air_b1": 515,
+       "ptc_air_b3": 1029,
+       "ptc_air_b5": 1543
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 01 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": {
+      "val": 255,
+      "further": {
+       "ptc_air_b1": 65535,
+       "ptc_air_b3": 65535,
+       "ptc_air_b5": 65535
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 01 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": {
+      "val": 0,
+      "further": {
+       "ptc_air_b1": 0,
+       "ptc_air_b3": 0,
+       "ptc_air_b5": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 04 62 08 01 B4",
+     "value": {
+      "val": 180,
+      "further": {}
+     }
+    },
+    {
+     "response": "17FE007B 10 13 62 08 01 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": {
+      "val": 247,
+      "further": {
+       "ptc_air_b1": 5150,
+       "ptc_air_b3": 3328,
+       "ptc_air_b5": 0
+      }
+     }
+    },
+    {
+     "response": "17FE007B 10 1B 62 08 01 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": {
+      "val": 11,
+      "further": {
+       "ptc_air_b1": 12373,
+       "ptc_air_b3": 31391,
+       "ptc_air_b5": 50409
+      }
+     }
+    }
+   ]
+  },
+  {
+   "order": 87,
+   "name": "outside_temp_c",
+   "did": "222609",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 20,
+   "required": false,
+   "spec": {
+    "name": "outside_temp_c",
+    "title": "Aussentemperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "222609",
+    "address": "CLIMATE",
+    "rarely": 20,
+    "downhill": 0,
+    "len_total": 1,
+    "divider": 2,
+    "offset": -50
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 09 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": -49.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 09 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 77.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 09 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -50
+    },
+    {
+     "response": "17FE007B 04 62 26 09 B4",
+     "value": 40
+    },
+    {
+     "response": "17FE007B 10 13 62 26 09 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 73.5
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 09 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": -44.5
+    }
+   ]
+  },
+  {
+   "order": 88,
+   "name": "inside_temp_c",
+   "did": "222613",
+   "address": "CLIMATE",
+   "addressDef": {
+    "cp": "00",
+    "sh": "746",
+    "cra": "7B0",
+    "fcsh": "746",
+    "trace_log": "6"
+   },
+   "rarely": 20,
+   "required": false,
+   "spec": {
+    "name": "inside_temp_c",
+    "title": "Innentemperatur",
+    "unit": "°C",
+    "put": 1,
+    "did": "222613",
+    "address": "CLIMATE",
+    "rarely": 20,
+    "downhill": 0,
+    "len_total": 2,
+    "divider": 5,
+    "offset": -40
+   },
+   "also": [],
+   "decoded": [
+    {
+     "response": "17FE007B 10 1B 62 26 13 01 02\n17FE007B 21 03 04 05 06 07 08 09\n17FE007B 22 0A 0B 0C 0D 0E 0F 10\n17FE007B 23 11 12 13 14 15 16 17\n17FE007B 24 18",
+     "value": 11.600000000000001
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 13 FF FF\n17FE007B 21 FF FF FF FF FF FF FF\n17FE007B 22 FF FF FF FF FF FF FF\n17FE007B 23 FF FF FF FF FF FF FF\n17FE007B 24 FF",
+     "value": 13067
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 13 00 00\n17FE007B 21 00 00 00 00 00 00 00\n17FE007B 22 00 00 00 00 00 00 00\n17FE007B 23 00 00 00 00 00 00 00\n17FE007B 24 00",
+     "value": -40
+    },
+    {
+     "response": "17FE007B 04 62 26 13 B4",
+     "value": null
+    },
+    {
+     "response": "17FE007B 10 13 62 26 13 F7 14\n17FE007B 21 1E 0D 00 00 00 00 00\n17FE007B 22 00 00 00 F7 14 1E 0D",
+     "value": 12610.4
+    },
+    {
+     "response": "17FE007B 10 1B 62 26 13 0B 30\n17FE007B 21 55 7A 9F C4 E9 0E 33\n17FE007B 22 58 7D A2 C7 EC 11 36\n17FE007B 23 5B 80 A5 CA EF 14 39\n17FE007B 24 5E",
+     "value": 532.8
+    }
+   ]
+  }
+ ]
+}
