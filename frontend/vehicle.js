@@ -41,7 +41,7 @@ window.joltVehicle = (function () {
      * so the choice is built from them. A vehicle without the field - old
      * cached data - is a MEB, the only thing the dongle could talk to before. */
     { name: "platform", title: "Plattform (OBD2)", kind: "auswahl",
-      standard: "meb",
+      standard: "meb", wide: true,
       vals: ((window.joltObd && window.joltObd.platforms()) || [])
         .map((p) => ({ value: p.id, label: p.title })),
       hint: "Bestimmt, welche Steuergeräte-Adressen und PIDs der Dongle "
@@ -81,7 +81,8 @@ window.joltVehicle = (function () {
     } else {
       user_input = `<input type="number" id="${id}" step="${field.step}">`;
     }
-    const wide = field.kind === "text" || field.kind === "liste" ? " feld-breit" : "";
+    const wide = field.kind === "text" || field.kind === "liste" || field.wide
+      ? " feld-breit" : "";
     return `<div class="feld${wide}"><label for="${id}">${field.title}${info}</label>${user_input}${hint}</div>`;
   }
 
