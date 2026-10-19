@@ -11,7 +11,7 @@ the route (`routing/variants.py`).
 
 The waypoints are not an end in themselves. openrouteservice does not know
 energy as an edge weight - "consumption-optimal" cannot be ordered there,
-only a routing layer of our own could do that (see konzept-routenplaner.md).
+only a routing layer of our own could do that (see docs/concept.md).
 And its built-in `alternative_routes` rejects every route over 100 km, i.e.
 exactly those where an alternative would change something. What remains:
 generate candidates ourselves and evaluate them with jolt's own consumption

@@ -1,6 +1,6 @@
 # CarPlay application for jolt (draft)
 
-Step 8 of [`konzept-ios-app.md`](konzept-ios-app.md). The application is for
+Step 8 of [`docs/ios-concept.md`](ios-concept.md). The application is for
 **route B** (own CarPlay app with templates). Route A, the Live Activity on the
 CarPlay dashboard, needs no application and is already running.
 
@@ -99,7 +99,7 @@ is not built and belongs in step 10; in the application it is stated as a plan.
 > household. We would like to develop and test the CarPlay interface against
 > real vehicles under this entitlement.
 >
-> **Contact:** r.schillinger@gmail.com
+> **Contact:** <your email address>
 
 ## What I cannot know
 

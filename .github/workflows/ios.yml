@@ -14,7 +14,7 @@ name: iOS
 # What is missing here is a device build. It would need the certificate and
 # provisioning profile as secrets; for "does it compile at all" that is a high
 # price. The signed build including the TestFlight upload lives in
-# ios-testflight.yml, and can be set up following ios-einrichten.md.
+# ios-testflight.yml, and can be set up following docs/ios-app.md.
 on:
   push:
     branches: [main]

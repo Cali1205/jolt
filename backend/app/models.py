@@ -57,7 +57,7 @@ class Vehicle(Base):
 
     The parameters are deliberately physical and not "kWh/100 km": only that
     way can it be answered what 130 instead of 110 km/h costs or what a pass
-    consumes. The flat value cannot do that - see konzept-routenplaner.md.
+    consumes. The flat value cannot do that - see docs/concept.md.
     """
     __tablename__ = "vehicles"
 

@@ -1,7 +1,7 @@
 """The consumption model - the core of jolt.
 
 The physics is calculated per route segment, not a flat value in
-kWh/100 km. The reasoning is laid out in detail in konzept-routenplaner.md,
+kWh/100 km. The reasoning is laid out in detail in docs/concept.md,
 in short:
 
 - Air resistance goes with v². The difference between 110 and 130 km/h is not
