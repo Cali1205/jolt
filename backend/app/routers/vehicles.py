@@ -44,6 +44,10 @@ class VehicleInput(BaseModel):
     max_charge_power_kw: float = Field(default=150.0, gt=0, le=1500,
                                        allow_inf_nan=False)
     connector_type: str = Field(default="CCS", max_length=40)
+    # Only the shape is checked here: the set of known platforms lives in the
+    # frontend (frontend/platforms/), and a new one must not need a deploy of
+    # the backend.
+    platform: str = Field(default="meb", pattern=r"^[a-z0-9_]{1,20}$")
     # Names or name fragments the charging plan prefers - not a hard filter.
     preferred_operators: list[Annotated[str, Field(max_length=80)]] = Field(
         default=[], max_length=50)
@@ -91,6 +95,7 @@ def _as_dict(vehicle: models.Vehicle) -> dict:
             "reserve_soc": vehicle.reserve_soc, "target_soc": vehicle.target_soc,
             "max_charge_power_kw": vehicle.max_charge_power_kw,
             "connector_type": vehicle.connector_type,
+            "platform": vehicle.platform,
             "preferred_operators": vehicle.preferred_operators or [],
             "electricity_price_eur_kwh": vehicle.electricity_price_eur_kwh,
             "electricity_prices": vehicle.electricity_prices or [],

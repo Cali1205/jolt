@@ -98,6 +98,10 @@ class Vehicle(Base):
     target_soc = Column(Float, nullable=False, default=20.0)
 
     max_charge_power_kw = Column(Float, nullable=False, default=150.0)
+    # Which OBD2 platform profile the dongle uses for this car (the profiles
+    # live in frontend/platforms/). The backend only stores the id; which ids
+    # exist is the frontend's knowledge.
+    platform = Column(String(20), nullable=False, default="meb", server_default="meb")
     connector_type = Column(String(20), nullable=False, default="CCS")
 
     # Names (or parts of them, e.g. "EnBW") that the optimiser prefers when
