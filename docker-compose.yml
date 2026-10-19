@@ -78,7 +78,7 @@ services:
   # (six-field cron, with seconds), the time zone with TZ.
   # Optional trigger: with WATCHTOWER_HTTP_API_ENDPOINTS=update and a token, a
   # POST to /v1/update starts a run at once (the CI does that after pushing
-  # the image, see README). Polling keeps running next to it.
+  # the image, see docs/deploy.md). Polling keeps running next to it.
   watchtower:
     image: nickfedor/watchtower:latest
     container_name: jolt-watchtower

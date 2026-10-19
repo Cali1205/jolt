@@ -50,8 +50,10 @@ pip install -r backend/requirements.txt
 cd backend && python -m uvicorn app.main:app --port 8322
 ```
 
-Open <http://localhost:8322>. Without an `ORS_API_KEY` the routes are straight
-lines, and the app says so.
+Open <http://localhost:8322>. You need Python 3.10 or newer. Without an
+`ORS_API_KEY` the routes are straight lines, the place search only knows big
+German cities (Hamburg, München, ...), and no charging stops are planned until
+chargers are imported ([docs/deploy.md](docs/deploy.md#5-first-steps-in-the-app)).
 
 Run it for real, with Docker:
 
@@ -81,8 +83,10 @@ The app has five tabs:
 
 A typical first day:
 
-1. Create your vehicle in **Fahrzeug** from the closest template. Set the net
-   battery capacity and, if you have a dongle, the OBD2 platform.
+1. jolt starts with a generic vehicle. In **Fahrzeug**, pick *+ neues
+   Fahrzeug* (or edit the generic one), choose a template under *Aus Vorlage
+   befüllen*, set the net battery capacity and *Plattform (OBD2)*, and press
+   *Speichern*.
 2. Plan a trip in **Planen** and compare the variants.
 3. In the car, start the trip, or record one under **Fahrten**. With a dongle
    the app reads the car while you drive; without one it uses GPS and asks for

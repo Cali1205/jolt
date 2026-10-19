@@ -84,17 +84,21 @@ Rules the rest of the app relies on:
 | `odometer_km` | km | Distance instead of GPS |
 | `speed_kmh` | km/h | Speed |
 | `outside_temp_c` | °C | Consumption model |
-| `batterie_c` | °C | Charging curve |
+| `batterie_c` | °C | Battery temperature in the live view |
 | `battery_kwh` | kWh | Measured capacity and state of health |
-| `aux_load_kw`, `dcdc_current_a`, `ptc_current_a`, `compressor_w` | | Heating and auxiliary loads |
+| `aux_load_kw`, `dcdc_current_a` | kW, A | Heating and auxiliary loads (derived) |
+| `ptc_current_a`, `compressor_w` | A, W | Battery heater and A/C compressor in the live view |
 
 Any other name is stored with the measurement point and shown in the
 diagnostics, but nothing evaluates it.
 
+The `id` is stored with the vehicle and may only contain lower-case letters,
+digits and `_` (at most 20 characters).
+
 To make the file load, add it in the same places as the existing profiles:
-the `<script>` tags in `frontend/index.html` and `frontend/obd.html`, the file
-lists in `backend/app/main.py`, `SCAFFOLD` in `frontend/sw.js` (and count up
-`CACHE` there). Then add decode tests with example answers to
+the `<script>` tags in `frontend/index.html` and `frontend/obd.html`, all
+three file lists in `backend/app/main.py` (search for `platforms/obd2.js`),
+`SCAFFOLD` in `frontend/sw.js` (and count up `CACHE` there). Then add decode tests with example answers to
 `tools/check_platforms.js`; it also checks that every profile loads without
 errors and has its `soc_raw` row.
 
@@ -110,7 +114,7 @@ A device installed permanently in the car (for example an ESP32 with a CAN
 interface) can send measurements without the app. Tab "Fahrzeug", section
 "Logger im Auto", creates a token for the vehicle. The logger posts to
 `POST /api/live/report`; jolt finds the running trip itself and answers
-`aufgenommen: false` while no trip is running.
+`"recorded": false` while no trip is running.
 
 ```json
 {

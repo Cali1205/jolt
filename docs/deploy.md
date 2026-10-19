@@ -7,7 +7,9 @@ domain over HTTPS. Plan for about half an hour.
 
 - **A Linux host with Docker** and the Compose plugin (`docker compose
   version`). A small VPS or a home server is enough: jolt and Postgres use
-  well under 1 GB of memory.
+  well under 1 GB of memory. The ready-made image is built for x86-64
+  (amd64) only; on an ARM host (Raspberry Pi, Ampere) run `docker compose
+  build` once before `docker compose up -d`.
 - **An HTTPS address.** The phone only allows location, Bluetooth and
   notifications on HTTPS pages, so plain `http://<ip>:8322` is fine for a look
   around but not for driving. Below are two ways: a Cloudflare Tunnel (no open
@@ -44,7 +46,7 @@ ORS_API_KEY=<your key>
 ```
 
 `.env.example` explains every other setting. Keep `.env` readable only for
-root: `chmod 600 .env`.
+its owner: `chmod 600 .env`.
 
 ## 3. Start
 
@@ -78,17 +80,19 @@ whose DNS is managed by Cloudflare (the free plan is enough).
 
    ```bash
    TUNNEL_TOKEN=<token>
-   TRUSTED_PROXIES=172.16.0.0/12
+   TRUSTED_PROXIES=<subnet of the compose network>
    COMPOSE_FILE=docker-compose.yml:docker-compose.tunnel.yml
    ```
 
-   `COMPOSE_FILE` makes every later `docker compose` command include the
-   tunnel file, which also hardens the app container (read-only file system,
-   no capabilities, memory and process limits). `TRUSTED_PROXIES` names the
-   Docker networks the tunnel container lives in; without it all visitors
-   would share one rate limit. To narrow it down, use the subnet that
+   The subnet is what
    `docker network inspect jolt_default --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`
-   prints.
+   prints (for example `172.24.0.0/16`); the network exists since step 3.
+   The tunnel container lives in it, and jolt only takes the visitor's
+   address from a peer listed in `TRUSTED_PROXIES`. Without it all visitors
+   would share one rate limit and one login lock. `COMPOSE_FILE` makes every
+   later `docker compose` command include the tunnel file, which also hardens
+   the app container (read-only file system, no capabilities, memory and
+   process limits).
 3. `docker compose up -d`, then check `docker logs jolt-cloudflared`: it
    should report four registered tunnel connections.
 4. In the tunnel, add a public hostname: `jolt.<your domain>`, type `HTTP`,
@@ -102,7 +106,8 @@ whose DNS is managed by Cloudflare (the free plan is enough).
 ### Option B: your own reverse proxy
 
 Any proxy that passes WebSockets works. With [Caddy](https://caddyserver.com)
-on the same host, which fetches the certificate by itself:
+on the same host, which fetches the certificate by itself (ports 80 and 443
+must be reachable from the internet):
 
 ```
 jolt.example.org {
@@ -110,21 +115,28 @@ jolt.example.org {
 }
 ```
 
-Then set `TRUSTED_PROXIES=127.0.0.1` in `.env` and run `docker compose up -d`
-again, so jolt takes the visitor's address from `X-Forwarded-For` for its rate
-limits. With nginx, forward the `Upgrade` and `Connection` headers for
+Then set `TRUSTED_PROXIES` in `.env` to the gateway of jolt's Docker network
+and run `docker compose up -d` again. Docker hands the proxy's connection to
+the container from that gateway, not from 127.0.0.1, so this is the address
+jolt has to trust before it takes the visitor's address from
+`X-Forwarded-For`. Without it all visitors share one rate limit and one login
+lock. The gateway is what
+`docker network inspect jolt_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`
+prints (for example `172.24.0.1`). With nginx, forward the `Upgrade` and `Connection` headers for
 `/api/live/`.
 
 ## 5. First steps in the app
 
-Open `https://jolt.<your domain>` and log in with `APP_PASSWORT`. On the
+Open `https://jolt.<your domain>` and log in with `APP_PASSWORT`. Logs, if
+something does not work: `docker compose logs -f jolt-app`. On the
 phone, add the page to the home screen (Safari: *Share*, *Add to Home
 Screen*); it then runs as an app and keeps working with poor reception.
 
 Then fill the charger database, which is empty on a new installation.
 Download "Ladesäulenregister" (CSV) from the
-[Bundesnetzagentur](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/E-Mobilitaet/Ladesaeulenkarte/start.html)
-and import it:
+[Bundesnetzagentur](https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/E-Mobilitaet/Ladesaeulenkarte/start.html),
+save it as `ladesaeulenregister.csv` next to `docker-compose.yml` and import
+it:
 
 ```bash
 docker compose run --rm --no-deps -v "$PWD/ladesaeulenregister.csv:/tmp/chargers.csv:ro" \
@@ -154,7 +166,8 @@ docker compose run --rm --no-deps jolt-app python tools/push_keyname.py
 Copy the three lines it prints into `.env`, set `VAPID_SUBJECT` to
 `mailto:<your address>`, and run `docker compose up -d`. The app asks for
 permission when a trip starts. On iOS this only works for the app added to
-the home screen. `POST /api/push/probe` sends a test message.
+the home screen. *Einstellungen*, *Testnachricht senden* sends a test
+message.
 
 ## Updating
 
@@ -179,11 +192,20 @@ use the commit tag instead (`ghcr.io/cali1205/jolt:<commit sha>`) in
 
 `jolt-backup` writes `data/backups/jolt-<date>.sql.gz` every night and keeps
 14 days (`BACKUP_KEEP_DAYS`). Copy that directory off the host now and then.
-To restore into an empty database:
+To restore, stop the app, empty the database (the app creates its tables on
+start, so a running installation is never empty) and load the dump:
 
 ```bash
+docker compose stop jolt-app
+docker exec jolt-db psql -U jolt -d postgres -c 'DROP DATABASE jolt' -c 'CREATE DATABASE jolt OWNER jolt'
 gunzip -c data/backups/jolt-<date>.sql.gz | docker exec -i jolt-db psql -U jolt jolt
+docker compose start jolt-app
 ```
+
+## Removing jolt
+
+`docker compose down` stops and removes the containers; delete `./data` (or
+`JOLT_DATA`) to remove the database and backups as well.
 
 ## Security checklist
 
