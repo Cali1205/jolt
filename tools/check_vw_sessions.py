@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""Checks the logbook: drives and charges found in VW data and jolt recordings.
+
+All streams are synthetic, built in the shapes the real data has (the
+history export, the portal's reports, the dongle's points). No real VIN, no
+real export. Each detection threshold is changed once on purpose to show
+that the cases notice it.
+
+Without network, without Postgres:
+
+    ./tools/check_vw_sessions.py
+"""
+import os
+import random
+import sys
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+TOOLS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, TOOLS)
+from examine import Check, application_provide  # noqa: E402
+
+application_provide("vw-sessions")
+
+from app.cloud import observations, sessions  # noqa: E402
+
+verify = Check()
+UTC = timezone.utc
+S = timedelta(seconds=1)
+MIN = timedelta(minutes=1)
+
+
+def T(day, h, m=0, s=0.0):
+    return datetime(2026, 10, day, h, m, tzinfo=UTC) + timedelta(seconds=s)
+
+
+def p(t, name, value):
+    """One `Data` entry of the history export."""
+    return {"key": f"k-{name}", "dataFieldName": name, "value": str(value),
+            "timestampUtc": t.isoformat().replace("+00:00", "Z")}
+
+
+def burst(t, odo, soc, plug="disconnected"):
+    """What the car reports within seconds when it wakes up or switches off."""
+    return [p(t, "mileage", odo), p(t + S, "currentSOCInPct", soc),
+            p(t + 3 * S, "plugConnectionState", plug),
+            p(t + 4 * S, "chargingState", "NOT_READY_FOR_CHARGING"),
+            p(t + 4 * S, "chargePowerInKW", "0.0"),
+            p(t + 4 * S, "chargeType", "INVALID")]
+
+
+def drive(start, odo, km, soc_start, soc_end, first_km_after=75 * S,
+          every=90 * S, switch_off=True):
+    """A drive as the export has it: wake-up burst, one odometer point per
+    kilometre, the charge level now and then, switch-off bursts. Returns the
+    points and the time of the last kilometre."""
+    points = burst(start, odo, soc_start)
+    last = start
+    for i in range(1, km + 1):
+        last = start + first_km_after + (i - 1) * every
+        points.append(p(last, "mileage", odo + i))
+        if i % 2 == 0:
+            soc = round(soc_start + (soc_end - soc_start) * i / km)
+            points.append(p(last + 10 * S, "currentSOCInPct", soc))
+    if switch_off:
+        points += burst(last + 53 * S, odo + km, soc_end)
+        points += burst(last + 85 * S, odo + km, soc_end)
+    return points, last
+
+
+def charging(start, minutes, kw, soc_start, kind="AC", spelling="upper",
+             every=60 * S, kwh_per_pct=0.726, soc_from=None):
+    """Power reports every `every`, the charge level rising with them, and a
+    zero report half a minute after the last one."""
+    state = "CHARGING" if spelling == "upper" else "charging"
+    kind = kind if spelling == "upper" else kind.lower()
+    points = [p(start - 30 * S, "plugConnectionState", "connected")]
+    steps = int(timedelta(minutes=minutes) / every)
+    base = soc_start if soc_from is None else soc_from
+    for i in range(steps + 1):
+        t = start + i * every
+        kwh = kw * (i * every).total_seconds() / 3600
+        points += [p(t, "chargingState", state), p(t, "chargePowerInKW", kw),
+                   p(t, "chargeType", kind),
+                   p(t, "currentSOCInPct", round(base + kwh / kwh_per_pct))]
+    end = start + steps * every + 30 * S
+    points += [p(end, "chargePowerInKW", "0.0"),
+               p(end, "chargingState", "NOT_READY_FOR_CHARGING" if spelling == "upper"
+                 else "notReadyForCharging")]
+    return points, end
+
+
+def obs(points):
+    return observations.from_history(points)
+
+
+def close(a, b, tolerance):
+    return a is not None and b is not None and abs(a - b) <= tolerance
+
+
+# ---------------------------------------------------------------------------
+# Synthetic cases. Each returns (ok, claim, measured); `part_detection`
+# prints them, the mutation part runs them again with a threshold changed.
+# ---------------------------------------------------------------------------
+
+def case_session_36():
+    points, _ = drive(T(16, 15, 44, 21), 62020, 6, 74, 73,
+                      every=timedelta(seconds=104.8))
+    found = sessions.detect_drives(obs(points))
+    d = found[0] if len(found) == 1 else None
+    return [(d is not None and d.started_at == T(16, 15, 44, 21)
+             and d.ended_at == T(16, 15, 55, 49),
+             "Fahrt wie Sitzung 36: Start mit dem Aufwach-Burst, Ende mit dem "
+             "letzten Abschalt-Burst",
+             str(found and (found[0].started_at, found[0].ended_at))),
+            (d is not None and (d.odo_start, d.odo_end, d.soc_start, d.soc_end)
+             == (62020, 62026, 74, 73),
+             "Kilometerstand 62020 -> 62026, Ladestand 74 -> 73",
+             str(d and (d.odo_start, d.odo_end, d.soc_start, d.soc_end)))]
+
+
+def case_stops():
+    a, last = drive(T(5, 7), 1000, 10, 80, 77)
+    b, _ = drive(last + 7 * MIN, 1010, 10, 77, 74)
+    seven = sessions.detect_drives(obs(a + b))
+    a, last = drive(T(5, 7), 1000, 10, 80, 77)
+    b, _ = drive(last + 15 * MIN, 1010, 10, 77, 74)
+    fifteen = sessions.detect_drives(obs(a + b))
+    return [(len(seven) == 1 and seven[0].odo_end - seven[0].odo_start == 20,
+             "7 Minuten Halt mit Abschalten: eine Fahrt über 20 km",
+             str([(d.odo_start, d.odo_end) for d in seven])),
+            (len(fifteen) == 2 and fifteen[1].started_at == last + 15 * MIN,
+             "15 Minuten Halt: zwei Fahrten, die zweite beginnt mit ihrem "
+             "Aufwach-Burst",
+             str([(d.odo_start, d.odo_end, d.started_at) for d in fifteen]))]
+
+
+def case_into_dc():
+    a, last = drive(T(6, 10), 2000, 10, 30, 25, switch_off=False)
+    plug = last + 40 * S
+    c, end = charging(last + 70 * S, 5, 100.0, 25, kind="DC", every=20 * S)
+    c[0] = p(plug, "plugConnectionState", "connected")
+    b, _ = drive(end + 30 * S, 2010, 5, 33, 32)
+    found = sessions.detect_drives(obs(a + c + b))
+    charges = sessions.detect_charges(obs(a + c + b))
+    ch = charges[0] if len(charges) == 1 else None
+    return [(len(found) == 2 and found[0].ended_at <= plug
+             and found[1].started_at >= end,
+             "Fahrt direkt an den Schnelllader: Laden trennt die Fahrten, auch "
+             "nach weniger als 10 Minuten",
+             str([(d.started_at, d.ended_at) for d in found])),
+            (ch is not None and ch.charge_type == "DC" and ch.max_power_kw == 100
+             and close(ch.energy_kwh, 100 * (5 / 60 + 15 / 3600), 0.1)
+             and (ch.soc_start, ch.odometer_km) == (25, 2010),
+             "DC-Ladung: Typ, Spitzenleistung, Energie als Integral, "
+             "Kilometerstand",
+             str(ch))]
+
+
+def case_overnight():
+    first, _ = charging(T(7, 22), 60, 11.0, 10)
+    later, end = charging(T(8, 1), 120, 11.0, 0, soc_from=10 + 33 / 0.726)
+    points = first[:-2] + later[1:]
+    with_capacity = sessions.detect_charges(obs(points), kwh_per_pct=0.726)
+    without = sessions.detect_charges(obs(points))
+    expected_full = 11 * 5 + 11 * 15 / 3600
+    stalled, _ = charging(T(9, 10), 30, 11.0, 60)
+    resumed, _ = charging(T(9, 12, 30), 30, 11.0, 60, soc_from=60 + 5.5 / 0.726)
+    flat = sessions.detect_charges(obs(stalled[:-2] + resumed[1:]), kwh_per_pct=0.726)
+    capped = 11 * 0.5 * 2 + 11 * 10 / 60
+    return [(len(with_capacity) == 1
+             and close(with_capacity[0].energy_kwh, expected_full, 1.0),
+             "AC über Nacht mit 2 h Datenlücke: die Lücke zählt, was der "
+             "gestiegene Ladestand hergibt",
+             str(with_capacity and with_capacity[0].energy_kwh)),
+            (len(without) == 1
+             and close(without[0].energy_kwh, expected_full - 22 + 11 / 6, 0.5),
+             "ohne bekannte Kapazität zählt die Lücke höchstens 10 Minuten",
+             str(without and without[0].energy_kwh)),
+            (len(flat) == 1 and close(flat[0].energy_kwh, capped, 0.5),
+             "Lücke ohne Anstieg des Ladestands: höchstens 10 Minuten",
+             str(flat and flat[0].energy_kwh))]
+
+
+def case_pauses_and_spellings():
+    a, end = charging(T(10, 14), 30, 7.0, 50)
+    b, _ = charging(end + 8 * MIN, 20, 7.0, 0, spelling="lower",
+                    soc_from=50 + 3.5 / 0.726)
+    short = sessions.detect_charges(obs(a + b))
+    a, end = charging(T(11, 14), 30, 7.0, 50)
+    b, _ = charging(end + 20 * MIN, 20, 7.0, 0, spelling="lower",
+                    soc_from=50 + 3.5 / 0.726)
+    long = sessions.detect_charges(obs(a + b))
+    blip = [p(T(12, 16), "chargePowerInKW", 1.0), p(T(12, 16, 0, 30), "chargePowerInKW", 1.0),
+            p(T(12, 16, 1), "chargePowerInKW", 0.0), p(T(12, 15), "currentSOCInPct", 70),
+            p(T(12, 16, 2), "currentSOCInPct", 70)]
+    noise = sessions.detect_charges(obs(blip))
+    return [(len(short) == 1, "8 Minuten Pause: ein Ladevorgang", str(len(short))),
+            (len(long) == 2 and [c.charge_type for c in long] == ["AC", "AC"],
+             "20 Minuten Pause: zwei; AC in beiden Schreibweisen",
+             str([(c.started_at, c.charge_type) for c in long])),
+            (noise == [], "1 kW für eine halbe Minute ohne Anstieg ist Rauschen",
+             str(noise))]
+
+
+def case_manoeuvre():
+    t = T(13, 9)
+    small = [observations.Observation(t, "odometer_km", 100.0),
+             observations.Observation(t + MIN, "odometer_km", 100.6)]
+    real = small + [observations.Observation(t + 2 * MIN, "odometer_km", 101.2)]
+    return [(sessions.detect_drives(small) == [],
+             "0,6 km sind Rangieren, keine Fahrt", ""),
+            (len(sessions.detect_drives(real)) == 1, "1,2 km sind eine Fahrt", "")]
+
+
+def portal_rows():
+    """The portal's reports around one short drive, as jolt stores them:
+    `values` is the merged state, `raw` what the report itself carried."""
+    def row(t, raw, odo, soc):
+        return SimpleNamespace(
+            captured_at=t.replace(tzinfo=None),
+            values={"odometer_km": odo, "soc_pct": soc, "charge_power_kw": 0,
+                    "charge_state": "CHARGE_STATE_NOT_READY_FOR_CHARGING"},
+            raw={k: [name, value, None] for k, (name, value) in raw.items()})
+
+    state = ("charging_state_report.current_charge_state",
+             "CHARGE_STATE_NOT_READY_FOR_CHARGING")
+    return [
+        row(T(20, 4, 39, 33), {"a": ("mileage.value", "62067"),
+                               "b": ("battery_level_HV.value", "56.0"), "c": state},
+            62067, 56),
+        row(T(20, 5, 44, 24), {"c": state, "d": ("report_type",
+                                                 "REPORT_TYPE_CONFIGURATIONS")},
+            62067, 56),
+        row(T(20, 5, 59, 42), {"a": ("mileage.value", "62071"),
+                               "e": ("battery_state_report.soc", "53"),
+                               "f": ("update_reason", "UPDATE_REASON_CLAMP15_OFF")},
+            62067, 53),
+        row(T(20, 6, 0, 24), {"a": ("mileage.value", "62071"),
+                              "g": ("mileage.value", "62074"),
+                              "b": ("battery_level_HV.value", "53.0")},
+            62074, 53),
+        row(T(20, 6, 0, 41), {"a": ("mileage.value", "62071"),
+                              "g": ("mileage.value", "62074"),
+                              "b": ("battery_level_HV.value", "53.0")},
+            62074, 53),
+    ]
+
+
+def case_portal():
+    rows = portal_rows()
+    found = sessions.detect_drives(observations.from_snapshots(rows), dense=False)
+    d = found[0] if len(found) == 1 else None
+    shuffled = rows[:]
+    random.Random(7).shuffle(shuffled)
+    again = sessions.detect_drives(observations.from_snapshots(shuffled), dense=False)
+    return [(d is not None and d.started_at == T(20, 5, 44, 24)
+             and d.ended_at == T(20, 6, 0, 41),
+             "Portal: Start mit dem Bericht beim Einschalten (ohne Kilometerstand), "
+             "Ende mit dem letzten Abschaltbericht",
+             str(d and (d.started_at, d.ended_at))),
+            (d is not None and (d.odo_start, d.odo_end, d.soc_start, d.soc_end)
+             == (62067, 62074, 56, 53),
+             "Portal: der erste Abschaltbericht mit altem Kilometerstand stört nicht, "
+             "Ende 62074; Ladestand 56 -> 53",
+             str(d and (d.odo_start, d.odo_end, d.soc_start, d.soc_end))),
+            (again == found, "Portal: Berichte in anderer Reihenfolge, dieselbe Fahrt",
+             str(again))]
+
+
+CASES = [case_session_36, case_stops, case_into_dc, case_overnight,
+         case_pauses_and_spellings, case_manoeuvre, case_portal]
+
+
+def run_cases() -> list:
+    return [result for case in CASES for result in case()]
+
+
+def part_detection():
+    verify.section("Fahrten und Ladevorgänge erkennen")
+    for ok, claim, measured in run_cases():
+        verify(ok, claim, measured)
+    spellings = ["CHARGING", "charging", "NOT_READY_FOR_CHARGING", "notReadyForCharging",
+                 "readyForCharging", "ERROR", "error",
+                 "CHARGE_PURPOSE_REACHED_AND_NOT_CONVERSATION_CHARGING",
+                 "chargePurposeReachedAndNotConservationCharging",
+                 "CHARGE_PURPOSE_REACHED_AND_CONVERSATION",
+                 "chargePurposeReachedAndConservation",
+                 "CHARGE_STATE_NOT_READY_FOR_CHARGING"]
+    verify([observations.charge_state(s) for s in spellings]
+           == ["charging", "charging", "not_ready", "not_ready", "ready", "error",
+               "error", "purpose_reached", "purpose_reached", "conservation",
+               "conservation", "not_ready"],
+           "beide Schreibweisen des Ladezustands (und die des Portals) ergeben "
+           "denselben Wert")
+    broken = [p(T(1, 1), "mileage", 5), {"dataFieldName": "mileage", "value": "6",
+                                          "timestampUtc": "0001-01-01T00:00:00.000Z"},
+              {"dataFieldName": "mileage", "value": "7", "timestampUtc": "N/A"},
+              {"dataFieldName": "mileage", "value": "8"},
+              p(T(1, 2), "chargeType", "INVALID"), p(T(1, 2), "unknownField", 1)]
+    verify(len(obs(broken)) == 1,
+           "Punkte ohne gültige Zeit, INVALID und unbekannte Felder fallen weg",
+           str(obs(broken)))
+
+
+MUTATIONS = [("STOP_SPLIT", timedelta(minutes=5)), ("STOP_SPLIT", timedelta(minutes=20)),
+             ("BURST", timedelta(seconds=10)), ("MIN_DRIVE_KM", 0.5),
+             ("CHARGE_PAUSE", timedelta(minutes=5)),
+             ("CHARGE_PAUSE", timedelta(minutes=30)),
+             ("POWER_GAP_CAP", timedelta(hours=3)), ("MIN_CHARGE_KWH", 0.001)]
+
+
+def part_mutations():
+    verify.section("Jede Schwelle ist geprüft")
+    for name, value in MUTATIONS:
+        original = getattr(sessions, name)
+        setattr(sessions, name, value)
+        try:
+            failed = [claim for ok, claim, _ in run_cases() if not ok]
+        except Exception as failure:      # noqa: BLE001
+            failed = [repr(failure)]
+        finally:
+            setattr(sessions, name, original)
+        verify(failed, f"{name} = {value} fällt auf", "kein Fall schlägt fehl")
+
+
+PARTS = [part_detection, part_mutations]
+
+
+def main() -> int:
+    for part in PARTS:
+        part()
+    return verify.balance(
+        "Nicht geprüft: ein echter Export und echte Portalberichte - dafür "
+        "tools/import_vw_history.py --dry-run mit dem eigenen Export.")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
