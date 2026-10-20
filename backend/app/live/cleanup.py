@@ -41,6 +41,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .. import models
+from ..cloud import logbook
 from ..energy import calibration, charge_phases
 from ..geo import haversine_m
 from . import recording
@@ -198,6 +199,8 @@ def end_and_learn(db, session) -> dict:
                                    "after": vehicle.correction_factor}
             log.info("Calibration %s: %.3f -> %.3f (raw %.3f)",
                      vehicle.name, earlier, vehicle.correction_factor, raw)
+
+    logbook.after_session_end(db, session)
     return result
 
 

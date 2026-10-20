@@ -438,7 +438,127 @@ def _iso(t):
     return t.astimezone(UTC).replace(tzinfo=None).isoformat()
 
 
-PARTS = [part_detection, part_mutations, part_storage]
+def recorded(db, vehicle_id, start, odo, km, soc, recording=True,
+             odometer=True, running=False):
+    """A live session as the app and the dongle leave it: a point every 30 s,
+    about 1 km per 1.5 minutes, energy counters rising 0.18 kWh per km."""
+    from app import models
+    trip = models.Trip(vehicle_id=vehicle_id, recording=recording,
+                       start_lat=48.1, start_lon=11.5, target_lat=48.1,
+                       target_lon=11.5, start_soc=soc, geometry=[],
+                       energy_profile=[])
+    db.add(trip)
+    db.flush()
+    session = models.LiveSession(trip_id=trip.id, running=running,
+                                 started_at=start.replace(tzinfo=None))
+    db.add(session)
+    db.flush()
+    for i in range(km * 3 + 1):
+        done = i / 3
+        raw = {"discharge_kwh": 9000 + 0.18 * done, "charged_kwh": 4000.0}
+        if odometer:
+            raw["odometer_km"] = odo + int(done)
+        db.add(models.LivePoint(
+            session_id=session.id, lat=48.1 + 0.009 * done, lon=11.5,
+            timestamp=(start + i * 30 * S).replace(tzinfo=None),
+            soc=round(soc - done * 0.25, 1), raw_values=raw))
+    db.flush()
+    db.refresh(session)
+    return session
+
+
+def part_jolt():
+    verify.section("jolt-Aufzeichnungen im Fahrtenbuch")
+    import logging
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    from app.live import cleanup
+    drives, _ = history_records()
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = recorded(db, vid, T(16, 15, 44, 19), 62020, 6, 73.9,
+                           recording=False, running=True)
+        session.running = False
+        cleanup.end_and_learn(db, session)
+        rows = drives_of(db, vid)
+        verify(len(rows) == 1 and rows[0].sources == ["jolt"]
+               and rows[0].live_session_id == session.id
+               and (rows[0].odo_start, rows[0].odo_end) == (62020, 62026)
+               and rows[0].energy_used_kwh == 1.08,
+               "eine beendete Fahrt steht sofort im Fahrtenbuch, auch ohne VW-Daten",
+               str(rows and columns(rows[0])))
+        logbook.store_drives(db, vid, logbook.HISTORY, [drives[2]])
+        rows = drives_of(db, vid)
+        jolt_first = columns(rows[0])
+        verify(len(rows) == 1 and rows[0].sources == ["vw_history", "jolt"]
+               and rows[0].started_at == T(16, 15, 44, 21).replace(tzinfo=None)
+               and rows[0].live_session_id == session.id
+               and rows[0].energy_used_kwh == 1.08,
+               "danach der VW-Export: eine Zeile, Zeiten aus VW, Energie aus jolt, "
+               "Verweis auf die Aufzeichnung", str(rows and columns(rows[0])))
+        for row in rows:
+            db.delete(row)
+        db.flush()
+        logbook.store_drives(db, vid, logbook.HISTORY, [drives[2]])
+        logbook.store_session(db, session)
+        verify([columns(r) for r in drives_of(db, vid)] == [jolt_first],
+               "umgekehrte Reihenfolge: dieselbe Zeile")
+        again = logbook.store_all_sessions(db, vid)
+        verify(again == {"new": 0, "updated": 0, "unchanged": 1},
+               "alle Aufzeichnungen noch einmal: nichts ändert sich", str(again))
+
+        two = new_vehicle(db)
+        logbook.store_drives(db, two, logbook.HISTORY, drives[:2])
+        long = recorded(db, two, T(5, 6, 59), 1000, 20, 80)
+        logbook.store_session(db, long)
+        rows = drives_of(db, two)
+        verify(len(rows) == 2 and all(r.live_session_id == long.id for r in rows)
+               and all(r.energy_used_kwh is None for r in rows),
+               "eine Aufzeichnung über zwei VW-Fahrten: beide verweisen auf sie, keine "
+               "wird verklebt, keine bekommt die Energie der ganzen Aufzeichnung",
+               str([columns(r) for r in rows]))
+
+        three = new_vehicle(db)
+        planned = recorded(db, three, T(14, 9), 0, 5, 60, recording=False,
+                           odometer=False)
+        phone = recorded(db, three, T(14, 12), 0, 5, 60, odometer=False)
+        logbook.store_session(db, planned)
+        logbook.store_session(db, phone)
+        rows = drives_of(db, three)
+        verify(len(rows) == 1 and rows[0].live_session_id == phone.id
+               and rows[0].odo_start is None and close(rows[0].distance_km, 5.0, 0.1),
+               "ohne Kilometerstand: eine Aufzeichnung zählt mit der GPS-Strecke, "
+               "eine geplante Fahrt (der Simulator) gar nicht",
+               str([columns(r) for r in rows]))
+
+        broken = recorded(db, three, T(15, 9), 500, 3, 60, running=True)
+        broken.running = False
+        lines = []
+        handler = logging.Handler()
+        handler.emit = lambda record: lines.append(record.getMessage())
+        logger = logging.getLogger("uvicorn.error")
+        logger.addHandler(handler)
+        original = logbook.store_session
+        logbook.store_session = lambda db, s: 1 / 0
+        try:
+            result = cleanup.end_and_learn(db, broken)
+            ended = True
+        except Exception:      # noqa: BLE001
+            ended = False
+        finally:
+            logbook.store_session = original
+            logger.removeHandler(handler)
+        verify(ended and "recording" in result and not broken.running
+               and any("Logbook" in line for line in lines),
+               "ein Fehler im Fahrtenbuch hält das Beenden nicht auf", str(lines))
+        db.commit()
+    finally:
+        db.close()
+
+
+PARTS = [part_detection, part_mutations, part_storage, part_jolt]
 
 
 def main() -> int:

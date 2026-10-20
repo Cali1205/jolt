@@ -13,12 +13,16 @@ again replaces itself and changes nothing) and independent of the order in
 which the sources arrive. A detected drive belongs to a stored one when their
 odometer ranges overlap, or, where one of them has no odometer, their times.
 """
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, or_
 
 from .. import models
-from . import sessions
+from ..geo import haversine_m
+from . import observations, sessions
+
+log = logging.getLogger("uvicorn.error")
 
 HISTORY = "vw_history"
 PORTAL = "vw_portal"
@@ -242,3 +246,88 @@ def store_charges(db, vehicle_id: int, source: str, records: list[dict]) -> dict
 
 def kwh_per_pct(vehicle: models.Vehicle | None) -> float | None:
     return vehicle.capacity_kwh / 100 if vehicle else None
+
+
+# ---------------------------------------------------------------------------
+# Source: jolt's own recordings
+# ---------------------------------------------------------------------------
+
+def _gps_km(points) -> float:
+    km = 0.0
+    for a, b in zip(points, points[1:]):
+        km += haversine_m(a.lat, a.lon, b.lat, b.lon) / 1000
+    return km
+
+
+def session_record(session: models.LiveSession) -> dict | None:
+    """A finished live session as one drive - the trip as its driver
+    recorded it, even when it had a charging stop the VW data splits at.
+
+    Not split by `sessions.detect_drives`: the dongle falls silent whenever
+    its connection drops, so its gaps say nothing about the car standing.
+    Without odometer readings a recording counts with its GPS distance; a
+    planned trip without them is left out, since the simulator plays those
+    back with made-up times.
+    """
+    points = list(session.points)
+    if session.running or len(points) < 2:
+        return None
+    by_field: dict[str, list] = {}
+    for o in observations.from_live_points(points):
+        by_field.setdefault(o.field, []).append((o.t, o.value))
+    km_track = sessions.thin(sessions.dedup(sorted(by_field.get("odometer_km", []))))
+    soc_track = by_field.get("soc_pct", [])
+    net = by_field.get("energy_net_kwh", [])
+    if km_track:
+        odo_start = min(v for _, v in km_track)
+        odo_end = max(v for _, v in km_track)
+        km = odo_end - odo_start
+    else:
+        trip = session.trip
+        if trip is None or not trip.recording:
+            return None
+        odo_start = odo_end = None
+        km = _gps_km(points)
+    if km < sessions.MIN_DRIVE_KM:
+        return None
+    used = net[-1][1] - net[0][1] if len(net) > 1 else None
+    return {"started_at": _iso(points[0].timestamp),
+            "ended_at": _iso(points[-1].timestamp),
+            "odo_start": odo_start, "odo_end": odo_end,
+            "distance_km": round(km, 1),
+            "soc_start": soc_track[0][1] if soc_track else None,
+            "soc_end": soc_track[-1][1] if soc_track else None,
+            "energy_used_kwh": round(used, 2) if used is not None and used >= 0 else None,
+            "km_track": _track(km_track),
+            "soc_track": _track(sessions.thin(sessions.dedup(soc_track))),
+            "live_session_id": session.id}
+
+
+def store_session(db, session: models.LiveSession) -> dict:
+    record = session_record(session)
+    if record is None:
+        return _counts()
+    return store_drives(db, session.trip.vehicle_id, JOLT, [record])
+
+
+def store_all_sessions(db, vehicle_id: int | None = None) -> dict:
+    """Every finished live session (of one vehicle) into the logbook."""
+    query = (db.query(models.LiveSession)
+             .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
+             .filter(models.LiveSession.running.is_(False)))
+    if vehicle_id is not None:
+        query = query.filter(models.Trip.vehicle_id == vehicle_id)
+    total = _counts()
+    for session in query.order_by(models.LiveSession.id).all():
+        for key, value in store_session(db, session).items():
+            total[key] += value
+    return total
+
+
+def after_session_end(db, session: models.LiveSession) -> None:
+    """Hook for the end of a live session; never lets ending fail."""
+    try:
+        with db.begin_nested():
+            store_session(db, session)
+    except Exception as failure:      # noqa: BLE001
+        log.warning("Logbook: session %s not stored: %s", session.id, failure)
