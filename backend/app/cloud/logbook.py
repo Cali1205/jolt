@@ -26,24 +26,27 @@ log = logging.getLogger("uvicorn.error")
 
 HISTORY = "vw_history"
 PORTAL = "vw_portal"
+STELLANTIS = "stellantis"
 JOLT = "jolt"
 
 # Times, odometer and charge level: the export reports every kilometre, the
-# portal only at ignition on and off, the dongle reads the same odometer.
-TRACK_PREFERENCE = (HISTORY, PORTAL, JOLT)
+# portal only at ignition on and off, Stellantis whenever jolt asks (every
+# quarter hour), the dongle reads the same odometer. A car is on one cloud,
+# so the two cloud sources never compete for the same drive.
+TRACK_PREFERENCE = (HISTORY, PORTAL, STELLANTIS, JOLT)
 # Energy: the dongle reads the battery's own counters; VW only has the
 # charge level in whole percent and, from the portal, the energy content.
-ENERGY_PREFERENCE = (JOLT, PORTAL, HISTORY)
-CHARGE_PREFERENCE = (HISTORY, PORTAL)
+ENERGY_PREFERENCE = (JOLT, PORTAL, HISTORY, STELLANTIS)
+CHARGE_PREFERENCE = (HISTORY, PORTAL, STELLANTIS)
 
-# Portal reports: what is detected over this window is stored, but only once
-# it is old enough. The switch-off reports arrive late and out of order, and
-# an ongoing charge must not be stored as finished.
-PORTAL_WINDOW = timedelta(hours=48)
-PORTAL_SETTLE = timedelta(minutes=30)
+# Cloud snapshots: what is detected over this window is stored, but only once
+# it is old enough. The VW switch-off reports arrive late and out of order,
+# and an ongoing charge must not be stored as finished.
+SNAPSHOT_WINDOW = timedelta(hours=48)
+SNAPSHOT_SETTLE = timedelta(minutes=30)
 # A drive or charge that starts this close to the window's beginning may
 # have started before it; a later window sees it whole.
-PORTAL_EDGE = timedelta(hours=6)
+SNAPSHOT_EDGE = timedelta(hours=6)
 
 
 def _naive(t: datetime) -> datetime:
@@ -360,24 +363,24 @@ def after_session_end(db, session: models.LiveSession) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Source: the portal's live reports
+# Source: a cloud's snapshots (the VW portal's reports, Stellantis' status)
 # ---------------------------------------------------------------------------
 
 def settled(records: list[dict], window_start: datetime,
             now: datetime) -> list[dict]:
     """Only what lies whole inside the window and has stopped changing."""
     return [r for r in records
-            if _time(r["started_at"]) >= window_start + PORTAL_EDGE
-            and _time(r["ended_at"]) <= now - PORTAL_SETTLE]
+            if _time(r["started_at"]) >= window_start + SNAPSHOT_EDGE
+            and _time(r["ended_at"]) <= now - SNAPSHOT_SETTLE]
 
 
-def store_from_snapshots(db, vehicle_id: int,
+def store_from_snapshots(db, vehicle_id: int, source: str,
                          now: datetime | None = None) -> dict:
     now = now or datetime.utcnow()
-    window_start = now - PORTAL_WINDOW
+    window_start = now - SNAPSHOT_WINDOW
     rows = (db.query(models.VehicleSnapshot)
             .filter(models.VehicleSnapshot.vehicle_id == vehicle_id,
-                    models.VehicleSnapshot.source == PORTAL,
+                    models.VehicleSnapshot.source == source,
                     models.VehicleSnapshot.captured_at >= window_start)
             .all())
     obs = observations.from_snapshots(rows)
@@ -387,8 +390,8 @@ def store_from_snapshots(db, vehicle_id: int,
     charges = settled([charge_record(c) for c in
                        sessions.detect_charges(obs, kwh_per_pct(vehicle))],
                       window_start, now)
-    result = {"drives": store_drives(db, vehicle_id, PORTAL, drives),
-              "charges": store_charges(db, vehicle_id, PORTAL, charges)}
+    result = {"drives": store_drives(db, vehicle_id, source, drives),
+              "charges": store_charges(db, vehicle_id, source, charges)}
     # A recording that ended before the portal's drive was stored attached
     # to nothing yet, or to one half of it; offered again, it finds both.
     recent = (db.query(models.LiveSession)

@@ -34,8 +34,7 @@ for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")
         break
 
 from app import models  # noqa: E402
-from app.cloud import logbook, observations, sessions  # noqa: E402
-from app.cloud.vw_portal import mask  # noqa: E402
+from app.cloud import logbook, mask, observations, sessions  # noqa: E402
 from app.database import SessionLocal, migrate  # noqa: E402
 
 

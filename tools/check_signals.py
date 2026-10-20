@@ -81,9 +81,15 @@ def _platform_names() -> dict[str, list[str]]:
 
 def part_sources():
     verify.section("Quellen sprechen den Katalog")
-    from app.cloud import observations, snapshot
-    verify(not signals.unknown(snapshot.PROVIDES),
-           "VW-Portal: PROVIDES nur Katalognamen", str(signals.unknown(snapshot.PROVIDES)))
+    from app import cloud
+    from app.cloud import observations, snapshot, stellantis
+    verify(set(cloud.SOURCES) == {"vw_portal", "stellantis"}
+           and set(cloud.SOURCES) <= signals.SOURCE_LABELS.keys(),
+           "jede Cloud-Quelle hat eine Bezeichnung", str(sorted(cloud.SOURCES)))
+    for name, provides in (("VW-Portal", snapshot.PROVIDES),
+                           ("Stellantis", stellantis.PROVIDES)):
+        verify(provides and not signals.unknown(provides),
+               f"{name}: PROVIDES nur Katalognamen", str(signals.unknown(provides)))
     verify(snapshot.PROVIDES == {name for name, _, _ in snapshot.FIELDS},
            "VW-Portal: PROVIDES ist, was FIELDS liefert")
     history = {field for field, _ in observations.HISTORY_FIELDS.values()}

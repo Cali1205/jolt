@@ -29,6 +29,7 @@ jobs:
       - run: ./tools/check_vw_portal.py
       - run: ./tools/check_vw_sessions.py
       - run: ./tools/check_signals.py
+      - run: ./tools/check_stellantis.py
       - run: ./tools/check_own.py
       - run: ./tools/check_tomtom.py
       - run: ./tools/check_weather.py

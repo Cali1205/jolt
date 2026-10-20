@@ -497,8 +497,9 @@ def part_poller():
                          vw_portal.PortalError("login rejected: x"),
                          RuntimeError("portal down"),
                          snap, snap])
-    config = cloud.Config(name="vw_portal", vin=None, vehicle=str(vehicle_id),
-                          interval_min=15, connect=lambda: source)
+    config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None,
+                          vehicle=str(vehicle_id), interval_min=15,
+                          provides=snapshot.PROVIDES, connect=lambda: source)
     poll = poller.Poll(config, SessionLocal)
 
     lines = []
@@ -559,7 +560,8 @@ def part_poller():
             ("x", None, [VIN], "must be a jolt vehicle id"),
             (str(vehicle_id), None, [VIN, "WVGZZZSYNTHETIC02"], "…IC01, …IC02")):
         bad = poller.Poll(cloud.Config(
-            name="vw_portal", vin=vin, vehicle=vehicle, interval_min=15,
+            name="vw_portal", env="VW_PORTAL", vin=vin, vehicle=vehicle,
+            interval_min=15, provides=snapshot.PROVIDES,
             connect=lambda: type("S", (), {"vehicles": lambda self: vins})()),
             SessionLocal)
         try:

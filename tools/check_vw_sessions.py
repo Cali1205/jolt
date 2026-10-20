@@ -578,12 +578,14 @@ def part_portal():
                                           received_at=row.captured_at,
                                           values=row.values, raw=row.raw))
         db.commit()
-        early = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 6, 10))
+        early = logbook.store_from_snapshots(db, vid, logbook.PORTAL,
+                                             now=datetime(2026, 10, 20, 6, 10))
         verify(early["drives"]["new"] + early["drives"]["updated"] == 0
                and drives_of(db, vid)[0].sources == ["jolt"],
                "zehn Minuten nach dem Abschalten wird noch nichts gespeichert: "
                "Abschaltberichte kommen spät", str(early))
-        later = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 7, 0))
+        later = logbook.store_from_snapshots(db, vid, logbook.PORTAL,
+                                             now=datetime(2026, 10, 20, 7, 0))
         rows = drives_of(db, vid)
         verify(len(rows) == 1 and rows[0].sources == ["vw_portal", "jolt"]
                and rows[0].started_at == datetime(2026, 10, 20, 5, 44, 24)
@@ -591,7 +593,8 @@ def part_portal():
                and rows[0].live_session_id == session.id,
                "nach einer halben Stunde: die Portal-Fahrt, mit der Aufzeichnung "
                "zusammengeführt", f"{later} {[columns(r) for r in rows]}")
-        again = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 7, 15))
+        again = logbook.store_from_snapshots(db, vid, logbook.PORTAL,
+                                             now=datetime(2026, 10, 20, 7, 15))
         verify(again["drives"] == {"new": 0, "updated": 0, "unchanged": 1},
                "die nächste Runde ändert nichts", str(again))
     finally:
@@ -603,9 +606,9 @@ def part_portal():
     logger = logging.getLogger("uvicorn.error")
     logger.addHandler(handler)
     original = logbook.store_from_snapshots
-    logbook.store_from_snapshots = lambda db, vehicle_id: 1 / 0
-    config = cloud.Config(name="vw_portal", vin=None, vehicle=str(vid),
-                          interval_min=15, connect=lambda: None)
+    logbook.store_from_snapshots = lambda db, vehicle_id, source: 1 / 0
+    config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None, vehicle=str(vid),
+                          interval_min=15, provides=frozenset(), connect=lambda: None)
     poll = poller.Poll(config, SessionLocal)
     poll.status.vehicle_id = vid
     db = SessionLocal()
