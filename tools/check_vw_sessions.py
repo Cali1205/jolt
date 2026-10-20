@@ -587,16 +587,46 @@ def part_portal():
         later = logbook.store_from_snapshots(db, vid, logbook.PORTAL,
                                              now=datetime(2026, 10, 20, 7, 0))
         rows = drives_of(db, vid)
+        jolt = rows[0].details["by_source"]["jolt"][0] if rows else {}
         verify(len(rows) == 1 and rows[0].sources == ["vw_portal", "jolt"]
-               and rows[0].started_at == datetime(2026, 10, 20, 5, 44, 24)
-               and rows[0].ended_at == datetime(2026, 10, 20, 6, 0, 41)
+               and rows[0].odo_start == 62067 and rows[0].odo_end == 62074
+               and rows[0].started_at.isoformat() == jolt.get("started_at")
+               and rows[0].ended_at.isoformat() == jolt.get("ended_at")
                and rows[0].live_session_id == session.id,
                "nach einer halben Stunde: die Portal-Fahrt, mit der Aufzeichnung "
-               "zusammengeführt", f"{later} {[columns(r) for r in rows]}")
+               "zusammengeführt; Kilometer vom Portal, Zeiten von der Aufzeichnung",
+               f"{later} {[columns(r) for r in rows]}")
         again = logbook.store_from_snapshots(db, vid, logbook.PORTAL,
                                              now=datetime(2026, 10, 20, 7, 15))
         verify(again["drives"] == {"new": 0, "updated": 0, "unchanged": 1},
                "die nächste Runde ändert nichts", str(again))
+    finally:
+        db.close()
+
+    # 20 Oct 2026: no report at switch-on, so the portal only knows "parked at
+    # 15:00, parked again at 20:11, 18 km more". The recording knows 19:13 to
+    # 19:51; the logbook must not stretch the drive to five hours.
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = recorded(db, vid, T(20, 17, 13, 23), 62074, 18, 51.7)
+        logbook.store_session(db, session)
+        recorded_span = drives_of(db, vid)[0]
+        recorded_span = (recorded_span.started_at, recorded_span.ended_at)
+        for moment, odo, soc in ((datetime(2026, 10, 20, 13, 0, 24), 62074, 53),
+                                 (datetime(2026, 10, 20, 18, 11, 33), 62092, 45)):
+            db.add(models.VehicleSnapshot(
+                vehicle_id=vid, source="vw_portal", captured_at=moment, received_at=moment,
+                values={"odometer_km": odo, "soc_pct": soc, "charge_state": "not_ready"},
+                raw=None))
+        db.commit()
+        logbook.store_from_snapshots(db, vid, logbook.PORTAL, now=datetime(2026, 10, 20, 19, 9))
+        rows = drives_of(db, vid)
+        verify(len(rows) == 1 and rows[0].sources == ["vw_portal", "jolt"]
+               and (rows[0].started_at, rows[0].ended_at) == recorded_span
+               and rows[0].odo_end == 62092,
+               "ohne Bericht beim Einschalten: die Zeiten bleiben die der Aufzeichnung, "
+               "nicht 15:00 bis 20:11", str([columns(r) for r in rows]))
     finally:
         db.close()
 
