@@ -39,6 +39,15 @@ The diagnostics page shows what arrives: tab "Einstellungen", section
 answers and failures. "Bericht kopieren" copies a report you can attach to an
 issue.
 
+## Without a dongle
+
+Volkswagen group cars can send their last reported values (charge level,
+range, odometer) to the VW EU Data Act portal, and jolt can fetch them from
+there. It is no live data: the values are as old as the car's last report,
+usually a few minutes to hours. jolt uses them as the start charge level of a
+recording when the dongle gives none, and shows them in the tab "Fahrzeug".
+Setup: [vw-portal.md](vw-portal.md).
+
 ## Adding a platform
 
 A platform is one file in `frontend/platforms/` that registers itself:
