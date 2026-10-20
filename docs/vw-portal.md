@@ -55,6 +55,7 @@ Optional:
 | `VW_PORTAL_VIN` | The vehicle in the VW account. Only needed when the account has more than one. |
 | `VW_PORTAL_VEHICLE` | The jolt vehicle id the data belongs to. Only needed when jolt has more than one vehicle. |
 | `VW_PORTAL_INTERVAL_MIN` | Minutes between fetches. Default 15, at least 5. |
+| `VW_PORTAL_USER_AGENT` | Replaces the `User-Agent` jolt sends. Only if the login is refused with 403/406: VW's firewall decides partly by headers. |
 
 Test the login before you restart jolt:
 

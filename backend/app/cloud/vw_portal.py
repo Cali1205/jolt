@@ -20,6 +20,7 @@ VIN. Error texts carry the step and the HTTP status, never a URL with a VIN
 or a query string from the identity service.
 """
 import io
+import os
 import json
 import random
 import re
@@ -49,7 +50,10 @@ MAX_REDIRECTS = 10
 MAX_BACKFILL = 8
 # A dataset is a few kilobytes; anything far larger is not one.
 MAX_DATASET_BYTES = 20 * 1024 * 1024
-USER_AGENT = f"jolt/{VERSION} (+https://github.com/cali1205/jolt)"
+# VW's firewall in front of the portal decides by headers we cannot test
+# from here. VW_PORTAL_USER_AGENT replaces this one without a new image.
+USER_AGENT = (os.environ.get("VW_PORTAL_USER_AGENT", "").strip()
+              or f"jolt/{VERSION} (+https://github.com/cali1205/jolt)")
 
 REDIRECT_STATUS = (301, 302, 303, 307, 308)
 JSON = {"Accept": "application/json"}
