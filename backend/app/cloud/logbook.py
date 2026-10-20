@@ -38,6 +38,12 @@ TRACK_PREFERENCE = (HISTORY, PORTAL, STELLANTIS, JOLT)
 # charge level in whole percent and, from the portal, the energy content.
 ENERGY_PREFERENCE = (JOLT, PORTAL, HISTORY, STELLANTIS)
 CHARGE_PREFERENCE = (HISTORY, PORTAL, STELLANTIS)
+# Who knows when a drive began and ended. The history stamps every kilometre
+# and a recording runs the whole way; the portal and Stellantis only know the
+# reports around it, and when the car sent none at switch-on their drive
+# spans from the last parked report hours earlier (20 Oct 2026: 15:00 instead
+# of 19:13).
+TIME_PREFERENCE = (HISTORY, JOLT, PORTAL, STELLANTIS)
 
 # Cloud snapshots: what is detected over this window is stored, but only once
 # it is old enough. The VW switch-off reports arrive late and out of order,
@@ -152,23 +158,30 @@ def _same_distance(a: dict, b: dict) -> bool:
     return abs(a["distance_km"] - b["distance_km"]) <= max(1.0, 0.1 * b["distance_km"])
 
 
+def _whole(by_source: dict, order: tuple, main: dict) -> dict | None:
+    """The combined record of the first source in `order` that saw the whole
+    drive `main` describes, not a part of it or more."""
+    for source in order:
+        if by_source.get(source):
+            found = _combine(by_source[source])
+            if _same_distance(found, main):
+                return found
+    return None
+
+
 def _apply_drive(row: models.VehicleDrive) -> None:
     by_source = row.details["by_source"]
     main = _preferred(by_source, TRACK_PREFERENCE)
-    row.started_at, row.ended_at = _span(main)
+    row.started_at, row.ended_at = _span(_whole(by_source, TIME_PREFERENCE, main) or main)
     row.odo_start, row.odo_end = main.get("odo_start"), main.get("odo_end")
     row.distance_km = main["distance_km"]
     row.soc_start, row.soc_end = main.get("soc_start"), main.get("soc_end")
     # Energy only from a source that saw the whole drive: a recording that
     # covers two drives, or half of one, has the wrong kilowatt hours for it.
-    energy = None
-    for source in ENERGY_PREFERENCE:
-        if by_source.get(source):
-            found = _combine(by_source[source])
-            if found.get("energy_used_kwh") is not None and _same_distance(found, main):
-                energy = found["energy_used_kwh"]
-                break
-    row.energy_used_kwh = energy
+    with_energy = {s: [r for r in records if r.get("energy_used_kwh") is not None]
+                   for s, records in by_source.items()}
+    found = _whole(with_energy, ENERGY_PREFERENCE, main)
+    row.energy_used_kwh = found["energy_used_kwh"] if found else None
     jolt = by_source.get(JOLT) or []
     row.live_session_id = (max(jolt, key=lambda r: r["distance_km"])["live_session_id"]
                            if jolt else None)
