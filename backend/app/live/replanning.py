@@ -27,7 +27,7 @@ from .. import models
 from ..energy import model, weather
 from ..energy.model import VehicleValues, Environment
 from ..geo import haversine_m
-from ..charging import curves, optimizer, prices, availability
+from ..charging import curve_source, curves, optimizer, prices, availability
 from ..routing import corridor
 
 log = logging.getLogger("uvicorn.error")
@@ -244,9 +244,10 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
                 "stop_count": 0, "stops": []}
 
     options = search_options(db, geometry, vehicle, parameter)
+    curve, curve_info = curve_source.effective_curve(db, vehicle)
     plan = optimizer.schedule(
         profile, options, VehicleValues.from_trip(trip),
-        curves.as_pairs(vehicle.charge_curve), start_soc=start_soc,
+        curve, start_soc=start_soc,
         target_soc=vehicle.target_soc,
         max_vehicle_kw=vehicle.max_charge_power_kw,
         temperature_factor=curves.temperature_factor(
@@ -273,7 +274,8 @@ def schedule(db, trip: models.Trip, from_km: float, start_soc: float,
             # it is traceable whether a measurement is at work here or still
             # the slider from before departure.
             "basis": basis,
-            "speed_factor": speed_factor}
+            "speed_factor": speed_factor,
+            "charge_curve_source": curve_info["source"]}
 
 
 def stops_same(old: dict | None, new_plan: dict | None) -> bool:

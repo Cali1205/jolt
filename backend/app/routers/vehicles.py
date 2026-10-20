@@ -1,6 +1,6 @@
 import math
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import deps, models, security
 from ..timestamp import utc_iso
 from ..database import get_db
-from ..charging import curves
+from ..charging import curve_source, curves
 
 router = APIRouter(prefix="/api/vehicles", tags=["vehicles"],
                    dependencies=[Depends(deps.current_session)])
@@ -58,6 +58,9 @@ class VehicleInput(BaseModel):
     electricity_prices: list[ElectricityPrice] = Field(default=[], max_length=50)
     # [[soc, kw], ...] - empty means "leave the curve unchanged"
     charge_curve: list[list[float]] = Field(default=[], max_length=100)
+    # None leaves it unchanged: a client from before the setting must not
+    # reset someone's "profile" to "auto" with every save.
+    charge_curve_source: Literal["auto", "profile"] | None = None
 
     @model_validator(mode="after")
     def _target_above_reserve(self):
@@ -120,6 +123,7 @@ def _as_dict(vehicle: models.Vehicle) -> dict:
             # Only whether one is set up, not which one. The token appears
             # in exactly one response - the one that creates it.
             "logger_active": bool(vehicle.logger_token),
+            "charge_curve_source": vehicle.charge_curve_source,
             "charge_curve": [[p.soc_percent, p.kw] for p in vehicle.charge_curve]}
 
 
@@ -139,6 +143,14 @@ def _examine_curve(pairs: list[list[float]]) -> None:
                 400, f"Ladestand {soc:g} % kommt in der Ladekurve mehrfach vor - "
                      "jeder Ladestand darf nur eine Ladeleistung haben.")
         seen.add(soc)
+
+
+def _fields(user_input: VehicleInput) -> dict:
+    """The input's columns, without the curve and without unset settings."""
+    exclude = {"charge_curve"}
+    if user_input.charge_curve_source is None:
+        exclude.add("charge_curve_source")
+    return user_input.model_dump(exclude=exclude)
 
 
 def _set_curve(db: Session, vehicle: models.Vehicle,
@@ -183,8 +195,7 @@ def create(user_input: VehicleInput, db: Session = Depends(get_db)):
     if user_input.battery_net_kwh > user_input.battery_gross_kwh:
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
     _examine_curve(user_input.charge_curve)
-    fields = user_input.model_dump(exclude={"charge_curve"})
-    vehicle = models.Vehicle(**fields)
+    vehicle = models.Vehicle(**_fields(user_input))
     db.add(vehicle)
     db.flush()
     _set_curve(db, vehicle, user_input.charge_curve or
@@ -203,12 +214,25 @@ def change(vehicle_id: int, user_input: VehicleInput,
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
     if user_input.charge_curve:
         _examine_curve(user_input.charge_curve)
-    for field, value in user_input.model_dump(exclude={"charge_curve"}).items():
+    for field, value in _fields(user_input).items():
         setattr(vehicle, field, value)
     if user_input.charge_curve:
         _set_curve(db, vehicle, user_input.charge_curve)
     db.commit()
     return _as_dict(vehicle)
+
+
+@router.get("/{vehicle_id}/charge-curve")
+def charge_curve(vehicle_id: int, db: Session = Depends(get_db)):
+    """The curve the planner uses, where it comes from, and both candidates:
+    the envelope of the logbook's DC charges and the profile curve."""
+    vehicle = db.get(models.Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+    curve, info = curve_source.effective_curve(db, vehicle)
+    return {**info, "curve": [list(p) for p in curve],
+            "measured": [list(p) for p in info["measured"]],
+            "profile": [list(p) for p in info["profile"]]}
 
 
 @router.post("/{vehicle_id}/logger-token")

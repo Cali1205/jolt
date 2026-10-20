@@ -604,7 +604,16 @@
       <div id="vehicle-form"></div>
       <h2>Ladekurve <button type="button" class="info" data-info="help-curve" aria-expanded="false" aria-label="Erklärung">i</button></h2>
       <p class="hilfe" id="help-curve" hidden>Leistung bei welchem Ladestand.
-        Dazwischen wird interpoliert.</p>
+        Dazwischen wird interpoliert. Hat das Fahrtenbuch genug
+        Schnellladungen, plant jolt mit der dort gemessenen Kurve: je
+        Ladestand die Leistung, die das Auto an einer starken Säule bei warmem
+        Akku nimmt. Wo nichts gemessen ist, gelten die Werte unten.</p>
+      <label for="veh-charge_curve_source">Ladekurve für die Planung</label>
+      <select id="veh-charge_curve_source">
+        <option value="auto">gemessen, sonst Profil</option>
+        <option value="profile">immer Profil</option>
+      </select>
+      <div id="curve-source" hidden></div>
       <table class="kurve"><tbody id="curve-rows"></tbody></table>
       <button class="tat neben" id="curve-row-new">Stützstelle hinzufügen</button>
       <button class="tat" id="vehicle-save">Speichern</button>

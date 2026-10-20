@@ -218,6 +218,8 @@ window.joltVehicle = (function () {
       }
     }
     fillCurve(vehicle.charge_curve || []);
+    document.getElementById("veh-charge_curve_source").value =
+      vehicle.charge_curve_source || "auto";
   }
 
   function readForm() {
@@ -233,6 +235,7 @@ window.joltVehicle = (function () {
       else form[field.name] = Number(el.value);
     }
     form.charge_curve = readCurve();
+    form.charge_curve_source = document.getElementById("veh-charge_curve_source").value;
     return form;
   }
 
@@ -250,6 +253,53 @@ window.joltVehicle = (function () {
                  font-size:18px">×</button></td>`;
     row.querySelector(".kurve-weg").addEventListener("click", () => row.remove());
     return row;
+  }
+
+  /* Which curve the planner uses, and the measured one next to the profile. */
+  function curveSourceHtml(info) {
+    const date = info.updated ? new Date(info.updated).toLocaleDateString("de-DE") : "";
+    const dc = `${info.charges} DC-Ladung${info.charges === 1 ? "" : "en"}`;
+    let text;
+    if (info.source === "measured") {
+      text = `Plant mit der gemessenen Kurve aus ${dc}${date ? ", zuletzt am " + date : ""}.`
+        + " Wo nichts gemessen ist, gelten die Profilwerte.";
+    } else if (info.setting === "profile") {
+      text = "Plant mit dem Profil." + (info.measured.length
+        ? ` Gemessen wäre eine Kurve aus ${dc}.` : "");
+    } else {
+      text = `Plant mit dem Profil: im Fahrtenbuch ${info.charges ? "erst " + dc : "noch keine DC-Ladung"},`
+        + " zu wenig für eine eigene Kurve.";
+    }
+    const lines = [[info.measured, "#ffc93c", ""], [info.profile, "#8a97a5", "4 3"]]
+      .filter(([pairs]) => pairs.length >= 2);
+    if (!info.measured.length) return `<p class="unter">${K.esc(text)}</p>`;
+    const top = Math.max(...lines.flatMap(([pairs]) => pairs.map((p) => p[1])), 1);
+    const px = (soc) => 4 + soc / 100 * 292;
+    const py = (kw) => 76 - kw / top * 70;
+    const svg = `<svg viewBox="0 0 300 80" style="width:100%;height:80px;margin-top:8px">`
+      + lines.map(([pairs, colour, dash]) => `<polyline fill="none" stroke="${colour}" stroke-width="2"`
+        + (dash ? ` stroke-dasharray="${dash}"` : "")
+        + ` points="${pairs.map((p) => px(p[0]).toFixed(1) + "," + py(p[1]).toFixed(1)).join(" ")}"/>`).join("")
+      + `</svg>`;
+    return `<p class="unter">${K.esc(text)}</p>${svg}`
+      + `<div class="karte-fuss"><span>kW über Ladestand · bis ${K.num(top)} kW</span>`
+      + `<span><span style="color:#ffc93c">━</span> gemessen · <span style="color:#8a97a5">╌</span> Profil</span></div>`;
+  }
+
+  async function showCurveSource(vehicle) {
+    const box = document.getElementById("curve-source");
+    if (!box) return;
+    box.hidden = true;
+    if (!vehicle || !vehicle.id) return;
+    let info;
+    try {
+      info = await K.api(`/api/vehicles/${vehicle.id}/charge-curve`, { timeout: 8000 });
+    } catch (failure) {
+      return;
+    }
+    if (document.getElementById("vehicle-list").value !== String(vehicle.id)) return;
+    box.innerHTML = curveSourceHtml(info);
+    box.hidden = false;
   }
 
   /* ---------- Electricity prices ---------- */
@@ -390,6 +440,7 @@ window.joltVehicle = (function () {
     if (choice === "neu") {
       fillForm(Object.assign({}, templates[0] || {}, { name: "" }));
       showPortal(null);
+      showCurveSource(null);
       return;
     }
     const vehicle = K.state.vehicles.find((f) => String(f.id) === String(choice));
@@ -401,6 +452,7 @@ window.joltVehicle = (function () {
     }
     showLogger(vehicle);
     showPortal(vehicle);
+    showCurveSource(vehicle);
   }
 
   /* ---------- Logger in the car ---------- */
