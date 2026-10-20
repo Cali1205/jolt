@@ -13,7 +13,23 @@
   "to": "now"
  },
  "templating": {
-  "list": []
+  "list": [
+   {
+    "name": "charge",
+    "label": "Ladevorgang",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' AS __text FROM grafana_charges WHERE energy_kwh >= 5 AND soc_end > soc_start ORDER BY time DESC",
+    "definition": "grafana_charges",
+    "refresh": 2,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   }
+  ]
  },
  "panels": [
   {
@@ -902,6 +918,149 @@
     ]
    },
    "description": "Die nutzbare Kapazität (maximaler Energieinhalt laut Auto) sinkt mit dem Alter des Akkus - über Monate betrachtet ist das die Akkugesundheit."
+  },
+  {
+   "id": 16,
+   "type": "xychart",
+   "title": "Ladekurve: ${charge:text}",
+   "gridPos": {
+    "x": 0,
+    "y": 56,
+    "w": 12,
+    "h": 11
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT kw AS \"kW\", soc AS \"Ladestand %\" FROM grafana_charge_curve\nWHERE charge_id = ${charge} ORDER BY time",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points+lines",
+      "pointSize": {
+       "fixed": 3
+      },
+      "lineWidth": 2
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Ladestand %"
+      },
+      "properties": [
+       {
+        "id": "min",
+        "value": 0
+       },
+       {
+        "id": "max",
+        "value": 100
+       },
+       {
+        "id": "unit",
+        "value": "percent"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Ladevorgang oben in der Auswahl „Ladevorgang“ wählen. Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende."
+  },
+  {
+   "id": 17,
+   "type": "xychart",
+   "title": "Alle DC-Ladekurven im Zeitraum",
+   "gridPos": {
+    "x": 12,
+    "y": 56,
+    "w": 12,
+    "h": 11
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT kw AS \"kW\", soc AS \"Ladestand %\" FROM grafana_charge_curve\nWHERE charge_type = 'DC' AND $__timeFilter(time) ORDER BY charge_id, time",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points",
+      "pointSize": {
+       "fixed": 3
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Ladestand %"
+      },
+      "properties": [
+       {
+        "id": "min",
+        "value": 0
+       },
+       {
+        "id": "max",
+        "value": 100
+       },
+       {
+        "id": "unit",
+        "value": "percent"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Jeder Punkt ein Messwert eines DC-Ladevorgangs: die obere Kante ist, was der Akku bei welchem Ladestand höchstens annimmt; Punkte darunter sind kalter Akku, schwache Säule oder geteilte Leistung. Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende."
   }
  ],
  "links": [

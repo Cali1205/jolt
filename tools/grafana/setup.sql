@@ -199,6 +199,44 @@ SELECT s.id, s.vehicle_id, s.captured_at AS time, s.received_at,
        (s.values->>'target_soc_pct')::float   AS target_soc_pct
 FROM vehicle_snapshots s;
 
+-- The charging curve: power over charge level, one row per point of a
+-- charge's power track. The logbook keeps the power at each moment but the
+-- charge level only at start and end, so the level in between is estimated
+-- from the energy delivered so far: start + (kWh so far / kWh in total) x gain.
+-- The battery's charge level is energy-based, so this follows the real one
+-- closely. A gap of more than 10 minutes counts as 10, as in the logbook.
+CREATE OR REPLACE VIEW grafana_charge_curve AS
+WITH track AS (
+    SELECT c.id AS charge_id, c.vehicle_id, c.started_at, c.charge_type,
+           c.soc_start, c.soc_end, c.energy_kwh,
+           coalesce(c.details->'by_source'->'vw_history'->0->'power_track',
+                    c.details->'by_source'->'vw_portal'->0->'power_track') AS points
+    FROM vehicle_charges c
+    WHERE c.soc_start IS NOT NULL AND c.soc_end > c.soc_start
+), p AS (
+    SELECT t.charge_id, t.vehicle_id, t.started_at, t.charge_type,
+           t.soc_start, t.soc_end, e.n,
+           (e.point->>0)::timestamp AS time,
+           (e.point->>1)::float AS kw
+    FROM track t
+    CROSS JOIN LATERAL json_array_elements(t.points) WITH ORDINALITY AS e(point, n)
+    WHERE t.points IS NOT NULL
+), steps AS (
+    SELECT p.*,
+           coalesce((kw + lag(kw) OVER w) / 2
+                    * least(extract(epoch FROM time - lag(time) OVER w), 600) / 3600, 0)
+             AS step_kwh
+    FROM p
+    WINDOW w AS (PARTITION BY charge_id ORDER BY n)
+), cum AS (
+    SELECT s.*, sum(step_kwh) OVER (PARTITION BY charge_id ORDER BY n) AS kwh_so_far,
+           sum(step_kwh) OVER (PARTITION BY charge_id) AS kwh_total
+    FROM steps s
+)
+SELECT charge_id, vehicle_id, started_at, charge_type, time, kw,
+       soc_start + kwh_so_far / nullif(kwh_total, 0) * (soc_end - soc_start) AS soc
+FROM cum;
+
 -- Role. The password comes from -v pw=... so it is not stored in the repo.
 DO $$
 BEGIN
@@ -213,4 +251,5 @@ ALTER ROLE grafana_ro SET default_transaction_read_only = on;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM grafana_ro;
 GRANT USAGE ON SCHEMA public TO grafana_ro;
 GRANT SELECT ON grafana_points, grafana_sessions, grafana_trips, grafana_windows,
-                 grafana_drives, grafana_charges, grafana_reports TO grafana_ro;
+                 grafana_drives, grafana_charges, grafana_reports,
+                 grafana_charge_curve TO grafana_ro;

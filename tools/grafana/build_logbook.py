@@ -221,11 +221,48 @@ FROM grafana_reports WHERE {where} ORDER BY time""",
         description="Die nutzbare Kapazität (maximaler Energieinhalt laut Auto) sinkt mit dem "
                     "Alter des Akkus - über Monate betrachtet ist das die Akkugesundheit."))
 
+    # Only the charge level runs from 0 to 100; the power axis follows the data.
+    SOC_AXIS = {"matcher": {"id": "byName", "options": "Ladestand %"},
+                "properties": [{"id": "min", "value": 0}, {"id": "max", "value": 100},
+                               {"id": "unit", "value": "percent"}]}
+    curve_options = {"seriesMapping": "auto", "tooltip": {"mode": "single"},
+                     "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}}
+    curve_note = ("Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen "
+                  "Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto "
+                  "meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende.")
+    panels.append(_panel(
+        "xychart", "Ladekurve: ${charge:text}", 0, 56, 12, 11,
+        [sql("""SELECT kw AS "kW", soc AS "Ladestand %" FROM grafana_charge_curve
+WHERE charge_id = ${charge} ORDER BY time""")],
+        options=curve_options,
+        field_config={"defaults": {"custom": {"show": "points+lines", "pointSize": {"fixed": 3},
+                                              "lineWidth": 2}},
+                      "overrides": [SOC_AXIS]},
+        description="Ladevorgang oben in der Auswahl „Ladevorgang“ wählen. " + curve_note))
+    panels.append(_panel(
+        "xychart", "Alle DC-Ladekurven im Zeitraum", 12, 56, 12, 11,
+        [sql(f"""SELECT kw AS "kW", soc AS "Ladestand %" FROM grafana_charge_curve
+WHERE charge_type = 'DC' AND {where} ORDER BY charge_id, time""")],
+        options=curve_options,
+        field_config={"defaults": {"custom": {"show": "points", "pointSize": {"fixed": 3}}},
+                      "overrides": [SOC_AXIS]},
+        description="Jeder Punkt ein Messwert eines DC-Ladevorgangs: die obere Kante ist, "
+                    "was der Akku bei welchem Ladestand höchstens annimmt; Punkte darunter "
+                    "sind kalter Akku, schwache Säule oder geteilte Leistung. " + curve_note))
+
     return {
         "uid": UID, "title": "jolt Fahrtenbuch", "tags": ["jolt"], "timezone": "browser",
         "schemaVersion": 41, "version": 1, "refresh": "",
         "time": {"from": "now-1y", "to": "now"},
-        "templating": {"list": []},
+        "templating": {"list": [{
+            "name": "charge", "label": "Ladevorgang", "type": "query", "datasource": base.DS,
+            "query": ("SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || "
+                      "charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || "
+                      "round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' "
+                      "AS __text FROM grafana_charges WHERE energy_kwh >= 5 "
+                      "AND soc_end > soc_start ORDER BY time DESC"),
+            "definition": "grafana_charges", "refresh": 2, "sort": 0,
+            "includeAll": False, "multi": False}]},
         "panels": panels,
         "links": [{"title": "jolt Fahrten", "type": "link", "url": "/d/" + base.UID,
                    "icon": "external link"},
@@ -239,4 +276,7 @@ if __name__ == "__main__":
     OUT.write_text(json.dumps(dashboard, indent=1, ensure_ascii=False), encoding="utf-8")
     if "--push" in sys.argv:
         position = sys.argv.index("--push")
+        base.EXTRA_SUBSTITUTIONS = {
+            "${charge}": "(SELECT max(id) FROM grafana_charges WHERE charge_type = 'DC')",
+            "${charge:text}": "x"}
         base.push(sys.argv[position + 1], sys.argv[position + 2], dashboard)
