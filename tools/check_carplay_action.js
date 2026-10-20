@@ -45,8 +45,13 @@ function build(o) {
     state: { sessionId: o.running ? 7 : null, vehicles: [{ id: 1 }], tripsStale: false },
     report(t, k) { calls.reports.push(t); if (process.env.DBG) console.log("REPORT", k, t); },
     at(id, event, f) { return (elemente[id] || empty()); },
-    api: async (fs_path, opt) => { calls.api.push({ fs_path, body: opt && opt.body });
-                                return { session_id: 9, trip_id: 3, pending: calls.pending }; },
+    api: async (fs_path, opt) => {
+      // The VW-portal lookup for a start charge level: a read, and without
+      // the portal set up the server answers 404.
+      if (/\/snapshot$/.test(fs_path)) throw Object.assign(new Error("404"), { status: 404 });
+      calls.api.push({ fs_path, body: opt && opt.body });
+      return { session_id: 9, trip_id: 3, pending: calls.pending };
+    },
     sessionRemember() {},
   };
   const plugin = {

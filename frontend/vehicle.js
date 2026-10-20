@@ -129,6 +129,76 @@ window.joltVehicle = (function () {
       + ` · ${(vehicle.capacity_history || []).length} Messungen gespeichert</div>` + curve;
   }
 
+  /* What the VW portal last heard from the car (backend app/cloud/). Only
+   * there when the server fetches it; a 404 or any failure hides the card. */
+  const CHARGE_STATES = [
+    [/NOT_READY_FOR_CHARGING$/, "nicht ladebereit"],
+    [/READY_FOR_CHARGING$/, "ladebereit"],
+    [/CONSERVATION_CHARGING$/, "Erhaltungsladung"],
+    [/(^|_)CHARGING(_HV)?$/i, "lädt"],
+    [/CHARGE_PURPOSE_REACHED/, "Ladeziel erreicht"],
+    [/ERROR$/, "Fehler"],
+  ];
+
+  function chargeState(raw) {
+    const hit = CHARGE_STATES.find(([pattern]) => pattern.test(raw));
+    return hit ? hit[1] : raw;
+  }
+
+  function ago(ms) {
+    const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (min < 60) return `vor ${min} min`;
+    if (min < 48 * 60) return `vor ${Math.round(min / 60)} h`;
+    return `vor ${Math.round(min / 1440)} Tagen`;
+  }
+
+  function portalHtml(snap) {
+    const v = snap.values || {};
+    const has = (name) => v[name] !== undefined && v[name] !== null;
+    const tiles = [];
+    if (has("soc_pct")) tiles.push(K.valueTile("Ladestand", K.num(v.soc_pct) + " %"));
+    if (has("range_km")) tiles.push(K.valueTile("Reichweite", K.num(v.range_km) + " km"));
+    if (has("odometer_km")) tiles.push(K.valueTile("Kilometerstand", K.num(v.odometer_km) + " km"));
+    const rows = [];
+    const row = (name, text) => rows.push(`<dt>${name}</dt><dd>${K.esc(text)}</dd>`);
+    if (has("energy_kwh")) {
+      row("Energie", K.num(v.energy_kwh, 1)
+        + (has("capacity_kwh") ? " / " + K.num(v.capacity_kwh, 1) : "") + " kWh");
+    }
+    if (has("batt_temp_min_c") || has("batt_temp_max_c")) {
+      const low = has("batt_temp_min_c") ? v.batt_temp_min_c : v.batt_temp_max_c;
+      const high = has("batt_temp_max_c") ? v.batt_temp_max_c : v.batt_temp_min_c;
+      row("Batterie", low === high ? K.num(low, 1) + " °C"
+        : K.num(low, 1) + "–" + K.num(high, 1) + " °C");
+    }
+    if (has("charge_state")) row("Ladezustand", chargeState(String(v.charge_state)));
+    const at = K.timestamp(snap.captured_at);
+    const as_of = at
+      ? `Stand: ${at.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
+          hour: "2-digit", minute: "2-digit" })}, ${ago(at.getTime())}` : "";
+    return `<h2>VW-Portal</h2>`
+      + (tiles.length ? `<div class="werte gross">${tiles.join("")}</div>` : "")
+      + (rows.length ? `<dl class="einst-liste" style="margin-top:10px">${rows.join("")}</dl>` : "")
+      + `<div class="unter">${as_of}</div>`;
+  }
+
+  async function showPortal(vehicle) {
+    const box = document.getElementById("vehicle-portal");
+    if (!box) return;
+    box.hidden = true;
+    if (!vehicle || !vehicle.id) return;
+    let snap;
+    try {
+      snap = await K.api(`/api/vehicles/${vehicle.id}/snapshot`, { timeout: 8000 });
+    } catch (failure) {
+      return;
+    }
+    // The choice may have moved on while the answer was under way.
+    if (document.getElementById("vehicle-list").value !== String(vehicle.id)) return;
+    box.innerHTML = portalHtml(snap);
+    box.hidden = false;
+  }
+
   function fillForm(vehicle) {
     showHealth(vehicle);
     for (const field of FIELDS) {
@@ -313,6 +383,7 @@ window.joltVehicle = (function () {
     const choice = document.getElementById("vehicle-list").value;
     if (choice === "neu") {
       fillForm(Object.assign({}, templates[0] || {}, { name: "" }));
+      showPortal(null);
       return;
     }
     const vehicle = K.state.vehicles.find((f) => String(f.id) === String(choice));
@@ -323,6 +394,7 @@ window.joltVehicle = (function () {
       if (defaultPrice) defaultPrice.value = vehicle.electricity_price_eur_kwh ?? 0.59;
     }
     showLogger(vehicle);
+    showPortal(vehicle);
   }
 
   /* ---------- Logger in the car ---------- */

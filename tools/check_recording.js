@@ -31,6 +31,7 @@ async function cycle(scenario) {
   const calls = { dongleUse: 0, link: 0, positionTrace: 0,
                     state: null, order: [] };
   const sent = [];
+  const asked = [];
   const elemente = {
     "rec-start": { disabled: false },
     "rec-status": { textContent: "" },
@@ -60,8 +61,21 @@ async function cycle(scenario) {
   const K = {
     state: { sessionId: null, vehicles: [{ id: 1 }], tripsStale: false },
     report: (t) => reports.push(t),
-    api: async (fs_path, opt) => { sent.push({ fs_path, body: opt && opt.body });
-                                return { session_id: 9 }; },
+    api: async (fs_path, opt) => {
+      if (/\/snapshot$/.test(fs_path)) {
+        asked.push(fs_path);
+        if (!scenario.snapshot) {
+          const failure = new Error("Keine Daten aus der Hersteller-Cloud.");
+          failure.status = 404;
+          throw failure;
+        }
+        return scenario.snapshot;
+      }
+      sent.push({ fs_path, body: opt && opt.body });
+      return { session_id: 9 };
+    },
+    timestamp: (text) => (text ? new Date(text) : null),
+    num: (value) => String(Math.round(value)),
     sessionRemember() {},
   };
   const timeframe = {
@@ -91,7 +105,7 @@ async function cycle(scenario) {
   vm.runInContext(pendingSource, context);
   vm.runInContext(source, context);
   await timeframe.joltTrips.startRecording();
-  return { calls, sent, reports, as_of: elemente["rec-status"].textContent,
+  return { calls, sent, asked, reports, as_of: elemente["rec-status"].textContent,
            btn: elemente["rec-start"] };
 }
 
@@ -142,6 +156,35 @@ async function cycle(scenario) {
   verify(r.calls.state === "faehrt",
          "der Zustand gilt auch dann - er sagt nur, ob gelesen werden darf, "
          + "falls später doch ein Dongle verbunden wird");
+  verify(r.asked.length === 1 && r.sent[0].body.soc === null,
+         "ohne Daten aus dem VW-Portal (404) bleibt der Startladestand leer",
+         JSON.stringify(r.asked) + " " + JSON.stringify(r.sent[0].body));
+
+  console.log("\nKein Dongle, aber das VW-Portal kennt den Ladestand");
+  const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+  r = await cycle({ connectedPastConnect: false,
+                    snapshot: { source: "vw_portal", captured_at: hourAgo,
+                                values: { soc_pct: 57 } } });
+  verify(r.sent.length === 1 && r.sent[0].body.soc === 57,
+         "der Startladestand kommt aus dem Portal", JSON.stringify(r.sent));
+  verify(/Startladestand 57 % aus dem VW-Portal \(Stand \d\d:\d\d\)/.test(r.reports.join(" ")),
+         "und die Meldung sagt woher und von wann", r.reports.join(" | "));
+
+  r = await cycle({ connectedPastConnect: false,
+                    snapshot: { source: "vw_portal",
+                                captured_at: new Date(Date.now() - 13 * 3600 * 1000).toISOString(),
+                                values: { soc_pct: 57 } } });
+  verify(r.sent.length === 1 && r.sent[0].body.soc === null
+         && !/VW-Portal/.test(r.reports.join(" ")),
+         "ein Bericht älter als 12 h wird nicht genommen", JSON.stringify(r.sent));
+
+  console.log("\nDongle und Portal");
+  r = await cycle({ response: "62028C B5",
+                    snapshot: { source: "vw_portal", captured_at: hourAgo,
+                                values: { soc_pct: 57 } } });
+  verify(r.sent[0].body.soc === 71.7 && r.asked.length === 0,
+         "der Wert vom Dongle gewinnt, das Portal wird gar nicht gefragt",
+         JSON.stringify(r.sent) + " " + JSON.stringify(r.asked));
 
   console.log(failure ? `\n${failure} Prüfung(en) fehlgeschlagen.`
                      : "\nAlle Prüfungen bestanden.");
