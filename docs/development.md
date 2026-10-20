@@ -116,7 +116,8 @@ backend/app/
               calibration.py · charge_phases.py (driving and charging sections)
   routing/    provider.py (interface) · ors.py · demo.py · corridor.py
   charging/   optimizer.py · curves.py · prices.py · availability.py
-              chargers_import.py
+              chargers_import.py · measured.py (curve from the logbook)
+              curve_source.py (measured or profile curve for the planner)
   live/       session.py · replanning.py · recording.py · cleanup.py
               channel.py (WebSocket) · simulator.py
               sources/  translate foreign report formats (jolt.py · abrp.py)

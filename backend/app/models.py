@@ -103,6 +103,11 @@ class Vehicle(Base):
     # exist is the frontend's knowledge.
     platform = Column(String(20), nullable=False, default="meb", server_default="meb")
     connector_type = Column(String(20), nullable=False, default="CCS")
+    # "auto": plan with the curve measured in the logbook when there is
+    # enough of it, "profile": always with `charge_curve`. See
+    # charging/curve_source.py.
+    charge_curve_source = Column(String(10), nullable=False, default="auto",
+                                 server_default="auto")
 
     # Names (or parts of them, e.g. "EnBW") that the optimiser prefers when
     # choosing stops - see charging/availability.py:operator_bonus().
