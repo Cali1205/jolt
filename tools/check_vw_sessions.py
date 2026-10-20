@@ -324,7 +324,121 @@ def part_mutations():
         verify(failed, f"{name} = {value} fällt auf", "kein Fall schlägt fehl")
 
 
-PARTS = [part_detection, part_mutations]
+COLUMNS = ("started_at", "ended_at", "odo_start", "odo_end", "distance_km",
+           "soc_start", "soc_end", "energy_used_kwh", "sources", "live_session_id")
+
+
+def columns(row) -> dict:
+    return {c: getattr(row, c) for c in COLUMNS} | {"details": row.details}
+
+
+def new_vehicle(db) -> int:
+    from app import models
+    vehicle = models.Vehicle(name="Prüfauto", battery_gross_kwh=77.0,
+                             battery_net_kwh=72.6)
+    db.add(vehicle)
+    db.flush()
+    return vehicle.id
+
+
+def drives_of(db, vehicle_id):
+    from app import models
+    return (db.query(models.VehicleDrive).filter_by(vehicle_id=vehicle_id)
+            .order_by(models.VehicleDrive.started_at).all())
+
+
+def history_records():
+    from app.cloud import logbook
+    a, last = drive(T(5, 7), 1000, 10, 80, 77)
+    b, _ = drive(last + 15 * MIN, 1010, 10, 77, 74)
+    c, _ = drive(T(16, 15, 44, 21), 62020, 6, 74, 73, every=timedelta(seconds=104.8))
+    charge, _ = charging(T(17, 22), 60, 11.0, 30)
+    stream = obs(a + b + c + charge)
+    return ([logbook.drive_record(d) for d in sessions.detect_drives(stream)],
+            [logbook.charge_record(x) for x in sessions.detect_charges(stream, 0.726)])
+
+
+def part_storage():
+    verify.section("Speichern: einmal, egal wie oft und in welcher Reihenfolge")
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal, migrate
+    migrate()
+    db = SessionLocal()
+    drives, charges = history_records()
+    try:
+        vid = new_vehicle(db)
+        first = logbook.store_drives(db, vid, logbook.HISTORY, drives)
+        again = logbook.store_drives(db, vid, logbook.HISTORY, drives)
+        verify(first == {"new": 3, "updated": 0, "unchanged": 0}
+               and again == {"new": 0, "updated": 0, "unchanged": 3}
+               and len(drives_of(db, vid)) == 3,
+               "derselbe Export zweimal: drei Fahrten, beim zweiten Mal unverändert",
+               f"{first} {again}")
+        first = logbook.store_charges(db, vid, logbook.HISTORY, charges)
+        again = logbook.store_charges(db, vid, logbook.HISTORY, charges)
+        verify(first["new"] == 1 and again == {"new": 0, "updated": 0, "unchanged": 1}
+               and db.query(models.VehicleCharge).filter_by(vehicle_id=vid).count() == 1,
+               "Ladevorgänge ebenso", f"{first} {again}")
+
+        history = drives[2]
+        portal = dict(history, started_at=_iso(T(16, 15, 44, 30)),
+                      ended_at=_iso(T(16, 15, 56, 10)), soc_end=72,
+                      energy_used_kwh=1.2, km_track=[], soc_track=[])
+        logbook.store_drives(db, vid, logbook.PORTAL, [portal])
+        rows = drives_of(db, vid)
+        merged = rows[-1]
+        verify(len(rows) == 3 and merged.sources == ["vw_history", "vw_portal"]
+               and merged.started_at == T(16, 15, 44, 21).replace(tzinfo=None)
+               and merged.soc_end == 73 and merged.energy_used_kwh == 1.2,
+               "dieselbe Fahrt aus dem Portal: eine Zeile; Zeiten und Ladestand aus "
+               "dem Export, Energie aus dem Portal",
+               str(columns(merged)))
+
+        other = new_vehicle(db)
+        logbook.store_drives(db, other, logbook.PORTAL, [portal])
+        logbook.store_drives(db, other, logbook.HISTORY, [history])
+        verify(columns(drives_of(db, other)[0]) == columns(merged),
+               "umgekehrte Reihenfolge (erst Portal, dann Export): dieselbe Zeile")
+
+        whole = dict(portal, odo_start=1000.0, odo_end=1010.0, distance_km=10.0,
+                     started_at=_iso(T(18, 8)), ended_at=_iso(T(18, 8, 20)))
+        halves = [dict(whole, odo_end=1005.0, distance_km=5.0,
+                       ended_at=_iso(T(18, 8, 10)), energy_used_kwh=0.6),
+                  dict(whole, odo_start=1005.0, distance_km=5.0,
+                       started_at=_iso(T(18, 8, 10, 30)), energy_used_kwh=0.7)]
+        split = new_vehicle(db)
+        logbook.store_drives(db, split, logbook.PORTAL, halves)
+        logbook.store_drives(db, split, logbook.HISTORY, [dict(whole, energy_used_kwh=None)])
+        logbook.store_drives(db, split, logbook.PORTAL, halves)
+        rows = drives_of(db, split)
+        verify(len(rows) == 1 and rows[0].distance_km == 10
+               and rows[0].energy_used_kwh == 1.3,
+               "zwei Portal-Hälften und eine Export-Fahrt: eine Zeile, die Energie der "
+               "Hälften zusammen; erneutes Speichern ändert daran nichts",
+               str([columns(r) for r in rows]))
+
+        partial = dict(portal, odo_start=62067.0, odo_end=62071.0, distance_km=4.0,
+                       started_at=_iso(T(20, 5, 44, 24)), ended_at=_iso(T(20, 5, 59, 42)))
+        full = dict(partial, odo_end=62074.0, distance_km=7.0,
+                    ended_at=_iso(T(20, 6, 0, 41)))
+        late, direct = new_vehicle(db), new_vehicle(db)
+        logbook.store_drives(db, late, logbook.PORTAL, [partial])
+        logbook.store_drives(db, late, logbook.PORTAL, [full])
+        logbook.store_drives(db, direct, logbook.PORTAL, [full])
+        verify([columns(r) for r in drives_of(db, late)]
+               == [columns(r) for r in drives_of(db, direct)],
+               "eine spätere, vollständigere Erkennung ersetzt die frühere")
+        db.commit()
+    finally:
+        db.close()
+
+
+def _iso(t):
+    return t.astimezone(UTC).replace(tzinfo=None).isoformat()
+
+
+PARTS = [part_detection, part_mutations, part_storage]
 
 
 def main() -> int:
