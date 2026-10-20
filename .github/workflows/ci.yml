@@ -25,6 +25,7 @@ jobs:
       - run: ./tools/check_optimizer.py
       - run: ./tools/check_replanning.py
       - run: ./tools/check_sources.py
+      - run: ./tools/check_vw_portal.py
       - run: ./tools/check_own.py
       - run: ./tools/check_tomtom.py
       - run: ./tools/check_weather.py

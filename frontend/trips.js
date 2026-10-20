@@ -396,7 +396,7 @@ window.joltTrips = (function () {
 
   /* With a dongle, pass the real start charge level right away - better than
    * the 100 % the server otherwise assumes. */
-  async function startCharge(dongle) {
+  async function dongleCharge(dongle) {
     if (!dongle.present) return null;
     try {
       const reading = await window.joltObd.readSoc();
@@ -421,6 +421,38 @@ window.joltTrips = (function () {
     return null;
   }
 
+  /* Without a reading from the dongle, the VW portal's last report will do
+   * if it is recent: the server fetches it only when it is set up
+   * (docs/vw-portal.md), otherwise this is a quick 404. Never a reason for
+   * the start to wait or fail. */
+  const PORTAL_MAX_AGE_MS = 12 * 3600 * 1000;
+
+  async function portalCharge(vehicleId) {
+    try {
+      const snap = await K.api(`/api/vehicles/${vehicleId}/snapshot`, { timeout: 3000 });
+      const soc = snap && snap.values && snap.values.soc_pct;
+      const at = K.timestamp(snap && snap.captured_at);
+      if (typeof soc !== "number" || !at
+          || Date.now() - at.getTime() > PORTAL_MAX_AGE_MS) return null;
+      return { soc, at };
+    } catch (failure) {
+      return null;
+    }
+  }
+
+  async function startCharge(dongle, vehicleId) {
+    const soc = await dongleCharge(dongle);
+    if (soc !== null) return { soc, portal: null };
+    const portal = await portalCharge(vehicleId);
+    return { soc: portal ? portal.soc : null, portal };
+  }
+
+  function portalNote(portal) {
+    const time = portal.at.toLocaleTimeString("de-DE",
+      { hour: "2-digit", minute: "2-digit" });
+    return `Startladestand ${K.num(portal.soc)} % aus dem VW-Portal (Stand ${time}). `;
+  }
+
   function enterLiveView(response, id) {
     K.state.sessionId = response.session_id;
     K.sessionRemember(response.session_id);
@@ -441,17 +473,18 @@ window.joltTrips = (function () {
     window.joltLive.positionTrace();
   }
 
-  function announceStart(dongle, soc, response) {
+  function announceStart(dongle, start, response) {
+    const note = start.portal ? portalNote(start.portal) : "";
     if (response.pending) {
       K.report("Kein Netz – die Aufzeichnung läuft auf dem Gerät und wird "
         + "nachgeliefert, sobald wieder Verbindung besteht.", "warnung");
     }
     if (dongle.present) {
       window.joltLive.dongleUse();
-      K.report(soc !== null
+      K.report(start.soc !== null && !start.portal
         ? "Aufzeichnung läuft, Ladestand kommt aus dem Auto."
-        : "Aufzeichnung läuft. Das Auto antwortet noch nicht – jolt liest "
-          + "den Ladestand, sobald du fährst.", "hinweis");
+        : "Aufzeichnung läuft. " + note + "Das Auto antwortet noch nicht – "
+          + "jolt liest den Ladestand, sobald du fährst.", "hinweis");
       return;
     }
     if (dongle.later) {
@@ -461,7 +494,7 @@ window.joltTrips = (function () {
       window.joltLive.dongleUse();
       window.joltLive.reconnectDongle();
     }
-    K.report("Aufzeichnung läuft. Den Ladestand unterwegs gelegentlich "
+    K.report("Aufzeichnung läuft. " + note + "Den Ladestand unterwegs gelegentlich "
       + "melden – ohne ihn lässt sich hinterher nichts lernen.", "hinweis");
   }
 
@@ -485,17 +518,17 @@ window.joltTrips = (function () {
       }
       as_of("Standort holen …");
       const city = await currentPosition();
-      const soc = await startCharge(dongle);
+      const start = await startCharge(dongle, id);
 
       as_of("Fahrt anlegen …");
       // Without network the recording starts locally and is created on the
       // server later (`pending.js`) - the start must not depend on reception.
       const response = await window.joltPending.start(K.api, {
         vehicle_id: id, lat: city.latitude, lon: city.longitude,
-        soc: soc, name: document.getElementById("rec-name").value });
+        soc: start.soc, name: document.getElementById("rec-name").value });
       enterLiveView(response, id);
       if (window.joltHaptic) window.joltHaptic.good();
-      announceStart(dongle, soc, response);
+      announceStart(dongle, start, response);
       // The last recorded vehicle applies again next time -
       // also for the start from CarPlay, where one cannot choose any.
       try { localStorage.setItem("jolt-aufz-fahrzeug", String(id)); } catch (e) { /* without memory */ }

@@ -160,6 +160,7 @@ class Vehicle(Base):
     capacity_history = relationship("CapacityHistory", back_populates="vehicle",
                                     cascade="all, delete-orphan",
                                     order_by="CapacityHistory.measured_at")
+    snapshots = relationship("VehicleSnapshot", cascade="all, delete-orphan")
 
     @property
     def mass_kg(self) -> float:
@@ -206,6 +207,27 @@ class CapacityHistory(Base):
     odometer_km = Column(Float)
 
     vehicle = relationship("Vehicle", back_populates="capacity_history")
+
+
+class VehicleSnapshot(Base):
+    """What a manufacturer cloud last heard from the car (app/cloud/).
+
+    `captured_at` is when the car reported, `received_at` when jolt fetched
+    it. The same report fetched twice has the same `captured_at` and is
+    stored once.
+    """
+    __tablename__ = "vehicle_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    source = Column(String(20), nullable=False)
+    captured_at = Column(DateTime, nullable=False)
+    received_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    values = Column(JSON, nullable=False)
+
+    __table_args__ = (UniqueConstraint("vehicle_id", "source", "captured_at",
+                                       name="uq_vehicle_snapshot"),)
 
 
 class ChargePoint(Base):

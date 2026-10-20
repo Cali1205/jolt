@@ -68,6 +68,7 @@ window.joltSettings = (function () {
       rows.push(row("Passwortschutz",
         status.password_required ? "an" : "aus – jeder im Netz darf herein",
         status.password_required ? "gut" : "warnung"));
+      rows.push(...await cloudRows());
     } catch (failure) {
       rows.push(row("Server", "nicht erreichbar", "schlecht"));
     }
@@ -75,6 +76,33 @@ window.joltSettings = (function () {
     rows.push(row("Oberfläche", K.esc(location.origin)));
     el("settings-server").innerHTML = rows.join("");
     el("settings-sign-out").hidden = !K.token();
+  }
+
+  /* The manufacturer cloud (VW portal), only when the server has it set up. */
+  const CLOUD_NAMES = { vw_portal: "VW-Portal" };
+
+  async function cloudRows() {
+    let cloud;
+    try {
+      cloud = await K.api("/api/cloud/status", { timeout: 5000 });
+    } catch (failure) {
+      return [];
+    }
+    if (!cloud || !cloud.configured) return [];
+    const when = (text) => {
+      const d = K.timestamp(text);
+      return d ? d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
+        hour: "2-digit", minute: "2-digit" }) : "";
+    };
+    return (cloud.sources || []).map((s) => {
+      const name = CLOUD_NAMES[s.name] || s.name;
+      if (s.last_error) {
+        return row(name, "Fehler: " + K.esc(s.last_error)
+          + (s.last_ok ? " · zuletzt ok " + when(s.last_ok) : ""), "schlecht");
+      }
+      if (s.last_ok) return row(name, "ok · " + when(s.last_ok), "gut");
+      return row(name, "eingerichtet, noch kein Abruf", "warnung");
+    });
   }
 
   async function sign_out() {

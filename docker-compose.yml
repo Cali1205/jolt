@@ -60,6 +60,14 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # Optional: the car's last values from the VW EU Data Act portal
+      # (docs/vw-portal.md). Without user and password nothing is fetched.
+      VW_PORTAL_USER: ${VW_PORTAL_USER:-}
+      VW_PORTAL_PASSWORD: ${VW_PORTAL_PASSWORD:-}
+      VW_PORTAL_VIN: ${VW_PORTAL_VIN:-}
+      VW_PORTAL_VEHICLE: ${VW_PORTAL_VEHICLE:-}
+      VW_PORTAL_INTERVAL_MIN: ${VW_PORTAL_INTERVAL_MIN:-}
+      VW_PORTAL_USER_AGENT: ${VW_PORTAL_USER_AGENT:-}
     # Only on this host by default. Docker publishes ports past the host
     # firewall, so 0.0.0.0 here would put jolt on the internet without HTTPS.
     # Set JOLT_BIND to a LAN or VPN address to reach it from other machines.
