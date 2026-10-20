@@ -113,6 +113,29 @@ def bars(title, x, y, w, h, query, stacking=None, unit=None, description=None):
     return _panel("barchart", title, x, y, w, h, [sql(query)], options=options,
                   field_config={"defaults": defaults, "overrides": []}, description=description)
 
+# The car's DC curve from the logbook and the energy one percent takes; shared
+# by the bar chart and the table of the charging-time analysis.
+CHARGE_TIME = """WITH env AS (
+    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw
+    FROM grafana_charge_curve
+    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),
+per_pct AS (
+    SELECT coalesce(
+        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)
+         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),
+        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)
+         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),
+per_cap AS (
+    SELECT c.cap,
+           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,
+           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,
+           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,
+           round(100.0 * count(*) / 70) AS covered
+    FROM generate_series(185, 80, -5) AS c(cap)
+    CROSS JOIN per_pct p
+    JOIN env e ON e.pct BETWEEN 10 AND 79
+    GROUP BY c.cap)"""
+
 
 def build() -> dict:
     trips_where = "$__timeFilter(time) AND km >= ${minkm}"
@@ -231,6 +254,33 @@ FROM (SELECT km, kwh100_soc, extract(month FROM time) NOT BETWEEN 4 AND 9 AS win
 GROUP BY cls ORDER BY cls""",
         description="Nach Strecke gewichtet. Kurze Fahrten im Winter kosten am meisten: "
                     "Heizen und ein kalter Akku fallen auf wenige Kilometer."))
+
+    # What a weaker charger costs: the car's own curve (upper edge of every DC
+    # charge, 90th percentile per percent of charge level) cut at the
+    # charger's power, then the minutes per percent summed from 10 to 80 %.
+    row += 10
+    panels.append(bars(
+        "Ladezeit 10–80 % je Säulenleistung (Minuten)", 0, row, 12, 10,
+        f"""{CHARGE_TIME}
+SELECT cap::text || ' kW' AS "Klasse", minutes AS "Minuten 10-80 %"
+FROM per_cap ORDER BY cap DESC""",
+        description="Bester Fall mit warmem Akku: die Ladekurve ist die obere Kante aller "
+                    "DC-Ladevorgänge im Zeitraum, je Prozent Ladestand gekappt bei der "
+                    "Säulenleistung. Echte Ladevorgänge dauern etwa 10-15 % länger "
+                    "(Hochfahren der Leistung), mit kaltem Akku deutlich mehr."))
+    panels.append(_panel(
+        "table", "Ladezeit 10–80 %: was eine schwächere Säule kostet", 12, row, 12, 10,
+        [sql(f"""{CHARGE_TIME}
+SELECT cap AS "Säule kW", minutes AS "Min 10-80 %",
+       round(minutes - min(minutes) OVER (), 1) AS "+ Min",
+       round(100 * (minutes / min(minutes) OVER () - 1)) AS "+ %",
+       avg_kw AS "Ø kW", limited AS "% gedrosselt", covered AS "% mit Messdaten"
+FROM per_cap ORDER BY cap DESC""")],
+        options={"showHeader": True, "cellHeight": "sm"},
+        description="% gedrosselt: Anteil der Prozentpunkte, bei denen die Säule weniger "
+                    "liefert als der Akku annehmen würde. % mit Messdaten: wie viele der 70 "
+                    "Prozentpunkte zwischen 10 und 80 % durch DC-Ladevorgänge belegt sind - "
+                    "fehlen welche, ist die Zeit zu kurz."))
 
     return {
         "uid": UID, "title": "jolt Analyse", "tags": ["jolt"], "timezone": "browser",
