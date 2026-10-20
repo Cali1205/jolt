@@ -1,0 +1,25 @@
+{
+  "vin": "WVGZZZSYNTHETIC01",
+  "Data": [
+    {"key": "00000000-0000-4000-8000-000000000001", "dataFieldName": "battery_level_HV.value", "value": "57.0", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "506cb83e-f99f-3af3-bbeb-0429b69a78d9", "dataFieldName": "battery_state_report.soc", "value": "57", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000003", "dataFieldName": "mileage.value", "value": "62067", "timestampUtc": "2026-10-20T00:17:12Z"},
+    {"key": "0ca40e18-0564-3eda-bcc0-7aee9ef44f04", "dataFieldName": "value", "value": "192", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000005", "dataFieldName": "energy_contents.current_energy_content.physical_value", "value": "366.5", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000006", "dataFieldName": "energy_contents.maximal_energy_content.physical_value", "value": "726.0", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000007", "dataFieldName": "min_temperature", "value": "15.0", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000008", "dataFieldName": "max_temperature", "value": "15.5", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000009", "dataFieldName": "battery_state_report.charge_power", "value": "0.0", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000010", "dataFieldName": "charging_state_report.current_charge_state", "value": "CHARGE_STATE_NOT_READY_FOR_CHARGING", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000011", "dataFieldName": "settings.target_soc", "value": "80", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000012", "dataFieldName": "locked", "value": "true", "timestampUtc": "2026-10-20T00:17:13Z"},
+    {"key": "00000000-0000-4000-8000-000000000013", "dataFieldName": "parking_brake", "value": "true", "timestampUtc": "2026-10-20T00:17:13Z"},
+    {"key": "00000000-0000-4000-8000-000000000014", "dataFieldName": "climatisation_state", "value": "CLIMATISATION_STATE_OFF", "timestampUtc": "2026-10-20T00:17:11Z"},
+    {"key": "00000000-0000-4000-8000-000000000015", "dataFieldName": "car_captured_time", "value": "2026-10-20T00:17:14Z", "timestampUtc": "2026-10-20T00:17:14Z"},
+    {"key": "00000000-0000-4000-8000-000000000016", "dataFieldName": "timestamp", "value": "2026-10-20T00:17:10Z", "timestampUtc": "2026-10-20T00:17:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000017", "dataFieldName": "timestamp", "value": "2026-10-20T00:17:12Z", "timestampUtc": "2026-10-20T00:17:12Z"},
+    {"key": "00000000-0000-4000-8000-000000000018", "dataFieldName": "door_state_front_left", "value": "DOOR_CLOSED", "timestampUtc": "2026-10-20T00:17:13Z"},
+    {"key": "00000000-0000-4000-8000-000000000019", "dataFieldName": "window_heating_state", "value": "", "timestampUtc": "2026-10-20T00:17:13Z"},
+    {"key": "00000000-0000-4000-8000-000000000001", "dataFieldName": "battery_level_HV.value", "value": "55.0", "timestampUtc": "2026-10-19T23:02:10Z"}
+  ]
+}
