@@ -11,7 +11,7 @@ Everything here is pure: points in, `Snapshot` out. The network lives in
 `vw_portal.py`.
 """
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 
@@ -37,6 +37,9 @@ class Point:
 class Snapshot:
     captured_at: datetime
     values: dict[str, Value]
+    # Every point this report delivered, {id: [name, value, iso time]}: what
+    # jolt does not interpret yet is kept for later instead of thrown away.
+    raw: dict[str, list] = field(default_factory=dict)
 
 
 def parse_time(text: str | None) -> datetime | None:
@@ -155,11 +158,30 @@ FIELDS: list[tuple[str, tuple[str, ...], Callable[[str], Value]]] = [
 ]
 
 
-def from_points(points: list[Point]) -> Snapshot | None:
+def _captured_at(points: list[Point]) -> datetime | None:
+    captured = lookup(points, (CAPTURED_AT,))
+    moment = parse_time(captured.value) if captured else None
+    if moment is None:
+        moment = max((p.timestamp for p in points if p.timestamp), default=None)
+    return moment
+
+
+def raw_of(points: list[Point]) -> dict[str, list]:
+    return {p.id: [p.name, p.value,
+                   p.timestamp.isoformat() if p.timestamp else None]
+            for p in points}
+
+
+def from_points(points: list[Point],
+                delivered: list[Point] | None = None) -> Snapshot | None:
     """The values jolt knows, or None when there is nothing to keep.
 
-    The snapshot time is when the car reported, not when the portal was
-    asked: `car_captured_time` when present, else the newest point.
+    `points` is the merged state (fields a report left out keep their last
+    value), `delivered` what this one report carried. The snapshot time is
+    when the car reported, not when the portal was asked: the report's
+    `car_captured_time` when present, else its newest point. Taking it from
+    the merged state instead would give a report without that field the
+    time of an older one, and the older row would swallow it.
     """
     values: dict[str, Value] = {}
     for name, idents, convert in FIELDS:
@@ -172,11 +194,8 @@ def from_points(points: list[Point]) -> Snapshot | None:
             continue
     if not values:
         return None
-    captured = lookup(points, (CAPTURED_AT,))
-    captured_at = parse_time(captured.value) if captured else None
-    if captured_at is None:
-        captured_at = max((p.timestamp for p in points if p.timestamp),
-                          default=None)
+    own = delivered if delivered is not None else points
+    captured_at = _captured_at(own) or _captured_at(points)
     if captured_at is None:
         return None
-    return Snapshot(captured_at=captured_at, values=values)
+    return Snapshot(captured_at=captured_at, values=values, raw=raw_of(own))

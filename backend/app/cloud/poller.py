@@ -21,6 +21,12 @@ from .vw_portal import PortalError, mask
 log = logging.getLogger("uvicorn.error")
 
 MAX_DELAY_S = 2 * 3600
+# After this long without a new report the car is parked and unchanged;
+# asking every quarter hour then only tries the portal's patience (it
+# answers 429). Nothing is lost by asking less often: every report the car
+# made in between is still listed and is fetched one by one.
+QUIET_AFTER_S = 2 * 3600
+QUIET_DELAY_S = 3600
 
 
 class SetupError(Exception):
@@ -53,13 +59,23 @@ def store(db, vehicle_id: int, source: str, snap: Snapshot,
     db.add(models.VehicleSnapshot(vehicle_id=vehicle_id, source=source,
                                   captured_at=captured_at,
                                   received_at=now or datetime.utcnow(),
-                                  values=dict(snap.values)))
+                                  values=dict(snap.values),
+                                  raw=dict(snap.raw) or None))
     db.commit()
     return True
 
 
-def delay_s(interval_min: int, failures: int) -> float:
-    return min(interval_min * 60 * 2 ** failures, MAX_DELAY_S)
+def delay_s(interval_min: int, failures: int,
+            last_new: datetime | None = None,
+            now: datetime | None = None) -> float:
+    """Back off after failures; otherwise the interval while the car has
+    been reporting lately, and once an hour while it is quiet."""
+    base = interval_min * 60
+    if failures:
+        return min(base * 2 ** failures, MAX_DELAY_S)
+    recent = (last_new is not None and now is not None
+              and (now - last_new).total_seconds() < QUIET_AFTER_S)
+    return base if recent else max(base, QUIET_DELAY_S)
 
 
 def record(status: Status, error: str | None, now: datetime) -> str | None:
@@ -110,10 +126,11 @@ class Poll:
         self.db_factory = db_factory
         self.client = None
         self.vin: str | None = None
+        self.last_new: datetime | None = None
         self.status = STATUS[config.name] = Status(config.name)
 
-    def tick(self) -> bool:
-        """One round, blocking. True when a new snapshot was stored."""
+    def tick(self) -> int:
+        """One round, blocking: how many new snapshots were stored."""
         db = self.db_factory()
         try:
             if self.status.vehicle_id is None:
@@ -122,9 +139,11 @@ class Poll:
                 self.client = self.config.connect()
             if self.vin is None:
                 self.vin = self.config.vin or _one_vin(self.client.vehicles())
-            snap = self.client.latest(self.vin)
-            return snap is not None and store(db, self.status.vehicle_id,
-                                              self.config.name, snap)
+            stored = sum(store(db, self.status.vehicle_id, self.config.name, snap)
+                         for snap in self.client.updates(self.vin))
+            if stored:
+                self.last_new = datetime.utcnow()
+            return stored
         finally:
             db.close()
 
@@ -145,7 +164,8 @@ async def run(poll: Poll, sleep=asyncio.sleep) -> None:
         line = record(poll.status, error, datetime.utcnow())
         if line:
             (log.warning if error else log.info)(line)
-        await sleep(delay_s(poll.config.interval_min, poll.status.failures))
+        await sleep(delay_s(poll.config.interval_min, poll.status.failures,
+                            poll.last_new, datetime.utcnow()))
 
 
 async def loop(db_factory, configs: list[Config] | None = None) -> None:

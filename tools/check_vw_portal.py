@@ -13,7 +13,7 @@ Without network, without Postgres:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TOOLS)
@@ -272,6 +272,23 @@ def part_login():
            "Referer beim Formular, ehrlicher User-Agent, Accept JSON",
            str(fake.headers[VEHICLES]))
 
+    found = portal.updates(VIN)
+    verify([s.captured_at for s in found]
+           == [datetime(2026, 10, 19, 23, 2, 10, tzinfo=timezone.utc),
+               datetime(2026, 10, 20, 0, 17, 14, tzinfo=timezone.utc)]
+           and [s.values.get("soc_pct") for s in found] == [61, 57],
+           "zwei Meldungen in einem Abruf: zwei Momentaufnahmen, jede mit "
+           "ihrer eigenen Zeit (ohne car_captured_time der jüngste Punkt)",
+           str([(s.captured_at, s.values.get("soc_pct")) for s in found]))
+    verify(len(found) == 2 and len(found[0].raw) == 2
+           and len(found[1].raw) == len(snapshot.decode(DATASET["Data"]))
+           and found[0].raw["00000000-0000-4000-8000-000000000001"][:2]
+           == ["battery_level_HV.value", "61.0"],
+           "die Rohpunkte sind die der jeweiligen Meldung, nicht der ganze "
+           "fortgeschriebene Stand", str(found and found[0].raw))
+    verify(found[1].values.get("climatisation_state") == "CLIMATISATION_STATE_OFF",
+           "Felder, die eine Meldung auslässt, behalten den letzten Wert",
+           str(found[1].values))
     snap = portal.latest(VIN)
     verify([fake.headers[DELIVERY + "/list"].get("type")] == ["partial"],
            "die Liste wird als partial angefragt")
@@ -356,6 +373,9 @@ def part_storage():
         rows = db.query(models.VehicleSnapshot).filter_by(vehicle_id=vehicle_id).all()
         verify(first and not second and len(rows) == 1,
                "derselbe Bericht zweimal: eine Zeile", f"{first}, {second}, {len(rows)}")
+        verify(rows[0].raw and len(rows[0].raw) == len(snapshot.decode(DATASET["Data"])),
+               "alle Rohpunkte der Meldung werden mitgespeichert",
+               str(rows[0].raw and len(rows[0].raw)))
         verify(rows[0].captured_at == datetime(2026, 10, 20, 0, 17, 14)
                and rows[0].values["soc_pct"] == 57,
                "gespeichert als UTC ohne Zone, mit den Werten",
@@ -441,11 +461,11 @@ class FakeSource:
         self.vehicle_calls += 1
         return [VIN]
 
-    def latest(self, vin):
+    def updates(self, vin):
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return [outcome]
 
 
 def part_poller():
@@ -508,6 +528,14 @@ def part_poller():
     verify(source.vehicle_calls == 1,
            "die Fahrzeugliste wird nur einmal abgefragt", str(source.vehicle_calls))
     verify(poller.delay_s(15, 10) == 7200, "die Pause wächst nicht über 2 h")
+    now = datetime(2026, 10, 20, 12, 0)
+    verify([poller.delay_s(15, 0, now - timedelta(hours=1), now),
+            poller.delay_s(15, 0, now - timedelta(hours=3), now),
+            poller.delay_s(15, 0, None, now),
+            poller.delay_s(90, 0, now - timedelta(hours=3), now)]
+           == [900, 3600, 3600, 5400],
+           "15 min, solange das Auto in den letzten 2 h gemeldet hat, sonst "
+           "stündlich (ein längeres eingestelltes Intervall bleibt)")
     db = SessionLocal()
     rows = db.query(models.VehicleSnapshot).filter_by(
         vehicle_id=vehicle_id, captured_at=datetime(2026, 10, 20, 3, 0)).count()

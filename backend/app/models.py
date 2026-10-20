@@ -225,6 +225,8 @@ class VehicleSnapshot(Base):
     captured_at = Column(DateTime, nullable=False)
     received_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     values = Column(JSON, nullable=False)
+    # Every data point of the report, interpreted or not (snapshot.raw_of).
+    raw = Column(JSON)
 
     __table_args__ = (UniqueConstraint("vehicle_id", "source", "captured_at",
                                        name="uq_vehicle_snapshot"),)

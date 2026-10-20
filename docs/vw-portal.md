@@ -89,8 +89,13 @@ something changes: an error, a different error, or working again.
 - **Tab "Einstellungen":** the row "VW-Portal" shows whether the last fetch
   worked, the last error and the time of the last success.
 
-On failure jolt waits longer before the next try: twice the interval after
-each failure, at most two hours.
+jolt asks every `VW_PORTAL_INTERVAL_MIN` minutes while the car has reported
+within the last two hours, and once an hour while it has been quiet longer.
+Nothing is missed by asking less often: every report the car made in between
+is still listed in the portal, and jolt stores each one as its own row, so
+parked, driving and parked again stay three moments instead of one. On
+failure jolt waits longer before the next try: twice the interval after each
+failure, at most two hours.
 
 The API behind it, for your own scripts:
 `GET /api/vehicles/{id}/snapshot` (newest stored report, 404 if none) and
@@ -101,9 +106,10 @@ The API behind it, for your own scripts:
 - The VW ID and password are only in `.env`. jolt never logs them and never
   returns them through the API. The VIN appears only shortened to its last
   four characters.
-- jolt stores the values it knows (the list above) per vehicle, one row per
-  report of the car, in its own database. Data points it does not use are not
-  stored.
+- jolt stores per vehicle, one row per report of the car, the values it
+  knows (the list above) and every data point that report carried, also the
+  ones jolt does not interpret yet. That depends on which data categories
+  you released in the portal.
 - jolt talks only to `identity.vwgroup.io` and
   `eu-data-act.drivesomethinggreater.com`, and refuses redirects to any other
   host during the login.
