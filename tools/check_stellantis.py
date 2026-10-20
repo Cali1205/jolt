@@ -14,6 +14,7 @@ Without network, without Postgres:
 """
 import base64
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -435,7 +436,70 @@ def part_poller():
            "/api/vehicles/{id}/snapshot: Stellantis mit Position", str(snap))
 
 
-PARTS = [part_parse, part_tokens, part_poller]
+def _login_tool():
+    spec = importlib.util.spec_from_file_location(
+        "stellantis_login", os.path.join(TOOLS, "stellantis_login.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def part_login():
+    verify.section("Anmeldewerkzeug")
+    import contextlib
+    tool = _login_tool()
+    db = SessionLocal()
+    from app import models
+    db.query(models.CloudCredential).delete()
+    db.commit()
+    db.close()
+    fake = FakeStellantis()
+    printed = io.StringIO()
+
+    def read(prompt):
+        url = next(line.strip() for line in printed.getvalue().splitlines()
+                   if line.strip().startswith(OPEL.authorize_url))
+        query = parse_qs(urlsplit(url).query)
+        fake.challenge = query["code_challenge"][0]
+        read.query = query
+        return f"mymopsdk://oauth2redirect/de?code={fake.code}&scope=openid%20profile"
+
+    with contextlib.redirect_stdout(printed):
+        result = tool.main(["--brand", "opel", "--user", USER, "--country", "DE"],
+                           read=read, adapter=fake)
+    out = printed.getvalue()
+    query = {k: v[0] for k, v in read.query.items()}
+    verify(result == 0, "die Anmeldung gelingt", out[-300:])
+    verify(query.get("client_id") == OPEL.client_id
+           and query.get("redirect_uri") == "mymopsdk://oauth2redirect/de"
+           and query.get("response_type") == "code" and query.get("scope") == "openid profile"
+           and query.get("code_challenge_method") == "S256",
+           "die Adresse ist evccs: Opel-Client, mymopsdk-Rückruf, PKCE S256", str(query))
+    verify(fake.forms[0].get("grant_type") == "authorization_code"
+           and fake.forms[0].get("code") == "code-1"
+           and fake.forms[0].get("redirect_uri") == "mymopsdk://oauth2redirect/de",
+           "der Code aus der kopierten Adresse wird mit Prüfwert eingetauscht",
+           str(fake.forms[0]))
+    stored = _stored()
+    verify(stored and stored.get("refresh_token") == "refresh-1" and stored.get("brand") == "opel"
+           and stored.get("country") == "de" and stored.get("access_token") == "access-1",
+           "die Tokens stehen in cloud_credentials", str(stored and sorted(stored)))
+    verify("…0001" in out and VIN not in out and "refresh-1" not in out and "access-1" not in out,
+           "die Ausgabe nennt das Fahrzeug gekürzt und keine Tokens", out[-400:])
+    verify(tool.code_from("  abc-123 ") == "abc-123"
+           and tool.code_from("mymap://oauth2redirect/fr?code=xyz&state=") == "xyz",
+           "Code allein oder ganze Adresse")
+
+    fake = FakeStellantis()
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        result = tool.main(["--user", USER], read=lambda prompt: "falsch", adapter=fake)
+    verify(result == 1 and "invalid_grant" in printed.getvalue()
+           and _stored().get("refresh_token") == "refresh-1",
+           "ein falscher Code: Fehler, gespeicherte Tokens bleiben", printed.getvalue()[-200:])
+
+
+PARTS = [part_parse, part_tokens, part_poller, part_login]
 
 
 def main() -> int:
