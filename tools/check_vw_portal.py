@@ -370,8 +370,168 @@ def part_storage():
     finally:
         db.close()
 
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as client:
+        body = client.get(f"/api/vehicles/{vehicle_id}/snapshot").json()
+    verify(body.get("source") == "vw_portal"
+           and body.get("captured_at") == "2026-10-20T02:17:00Z"
+           and body.get("received_at", "").endswith("Z")
+           and body.get("values", {}).get("soc_pct") == 55,
+           "die API liefert den neuesten Bericht, Zeiten in UTC mit Z", str(body))
 
-PARTS = [part_snapshot, part_login, part_storage]
+
+def _cloud_tasks(main) -> list:
+    return [t for t in main._tasks
+            if t.get_coro().cr_code.co_filename.endswith("poller.py")]
+
+
+def part_disabled():
+    verify.section("Ohne Zugangsdaten läuft nichts")
+    from fastapi.testclient import TestClient
+    from app import cloud, main
+    verify(not cloud.configured(), "ohne VW_PORTAL_* ist nichts eingerichtet")
+    verify(not cloud.configured({"VW_PORTAL_USER": "a@b.c"}),
+           "nur der Benutzer ohne Passwort reicht nicht")
+    with TestClient(main.app) as client:
+        verify(not _cloud_tasks(main), "beim Start entsteht keine Abruf-Aufgabe",
+               str(main._tasks))
+        status = client.get("/api/cloud/status").json()
+        verify(status == {"configured": False, "sources": []},
+               "/api/cloud/status sagt configured false", str(status))
+        response = client.get("/api/vehicles/1/snapshot")
+        verify(response.status_code == 404, "/api/vehicles/1/snapshot ist 404",
+               str(response.status_code))
+
+    started = []
+
+    async def fake_loop(db_factory):
+        started.append(db_factory)
+
+    os.environ.update({"VW_PORTAL_USER": USER, "VW_PORTAL_PASSWORD": PASSWORD,
+                       "VW_PORTAL_INTERVAL_MIN": "2"})
+    real_loop = main.cloud_poller.loop
+    main.cloud_poller.loop = fake_loop
+    try:
+        configs = cloud.active()
+        verify(len(configs) == 1 and configs[0].interval_min == 5
+               and PASSWORD not in repr(configs[0]),
+               "mit Zugangsdaten eingerichtet, Abstand mindestens 5 min, "
+               "das Passwort steht nicht in der Darstellung", repr(configs))
+        with TestClient(main.app) as client:
+            verify(len(started) == 1, "mit Zugangsdaten startet der Abruf")
+            status = client.get("/api/cloud/status").json()
+            verify(status["configured"] is True
+                   and status["sources"][0]["name"] == "vw_portal"
+                   and PASSWORD not in json.dumps(status)
+                   and USER not in json.dumps(status),
+                   "der Status nennt die Quelle, aber keine Zugangsdaten", str(status))
+    finally:
+        main.cloud_poller.loop = real_loop
+        for name in ("VW_PORTAL_USER", "VW_PORTAL_PASSWORD", "VW_PORTAL_INTERVAL_MIN"):
+            os.environ.pop(name, None)
+
+
+class FakeSource:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.vehicle_calls = 0
+
+    def vehicles(self):
+        self.vehicle_calls += 1
+        return [VIN]
+
+    def latest(self, vin):
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def part_poller():
+    verify.section("Abruf im Hintergrund")
+    import asyncio
+    import logging
+    from app import cloud, models
+    from app.cloud import poller
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    vehicle_id = db.query(models.Vehicle.id).first()[0]
+    db.close()
+    snap = snapshot.Snapshot(captured_at=datetime(2026, 10, 20, 3, 0, tzinfo=timezone.utc),
+                             values={"soc_pct": 54})
+    source = FakeSource([vw_portal.PortalError("login rejected: x"),
+                         vw_portal.PortalError("login rejected: x"),
+                         RuntimeError("portal down"),
+                         snap, snap])
+    config = cloud.Config(name="vw_portal", vin=None, vehicle=str(vehicle_id),
+                          interval_min=15, connect=lambda: source)
+    poll = poller.Poll(config, SessionLocal)
+
+    lines = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    handler = Collect()
+    logger = logging.getLogger("uvicorn.error")
+    level = logger.level
+    logger.setLevel(logging.INFO)       # what uvicorn sets when it runs
+    logger.addHandler(handler)
+    delays = []
+
+    async def sleep(seconds):
+        delays.append(seconds)
+        if len(delays) == 5:
+            raise asyncio.CancelledError
+
+    try:
+        asyncio.run(poller.run(poll, sleep=sleep))
+    except asyncio.CancelledError:
+        pass
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+
+    verify(delays == [1800, 3600, 7200, 900, 900],
+           "nach Fehlern wartet der Abruf doppelt so lang (max. 2 h), danach "
+           "wieder 15 min", str(delays))
+    verify(lines == ["vw_portal: login rejected: x", "vw_portal: RuntimeError: portal down",
+                     "vw_portal: working again"],
+           "ins Log kommt nur der Wechsel: Fehler, anderer Fehler, wieder ok",
+           str(lines))
+    verify(poll.status.failures == 0 and poll.status.last_error is None
+           and poll.status.last_ok is not None and poll.status.vehicle_id == vehicle_id,
+           "der Status steht wieder auf ok", str(poll.status))
+    verify(source.vehicle_calls == 1,
+           "die Fahrzeugliste wird nur einmal abgefragt", str(source.vehicle_calls))
+    verify(poller.delay_s(15, 10) == 7200, "die Pause wächst nicht über 2 h")
+    db = SessionLocal()
+    rows = db.query(models.VehicleSnapshot).filter_by(
+        vehicle_id=vehicle_id, captured_at=datetime(2026, 10, 20, 3, 0)).count()
+    db.close()
+    verify(rows == 1, "zweimal derselbe Bericht: eine Zeile", str(rows))
+
+    for vehicle, vin, vins, needle in (
+            ("999", None, [VIN], "no such vehicle"),
+            ("x", None, [VIN], "must be a jolt vehicle id"),
+            (str(vehicle_id), None, [VIN, "WVGZZZSYNTHETIC02"], "…IC01, …IC02")):
+        bad = poller.Poll(cloud.Config(
+            name="vw_portal", vin=vin, vehicle=vehicle, interval_min=15,
+            connect=lambda: type("S", (), {"vehicles": lambda self: vins})()),
+            SessionLocal)
+        try:
+            bad.tick()
+            error = ""
+        except poller.SetupError as failure:
+            error = str(failure)
+        verify(needle in error and VIN not in error,
+               f"Einrichtungsfehler wird benannt, VIN nur gekürzt: {needle}", error)
+
+
+PARTS = [part_snapshot, part_login, part_disabled, part_storage, part_poller]
 
 
 def main() -> int:
