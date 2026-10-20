@@ -1,0 +1,1080 @@
+{
+ "uid": "jolt-logbook",
+ "title": "jolt Fahrtenbuch",
+ "tags": [
+  "jolt"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 41,
+ "version": 1,
+ "refresh": "",
+ "time": {
+  "from": "now-1y",
+  "to": "now"
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "charge",
+    "label": "Ladevorgang",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' AS __text FROM grafana_charges WHERE energy_kwh >= 5 AND soc_end > soc_start ORDER BY time DESC",
+    "definition": "grafana_charges",
+    "refresh": 2,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "stat",
+   "title": "Fahrten",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 4
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\",\n       round(avg(km)::numeric, 1) AS \"Ø km je Fahrt\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"Ø kWh/100 km\",\n       count(*) FILTER (WHERE recorded) AS \"aufgezeichnet\"\nFROM grafana_drives WHERE $__timeFilter(time)",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "description": "Ø kWh/100 km aus dem Rückgang des Ladestands mal Akkukapazität, nach Strecke gewichtet, nur Fahrten ab 15 km (der Ladestand hat ganze Prozent)."
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Laden",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 4
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT count(*) AS \"Ladevorgänge\", round(sum(energy_kwh)::numeric) AS \"kWh\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"davon DC kWh\",\n       round(sum(cost_eur)::numeric) AS \"€ (Hauspreis)\",\n       round(avg(kwh_per_pct)::numeric, 3) AS \"kWh je %\"\nFROM grafana_charges WHERE $__timeFilter(time)",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "colorMode": "none",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "description": "€ mit dem Strompreis aus dem Fahrzeugprofil, also ohne die Preise an Schnellladern. kWh je % ist die Energie, die ein Prozent Ladestand kostet (Ladevorgänge ab 5 % Gewinn) - steigende Werte heißen mehr Ladeverluste, fallende eine kleinere nutzbare Kapazität."
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Kilometer pro Woche",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT date_trunc('week', time) AS time, round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 70,
+      "lineWidth": 1,
+      "barAlignment": -1,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "unit": "lengthkm"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Geladene Energie pro Monat",
+   "gridPos": {
+    "x": 12,
+    "y": 4,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'AC'))::numeric) AS \"AC\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 70,
+      "lineWidth": 1,
+      "barAlignment": -1,
+      "stacking": {
+       "mode": "normal"
+      }
+     },
+     "unit": "kwatth"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Verbrauch pro Monat (kWh/100 km)",
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"aus Ladestand\",\n       round((100 * sum(kwh_dongle) / nullif(sum(km) FILTER (WHERE kwh_dongle IS NOT NULL AND km >= 1), 0))::numeric, 1) AS \"Dongle\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 6,
+      "showPoints": "auto",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "description": "Zwei Messungen derselben Größe: der Rückgang des Ladestands (alle Fahrten ab 15 km) und die Energiezähler des Dongles (nur aufgezeichnete Fahrten). Der Winter zeigt sich hier zuerst."
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Kilometerstand",
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT ended_at AS time, odo_end AS \"Kilometerstand\"\nFROM grafana_drives WHERE $__timeFilter(time) AND odo_end IS NOT NULL ORDER BY 1",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 6,
+      "showPoints": "auto",
+      "spanNulls": true
+     },
+     "unit": "lengthkm"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 7,
+   "type": "barchart",
+   "title": "Fahrten nach Uhrzeit",
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT lpad(hour::int::text, 2, '0') AS \"Klasse\", count(*) AS \"Fahrten\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY hour ORDER BY hour",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "km"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 8,
+   "type": "barchart",
+   "title": "Fahrtlängen",
+   "gridPos": {
+    "x": 8,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT cls AS \"Klasse\", count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\"\nFROM (SELECT km, CASE WHEN km < 5 THEN '1: <5' WHEN km < 10 THEN '2: 5-10'\n                      WHEN km < 20 THEN '3: 10-20' WHEN km < 50 THEN '4: 20-50'\n                      WHEN km < 150 THEN '5: 50-150' ELSE '6: 150+' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time)) q GROUP BY cls ORDER BY cls",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "km"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Wenige lange Fahrten machen oft den Großteil der Kilometer aus."
+  },
+  {
+   "id": 9,
+   "type": "barchart",
+   "title": "Ladestand bei Ladebeginn",
+   "gridPos": {
+    "x": 16,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT lpad((floor(soc_start / 10) * 10)::int::text, 3, ' ') || ' %' AS \"Klasse\",\n       count(*) FILTER (WHERE charge_type = 'AC') AS \"AC\",\n       count(*) FILTER (WHERE charge_type = 'DC') AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) AND soc_start IS NOT NULL AND energy_kwh >= 1\nGROUP BY 1 ORDER BY 1",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7,
+    "stacking": "normal"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": []
+   },
+   "description": "Ladevorgänge ab 1 kWh: wie weit der Akku leer war, als geladen wurde."
+  },
+  {
+   "id": 10,
+   "type": "barchart",
+   "title": "Verbrauch nach Wochentag (aus Ladestand)",
+   "gridPos": {
+    "x": 0,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT CASE weekday::int WHEN 1 THEN '1 Mo' WHEN 2 THEN '2 Di' WHEN 3 THEN '3 Mi'\n                   WHEN 4 THEN '4 Do' WHEN 5 THEN '5 Fr' WHEN 6 THEN '6 Sa' ELSE '7 So' END AS \"Klasse\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"kWh/100 km\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY weekday ORDER BY weekday",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "km"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 11,
+   "type": "xychart",
+   "title": "Ladevorgänge: Energie über Ladestand-Gewinn",
+   "gridPos": {
+    "x": 12,
+    "y": 28,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT soc_gain AS \"Ladestand-Gewinn %\",\n       CASE WHEN charge_type = 'AC' THEN energy_kwh END AS \"AC kWh\",\n       CASE WHEN charge_type = 'DC' THEN energy_kwh END AS \"DC kWh\"\nFROM grafana_charges WHERE $__timeFilter(time) AND soc_gain > 0 ORDER BY 1",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points",
+      "pointSize": {
+       "fixed": 6
+      }
+     }
+    },
+    "overrides": []
+   },
+   "description": "Liegen die Punkte auf einer Geraden, passt die Ladeenergie zum Ladestand. Ihre Steigung ist die Energie je Prozent, also etwa ein Hundertstel der nutzbaren Kapazität plus Ladeverluste."
+  },
+  {
+   "id": 12,
+   "type": "table",
+   "title": "Fahrten (Aufzeichnung anklicken: Details)",
+   "gridPos": {
+    "x": 0,
+    "y": 36,
+    "w": 14,
+    "h": 12
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time AS \"Start\", round(duration_min::numeric) AS \"Min\",\n       round(km::numeric, 1) AS \"km\", soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh100_soc::numeric, 1) AS \"kWh/100 Ladestand\",\n       round(kwh100_dongle::numeric, 1) AS \"kWh/100 Dongle\",\n       round(speed_avg::numeric) AS \"Ø km/h\", odo_end AS \"Kilometerstand\",\n       replace(replace(replace(sources, 'vw_history', 'VW'), 'vw_portal', 'VW'), '\"', '') AS \"Quelle\",\n       live_session_id AS \"Aufzeichnung\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM ended_at) * 1000 + 60000)::bigint AS bis\nFROM grafana_drives WHERE $__timeFilter(time) ORDER BY time DESC LIMIT 500",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Aufzeichnung"
+      },
+      "properties": [
+       {
+        "id": "links",
+        "value": [
+         {
+          "title": "Aufzeichnung in jolt Fahrten",
+          "url": "/d/jolt-trips?orgId=1&var-session=${__data.fields.Aufzeichnung}&from=${__data.fields.von}&to=${__data.fields.bis}"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(von|bis)$"
+      },
+      "properties": [
+       {
+        "id": "custom.hidden",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^kWh/100"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "thresholds",
+        "value": {
+         "mode": "absolute",
+         "steps": [
+          {
+           "color": "green",
+           "value": null
+          },
+          {
+           "color": "yellow",
+           "value": 20
+          },
+          {
+           "color": "red",
+           "value": 24
+          }
+         ]
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 13,
+   "type": "table",
+   "title": "Ladevorgänge",
+   "gridPos": {
+    "x": 14,
+    "y": 36,
+    "w": 10,
+    "h": 12
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time AS \"Start\", charge_type AS \"Art\", round(duration_min::numeric) AS \"Min\",\n       round(energy_kwh::numeric, 1) AS \"kWh\", round(max_power_kw::numeric) AS \"max kW\",\n       soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh_per_pct::numeric, 3) AS \"kWh je %\", odometer_km AS \"Kilometerstand\"\nFROM grafana_charges WHERE $__timeFilter(time) ORDER BY time DESC LIMIT 500",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Art"
+      },
+      "properties": [
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-text"
+        }
+       },
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "DC": {
+            "color": "orange",
+            "index": 0
+           },
+           "AC": {
+            "color": "green",
+            "index": 1
+           }
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": 14,
+   "type": "timeseries",
+   "title": "VW-Portal: Ladestand und Reichweite",
+   "gridPos": {
+    "x": 0,
+    "y": 48,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, soc_pct AS \"Ladestand %\", range_km AS \"Reichweite km\"\nFROM grafana_reports WHERE $__timeFilter(time) ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 6,
+      "showPoints": "auto",
+      "spanNulls": true
+     },
+     "unit": "percent"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Reichweite km"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "lengthkm"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Jede Meldung des Autos an das VW-Portal (beim Ein- und Ausschalten, beim Laden). Erst seit dem Einschalten des Portal-Abrufs."
+  },
+  {
+   "id": 15,
+   "type": "timeseries",
+   "title": "VW-Portal: Akkutemperatur und nutzbare Kapazität",
+   "gridPos": {
+    "x": 12,
+    "y": 48,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT time, batt_temp_min_c AS \"Akku min °C\", batt_temp_max_c AS \"Akku max °C\",\n       capacity_kwh AS \"nutzbar kWh\"\nFROM grafana_reports WHERE $__timeFilter(time) ORDER BY time",
+     "format": "time_series",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 6,
+      "showPoints": "auto",
+      "spanNulls": true
+     },
+     "unit": "celsius"
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "nutzbar kWh"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "kwatth"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Die nutzbare Kapazität (maximaler Energieinhalt laut Auto) sinkt mit dem Alter des Akkus - über Monate betrachtet ist das die Akkugesundheit."
+  },
+  {
+   "id": 16,
+   "type": "xychart",
+   "title": "Ladekurve: ${charge:text}",
+   "gridPos": {
+    "x": 0,
+    "y": 56,
+    "w": 12,
+    "h": 11
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT kw AS \"kW\", soc AS \"Ladestand %\" FROM grafana_charge_curve\nWHERE charge_id = ${charge} ORDER BY time",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points+lines",
+      "pointSize": {
+       "fixed": 3
+      },
+      "lineWidth": 2
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Ladestand %"
+      },
+      "properties": [
+       {
+        "id": "min",
+        "value": 0
+       },
+       {
+        "id": "max",
+        "value": 100
+       },
+       {
+        "id": "unit",
+        "value": "percent"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Ladevorgang oben in der Auswahl „Ladevorgang“ wählen. Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende."
+  },
+  {
+   "id": 17,
+   "type": "xychart",
+   "title": "Alle DC-Ladekurven im Zeitraum",
+   "gridPos": {
+    "x": 12,
+    "y": 56,
+    "w": 12,
+    "h": 11
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT kw AS \"kW\", soc AS \"Ladestand %\" FROM grafana_charge_curve\nWHERE charge_type = 'DC' AND $__timeFilter(time) ORDER BY charge_id, time",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points",
+      "pointSize": {
+       "fixed": 3
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Ladestand %"
+      },
+      "properties": [
+       {
+        "id": "min",
+        "value": 0
+       },
+       {
+        "id": "max",
+        "value": 100
+       },
+       {
+        "id": "unit",
+        "value": "percent"
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Jeder Punkt ein Messwert eines DC-Ladevorgangs: die obere Kante ist, was der Akku bei welchem Ladestand höchstens annimmt; Punkte darunter sind kalter Akku, schwache Säule oder geteilte Leistung. Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende."
+  }
+ ],
+ "links": [
+  {
+   "title": "jolt Fahrten",
+   "type": "link",
+   "url": "/d/jolt-trips",
+   "icon": "external link"
+  },
+  {
+   "title": "jolt Analyse",
+   "type": "link",
+   "url": "/d/jolt-analysis",
+   "icon": "external link"
+  }
+ ]
+}

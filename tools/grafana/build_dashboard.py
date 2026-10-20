@@ -252,7 +252,10 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
             "current": {"text": "Tempo", "value": "speed_kmh"},
             "includeAll": False, "multi": False}]},
         "panels": panels,
-        "links": [],
+        "links": [{"title": "jolt Fahrtenbuch", "type": "link", "url": "/d/jolt-logbook",
+                   "icon": "external link"},
+                  {"title": "jolt Analyse", "type": "link", "url": "/d/jolt-analysis",
+                   "icon": "external link"}],
     }
 
 
