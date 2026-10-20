@@ -110,6 +110,19 @@ def part_snapshot():
            "Reihenfolge der Kandidaten und nicht der Zeitstempel des Punktes",
            str(snap.values))
 
+    parked = snapshot.decode([
+        {"key": "k-config", "dataFieldName": "mileage.value", "value": "62067",
+         "timestampUtc": "2026-10-20T05:44:20Z"}])
+    stopped = snapshot.decode([
+        {"key": "k-energy", "dataFieldName": "mileage.value", "value": "62071",
+         "timestampUtc": "2026-10-20T05:59:42Z"}])
+    merged = snapshot.merge(snapshot.merge([], parked, 1), stopped, 2)
+    snap = snapshot.from_points(merged)
+    verify(snap and snap.values.get("odometer_km") == 62071,
+           "derselbe Feldname unter einem anderen Schlüssel: der neuere Wert "
+           "gewinnt (Fahrt vom 20.10.: 62067 statt 62071 gespeichert)",
+           str(snap and snap.values))
+
 
 USER, PASSWORD, VIN = "fahrer@example.org", "geheim-123", DATASET["vin"]
 AUTHORIZE = vw_portal.AUTHORIZE_URL
