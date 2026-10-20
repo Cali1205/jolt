@@ -1,5 +1,7 @@
 -- Read-only access for Grafana. Run once as the jolt user:
 --   docker exec -i jolt-db psql -U jolt -d jolt -v pw="'<password>'" < tools/grafana/setup.sql
+-- Run again without -v pw to update the views and grants only; the password
+-- of grafana_ro stays as it is.
 -- The views flatten the raw values of the dongle (JSON) into columns, so the
 -- dashboard needs no JSON handling. The role sees only these views, not the
 -- tables (no logger tokens, no sessions, no push subscriptions).
@@ -133,6 +135,70 @@ FROM (SELECT session_id,
       GROUP BY 1, 2 HAVING count(*) >= 2 AND avg(speed_kmh) > 5) w
 JOIN grafana_sessions s ON s.id = w.session_id;
 
+-- The logbook (vehicle_drives / vehicle_charges): every drive and charge the
+-- VW data or a jolt recording saw, with what Grafana needs as plain columns.
+-- Consumption comes two ways: from the dongle's energy counters where a
+-- recording measured it, and from the drop of the charge level times the
+-- battery's capacity for everything else. The charge level has whole percent,
+-- so the second is only meaningful on longer drives (>= 15 km).
+CREATE OR REPLACE VIEW grafana_drives AS
+SELECT d.id, d.vehicle_id, v.name AS vehicle,
+       d.started_at AS time, d.ended_at,
+       extract(epoch FROM d.ended_at - d.started_at) / 60 AS duration_min,
+       d.distance_km AS km, d.odo_start, d.odo_end,
+       d.soc_start, d.soc_end, d.soc_start - d.soc_end AS soc_used,
+       d.energy_used_kwh AS kwh_dongle,
+       CASE WHEN d.energy_used_kwh IS NOT NULL AND d.distance_km >= 1
+            THEN 100 * d.energy_used_kwh / d.distance_km END AS kwh100_dongle,
+       -- A drive with a charge in between ends with the same or a higher charge
+       -- level; its drop says nothing about the consumption.
+       CASE WHEN d.distance_km >= 15 AND d.soc_start > d.soc_end
+            THEN (d.soc_start - d.soc_end) / 100
+                 * coalesce(v.measured_capacity_kwh, v.battery_net_kwh)
+                 / d.distance_km * 100 END AS kwh100_soc,
+       CASE WHEN d.ended_at > d.started_at
+            THEN d.distance_km / (extract(epoch FROM d.ended_at - d.started_at) / 3600)
+       END AS speed_avg,
+       d.sources::text AS sources,
+       d.live_session_id IS NOT NULL AS recorded,
+       d.live_session_id,
+       extract(isodow FROM d.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Berlin') AS weekday,
+       extract(hour FROM d.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Berlin') AS hour
+FROM vehicle_drives d
+JOIN vehicles v ON v.id = d.vehicle_id;
+
+CREATE OR REPLACE VIEW grafana_charges AS
+SELECT c.id, c.vehicle_id, v.name AS vehicle,
+       c.started_at AS time, c.ended_at,
+       extract(epoch FROM c.ended_at - c.started_at) / 60 AS duration_min,
+       c.energy_kwh, c.max_power_kw, c.avg_power_kw,
+       coalesce(c.charge_type, '?') AS charge_type,
+       c.soc_start, c.soc_end, c.soc_end - c.soc_start AS soc_gain,
+       CASE WHEN c.soc_end - c.soc_start >= 5
+            THEN c.energy_kwh / (c.soc_end - c.soc_start) END AS kwh_per_pct,
+       c.odometer_km,
+       c.energy_kwh * v.electricity_price_eur_kwh AS cost_eur,
+       c.sources::text AS sources,
+       extract(isodow FROM c.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Berlin') AS weekday,
+       extract(hour FROM c.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'Europe/Berlin') AS hour
+FROM vehicle_charges c
+JOIN vehicles v ON v.id = c.vehicle_id;
+
+-- What the VW portal reported, one row per report of the car.
+CREATE OR REPLACE VIEW grafana_reports AS
+SELECT s.id, s.vehicle_id, s.captured_at AS time, s.received_at,
+       (s.values->>'soc_pct')::float          AS soc_pct,
+       (s.values->>'range_km')::float         AS range_km,
+       (s.values->>'odometer_km')::float      AS odometer_km,
+       (s.values->>'energy_kwh')::float       AS energy_kwh,
+       (s.values->>'capacity_kwh')::float     AS capacity_kwh,
+       (s.values->>'batt_temp_min_c')::float  AS batt_temp_min_c,
+       (s.values->>'batt_temp_max_c')::float  AS batt_temp_max_c,
+       (s.values->>'charge_power_kw')::float  AS charge_power_kw,
+       s.values->>'charge_state'              AS charge_state,
+       (s.values->>'target_soc_pct')::float   AS target_soc_pct
+FROM vehicle_snapshots s;
+
 -- Role. The password comes from -v pw=... so it is not stored in the repo.
 DO $$
 BEGIN
@@ -140,8 +206,11 @@ BEGIN
         CREATE ROLE grafana_ro LOGIN;
     END IF;
 END $$;
+\if :{?pw}
 ALTER ROLE grafana_ro PASSWORD :pw;
+\endif
 ALTER ROLE grafana_ro SET default_transaction_read_only = on;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM grafana_ro;
 GRANT USAGE ON SCHEMA public TO grafana_ro;
-GRANT SELECT ON grafana_points, grafana_sessions, grafana_trips, grafana_windows TO grafana_ro;
+GRANT SELECT ON grafana_points, grafana_sessions, grafana_trips, grafana_windows,
+                 grafana_drives, grafana_charges, grafana_reports TO grafana_ro;

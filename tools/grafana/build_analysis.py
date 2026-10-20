@@ -194,6 +194,44 @@ GROUP BY cls ORDER BY cls""",
             "matcher": {"id": "byName", "options": "Fenster"},
             "properties": [{"id": "custom.axisPlacement", "value": "right"}]}]
 
+    # The logbook: every drive, also the ones driven without the app, with
+    # consumption from the drop of the charge level. Coarser than the dongle
+    # (whole percent), so only drives from 15 km, but far more of them.
+    row += 18
+    logbook_where = "$__timeFilter(time) AND kwh100_soc IS NOT NULL"
+    panels.append(_panel(
+        "xychart", "Fahrtenbuch: Verbrauch über Ø Tempo (alle Fahrten ab 15 km)",
+        0, row, 12, 10,
+        [sql(f"""WITH d AS (SELECT speed_avg AS x, kwh100_soc AS y FROM grafana_drives
+           WHERE {logbook_where} AND speed_avg BETWEEN 5 AND 160),
+     r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a,
+                  min(x) AS x0, max(x) AS x1 FROM d)
+SELECT x AS "Ø km/h", y AS "kWh/100 km", NULL::float AS "Trend" FROM d
+UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL
+UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1""")],
+        options={"seriesMapping": "auto", "tooltip": {"mode": "single"},
+                 "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}},
+        field_config={"defaults": {"custom": {"show": "points", "pointSize": {"fixed": 5},
+                                              "lineWidth": 2}},
+                      "overrides": [{"matcher": {"id": "byName", "options": "Trend"},
+                                     "properties": [{"id": "custom.show", "value": "lines"},
+                                                    {"id": "color", "value": {
+                                                        "mode": "fixed", "fixedColor": "orange"}}]}]},
+        description="Ø Tempo = Strecke durch Zeit vom Einschalten bis zum Abstellen, Ampeln "
+                    "und Staus eingeschlossen. Verbrauch aus dem Ladestand mal Akkukapazität."))
+    panels.append(bars(
+        "Fahrtenbuch: Verbrauch nach Fahrtlänge und Jahreszeit (kWh/100 km)", 12, row, 12, 10,
+        f"""SELECT cls AS "Klasse",
+       round((sum(kwh100_soc * km) FILTER (WHERE winter) / nullif(sum(km) FILTER (WHERE winter), 0))::numeric, 1) AS "Okt-Mär",
+       round((sum(kwh100_soc * km) FILTER (WHERE NOT winter) / nullif(sum(km) FILTER (WHERE NOT winter), 0))::numeric, 1) AS "Apr-Sep"
+FROM (SELECT km, kwh100_soc, extract(month FROM time) NOT BETWEEN 4 AND 9 AS winter,
+             CASE WHEN km < 30 THEN '1: 15-30 km' WHEN km < 60 THEN '2: 30-60 km'
+                  WHEN km < 150 THEN '3: 60-150 km' ELSE '4: 150+ km' END AS cls
+      FROM grafana_drives WHERE {logbook_where}) q
+GROUP BY cls ORDER BY cls""",
+        description="Nach Strecke gewichtet. Kurze Fahrten im Winter kosten am meisten: "
+                    "Heizen und ein kalter Akku fallen auf wenige Kilometer."))
+
     return {
         "uid": UID, "title": "jolt Analyse", "tags": ["jolt"], "timezone": "browser",
         "schemaVersion": 41, "version": 1, "refresh": "",
@@ -208,6 +246,8 @@ GROUP BY cls ORDER BY cls""",
              "current": {"text": "3", "value": "3"}}]},
         "panels": panels,
         "links": [{"title": "jolt Fahrten", "type": "link", "url": "/d/" + base.UID,
+                   "icon": "external link"},
+                  {"title": "jolt Fahrtenbuch", "type": "link", "url": "/d/jolt-logbook",
                    "icon": "external link"}],
     }
 

@@ -623,6 +623,127 @@
     ]
    },
    "description": "Steigung aus dem Höhenunterschied im Fenster (Höhe in ganzen Metern: grob). Bergab sinkt der Verbrauch durch Rekuperation, negative Werte sind möglich."
+  },
+  {
+   "id": 12,
+   "type": "xychart",
+   "title": "Fahrtenbuch: Verbrauch über Ø Tempo (alle Fahrten ab 15 km)",
+   "gridPos": {
+    "x": 0,
+    "y": 44,
+    "w": 12,
+    "h": 10
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "WITH d AS (SELECT speed_avg AS x, kwh100_soc AS y FROM grafana_drives\n           WHERE $__timeFilter(time) AND kwh100_soc IS NOT NULL AND speed_avg BETWEEN 5 AND 160),\n     r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a,\n                  min(x) AS x0, max(x) AS x1 FROM d)\nSELECT x AS \"Ø km/h\", y AS \"kWh/100 km\", NULL::float AS \"Trend\" FROM d\nUNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL\nUNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "seriesMapping": "auto",
+    "tooltip": {
+     "mode": "single"
+    },
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "show": "points",
+      "pointSize": {
+       "fixed": 5
+      },
+      "lineWidth": 2
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Trend"
+      },
+      "properties": [
+       {
+        "id": "custom.show",
+        "value": "lines"
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "orange"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "description": "Ø Tempo = Strecke durch Zeit vom Einschalten bis zum Abstellen, Ampeln und Staus eingeschlossen. Verbrauch aus dem Ladestand mal Akkukapazität."
+  },
+  {
+   "id": 13,
+   "type": "barchart",
+   "title": "Fahrtenbuch: Verbrauch nach Fahrtlänge und Jahreszeit (kWh/100 km)",
+   "gridPos": {
+    "x": 12,
+    "y": 44,
+    "w": 12,
+    "h": 10
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "SELECT cls AS \"Klasse\",\n       round((sum(kwh100_soc * km) FILTER (WHERE winter) / nullif(sum(km) FILTER (WHERE winter), 0))::numeric, 1) AS \"Okt-Mär\",\n       round((sum(kwh100_soc * km) FILTER (WHERE NOT winter) / nullif(sum(km) FILTER (WHERE NOT winter), 0))::numeric, 1) AS \"Apr-Sep\"\nFROM (SELECT km, kwh100_soc, extract(month FROM time) NOT BETWEEN 4 AND 9 AS winter,\n             CASE WHEN km < 30 THEN '1: 15-30 km' WHEN km < 60 THEN '2: 30-60 km'\n                  WHEN km < 150 THEN '3: 60-150 km' ELSE '4: 150+ km' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time) AND kwh100_soc IS NOT NULL) q\nGROUP BY cls ORDER BY cls",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": []
+   },
+   "description": "Nach Strecke gewichtet. Kurze Fahrten im Winter kosten am meisten: Heizen und ein kalter Akku fallen auf wenige Kilometer."
   }
  ],
  "links": [
@@ -630,6 +751,12 @@
    "title": "jolt Fahrten",
    "type": "link",
    "url": "/d/jolt-trips",
+   "icon": "external link"
+  },
+  {
+   "title": "jolt Fahrtenbuch",
+   "type": "link",
+   "url": "/d/jolt-logbook",
    "icon": "external link"
   }
  ]
