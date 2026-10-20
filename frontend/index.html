@@ -544,6 +544,27 @@
 
       <h2>Gefahrene Fahrten</h2>
       <div id="trips-list"></div>
+
+      <!-- The logbook: every drive and charge the VW data or jolt saw, also
+           the ones driven without the app. Hidden while it is empty. -->
+      <div id="logbook" hidden>
+        <h2>Fahrtenbuch <button type="button" class="info" data-info="help-logbook" aria-expanded="false" aria-label="Erklärung">i</button></h2>
+        <p class="hilfe" id="help-logbook" hidden>Fahrten und Ladevorgänge aus
+          dem VW-Portal (Verlauf und laufende Berichte) und aus den
+          jolt-Aufzeichnungen. Hat beides dieselbe Fahrt gesehen, steht sie
+          einmal da, mit „VW + jolt“. Den Verbrauch kennt jolt nur, wo der
+          Dongle mitgezählt hat.</p>
+        <details class="opt" id="logbook-drives-block">
+          <summary><span class="opt-titel">Fahrten</span>
+            <span class="chips" id="logbook-drives-sum"></span></summary>
+          <div class="opt-inhalt"><div id="logbook-drives"></div></div>
+        </details>
+        <details class="opt" id="logbook-charges-block">
+          <summary><span class="opt-titel">Ladevorgänge</span>
+            <span class="chips" id="logbook-charges-sum"></span></summary>
+          <div class="opt-inhalt"><div id="logbook-charges"></div></div>
+        </details>
+      </div>
     </div>
 
     <!-- Detail of a driven or recorded trip: stays in this tab, so that what

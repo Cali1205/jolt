@@ -353,9 +353,12 @@ def history_records():
     b, _ = drive(last + 15 * MIN, 1010, 10, 77, 74)
     c, _ = drive(T(16, 15, 44, 21), 62020, 6, 74, 73, every=timedelta(seconds=104.8))
     charge, _ = charging(T(17, 22), 60, 11.0, 30)
-    stream = obs(a + b + c + charge)
-    return ([logbook.drive_record(d) for d in sessions.detect_drives(stream)],
-            [logbook.charge_record(x) for x in sessions.detect_charges(stream, 0.726)])
+    # Two streams: the odometer of the second car-week does not continue
+    # the first, and one stream would read the jump as a drive.
+    found = sessions.detect_drives(obs(a + b)) + sessions.detect_drives(obs(c))
+    return ([logbook.drive_record(d) for d in found],
+            [logbook.charge_record(x)
+             for x in sessions.detect_charges(obs(charge), 0.726)])
 
 
 def part_storage():
@@ -671,8 +674,52 @@ def part_import():
            "die Ausgabe zeigt die VIN nur gekürzt", first)
 
 
+def part_api():
+    verify.section("API")
+    from fastapi.testclient import TestClient
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    from app.main import app
+    drives, charges = history_records()
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        logbook.store_drives(db, vid, logbook.HISTORY, drives)
+        logbook.store_charges(db, vid, logbook.HISTORY, charges)
+        session = recorded(db, vid, T(16, 15, 44, 19), 62020, 6, 73.9)
+        logbook.store_session(db, session)
+        trip_id = session.trip_id
+        db.commit()
+    finally:
+        db.close()
+    with TestClient(app) as client:
+        first = client.get(f"/api/vehicles/{vid}/drives?limit=2").json()
+        rest = client.get(f"/api/vehicles/{vid}/drives",
+                          params={"limit": 2, "before": first["next_before"]}).json()
+        load = client.get(f"/api/vehicles/{vid}/charges").json()
+        missing = client.get("/api/vehicles/99999/drives").status_code
+    items = first["items"] + rest["items"]
+    newest = items[0]
+    verify(len(items) == 3 and rest["next_before"] is None
+           and [i["started_at"] for i in items]
+           == sorted([i["started_at"] for i in items], reverse=True),
+           "Fahrten, neueste zuerst, seitenweise über `before`",
+           str([i["started_at"] for i in items]))
+    verify(newest["sources"] == ["vw_history", "jolt"] and newest["trip_id"] == trip_id
+           and newest["kwh_per_100km"] == 18.0 and newest["started_at"].endswith("Z"),
+           "eine Fahrt aus VW und jolt: Verweis auf die Aufzeichnung, Verbrauch, "
+           "Zeiten in UTC mit Z", str(newest))
+    verify(first["totals"] == {"count": 3, "distance_km": 26.0, "energy_used_kwh": 1.1,
+                               "distance_km_with_energy": 6.0},
+           "Summen über alle Fahrten", str(first["totals"]))
+    verify(load["totals"]["count"] == 1 and load["items"][0]["charge_type"] == "AC"
+           and load["totals"]["by_type"]["AC"]["count"] == 1,
+           "Ladevorgänge mit Summen nach AC/DC", str(load["totals"]))
+    verify(missing == 404, "unbekanntes Fahrzeug: 404", str(missing))
+
+
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_import]
+         part_import, part_api]
 
 
 def main() -> int:
