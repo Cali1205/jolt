@@ -161,6 +161,8 @@ class Vehicle(Base):
                                     cascade="all, delete-orphan",
                                     order_by="CapacityHistory.measured_at")
     snapshots = relationship("VehicleSnapshot", cascade="all, delete-orphan")
+    drives = relationship("VehicleDrive", cascade="all, delete-orphan")
+    charges = relationship("VehicleCharge", cascade="all, delete-orphan")
 
     @property
     def mass_kg(self) -> float:
@@ -230,6 +232,55 @@ class VehicleSnapshot(Base):
 
     __table_args__ = (UniqueConstraint("vehicle_id", "source", "captured_at",
                                        name="uq_vehicle_snapshot"),)
+
+
+class VehicleDrive(Base):
+    """One drive of the logbook, from whichever sources saw it (cloud/logbook.py).
+
+    `sources` lists them ("vw_history", "vw_portal", "jolt"); `details` keeps
+    what each source detected (`by_source`), and the columns are derived from
+    that by a fixed preference per field, so the order in which the sources
+    arrive does not change the row.
+    """
+    __tablename__ = "vehicle_drives"
+
+    id = Column(Integer, primary_key=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    started_at = Column(DateTime, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=False)
+    # NULL for a jolt recording without odometer readings; `distance_km`
+    # then comes from the recorded track.
+    odo_start = Column(Float)
+    odo_end = Column(Float)
+    distance_km = Column(Float, nullable=False)
+    soc_start = Column(Float)
+    soc_end = Column(Float)
+    energy_used_kwh = Column(Float)
+    sources = Column(JSON, nullable=False)
+    live_session_id = Column(Integer, ForeignKey("live_sessions.id",
+                                                 ondelete="SET NULL"))
+    details = Column(JSON, nullable=False)
+
+
+class VehicleCharge(Base):
+    """One charge, from the VW history export or the portal's reports."""
+    __tablename__ = "vehicle_charges"
+
+    id = Column(Integer, primary_key=True)
+    vehicle_id = Column(Integer, ForeignKey("vehicles.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    started_at = Column(DateTime, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=False)
+    soc_start = Column(Float)
+    soc_end = Column(Float)
+    energy_kwh = Column(Float, nullable=False)
+    max_power_kw = Column(Float, nullable=False)
+    avg_power_kw = Column(Float)
+    charge_type = Column(String(2))
+    odometer_km = Column(Float)
+    sources = Column(JSON, nullable=False)
+    details = Column(JSON, nullable=False)
 
 
 class ChargePoint(Base):

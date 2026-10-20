@@ -101,6 +101,66 @@ The API behind it, for your own scripts:
 `GET /api/vehicles/{id}/snapshot` (newest stored report, 404 if none) and
 `GET /api/cloud/status` (whether the module is on and how fetching goes).
 
+## Logbook: drives and charges
+
+jolt builds a logbook of drives and charges, shown in the tab "Fahrten"
+under "Fahrtenbuch". Three sources feed it, and none needs the others:
+
+- **The history export** of the portal (one-off import, see below).
+- **The portal's live reports**, while the module is on. jolt stores a drive
+  or charge from them 30 minutes after it ended: the car sends its
+  switch-off reports late and out of order, and an ongoing charge must not
+  be stored as finished.
+- **jolt's own recordings.** Each finished live session becomes a drive,
+  also without VW credentials.
+
+When two sources saw the same drive, it is one entry with both names
+("VW + jolt"): entries match by overlapping odometer ranges, or by time
+where one side has no odometer. Times, odometer and charge level come from
+the finest source (history export, then portal, then jolt), the energy from
+the dongle, which reads the battery's own counters. Storing the same data
+again changes nothing.
+
+How drives and charges are found, with the thresholds and why, is described
+at the top of `backend/app/cloud/sessions.py`. In short: a drive is a run of
+odometer increases, and ten minutes without a new kilometre, charging or
+plugging in end it. A charge is a run of reports with charge power above
+zero; pauses under 15 minutes stay inside it, and its energy is the power
+integrated over time.
+
+What the VW data does **not** contain: positions. A drive that only VW saw
+has no map and no route; only drives jolt recorded link to the trip view.
+Consumption in kWh/100 km is known only where the dongle counted along.
+
+API: `GET /api/vehicles/{id}/drives` and `GET /api/vehicles/{id}/charges`,
+newest first, `limit` (default 30, at most 200) and `before` (an ISO time,
+for the next page), each with totals.
+
+## Import the history
+
+In the portal you can request the car's whole history once. You get a zip
+with one JSON file (about 70 MB for a year). jolt reads it, finds the
+drives and charges and stores those with their kilometre, charge level and
+power tracks. It does **not** keep the raw data points: that would be half
+a million rows for a year, and nothing in jolt reads them.
+
+Try it first without writing anything:
+
+```sh
+docker compose run --rm --no-deps -v "$PWD/export.zip:/tmp/export.zip:ro"     jolt-app python tools/import_vw_history.py /tmp/export.zip --dry-run
+```
+
+Then without `--dry-run`. With more than one vehicle in jolt, add
+`--vehicle ID`. The import also adds every finished jolt recording to the
+logbook, so drives both saw become one entry. Importing the same file
+again, or a newer export that overlaps it, changes nothing that is already
+there. The summary shows the period, the number of drives and kilometres,
+the charges with kWh split into AC and DC, and how many drives were merged
+with jolt recordings.
+
+The file contains the VIN and your VW user id. jolt prints the VIN only
+shortened and stores neither.
+
 ## Privacy
 
 - The VW ID and password are only in `.env`. jolt never logs them and never
@@ -113,5 +173,5 @@ The API behind it, for your own scripts:
 - jolt talks only to `identity.vwgroup.io` and
   `eu-data-act.drivesomethinggreater.com`, and refuses redirects to any other
   host during the login.
-- To stop, remove the two variables and restart. Stored reports stay until
-  you delete the vehicle.
+- To stop, remove the two variables and restart. Stored reports, drives and
+  charges stay until you delete the vehicle.

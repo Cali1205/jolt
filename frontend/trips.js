@@ -115,6 +115,7 @@ window.joltTrips = (function () {
     const plans = document.getElementById("plans-list");
     if (!holder && !plans) return;
     if (holder) holder.innerHTML = '<p class="leer">lädt …</p>';
+    loadLogbook();
     try {
       const trips = await K.api("/api/trips");
       for (const trip of trips) {
@@ -691,9 +692,151 @@ window.joltTrips = (function () {
         + "öffnen, dann geht es automatisch.";
   }
 
+  /* ---------- Logbook: drives and charges from VW data and jolt ---------- */
+
+  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", jolt: "jolt" };
+
+  function sourceBrand(sources) {
+    const names = [...new Set((sources || []).map((s) => SOURCE_NAMES[s] || s))];
+    return `<span class="marke${names.includes("jolt") ? " auf" : ""}">${names.join(" + ")}</span>`;
+  }
+
+  /* "Mo., 16.10.2026 · 15:44–15:55"; a charge over midnight gets the end
+   * day as well, otherwise 22:00–03:09 reads like a five-hour gap backwards. */
+  function period(item) {
+    const a = K.timestamp(item.started_at), b = K.timestamp(item.ended_at);
+    if (!a || !b) return "–";
+    const day = (d) => d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit",
+                                                        month: "2-digit", year: "numeric" });
+    const time = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const end = day(a) === day(b) ? time(b)
+      : b.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + time(b);
+    return `${day(a)} · ${time(a)}–${end}`;
+  }
+
+  function minutes(item) {
+    return (K.timestamp(item.ended_at) - K.timestamp(item.started_at)) / 60000;
+  }
+
+  const has = (value) => typeof value === "number" && Number.isFinite(value);
+
+  function socChip(item) {
+    return has(item.soc_start) && has(item.soc_end)
+      ? chip(`${num(item.soc_start, 0)}→${num(item.soc_end, 0)} %`) : "";
+  }
+
+  function logbookDrive(d) {
+    const chips = [chip(K.duration(minutes(d))), socChip(d),
+      has(d.energy_used_kwh) ? chip(num(d.energy_used_kwh, 1) + " kWh") : "",
+      has(d.odo_end) ? chip("km " + num(d.odo_end, 0)) : ""].join("");
+    // A map only for what jolt recorded: the VW data has no position.
+    const open = d.trip_id
+      ? `<div class="fahrt-tat"><button class="klein" data-trip="${d.trip_id}"
+           data-session="${d.live_session_id}">Aufzeichnung</button></div>` : "";
+    return `<div class="fahrt">
+      <div class="fahrt-kopf">
+        <div class="fahrt-text">
+          <div class="titel">${period(d)}</div>
+          <div class="unter">${sourceBrand(d.sources)}</div>
+        </div>
+        <div class="fahrt-zahlen">
+          <div class="stark">${num(d.distance_km, 0)}<small> km</small></div>
+          <div class="unter">${has(d.kwh_per_100km) ? num(d.kwh_per_100km, 1) + " kWh/100" : ""}</div>
+        </div>
+      </div>
+      <div class="chips" style="margin-top:8px">${chips}</div>${open}
+    </div>`;
+  }
+
+  function logbookCharge(c) {
+    const chips = [chip(K.duration(minutes(c))), socChip(c),
+      has(c.avg_power_kw) ? chip("Ø " + num(c.avg_power_kw, 1) + " kW") : "",
+      has(c.odometer_km) ? chip("km " + num(c.odometer_km, 0)) : ""].join("");
+    const kind = c.charge_type ? `<span class="marke${c.charge_type === "DC" ? " warn" : ""}">${c.charge_type}</span>` : "";
+    return `<div class="fahrt">
+      <div class="fahrt-kopf">
+        <div class="fahrt-text">
+          <div class="titel">${period(c)}</div>
+          <div class="unter">${kind} ${sourceBrand(c.sources)}</div>
+        </div>
+        <div class="fahrt-zahlen">
+          <div class="stark">${num(c.energy_kwh, 1)}<small> kWh</small></div>
+          <div class="unter">max ${num(c.max_power_kw, 0)} kW</div>
+        </div>
+      </div>
+      <div class="chips" style="margin-top:8px">${chips}</div>
+    </div>`;
+  }
+
+  const LOGBOOK = {
+    drives: { row: logbookDrive, summary(t) {
+      const avg = t.distance_km_with_energy > 0
+        ? chip(num(t.energy_used_kwh / t.distance_km_with_energy * 100, 1) + " kWh/100") : "";
+      return chip(String(t.count)) + chip(num(t.distance_km, 0) + " km") + avg;
+    } },
+    charges: { row: logbookCharge, summary(t) {
+      const kinds = ["AC", "DC"].filter((k) => t.by_type[k])
+        .map((k) => chip(`${k} ${t.by_type[k].count}`)).join("");
+      return chip(String(t.count)) + chip(num(t.energy_kwh, 0) + " kWh") + kinds;
+    } },
+  };
+
+  function logbookVehicle() {
+    const vehicles = K.state.vehicles || [];
+    return chosenVehicleId() || (vehicles.length === 1 ? vehicles[0].id : null);
+  }
+
+  async function loadLogbookPart(kind, before) {
+    const vehicleId = logbookVehicle();
+    const list = document.getElementById("logbook-" + kind);
+    if (!vehicleId || !list) return 0;
+    const query = before ? "&before=" + encodeURIComponent(before) : "";
+    const page = await K.api(`/api/vehicles/${vehicleId}/${kind}?limit=30${query}`);
+    const more = page.next_before
+      ? `<button class="klein" data-more="${kind}" data-before="${page.next_before}">ältere</button>` : "";
+    const html = page.items.map(LOGBOOK[kind].row).join("") + more;
+    // The first page replaces, so two loads that overlap (switching to the
+    // tab while the vehicle choice changes) do not list everything twice.
+    if (!before) {
+      list.innerHTML = html;
+    } else {
+      const old = list.querySelector("[data-more]");
+      if (old) old.remove();
+      list.insertAdjacentHTML("beforeend", html);
+    }
+    document.getElementById(`logbook-${kind}-sum`).innerHTML = LOGBOOK[kind].summary(page.totals);
+    return page.totals.count;
+  }
+
+  async function loadLogbook() {
+    const block = document.getElementById("logbook");
+    if (!block) return;
+    try {
+      const counts = await Promise.all(Object.keys(LOGBOOK).map((k) => loadLogbookPart(k)));
+      block.hidden = !counts.some((n) => n > 0);
+    } catch (failure) {
+      block.hidden = true;
+      K.report("Fahrtenbuch: " + failure.message, "fehler");
+    }
+  }
+
   function set_up() {
     K.at("rec-start", "click", startRecording);
     K.at("rec-vehicle", "change", usePlatformOfChoice);
+    K.at("rec-vehicle", "change", loadLogbook);
+    K.at("logbook", "click", (event) => {
+      const more = event.target.closest("[data-more]");
+      if (more) {
+        loadLogbookPart(more.dataset.more, more.dataset.before)
+          .catch((failure) => K.report("Fahrtenbuch: " + failure.message, "fehler"));
+        return;
+      }
+      const open = event.target.closest("[data-trip]");
+      if (open) {
+        sessions.set(Number(open.dataset.trip), Number(open.dataset.session));
+        openDetail(open.dataset.trip);
+      }
+    });
     const autoSwitch = document.getElementById("rec-auto");
     if (autoSwitch) {
       autoSwitch.checked = autoEnabled();

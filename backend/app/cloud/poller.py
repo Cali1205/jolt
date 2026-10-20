@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from .. import models
 from ..timestamp import utc_iso
-from . import Config, active
+from . import Config, active, logbook
 from .snapshot import Snapshot
 from .vw_portal import PortalError, mask
 
@@ -127,6 +127,7 @@ class Poll:
         self.client = None
         self.vin: str | None = None
         self.last_new: datetime | None = None
+        self.logbook_error: str | None = None
         self.status = STATUS[config.name] = Status(config.name)
 
     def tick(self) -> int:
@@ -143,9 +144,25 @@ class Poll:
                          for snap in self.client.updates(self.vin))
             if stored:
                 self.last_new = datetime.utcnow()
+            self.update_logbook(db)
             return stored
         finally:
             db.close()
+
+    def update_logbook(self, db) -> None:
+        """Drives and charges from the stored reports. Every round, not only
+        when something new came: a drive is stored only half an hour after
+        its end, and a parked car may send nothing new for hours. A failure
+        here must not count as a failed fetch."""
+        try:
+            logbook.store_from_snapshots(db, self.status.vehicle_id)
+            error = None
+        except Exception as failure:      # noqa: BLE001
+            db.rollback()
+            error = _describe(failure)
+        if error and error != self.logbook_error:
+            log.warning("%s: logbook: %s", self.config.name, error)
+        self.logbook_error = error
 
 
 def _describe(failure: Exception) -> str:
