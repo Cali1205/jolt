@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 
 from . import cloud, deps, push, routing, version
-from .cloud import poller as cloud_poller
+from .cloud import logbook, poller as cloud_poller
 from .live import cleanup
 from .database import SessionLocal, migrate, seed_templates
 from .routers import ALL_ROUTER
@@ -76,6 +76,9 @@ def _at_start():
     # loss: the route and energy profile are only created from the measurement
     # points when it ends.
     _tasks.add(asyncio.create_task(cleanup.loop(SessionLocal)))
+    # Recordings into the logbook that ended before it existed. In a thread:
+    # a long history must not hold up the start.
+    _tasks.add(asyncio.create_task(asyncio.to_thread(logbook.backfill, SessionLocal)))
     # Only with credentials in the environment: otherwise no request leaves
     # the server (docs/vw-portal.md).
     if cloud.configured():

@@ -333,6 +333,23 @@ def store_all_sessions(db, vehicle_id: int | None = None) -> dict:
     return total
 
 
+def backfill(db_factory) -> None:
+    """At startup: recordings from before the logbook existed, or whose end
+    did not reach it. Changes nothing for those already there."""
+    db = db_factory()
+    try:
+        counts = store_all_sessions(db)
+        db.commit()
+        if counts["new"] or counts["updated"]:
+            log.info("Logbook: %s recordings added, %s updated",
+                     counts["new"], counts["updated"])
+    except Exception as failure:      # noqa: BLE001
+        db.rollback()
+        log.warning("Logbook: recordings not added: %s", failure)
+    finally:
+        db.close()
+
+
 def after_session_end(db, session: models.LiveSession) -> None:
     """Hook for the end of a live session; never lets ending fail."""
     try:
