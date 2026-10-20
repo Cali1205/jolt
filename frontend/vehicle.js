@@ -129,20 +129,17 @@ window.joltVehicle = (function () {
       + ` · ${(vehicle.capacity_history || []).length} Messungen gespeichert</div>` + curve;
   }
 
-  /* What the VW portal last heard from the car (backend app/cloud/). Only
-   * there when the server fetches it; a 404 or any failure hides the card. */
-  const CHARGE_STATES = [
-    [/NOT_READY_FOR_CHARGING$/, "nicht ladebereit"],
-    [/READY_FOR_CHARGING$/, "ladebereit"],
-    [/CONSERVATION_CHARGING$/, "Erhaltungsladung"],
-    [/(^|_)CHARGING(_HV)?$/i, "lädt"],
-    [/CHARGE_PURPOSE_REACHED/, "Ladeziel erreicht"],
-    [/ERROR$/, "Fehler"],
-  ];
+  /* What a manufacturer cloud last heard from the car (backend app/cloud/).
+   * Only there when the server fetches it; a 404 or any failure hides the
+   * card. The values are catalog signals (backend app/signals.py). */
+  const CHARGE_STATES = {
+    charging: "lädt", ready: "ladebereit", not_ready: "nicht ladebereit",
+    purpose_reached: "Ladeziel erreicht", conservation: "Erhaltungsladung",
+    error: "Fehler",
+  };
 
-  function chargeState(raw) {
-    const hit = CHARGE_STATES.find(([pattern]) => pattern.test(raw));
-    return hit ? hit[1] : raw;
+  function chargeState(state) {
+    return CHARGE_STATES[state] || state;
   }
 
   function ago(ms) {
@@ -176,7 +173,7 @@ window.joltVehicle = (function () {
     const as_of = at
       ? `Stand: ${at.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
           hour: "2-digit", minute: "2-digit" })}, ${ago(at.getTime())}` : "";
-    return `<h2>VW-Portal</h2>`
+    return `<h2>${K.esc(snap.source_label || snap.source || "Hersteller-Cloud")}</h2>`
       + (tiles.length ? `<div class="werte gross">${tiles.join("")}</div>` : "")
       + (rows.length ? `<dl class="einst-liste" style="margin-top:10px">${rows.join("")}</dl>` : "")
       + `<div class="unter">${as_of}</div>`;
@@ -196,6 +193,47 @@ window.joltVehicle = (function () {
     // The choice may have moved on while the answer was under way.
     if (document.getElementById("vehicle-list").value !== String(vehicle.id)) return;
     box.innerHTML = portalHtml(snap);
+    box.hidden = false;
+  }
+
+  /* Which of the signals jolt needs or uses this car has delivered, and
+   * from where (backend app/signals.py, docs/data-model.md). */
+  function signalsHtml(answer) {
+    const rows = (answer.signals || []).filter((s) => s.tier !== "optional").map((s) => {
+      const missing = !s.seen;
+      const mark = missing ? "–" : "✓";
+      const colour = missing ? (s.tier === "required" ? "var(--schlecht)" : "var(--gedaempft)")
+        : "var(--gut)";
+      const at = s.last_at ? K.timestamp(s.last_at) : null;
+      const where = missing
+        ? (s.tier === "required" ? "fehlt – ohne ihn keine Aufzeichnung" : "nicht gesehen")
+        : s.sources.map((x) => x.label).join(", ") + (at ? ` · ${ago(at.getTime())}` : "");
+      return `<dt><span style="color:${colour};display:inline-block;width:1.2em">${mark}</span>`
+        + `${K.esc(s.label)}${s.tier === "required" ? " *" : ""}</dt>`
+        + `<dd${missing && s.tier === "required" ? ' style="color:var(--schlecht)"' : ""}>`
+        + `${K.esc(where)}</dd>`;
+    });
+    const optional = (answer.signals || []).filter((s) => s.tier === "optional");
+    const extra = optional.filter((s) => s.seen).length;
+    return `<h2>Daten</h2>`
+      + `<dl class="einst-liste">${rows.join("")}</dl>`
+      + `<div class="unter">* nötig, die anderen machen Planung und Fahrtenbuch genauer`
+      + ` · ${extra} von ${optional.length} weiteren Werten geliefert</div>`;
+  }
+
+  async function showSignals(vehicle) {
+    const box = document.getElementById("vehicle-signals");
+    if (!box) return;
+    box.hidden = true;
+    if (!vehicle || !vehicle.id) return;
+    let answer;
+    try {
+      answer = await K.api(`/api/vehicles/${vehicle.id}/signals`, { timeout: 8000 });
+    } catch (failure) {
+      return;
+    }
+    if (document.getElementById("vehicle-list").value !== String(vehicle.id)) return;
+    box.innerHTML = signalsHtml(answer);
     box.hidden = false;
   }
 
@@ -440,6 +478,7 @@ window.joltVehicle = (function () {
     if (choice === "neu") {
       fillForm(Object.assign({}, templates[0] || {}, { name: "" }));
       showPortal(null);
+      showSignals(null);
       showCurveSource(null);
       return;
     }
@@ -452,6 +491,7 @@ window.joltVehicle = (function () {
     }
     showLogger(vehicle);
     showPortal(vehicle);
+    showSignals(vehicle);
     showCurveSource(vehicle);
   }
 

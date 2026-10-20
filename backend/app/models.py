@@ -239,6 +239,25 @@ class VehicleSnapshot(Base):
                                        name="uq_vehicle_snapshot"),)
 
 
+class CloudCredential(Base):
+    """Tokens of a cloud source whose login rotates them (cloud/credentials.py).
+
+    A refresh token that is used once is replaced by a new one, so it cannot
+    live in the environment; the app container's file system is read-only.
+    Never logged, never returned by any API.
+    """
+    __tablename__ = "cloud_credentials"
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(20), nullable=False)
+    account = Column(String(200), nullable=False)
+    data = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("source", "account",
+                                       name="uq_cloud_credential"),)
+
+
 class VehicleDrive(Base):
     """One drive of the logbook, from whichever sources saw it (cloud/logbook.py).
 
@@ -269,7 +288,11 @@ class VehicleDrive(Base):
 
 
 class VehicleCharge(Base):
-    """One charge, from the VW history export or the portal's reports."""
+    """One charge, from the VW history export or a cloud's snapshots.
+
+    `max_power_kw` is NULL for a charge from a source without power reports
+    (Stellantis); its energy comes from the rise of the charge level.
+    """
     __tablename__ = "vehicle_charges"
 
     id = Column(Integer, primary_key=True)
@@ -280,7 +303,7 @@ class VehicleCharge(Base):
     soc_start = Column(Float)
     soc_end = Column(Float)
     energy_kwh = Column(Float, nullable=False)
-    max_power_kw = Column(Float, nullable=False)
+    max_power_kw = Column(Float)
     avg_power_kw = Column(Float)
     charge_type = Column(String(2))
     odometer_km = Column(Float)

@@ -82,19 +82,21 @@ Rules the rest of the app relies on:
 - Exactly one row has `required: true`, and it is named `soc_raw`. It holds
   the platform's raw charge-level value; `soc.bms` turns it into battery
   percent, `soc.hmi` (optional) into the percent the dashboard shows.
-- Use these names where your car has the value, because the app evaluates
-  them:
+- Name every value the car has after its signal in the catalog
+  ([data-model.md](data-model.md#signals)): `odometer_km`, `speed_kmh`,
+  `outside_temp_c`, `batt_temp_c`, `voltage_v`, `current_a`, and so on. The
+  catalog also says which signals jolt needs and which make it more accurate.
+  `soc_raw` is the dongle-side raw value; the converted percent is the
+  catalog's `soc_pct`. A few dongle names predate the catalog and are mapped
+  onto it (`batterie_c`, `battery_kwh`, `energy_content_kwh`, `soh_pct`, see
+  [data-model.md](data-model.md#where-the-signals-come-from)); use the
+  catalog name in a new profile.
+- These dongle-only names are evaluated too:
 
 | Name | Unit | Used for |
 |---|---|---|
 | `soc_raw` | raw | Charge level (required) |
-| `voltage_v`, `current_a` | V, A | Pack power; positive power means discharging |
 | `discharge_kwh`, `charged_kwh` | kWh | Lifetime energy counters: consumption per minute |
-| `odometer_km` | km | Distance instead of GPS |
-| `speed_kmh` | km/h | Speed |
-| `outside_temp_c` | °C | Consumption model |
-| `batterie_c` | °C | Battery temperature in the live view |
-| `battery_kwh` | kWh | Measured capacity and state of health |
 | `aux_load_kw`, `dcdc_current_a` | kW, A | Heating and auxiliary loads (derived) |
 | `ptc_current_a`, `compressor_w` | A, W | Battery heater and A/C compressor in the live view |
 

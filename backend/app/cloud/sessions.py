@@ -96,7 +96,7 @@ class Charge:
     soc_start: float | None
     soc_end: float | None
     energy_kwh: float
-    max_power_kw: float
+    max_power_kw: float | None       # None from a source without power reports
     avg_power_kw: float | None
     charge_type: str | None
     odometer_km: float | None
@@ -148,7 +148,7 @@ def _charging(o: Observation) -> bool:
 
 
 def _blocks_drive(o: Observation) -> bool:
-    return _charging(o) or (o.field == "plug_connected" and o.value is True)
+    return _charging(o) or (o.field == "plugged" and o.value is True)
 
 
 def dedup(track: Track) -> Track:
@@ -190,7 +190,8 @@ def _steps(stream: _Stream, dense: bool) -> list[_Step]:
     return steps
 
 
-def _runs(stream: _Stream, steps: list[_Step]) -> list[list[_Step]]:
+def _runs(stream: _Stream, steps: list[_Step],
+          stop_split: timedelta) -> list[list[_Step]]:
     blockers = [o.t for o in stream.all if _blocks_drive(o)]
     runs: list[list[_Step]] = []
     for step in steps:
@@ -198,7 +199,7 @@ def _runs(stream: _Stream, steps: list[_Step]) -> list[list[_Step]]:
             previous = runs[-1][-1]
             i = bisect_right(blockers, previous.t)
             blocked = i < len(blockers) and blockers[i] < step.t
-            if step.t - previous.t < STOP_SPLIT and not blocked:
+            if step.t - previous.t < stop_split and not blocked:
                 runs[-1].append(step)
                 continue
         runs.append([step])
@@ -250,12 +251,16 @@ def _energy_used(stream: _Stream, start: datetime, first_step: datetime,
     return None
 
 
-def detect_drives(obs, dense: bool = True) -> list[Drive]:
+def detect_drives(obs, dense: bool = True,
+                  stop_split: timedelta | None = None) -> list[Drive]:
     """`dense` for sources that report while the car moves (the history
-    export, the dongle); False for the portal's live reports."""
+    export, the dongle); False for the portal's live reports. `stop_split`
+    replaces `STOP_SPLIT` for a source that is sampled less often than that
+    (Stellantis, asked every quarter hour): two samples a poll apart are
+    one drive."""
     stream = _Stream(obs)
     drives = []
-    for run in _runs(stream, _steps(stream, dense)):
+    for run in _runs(stream, _steps(stream, dense), stop_split or STOP_SPLIT):
         odo_start, odo_end = run[0].before, max(s.value for s in run)
         if odo_end - odo_start < MIN_DRIVE_KM:
             continue
@@ -308,9 +313,21 @@ def _integrate(stream: _Stream, samples: Track,
     return kwh
 
 
-def _charge_runs(stream: _Stream) -> list[list[Observation]]:
-    """Power reports grouped into charges: each group starts with a positive
-    report and runs up to the zero report that ended it, if there was one."""
+def _level(o: Observation, powered: bool) -> float | None:
+    """How much a report says the car charges: its power, or, from a source
+    that reports no power (Stellantis), 1 for the state "charging" and 0 for
+    any other state. None for reports that say nothing about it."""
+    if powered:
+        return o.value if o.field == "charge_power_kw" else None
+    if o.field == "charge_state":
+        return 1.0 if o.value == "charging" else 0.0
+    return None
+
+
+def _charge_runs(stream: _Stream, powered: bool) -> list[list[Observation]]:
+    """Charging reports grouped into charges: each group starts with a
+    positive report and runs up to the zero report that ended it, if there
+    was one."""
     runs: list[list[Observation]] = []
     current: list[Observation] | None = None
     last_positive: Observation | None = None
@@ -322,9 +339,10 @@ def _charge_runs(stream: _Stream) -> list[list[Observation]]:
             if moved:
                 current = last_positive = None
             continue
-        if o.field != "charge_power_kw":
+        level = _level(o, powered)
+        if level is None:
             continue
-        if o.value > 0:
+        if level > 0:
             if current is None:
                 if (last_positive is not None and runs
                         and o.t - last_positive.t < CHARGE_PAUSE):
@@ -340,24 +358,37 @@ def _charge_runs(stream: _Stream) -> list[list[Observation]]:
     return runs
 
 
-def detect_charges(obs, kwh_per_pct: float | None = None) -> list[Charge]:
+def detect_charges(obs, kwh_per_pct: float | None = None,
+                   powered: bool = True) -> list[Charge]:
     """`kwh_per_pct`, the battery's usable capacity over 100, lets a gap in
-    the data count for what the charge level says went in."""
+    the data count for what the charge level says went in.
+
+    `powered` False is for a source that reports no charge power
+    (Stellantis): it is read from its charge state instead. Its reports are a
+    quarter of an hour apart, so the charge ends at the first report that no
+    longer says "charging", the one that carries the final charge level; the
+    energy is the charge level's rise, and there is no power track. VW's
+    charge state is not read that way: it says "charging" at zero power."""
     stream = _Stream(obs)
     charges = []
-    for run in _charge_runs(stream):
-        positive = [o for o in run if o.value > 0]
-        samples = [(o.t, float(o.value)) for o in run]
-        if run[-1].value == 0 and run[-1].t - positive[-1].t > POWER_GAP_CAP:
+    for run in _charge_runs(stream, powered):
+        positive = [o for o in run if _level(o, powered) > 0]
+        samples = [(o.t, float(_level(o, powered))) for o in run]
+        if (powered and samples[-1][1] == 0
+                and run[-1].t - positive[-1].t > POWER_GAP_CAP):
             samples.pop()
         start, end = samples[0][0], samples[-1][0]
-        energy = _integrate(stream, samples, kwh_per_pct)
         soc_before = (stream.last_at_or_before("soc_pct", start)
                       or next(iter(stream.between("soc_pct", start, end)), None))
         soc_after = stream.last_at_or_before("soc_pct", end + BURST)
         soc_start = soc_before.value if soc_before else None
         soc_end = soc_after.value if soc_after else None
         rise = (soc_end - soc_start) if soc_start is not None and soc_end is not None else 0
+        if powered:
+            energy = _integrate(stream, samples, kwh_per_pct)
+        else:
+            energy = max(0.0, rise) * (kwh_per_pct or 0.0)
+            samples = []
         if energy < MIN_CHARGE_KWH and rise < MIN_CHARGE_SOC_RISE:
             continue
         kinds = Counter(o.value for o in stream.between("charge_type", start, end))
@@ -367,7 +398,7 @@ def detect_charges(obs, kwh_per_pct: float | None = None) -> list[Charge]:
             started_at=start, ended_at=end,
             soc_start=soc_start, soc_end=soc_end,
             energy_kwh=round(energy, 2),
-            max_power_kw=max(p for _, p in samples),
+            max_power_kw=max((p for _, p in samples), default=None),
             avg_power_kw=round(energy / hours, 2) if hours > 0 else None,
             charge_type=kinds.most_common(1)[0][0] if kinds else None,
             odometer_km=odometer.value if odometer else None,

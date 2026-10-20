@@ -10,13 +10,12 @@ changes, not one per round.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from .. import models
+from .. import models, signals
 from ..timestamp import utc_iso
-from . import Config, active, logbook
+from . import Config, SourceError, active, logbook, mask
 from .snapshot import Snapshot
-from .vw_portal import PortalError, mask
 
 log = logging.getLogger("uvicorn.error")
 
@@ -94,27 +93,27 @@ def record(status: Status, error: str | None, now: datetime) -> str | None:
     return f"{status.name}: {error}" if changed else None
 
 
-def _one_vin(vins: list[str]) -> str:
+def _one_vin(vins: list[str], env: str) -> str:
     if len(vins) == 1:
         return vins[0]
     if not vins:
-        raise SetupError("no vehicle linked in the portal")
+        raise SetupError("no vehicle linked to the account")
     raise SetupError(f"the account has {len(vins)} vehicles "
-                     f"({', '.join(mask(v) for v in vins)}) - set VW_PORTAL_VIN")
+                     f"({', '.join(mask(v) for v in vins)}) - set {env}_VIN")
 
 
-def _vehicle_id(db, configured: str | None) -> int:
+def _vehicle_id(db, configured: str | None, env: str) -> int:
     if configured is None:
         ids = [row[0] for row in db.query(models.Vehicle.id).all()]
         if len(ids) != 1:
-            raise SetupError(f"jolt has {len(ids)} vehicles - set VW_PORTAL_VEHICLE")
+            raise SetupError(f"jolt has {len(ids)} vehicles - set {env}_VEHICLE")
         return ids[0]
     try:
         vehicle_id = int(configured)
     except ValueError:
-        raise SetupError("VW_PORTAL_VEHICLE must be a jolt vehicle id") from None
+        raise SetupError(f"{env}_VEHICLE must be a jolt vehicle id") from None
     if db.get(models.Vehicle, vehicle_id) is None:
-        raise SetupError(f"VW_PORTAL_VEHICLE={vehicle_id}: no such vehicle in jolt")
+        raise SetupError(f"{env}_VEHICLE={vehicle_id}: no such vehicle in jolt")
     return vehicle_id
 
 
@@ -135,11 +134,13 @@ class Poll:
         db = self.db_factory()
         try:
             if self.status.vehicle_id is None:
-                self.status.vehicle_id = _vehicle_id(db, self.config.vehicle)
+                self.status.vehicle_id = _vehicle_id(db, self.config.vehicle,
+                                                     self.config.env)
             if self.client is None:
                 self.client = self.config.connect()
             if self.vin is None:
-                self.vin = self.config.vin or _one_vin(self.client.vehicles())
+                self.vin = self.config.vin or _one_vin(self.client.vehicles(),
+                                                       self.config.env)
             stored = sum(store(db, self.status.vehicle_id, self.config.name, snap)
                          for snap in self.client.updates(self.vin))
             if stored:
@@ -155,7 +156,11 @@ class Poll:
         its end, and a parked car may send nothing new for hours. A failure
         here must not count as a failed fetch."""
         try:
-            logbook.store_from_snapshots(db, self.status.vehicle_id)
+            logbook.store_from_snapshots(
+                db, self.status.vehicle_id, self.config.name,
+                powered="charge_power_kw" in self.config.provides,
+                stop_split=(timedelta(minutes=2 * self.config.interval_min)
+                            if self.config.sampled else None))
             error = None
         except Exception as failure:      # noqa: BLE001
             db.rollback()
@@ -166,7 +171,7 @@ class Poll:
 
 
 def _describe(failure: Exception) -> str:
-    if isinstance(failure, (PortalError, SetupError)):
+    if isinstance(failure, (SourceError, SetupError)):
         return str(failure)
     return f"{type(failure).__name__}: {failure}"[:200]
 
@@ -199,7 +204,9 @@ def status_list() -> list[dict]:
     rows = []
     for config in active():
         status = STATUS.get(config.name) or Status(config.name)
-        rows.append({"name": status.name, "vehicle_id": status.vehicle_id,
+        rows.append({"name": status.name,
+                     "label": signals.SOURCE_LABELS.get(status.name, status.name),
+                     "vehicle_id": status.vehicle_id,
                      "last_ok": utc_iso(status.last_ok),
                      "last_error": status.last_error,
                      "failures": status.failures})

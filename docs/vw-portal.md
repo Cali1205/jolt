@@ -19,7 +19,9 @@ the way that still works. The login code is ported from
 - **It can break without notice.** VW changes the login now and then: it
   happened in May and October 2026. When it breaks, the settings show the
   error and jolt keeps working without the portal data.
-- **One car per jolt installation.** The data goes to one jolt vehicle.
+- **One car per source.** The data goes to one jolt vehicle. A second car of
+  another brand can come from its own source at the same time, for example
+  an Opel through [stellantis.md](stellantis.md).
 
 ## One-time setup in the browser
 
@@ -78,6 +80,10 @@ success, `vw_portal: first snapshot fetched`. After that it logs only when
 something changes: an error, a different error, or working again.
 
 ## What jolt does with the data
+
+The portal's fields are translated into jolt's signal catalog
+([data-model.md](data-model.md)); the card "Daten" in the tab "Fahrzeug"
+shows which signals arrive.
 
 - **Tab "Fahrzeug":** a card "VW-Portal" with charge level, range, odometer,
   battery energy, battery temperature, charge state and the time of the

@@ -1,4 +1,9 @@
-"""What the manufacturer cloud last heard from the car, as jolt's own values.
+"""What a manufacturer cloud last heard from the car, as catalog signals.
+
+`Snapshot` is what every cloud source returns (cloud/__init__.py). The rest
+of this module is the VW portal's boundary: it turns the portal's data points
+into catalog names (app/signals.py), so nothing behind it knows VW's
+spelling.
 
 The VW EU Data Act portal delivers a flat list of data points. Each point has
 a UUID `key`, a field `name`, a string `value` and its own timestamp. The same
@@ -119,15 +124,40 @@ def _tenth_kwh(text: str) -> float:
     return round(float(_number(text)) * 0.1, 2)
 
 
-def _text(text: str) -> str:
-    return text.strip()
-
-
 def _flag(text: str) -> bool:
     lowered = text.strip().lower()
     if lowered not in ("true", "false"):
         raise ValueError(text)
     return lowered == "true"
+
+
+# VW spells the same state in two ways (CHARGE_PURPOSE_REACHED_... in older
+# reports, chargePurposeReached... in newer ones and in the history export)
+# and writes "conversation" where it means "conservation". Keys are lower case
+# without underscores.
+CHARGE_STATES = {
+    "charging": "charging",
+    "readyforcharging": "ready",
+    "notreadyforcharging": "not_ready",
+    "chargepurposereachedandnotconversationcharging": "purpose_reached",
+    "chargepurposereachedandnotconservationcharging": "purpose_reached",
+    "chargepurposereachedandconversation": "conservation",
+    "chargepurposereachedandconservation": "conservation",
+    "error": "error",
+}
+
+
+def charge_state(text) -> str:
+    """VW's charge state as the catalog's `charge_state`."""
+    key = str(text).strip().lower().replace("_", "")
+    key = key.removeprefix("chargestate")
+    if key not in CHARGE_STATES:
+        raise ValueError(text)
+    return CHARGE_STATES[key]
+
+
+def climate_state(text) -> str:
+    return str(text).strip().lower().removeprefix("climatisation_state_")
 
 
 # evcc's identifiers (types.go)
@@ -154,11 +184,14 @@ FIELDS: list[tuple[str, tuple[str, ...], Callable[[str], Value]]] = [
     ("batt_temp_max_c", ("max_temperature",), _number),
     ("charge_power_kw", ("battery_state_report.charge_power",), _number),
     ("charge_state", ("charging_state_report.current_charge_state",
-                      "charging_state"), _text),
+                      "charging_state"), charge_state),
     ("target_soc_pct", ("settings.target_soc",), _number),
     ("locked", ("locked",), _flag),
-    ("climatisation_state", ("climatisation_state",), _text),
+    ("climate_state", ("climatisation_state",), climate_state),
 ]
+
+PROVIDES = frozenset(name for name, _, _ in FIELDS)
+ODOMETER_NAMES = next(idents for name, idents, _ in FIELDS if name == "odometer_km")
 
 
 def _captured_at(points: list[Point]) -> datetime | None:
@@ -175,6 +208,19 @@ def raw_of(points: list[Point]) -> dict[str, list]:
             for p in points}
 
 
+def _values(points: list[Point]) -> dict[str, Value]:
+    values: dict[str, Value] = {}
+    for name, idents, convert in FIELDS:
+        point = lookup(points, idents)
+        if point is None:
+            continue
+        try:
+            values[name] = convert(point.value)
+        except ValueError:
+            continue
+    return values
+
+
 def from_points(points: list[Point],
                 delivered: list[Point] | None = None) -> Snapshot | None:
     """The values jolt knows, or None when there is nothing to keep.
@@ -186,15 +232,7 @@ def from_points(points: list[Point],
     the merged state instead would give a report without that field the
     time of an older one, and the older row would swallow it.
     """
-    values: dict[str, Value] = {}
-    for name, idents, convert in FIELDS:
-        point = lookup(points, idents)
-        if point is None:
-            continue
-        try:
-            values[name] = convert(point.value)
-        except ValueError:
-            continue
+    values = _values(points)
     if not values:
         return None
     own = delivered if delivered is not None else points
@@ -202,3 +240,32 @@ def from_points(points: list[Point],
     if captured_at is None:
         return None
     return Snapshot(captured_at=captured_at, values=values, raw=raw_of(own))
+
+
+def report_values(values: dict | None, raw: dict | None) -> dict:
+    """What one stored portal report says, as catalog signals.
+
+    `values` is the merged state: a field the report left out keeps its
+    value from an earlier report, which is stale by the time of this one. So
+    when the report's own points (`raw`) are there, only they count. The
+    odometer is the largest reading in the report: a switch-off report can
+    carry the same field twice, the reading from mid-drive and the final one.
+    """
+    if not raw:
+        return dict(values or {})
+    points = [Point(key=str(ident), name=str(entry[0] or ""),
+                    value=str(entry[1]), timestamp=None)
+              for ident, entry in raw.items()
+              if isinstance(entry, list) and len(entry) >= 2
+              and entry[1] not in (None, "")]
+    delivered = _values(points)
+    readings = []
+    for p in points:
+        if p.name in ODOMETER_NAMES or p.key in ODOMETER_NAMES:
+            try:
+                readings.append(_number(p.value))
+            except ValueError:
+                pass
+    if readings:
+        delivered["odometer_km"] = max(readings)
+    return delivered

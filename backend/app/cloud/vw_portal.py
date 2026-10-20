@@ -34,7 +34,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit
 import requests
 
 from ..version import VERSION
-from . import snapshot
+from . import SourceError, mask, snapshot
 
 PORTAL = "https://eu-data-act.drivesomethinggreater.com"
 PORTAL_HOST = "eu-data-act.drivesomethinggreater.com"
@@ -69,18 +69,14 @@ BRANDS = {
 }
 
 
-class PortalError(Exception):
-    """Something the owner can act on; the text is safe to log and show."""
+class PortalError(SourceError):
+    pass
 
 
 class StatusError(PortalError):
     def __init__(self, step: str, status: int):
         super().__init__(f"{step}: HTTP {status}")
         self.status = status
-
-
-def mask(vin: str) -> str:
-    return "…" + vin[-4:]
 
 
 # ---------------------------------------------------------------------------

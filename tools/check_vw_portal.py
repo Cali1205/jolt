@@ -50,9 +50,8 @@ def part_snapshot():
         "soc_pct": 57, "range_km": 192, "odometer_km": 62067,
         "energy_kwh": 36.65, "capacity_kwh": 72.6,
         "batt_temp_min_c": 15.0, "batt_temp_max_c": 15.5,
-        "charge_power_kw": 0, "charge_state": "CHARGE_STATE_NOT_READY_FOR_CHARGING",
-        "target_soc_pct": 80, "locked": True,
-        "climatisation_state": "CLIMATISATION_STATE_OFF",
+        "charge_power_kw": 0, "charge_state": "not_ready",
+        "target_soc_pct": 80, "locked": True, "climate_state": "off",
     }
     verify(snap is not None, "aus dem Datensatz entsteht ein Schnappschuss")
     if snap is None:
@@ -299,7 +298,7 @@ def part_login():
            == ["battery_level_HV.value", "61.0"],
            "die Rohpunkte sind die der jeweiligen Meldung, nicht der ganze "
            "fortgeschriebene Stand", str(found and found[0].raw))
-    verify(found[1].values.get("climatisation_state") == "CLIMATISATION_STATE_OFF",
+    verify(found[1].values.get("climate_state") == "off",
            "Felder, die eine Meldung auslässt, behalten den letzten Wert",
            str(found[1].values))
     snap = portal.latest(VIN)
@@ -498,8 +497,9 @@ def part_poller():
                          vw_portal.PortalError("login rejected: x"),
                          RuntimeError("portal down"),
                          snap, snap])
-    config = cloud.Config(name="vw_portal", vin=None, vehicle=str(vehicle_id),
-                          interval_min=15, connect=lambda: source)
+    config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None,
+                          vehicle=str(vehicle_id), interval_min=15,
+                          provides=snapshot.PROVIDES, connect=lambda: source)
     poll = poller.Poll(config, SessionLocal)
 
     lines = []
@@ -560,7 +560,8 @@ def part_poller():
             ("x", None, [VIN], "must be a jolt vehicle id"),
             (str(vehicle_id), None, [VIN, "WVGZZZSYNTHETIC02"], "…IC01, …IC02")):
         bad = poller.Poll(cloud.Config(
-            name="vw_portal", vin=vin, vehicle=vehicle, interval_min=15,
+            name="vw_portal", env="VW_PORTAL", vin=vin, vehicle=vehicle,
+            interval_min=15, provides=snapshot.PROVIDES,
             connect=lambda: type("S", (), {"vehicles": lambda self: vins})()),
             SessionLocal)
         try:

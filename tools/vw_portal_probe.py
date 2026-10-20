@@ -22,7 +22,8 @@ for _candidate in (os.path.join(HERE, "..", "backend"), os.path.join(HERE, "..")
         sys.path.insert(0, _candidate)
         break
 
-from app.cloud.vw_portal import PortalError, VwPortal, mask  # noqa: E402
+from app.cloud import mask  # noqa: E402
+from app.cloud.vw_portal import PortalError, VwPortal  # noqa: E402
 
 
 def main() -> int:

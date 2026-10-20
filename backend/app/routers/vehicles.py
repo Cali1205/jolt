@@ -1,15 +1,17 @@
 import math
 import secrets
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from .. import deps, models, security
+from .. import deps, models, security, signals
 from ..timestamp import utc_iso
 from ..database import get_db
 from ..charging import curve_source, curves
+from ..cloud import observations
 
 router = APIRouter(prefix="/api/vehicles", tags=["vehicles"],
                    dependencies=[Depends(deps.current_session)])
@@ -233,6 +235,66 @@ def charge_curve(vehicle_id: int, db: Session = Depends(get_db)):
     return {**info, "curve": [list(p) for p in curve],
             "measured": [list(p) for p in info["measured"]],
             "profile": [list(p) for p in info["profile"]]}
+
+
+# How far back /signals looks: recent enough to say what the car delivers
+# now, deep enough that a value read every few minutes is among it.
+SIGNAL_SAMPLE = {"live_points": 2000, "snapshots": 500, "logbook": 500}
+
+
+@router.get("/{vehicle_id}/signals")
+def vehicle_signals(vehicle_id: int, db: Session = Depends(get_db)):
+    """Per catalog signal: seen for this vehicle or not, when last, and from
+    which sources (jolt's live points, cloud snapshots, the logbook)."""
+    if db.get(models.Vehicle, vehicle_id) is None:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+    last: dict[str, dict[str, datetime]] = {}
+
+    def note(name: str, source: str, at: datetime) -> None:
+        if name in signals.BY_NAME:
+            by_source = last.setdefault(name, {})
+            by_source[source] = max(at, by_source.get(source, at))
+
+    points = (db.query(models.LivePoint)
+              .join(models.LiveSession, models.LivePoint.session_id == models.LiveSession.id)
+              .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
+              .filter(models.Trip.vehicle_id == vehicle_id)
+              .order_by(models.LivePoint.timestamp.desc())
+              .limit(SIGNAL_SAMPLE["live_points"]))
+    for point in points:
+        for name in observations.live_values(point):
+            note(name, "jolt", point.timestamp)
+    snapshots = (db.query(models.VehicleSnapshot)
+                 .filter_by(vehicle_id=vehicle_id)
+                 .order_by(models.VehicleSnapshot.captured_at.desc())
+                 .limit(SIGNAL_SAMPLE["snapshots"]))
+    for row in snapshots:
+        for name in observations.snapshot_values(row):
+            note(name, row.source, row.captured_at)
+    for model, columns in ((models.VehicleDrive, (("odometer_km", "odo_start"),
+                                                  ("soc_pct", "soc_start"))),
+                           (models.VehicleCharge, (("soc_pct", "soc_start"),
+                                                   ("charge_power_kw", "max_power_kw"),
+                                                   ("charge_type", "charge_type")))):
+        rows = (db.query(model).filter_by(vehicle_id=vehicle_id)
+                .order_by(model.ended_at.desc()).limit(SIGNAL_SAMPLE["logbook"]))
+        for row in rows:
+            for name, column in columns:
+                if getattr(row, column) is not None:
+                    for source in row.sources:
+                        note(name, source, row.ended_at)
+    out = []
+    for signal in signals.SIGNALS:
+        by_source = last.get(signal.name, {})
+        out.append({"name": signal.name, "label": signal.label, "unit": signal.unit,
+                    "tier": signal.tier, "meaning": signal.meaning,
+                    "seen": bool(by_source),
+                    "last_at": utc_iso(max(by_source.values())) if by_source else None,
+                    "sources": [{"id": s, "label": signals.SOURCE_LABELS.get(s, s)}
+                                for s in sorted(by_source)]})
+    return {"signals": out,
+            "missing_required": [s["name"] for s in out
+                                 if s["tier"] == "required" and not s["seen"]]}
 
 
 @router.post("/{vehicle_id}/logger-token")
