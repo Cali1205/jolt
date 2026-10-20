@@ -622,7 +622,57 @@ def part_portal():
            str(lines))
 
 
-PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal]
+def part_import():
+    verify.section("Import des Verlaufs")
+    import json
+    import subprocess
+    import tempfile
+    import zipfile
+    from app.database import SessionLocal
+    a, last = drive(T(5, 7), 1000, 10, 80, 77)
+    b, _ = drive(last + 15 * MIN, 1010, 10, 77, 74)
+    c, _ = charging(T(6, 22), 60, 11.0, 30)
+    document = {"vin": "WVWZZZSYNTHETIC01", "userId": "synthetic",
+                "Data": a + b + c}
+    folder = tempfile.mkdtemp(prefix="jolt-vw-export-")
+    path = os.path.join(folder, "export.zip")
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("WVWZZZSYNTHETIC01_export.json",
+                         json.dumps(document, indent=1))
+    db = SessionLocal()
+    vid = new_vehicle(db)
+    db.commit()
+    db.close()
+
+    def run(*extra):
+        done = subprocess.run(
+            [sys.executable, os.path.join(TOOLS, "import_vw_history.py"), path,
+             "--vehicle", str(vid), *extra],
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONUTF8": "1"})
+        return done.returncode, done.stdout + done.stderr
+
+    def count():
+        db = SessionLocal()
+        try:
+            return len(drives_of(db, vid))
+        finally:
+            db.close()
+
+    code, dry = run("--dry-run")
+    verify(code == 0 and "Fahrten:       2, 20 km" in dry and count() == 0,
+           "Probelauf aus der ZIP-Datei: zwei Fahrten erkannt, nichts gespeichert", dry)
+    code, first = run()
+    code2, second = run()
+    verify(code == 0 and "(2 neu," in first and code2 == 0
+           and "(0 neu, 0 aktualisiert, 2 unverändert)" in second and count() == 2,
+           "zweimal importiert: beim zweiten Mal unverändert", second)
+    verify("SYNTHETIC01" not in first and "…IC01" in first,
+           "die Ausgabe zeigt die VIN nur gekürzt", first)
+
+
+PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
+         part_import]
 
 
 def main() -> int:
