@@ -24,7 +24,16 @@ for _name in ("VW_PORTAL_USER", "VW_PORTAL_PASSWORD", "VW_PORTAL_VIN",
               "VW_PORTAL_VEHICLE", "VW_PORTAL_INTERVAL_MIN"):
     os.environ.pop(_name, None)
 
-from app.cloud import snapshot  # noqa: E402
+import http.client  # noqa: E402
+import io  # noqa: E402
+import zipfile  # noqa: E402
+from urllib.parse import parse_qsl, urlencode, urlsplit  # noqa: E402
+
+import requests  # noqa: E402
+import requests.adapters  # noqa: E402
+import urllib3  # noqa: E402
+
+from app.cloud import snapshot, vw_portal  # noqa: E402
 
 verify = Check()
 
@@ -102,7 +111,236 @@ def part_snapshot():
            str(snap.values))
 
 
-PARTS = [part_snapshot]
+USER, PASSWORD, VIN = "fahrer@example.org", "geheim-123", DATASET["vin"]
+AUTHORIZE = vw_portal.AUTHORIZE_URL
+SIGNIN = vw_portal.IDENTITY + "/signin-service/v1/signin/test"
+IDENTIFIER = vw_portal.IDENTITY + "/signin-service/v1/test/login/identifier"
+AUTHENTICATE = vw_portal.IDENTITY + "/signin-service/v1/test/login/authenticate"
+IDENTITY_CALLBACK = vw_portal.IDENTITY + "/oidc/v1/oauth/client/callback"
+MARKETING = vw_portal.IDENTITY + "/consent/marketing/test"
+PORTAL_CALLBACK = vw_portal.PORTAL + "/services/callbacklogin"
+USER_PAGE = vw_portal.PORTAL + "/content/euda/de/de/user.html"
+VEHICLES = vw_portal.PORTAL + "/proxy_api/consent/me/vehicles"
+METADATA = vw_portal.PORTAL + f"/proxy_api/euda-apim/datarequest/vehicles/{VIN}/metadata/partial"
+DELIVERY = vw_portal.PORTAL + f"/proxy_api/euda-apim/datadelivery/vehicles/{VIN}/ident-1"
+
+
+def _zip(document: dict) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("dataset.json", json.dumps(document))
+    return buffer.getvalue()
+
+
+OLDER = {"vin": VIN, "Data": [
+    {"key": "00000000-0000-4000-8000-000000000001",
+     "dataFieldName": "battery_level_HV.value", "value": "61.0",
+     "timestampUtc": "2026-10-19T23:02:10Z"},
+    {"key": "00000000-0000-4000-8000-000000000099",
+     "dataFieldName": "climatisation_state", "value": "CLIMATISATION_STATE_OFF",
+     "timestampUtc": "2026-10-19T23:02:10Z"}]}
+
+
+class FakePortal(requests.adapters.BaseAdapter):
+    """Identity service and portal behind their real host names, shaped after
+    evcc's api_test.go and forms_test.go. Records every request."""
+
+    def __init__(self, landing=USER_PAGE, marketing_callback=None):
+        super().__init__()
+        self.landing = landing
+        self.marketing_callback = marketing_callback
+        self.requests: list[tuple[str, str]] = []
+        self.forms: dict[str, dict] = {}
+        self.headers: dict[str, dict] = {}
+        self.expire_next = 0
+        self.downloaded: list[str] = []
+        self.datasets = [
+            {"name": "a_no_content_found.zip", "createdOn": "2026-10-20T00:30:00Z"},
+            {"name": "ds2.zip", "createdOn": "2026-10-20T00:17:30Z"},
+            {"name": "ds1.zip", "createdOn": "2026-10-19T23:02:30Z"},
+        ]
+        self.files = {"ds1.zip": _zip(OLDER), "ds2.zip": _zip(DATASET)}
+
+    def send(self, request, **kwargs):
+        parts = urlsplit(request.url)
+        where = f"{parts.scheme}://{parts.netloc}{parts.path}"
+        self.requests.append((request.method, where))
+        self.headers[where] = dict(request.headers)
+        if request.body:
+            body = request.body.decode() if isinstance(request.body, bytes) else request.body
+            self.forms[where] = dict(parse_qsl(body))
+        cookie = request.headers.get("Cookie", "")
+        status, headers, body = 200, {}, b""
+        if where == AUTHORIZE:
+            self.forms[where] = dict(parse_qsl(parts.query))
+            status, headers = 302, {"Location": "/signin-service/v1/signin/test"}
+        elif where == SIGNIN:
+            body = (b'<html><form id="other" action="/nope"><input name="x" value="y">'
+                    b'</form><form id="emailPasswordForm" action="/signin-service/v1/test/login/identifier">'
+                    b'<input type="hidden" name="_csrf" value="csrf-1">'
+                    b'<input type="hidden" name="relayState" value="relay-1">'
+                    b'<input type="hidden" name="hmac" value="hmac-1">'
+                    b'<input name="email"></form></html>')
+        elif where == IDENTIFIER:
+            body = (b"<script>\n  window._IDK = {\n    templateModel: "
+                    b'{"hmac":"hmac-2","relayState":"relay-2","error":null,'
+                    b'"postAction":"login/authenticate","identifierUrl":"login/identifier"},\n'
+                    b"    disabledFeatures: {\n      isRTLEnabled: false,\n    },\n"
+                    b"    currentLocale: 'de-DE',\n    csrf_parameterName: '_csrf',\n"
+                    b"    csrf_token: 'csrf-2',\n  }\n</script>")
+        elif where == AUTHENTICATE:
+            location = PORTAL_CALLBACK
+            if self.marketing_callback is not None:
+                location = MARKETING + "?" + urlencode({"callback": self.marketing_callback})
+            status, headers = 302, {"Location": location}
+        elif where == IDENTITY_CALLBACK:
+            status, headers = 302, {"Location": PORTAL_CALLBACK}
+        elif where == PORTAL_CALLBACK:
+            status, headers = 302, {"Location": self.landing,
+                                    "Set-Cookie": "access_token=tok-1; Path=/; Secure; HttpOnly"}
+        elif where.startswith(vw_portal.PORTAL + "/proxy_api/"):
+            if "access_token=tok-1" not in cookie or self.expire_next:
+                self.expire_next = max(0, self.expire_next - 1)
+                status = 401
+            elif where == VEHICLES:
+                body = json.dumps({"vehicles": [{"vin": VIN, "nickName": "Buzz"}]}).encode()
+            elif where == METADATA:
+                body = b'{"Identifier": "ident-1"}'
+            elif where == DELIVERY + "/list":
+                body = json.dumps(self.datasets).encode()
+            elif where == DELIVERY + "/download":
+                self.downloaded.append(request.headers["filename"])
+                body = self.files[request.headers["filename"]]
+            else:
+                status = 404
+        return _response(request, status, headers, body)
+
+    def close(self):
+        pass
+
+
+def _response(request, status, headers, body):
+    message = http.client.HTTPMessage()
+    for name, value in headers.items():
+        message[name] = value
+    original = type("Original", (), {"msg": message,
+                                     "isclosed": lambda self: False})()
+    raw = urllib3.HTTPResponse(body=io.BytesIO(body), headers=headers,
+                               status=status, preload_content=False,
+                               original_response=original)
+    return requests.adapters.HTTPAdapter().build_response(request, raw)
+
+
+def _login_error(fake) -> str:
+    try:
+        vw_portal.VwPortal(USER, PASSWORD, adapter=fake).vehicles()
+    except vw_portal.PortalError as failure:
+        return str(failure)
+    return ""
+
+
+def part_login():
+    verify.section("Anmeldung und Datensätze gegen ein nachgebautes Portal")
+    fake = FakePortal()
+    portal = vw_portal.VwPortal(USER, PASSWORD, adapter=fake)
+    vins = portal.vehicles()
+    verify(vins == [VIN], "das Konto nennt sein Fahrzeug", str(vins))
+    expected = [("GET", AUTHORIZE), ("GET", SIGNIN), ("POST", IDENTIFIER),
+                ("POST", AUTHENTICATE), ("GET", PORTAL_CALLBACK), ("GET", VEHICLES)]
+    verify(fake.requests == expected,
+           "Reihenfolge: authorize, Anmeldeseite, E-Mail, Passwort, Rückruf, "
+           "Fahrzeugliste - ohne Abruf der Startseite und der user.html",
+           str(fake.requests))
+    query = fake.forms[AUTHORIZE]
+    verify(query.get("client_id", "").startswith("9b58543e")
+           and query.get("state") == "de__en__VOLKSWAGEN_PASSENGER_CARS"
+           and query.get("scope") == "openid cars profile"
+           and query.get("redirect_uri") == vw_portal.PORTAL + "/login"
+           and query.get("prompt") == "login" and len(query.get("nonce", "")) == 43,
+           "der Login beginnt mit dem OIDC-Aufruf von evcc", str(query))
+    verify(fake.forms[IDENTIFIER] == {"_csrf": "csrf-1", "relayState": "relay-1",
+                                      "hmac": "hmac-1", "email": USER},
+           "E-Mail-Schritt schickt die versteckten Felder des Formulars mit",
+           str(fake.forms[IDENTIFIER]))
+    verify(fake.forms[AUTHENTICATE] == {"_csrf": "csrf-2", "relayState": "relay-2",
+                                        "hmac": "hmac-2", "email": USER,
+                                        "password": PASSWORD},
+           "Passwort-Schritt nimmt csrf/hmac aus window._IDK", str(fake.forms[AUTHENTICATE]))
+    verify(fake.headers[IDENTIFIER].get("Referer") == SIGNIN
+           and fake.headers[VEHICLES].get("User-Agent", "").startswith("jolt/")
+           and fake.headers[VEHICLES].get("Accept") == "application/json",
+           "Referer beim Formular, ehrlicher User-Agent, Accept JSON",
+           str(fake.headers[VEHICLES]))
+
+    snap = portal.latest(VIN)
+    verify([fake.headers[DELIVERY + "/list"].get("type")] == ["partial"],
+           "die Liste wird als partial angefragt")
+    verify(snap is not None and snap.values.get("soc_pct") == 57
+           and snap.values.get("odometer_km") == 62067,
+           "beide Datensätze werden geladen, der neuere gewinnt",
+           str(snap and snap.values))
+    verify(len(portal.points(VIN)) > len(snapshot.FIELDS),
+           "die Rohpunkte bleiben für das Prüfwerkzeug abrufbar")
+    count = len(fake.requests)
+    again = portal.latest(VIN)
+    verify(fake.requests[count:] == [("GET", DELIVERY + "/list")]
+           and again == snap,
+           "beim nächsten Abruf ohne neuen Datensatz wird nichts erneut geladen",
+           str(fake.requests[count:]))
+    verify(fake.downloaded == ["ds1.zip", "ds2.zip"],
+           "geladen wird ältester zuerst, Platzhalter ohne Inhalt gar nicht",
+           str(fake.downloaded))
+
+    fake.expire_next = 1
+    count = len(fake.requests)
+    vins = portal.vehicles()
+    verify(vins == [VIN] and fake.requests[count:]
+           == [("GET", VEHICLES), ("GET", AUTHORIZE), ("GET", SIGNIN),
+               ("POST", IDENTIFIER), ("POST", AUTHENTICATE),
+               ("GET", PORTAL_CALLBACK), ("GET", VEHICLES)],
+           "abgelaufene Sitzung (401): einmal neu anmelden, dann wiederholen",
+           str(fake.requests[count:]))
+    fake.expire_next = 5
+    try:
+        portal.vehicles()
+        refused = ""
+    except vw_portal.StatusError as failure:
+        refused = str(failure)
+    verify(refused == "vehicles: HTTP 401",
+           "bleibt es bei 401, wird nur einmal neu angemeldet und dann aufgegeben",
+           refused)
+
+    fake = FakePortal(marketing_callback=IDENTITY_CALLBACK + "?scopes=openid cars")
+    error = _login_error(fake)
+    verify(error == "" and ("GET", IDENTITY_CALLBACK) in fake.requests
+           and not any(u == MARKETING for _, u in fake.requests),
+           "Marketing-Einwilligung: weiter über den Rückruf, ohne die Seite zu öffnen",
+           error or str(fake.requests))
+
+    for landing, needle, text in (
+            ("https://attacker.example/content/euda/de/de/user.html",
+             "unexpected login redirect host attacker.example",
+             "eine Weiterleitung auf einen fremden Host wird verweigert"),
+            (vw_portal.PORTAL + "/consent", "confirm the consent",
+             "fehlende Einwilligung im Portal: klare Meldung"),
+            (vw_portal.PORTAL + "/content/euda/de/de/notuser.html",
+             "unexpected landing page", "falsche Zielseite wird nicht akzeptiert"),
+            (PORTAL_CALLBACK, "stopped after 10 redirects",
+             "Weiterleitungsschleife endet nach 10 Schritten")):
+        fake = FakePortal(landing=landing)
+        error = _login_error(fake)
+        verify(needle in error and not any("attacker" in u for _, u in fake.requests),
+               text, error)
+        verify(USER not in error and PASSWORD not in error,
+               "die Meldung enthält weder Benutzer noch Passwort", error)
+
+    fake = FakePortal(marketing_callback="https://attacker.example/oidc/v1/oauth/client/callback")
+    error = _login_error(fake)
+    verify("unexpected marketing consent callback URL" in error,
+           "ein Rückruf auf fremden Host wird nicht aufgerufen", error)
+
+
+PARTS = [part_snapshot, part_login]
 
 
 def main() -> int:
