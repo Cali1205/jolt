@@ -794,9 +794,16 @@ window.joltTrips = (function () {
     const page = await K.api(`/api/vehicles/${vehicleId}/${kind}?limit=30${query}`);
     const more = page.next_before
       ? `<button class="klein" data-more="${kind}" data-before="${page.next_before}">ältere</button>` : "";
-    const old = list.querySelector("[data-more]");
-    if (old) old.remove();
-    list.insertAdjacentHTML("beforeend", page.items.map(LOGBOOK[kind].row).join("") + more);
+    const html = page.items.map(LOGBOOK[kind].row).join("") + more;
+    // The first page replaces, so two loads that overlap (switching to the
+    // tab while the vehicle choice changes) do not list everything twice.
+    if (!before) {
+      list.innerHTML = html;
+    } else {
+      const old = list.querySelector("[data-more]");
+      if (old) old.remove();
+      list.insertAdjacentHTML("beforeend", html);
+    }
     document.getElementById(`logbook-${kind}-sum`).innerHTML = LOGBOOK[kind].summary(page.totals);
     return page.totals.count;
   }
@@ -804,9 +811,6 @@ window.joltTrips = (function () {
   async function loadLogbook() {
     const block = document.getElementById("logbook");
     if (!block) return;
-    for (const kind of Object.keys(LOGBOOK)) {
-      document.getElementById("logbook-" + kind).innerHTML = "";
-    }
     try {
       const counts = await Promise.all(Object.keys(LOGBOOK).map((k) => loadLogbookPart(k)));
       block.hidden = !counts.some((n) => n > 0);
