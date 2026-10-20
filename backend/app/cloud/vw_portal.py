@@ -483,11 +483,15 @@ class VwPortal:
                          + "/download",
                          {"filename": name, "type": "partial"}).content
 
-    def latest(self, vin: str) -> snapshot.Snapshot | None:
-        """Fetch what is new for the car and return the merged snapshot."""
+    def updates(self, vin: str) -> list[snapshot.Snapshot]:
+        """One snapshot per report that is new since the last call, oldest
+        first. Each report is a moment of the car (parked, driving, parked
+        again); folding them into one would keep only the last moment, and
+        a drive between two polls would vanish."""
         state = self._vins.setdefault(vin, _VinState())
         if not state.identifier:
             state.identifier = self._identifier(vin)
+        found = []
         for dataset in pending(self._datasets(vin, state.identifier), state.after):
             points = parse_dataset(self._download(vin, state.identifier,
                                                   dataset.name))
@@ -495,7 +499,15 @@ class VwPortal:
                 state.after = dataset.created
             state.seq += 1
             state.points = snapshot.merge(state.points, points, state.seq)
-        return snapshot.from_points(state.points)
+            snap = snapshot.from_points(state.points, points)
+            if snap is not None:
+                found.append(snap)
+        return found
+
+    def latest(self, vin: str) -> snapshot.Snapshot | None:
+        """Fetch what is new for the car and return the merged snapshot."""
+        self.updates(vin)
+        return snapshot.from_points(self._vins[vin].points)
 
     def points(self, vin: str) -> list[snapshot.Point]:
         """The merged raw points behind the last `latest(vin)`."""
