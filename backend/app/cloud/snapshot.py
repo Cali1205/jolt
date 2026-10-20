@@ -91,7 +91,10 @@ def merge(merged: list[Point], newer: list[Point], seq: int) -> list[Point]:
 
 
 def _find(points: list[Point], ident: str) -> Point | None:
-    return next((p for p in points if p.key == ident or p.name == ident), None)
+    """The newest point under this key or name. A name can sit under several
+    keys (one per report type), and the merged state keeps the old ones."""
+    return max((p for p in points if p.key == ident or p.name == ident),
+               key=lambda p: p.seq, default=None)
 
 
 def lookup(points: list[Point], idents: tuple[str, ...]) -> Point | None:
