@@ -227,12 +227,12 @@ FROM grafana_reports WHERE {where} ORDER BY time""",
                                {"id": "unit", "value": "percent"}]}
     curve_options = {"seriesMapping": "auto", "tooltip": {"mode": "single"},
                      "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True}}
-    curve_note = ("Leistung auf der x-Achse, Ladestand auf der y-Achse. Der Ladestand zwischen "
+    curve_note = ("Ladestand auf der x-Achse, Leistung auf der y-Achse. Der Ladestand zwischen "
                   "Anfang und Ende ist aus der bis dahin geladenen Energie geschätzt: das Auto "
                   "meldet die Leistung laufend, den Ladestand im Fahrtenbuch nur am Anfang und Ende.")
     panels.append(_panel(
         "xychart", "Ladekurve: ${charge:text}", 0, 56, 12, 11,
-        [sql("""SELECT kw AS "kW", soc AS "Ladestand %" FROM grafana_charge_curve
+        [sql("""SELECT soc AS "Ladestand %", kw AS "kW" FROM grafana_charge_curve
 WHERE charge_id = ${charge} ORDER BY time""")],
         options=curve_options,
         field_config={"defaults": {"custom": {"show": "points+lines", "pointSize": {"fixed": 3},
@@ -241,7 +241,7 @@ WHERE charge_id = ${charge} ORDER BY time""")],
         description="Ladevorgang oben in der Auswahl „Ladevorgang“ wählen. " + curve_note))
     panels.append(_panel(
         "xychart", "Alle DC-Ladekurven im Zeitraum", 12, 56, 12, 11,
-        [sql(f"""SELECT kw AS "kW", soc AS "Ladestand %" FROM grafana_charge_curve
+        [sql(f"""SELECT soc AS "Ladestand %", kw AS "kW" FROM grafana_charge_curve
 WHERE charge_type = 'DC' AND {where} ORDER BY charge_id, time""")],
         options=curve_options,
         field_config={"defaults": {"custom": {"show": "points", "pointSize": {"fixed": 3}}},
