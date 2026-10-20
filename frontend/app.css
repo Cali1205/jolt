@@ -207,6 +207,10 @@ details.opt > summary::after { content: "▸"; margin-left: auto; color: var(--g
 details.opt[open] > summary::after { transform: rotate(90deg); }
 .opt-titel { font-weight: 600; font-size: 14px; }
 .opt-inhalt { padding: 0 14px 14px; }
+.logbook-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.logbook-filter label { display: flex; flex-direction: column; gap: 2px; flex: 1 1 100px;
+  margin: 0; font-size: 11px; color: var(--gedaempft); }
+.logbook-filter select { width: 100%; }
 .opt-inhalt h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   color: var(--gedaempft); font-weight: 600; margin: 16px 0 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
