@@ -99,6 +99,7 @@ A typical first day:
 | Document | Content |
 |---|---|
 | [docs/deploy.md](docs/deploy.md) | Running jolt on your own server |
+| [docs/data-model.md](docs/data-model.md) | The vehicle signals jolt understands, the minimum a car must deliver, adding a car platform or a cloud source |
 | [docs/obd.md](docs/obd.md) | Dongle, supported cars, adding a platform, in-car logger |
 | [docs/obd-meb.md](docs/obd-meb.md) | VW MEB data identifiers and where they come from |
 | [docs/vw-portal.md](docs/vw-portal.md) | Optional: the car's last values, drives and charges from the VW EU Data Act portal, and importing its history |

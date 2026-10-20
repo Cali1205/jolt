@@ -177,7 +177,9 @@ window.joltDisplay = (function () {
       ? Math.max(0, kw - dcdcA * battV / 1000) : null;
     const compressorW = valueFresh(vals, "compressor_w", now);
     const climate = compressorW !== null ? compressorW / 1000 : null;
-    const batterie = valueFresh(vals, "batterie_c", now);
+    // batterie_c is the older platforms' name for the catalog's batt_temp_c.
+    const fromCatalog = valueFresh(vals, "batt_temp_c", now);
+    const batterie = fromCatalog !== null ? fromCatalog : valueFresh(vals, "batterie_c", now);
 
     if (kw === null && heating === null && climate === null && batterie === null) return null;
     const rounded = (x) => (x === null ? null : Math.round(x * 10) / 10);
