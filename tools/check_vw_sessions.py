@@ -558,7 +558,71 @@ def part_jolt():
         db.close()
 
 
-PARTS = [part_detection, part_mutations, part_storage, part_jolt]
+def part_portal():
+    verify.section("Portalberichte im Fahrtenbuch")
+    import logging
+    from app import cloud, models
+    from app.cloud import logbook, poller
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = recorded(db, vid, T(20, 5, 44, 16), 62067, 7, 55.7)
+        logbook.store_session(db, session)
+        for row in portal_rows():
+            db.add(models.VehicleSnapshot(vehicle_id=vid, source="vw_portal",
+                                          captured_at=row.captured_at,
+                                          received_at=row.captured_at,
+                                          values=row.values, raw=row.raw))
+        db.commit()
+        early = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 6, 10))
+        verify(early["drives"]["new"] + early["drives"]["updated"] == 0
+               and drives_of(db, vid)[0].sources == ["jolt"],
+               "zehn Minuten nach dem Abschalten wird noch nichts gespeichert: "
+               "Abschaltberichte kommen spät", str(early))
+        later = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 7, 0))
+        rows = drives_of(db, vid)
+        verify(len(rows) == 1 and rows[0].sources == ["vw_portal", "jolt"]
+               and rows[0].started_at == datetime(2026, 10, 20, 5, 44, 24)
+               and rows[0].ended_at == datetime(2026, 10, 20, 6, 0, 41)
+               and rows[0].live_session_id == session.id,
+               "nach einer halben Stunde: die Portal-Fahrt, mit der Aufzeichnung "
+               "zusammengeführt", f"{later} {[columns(r) for r in rows]}")
+        again = logbook.store_from_snapshots(db, vid, now=datetime(2026, 10, 20, 7, 15))
+        verify(again["drives"] == {"new": 0, "updated": 0, "unchanged": 1},
+               "die nächste Runde ändert nichts", str(again))
+    finally:
+        db.close()
+
+    lines = []
+    handler = logging.Handler()
+    handler.emit = lambda record: lines.append(record.getMessage())
+    logger = logging.getLogger("uvicorn.error")
+    logger.addHandler(handler)
+    original = logbook.store_from_snapshots
+    logbook.store_from_snapshots = lambda db, vehicle_id: 1 / 0
+    config = cloud.Config(name="vw_portal", vin=None, vehicle=str(vid),
+                          interval_min=15, connect=lambda: None)
+    poll = poller.Poll(config, SessionLocal)
+    poll.status.vehicle_id = vid
+    db = SessionLocal()
+    try:
+        poll.update_logbook(db)
+        poll.update_logbook(db)
+        survived = True
+    except Exception:      # noqa: BLE001
+        survived = False
+    finally:
+        db.close()
+        logbook.store_from_snapshots = original
+        logger.removeHandler(handler)
+    verify(survived and len([x for x in lines if "logbook" in x]) == 1
+           and poll.status.failures == 0,
+           "ein Fehler im Fahrtenbuch stört den Abruf nicht und steht einmal im Log",
+           str(lines))
+
+
+PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal]
 
 
 def main() -> int:

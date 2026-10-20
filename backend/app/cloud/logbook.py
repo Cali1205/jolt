@@ -14,7 +14,7 @@ which the sources arrive. A detected drive belongs to a stored one when their
 odometer ranges overlap, or, where one of them has no odometer, their times.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_
 
@@ -35,6 +35,15 @@ TRACK_PREFERENCE = (HISTORY, PORTAL, JOLT)
 # charge level in whole percent and, from the portal, the energy content.
 ENERGY_PREFERENCE = (JOLT, PORTAL, HISTORY)
 CHARGE_PREFERENCE = (HISTORY, PORTAL)
+
+# Portal reports: what is detected over this window is stored, but only once
+# it is old enough. The switch-off reports arrive late and out of order, and
+# an ongoing charge must not be stored as finished.
+PORTAL_WINDOW = timedelta(hours=48)
+PORTAL_SETTLE = timedelta(minutes=30)
+# A drive or charge that starts this close to the window's beginning may
+# have started before it; a later window sees it whole.
+PORTAL_EDGE = timedelta(hours=6)
 
 
 def _naive(t: datetime) -> datetime:
@@ -331,3 +340,46 @@ def after_session_end(db, session: models.LiveSession) -> None:
             store_session(db, session)
     except Exception as failure:      # noqa: BLE001
         log.warning("Logbook: session %s not stored: %s", session.id, failure)
+
+
+# ---------------------------------------------------------------------------
+# Source: the portal's live reports
+# ---------------------------------------------------------------------------
+
+def settled(records: list[dict], window_start: datetime,
+            now: datetime) -> list[dict]:
+    """Only what lies whole inside the window and has stopped changing."""
+    return [r for r in records
+            if _time(r["started_at"]) >= window_start + PORTAL_EDGE
+            and _time(r["ended_at"]) <= now - PORTAL_SETTLE]
+
+
+def store_from_snapshots(db, vehicle_id: int,
+                         now: datetime | None = None) -> dict:
+    now = now or datetime.utcnow()
+    window_start = now - PORTAL_WINDOW
+    rows = (db.query(models.VehicleSnapshot)
+            .filter(models.VehicleSnapshot.vehicle_id == vehicle_id,
+                    models.VehicleSnapshot.source == PORTAL,
+                    models.VehicleSnapshot.captured_at >= window_start)
+            .all())
+    obs = observations.from_snapshots(rows)
+    vehicle = db.get(models.Vehicle, vehicle_id)
+    drives = settled([drive_record(d) for d in
+                      sessions.detect_drives(obs, dense=False)], window_start, now)
+    charges = settled([charge_record(c) for c in
+                       sessions.detect_charges(obs, kwh_per_pct(vehicle))],
+                      window_start, now)
+    result = {"drives": store_drives(db, vehicle_id, PORTAL, drives),
+              "charges": store_charges(db, vehicle_id, PORTAL, charges)}
+    # A recording that ended before the portal's drive was stored attached
+    # to nothing yet, or to one half of it; offered again, it finds both.
+    recent = (db.query(models.LiveSession)
+              .join(models.Trip, models.LiveSession.trip_id == models.Trip.id)
+              .filter(models.Trip.vehicle_id == vehicle_id,
+                      models.LiveSession.running.is_(False),
+                      models.LiveSession.started_at >= window_start))
+    for session in recent.all():
+        store_session(db, session)
+    db.commit()
+    return result
