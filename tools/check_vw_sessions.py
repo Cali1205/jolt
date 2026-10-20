@@ -22,7 +22,7 @@ from examine import Check, application_provide  # noqa: E402
 
 application_provide("vw-sessions")
 
-from app.cloud import observations, sessions  # noqa: E402
+from app.cloud import observations, sessions, snapshot  # noqa: E402
 
 verify = Check()
 UTC = timezone.utc
@@ -218,9 +218,9 @@ def portal_rows():
     `values` is the merged state, `raw` what the report itself carried."""
     def row(t, raw, odo, soc):
         return SimpleNamespace(
-            captured_at=t.replace(tzinfo=None),
+            source="vw_portal", captured_at=t.replace(tzinfo=None),
             values={"odometer_km": odo, "soc_pct": soc, "charge_power_kw": 0,
-                    "charge_state": "CHARGE_STATE_NOT_READY_FOR_CHARGING"},
+                    "charge_state": "not_ready"},
             raw={k: [name, value, None] for k, (name, value) in raw.items()})
 
     state = ("charging_state_report.current_charge_state",
@@ -287,7 +287,7 @@ def part_detection():
                  "CHARGE_PURPOSE_REACHED_AND_CONVERSATION",
                  "chargePurposeReachedAndConservation",
                  "CHARGE_STATE_NOT_READY_FOR_CHARGING"]
-    verify([observations.charge_state(s) for s in spellings]
+    verify([snapshot.charge_state(s) for s in spellings]
            == ["charging", "charging", "not_ready", "not_ready", "ready", "error",
                "error", "purpose_reached", "purpose_reached", "conservation",
                "conservation", "not_ready"],

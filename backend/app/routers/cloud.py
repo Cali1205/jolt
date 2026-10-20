@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import cloud, deps, models
+from .. import cloud, deps, models, signals
 from ..cloud import poller
 from ..database import get_db
 from ..timestamp import utc_iso
@@ -19,7 +19,9 @@ def vehicle_snapshot(vehicle_id: int, db: Session = Depends(get_db)):
            .first())
     if row is None:
         raise HTTPException(404, "Keine Daten aus der Hersteller-Cloud.")
-    return {"source": row.source, "captured_at": utc_iso(row.captured_at),
+    return {"source": row.source,
+            "source_label": signals.SOURCE_LABELS.get(row.source, row.source),
+            "captured_at": utc_iso(row.captured_at),
             "received_at": utc_iso(row.received_at), "values": row.values}
 
 

@@ -148,7 +148,7 @@ def _charging(o: Observation) -> bool:
 
 
 def _blocks_drive(o: Observation) -> bool:
-    return _charging(o) or (o.field == "plug_connected" and o.value is True)
+    return _charging(o) or (o.field == "plugged" and o.value is True)
 
 
 def dedup(track: Track) -> Track:

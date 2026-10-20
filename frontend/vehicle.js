@@ -129,20 +129,17 @@ window.joltVehicle = (function () {
       + ` · ${(vehicle.capacity_history || []).length} Messungen gespeichert</div>` + curve;
   }
 
-  /* What the VW portal last heard from the car (backend app/cloud/). Only
-   * there when the server fetches it; a 404 or any failure hides the card. */
-  const CHARGE_STATES = [
-    [/NOT_READY_FOR_CHARGING$/, "nicht ladebereit"],
-    [/READY_FOR_CHARGING$/, "ladebereit"],
-    [/CONSERVATION_CHARGING$/, "Erhaltungsladung"],
-    [/(^|_)CHARGING(_HV)?$/i, "lädt"],
-    [/CHARGE_PURPOSE_REACHED/, "Ladeziel erreicht"],
-    [/ERROR$/, "Fehler"],
-  ];
+  /* What a manufacturer cloud last heard from the car (backend app/cloud/).
+   * Only there when the server fetches it; a 404 or any failure hides the
+   * card. The values are catalog signals (backend app/signals.py). */
+  const CHARGE_STATES = {
+    charging: "lädt", ready: "ladebereit", not_ready: "nicht ladebereit",
+    purpose_reached: "Ladeziel erreicht", conservation: "Erhaltungsladung",
+    error: "Fehler",
+  };
 
-  function chargeState(raw) {
-    const hit = CHARGE_STATES.find(([pattern]) => pattern.test(raw));
-    return hit ? hit[1] : raw;
+  function chargeState(state) {
+    return CHARGE_STATES[state] || state;
   }
 
   function ago(ms) {
@@ -176,7 +173,7 @@ window.joltVehicle = (function () {
     const as_of = at
       ? `Stand: ${at.toLocaleString("de-DE", { day: "2-digit", month: "2-digit",
           hour: "2-digit", minute: "2-digit" })}, ${ago(at.getTime())}` : "";
-    return `<h2>VW-Portal</h2>`
+    return `<h2>${K.esc(snap.source_label || snap.source || "Hersteller-Cloud")}</h2>`
       + (tiles.length ? `<div class="werte gross">${tiles.join("")}</div>` : "")
       + (rows.length ? `<dl class="einst-liste" style="margin-top:10px">${rows.join("")}</dl>` : "")
       + `<div class="unter">${as_of}</div>`;
