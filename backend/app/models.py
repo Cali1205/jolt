@@ -239,6 +239,25 @@ class VehicleSnapshot(Base):
                                        name="uq_vehicle_snapshot"),)
 
 
+class CloudCredential(Base):
+    """Tokens of a cloud source whose login rotates them (cloud/credentials.py).
+
+    A refresh token that is used once is replaced by a new one, so it cannot
+    live in the environment; the app container's file system is read-only.
+    Never logged, never returned by any API.
+    """
+    __tablename__ = "cloud_credentials"
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(20), nullable=False)
+    account = Column(String(200), nullable=False)
+    data = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("source", "account",
+                                       name="uq_cloud_credential"),)
+
+
 class VehicleDrive(Base):
     """One drive of the logbook, from whichever sources saw it (cloud/logbook.py).
 
