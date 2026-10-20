@@ -288,7 +288,11 @@ class VehicleDrive(Base):
 
 
 class VehicleCharge(Base):
-    """One charge, from the VW history export or the portal's reports."""
+    """One charge, from the VW history export or a cloud's snapshots.
+
+    `max_power_kw` is NULL for a charge from a source without power reports
+    (Stellantis); its energy comes from the rise of the charge level.
+    """
     __tablename__ = "vehicle_charges"
 
     id = Column(Integer, primary_key=True)
@@ -299,7 +303,7 @@ class VehicleCharge(Base):
     soc_start = Column(Float)
     soc_end = Column(Float)
     energy_kwh = Column(Float, nullable=False)
-    max_power_kw = Column(Float, nullable=False)
+    max_power_kw = Column(Float)
     avg_power_kw = Column(Float)
     charge_type = Column(String(2))
     odometer_km = Column(Float)

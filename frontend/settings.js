@@ -78,9 +78,7 @@ window.joltSettings = (function () {
     el("settings-sign-out").hidden = !K.token();
   }
 
-  /* The manufacturer cloud (VW portal), only when the server has it set up. */
-  const CLOUD_NAMES = { vw_portal: "VW-Portal" };
-
+  /* The manufacturer clouds, only when the server has one set up. */
   async function cloudRows() {
     let cloud;
     try {
@@ -95,7 +93,7 @@ window.joltSettings = (function () {
         hour: "2-digit", minute: "2-digit" }) : "";
     };
     return (cloud.sources || []).map((s) => {
-      const name = CLOUD_NAMES[s.name] || s.name;
+      const name = s.label || s.name;
       if (s.last_error) {
         return row(name, "Fehler: " + K.esc(s.last_error)
           + (s.last_ok ? " · zuletzt ok " + when(s.last_ok) : ""), "schlecht");

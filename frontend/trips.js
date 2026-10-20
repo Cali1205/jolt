@@ -422,11 +422,12 @@ window.joltTrips = (function () {
     return null;
   }
 
-  /* Without a reading from the dongle, the VW portal's last report will do
-   * if it is recent: the server fetches it only when it is set up
-   * (docs/vw-portal.md), otherwise this is a quick 404. Never a reason for
-   * the start to wait or fail. */
+  /* Without a reading from the dongle, the manufacturer cloud's last report
+   * will do if it is recent: the server fetches it only when it is set up
+   * (docs/vw-portal.md, docs/stellantis.md), otherwise this is a quick 404.
+   * Never a reason for the start to wait or fail. */
   const PORTAL_MAX_AGE_MS = 12 * 3600 * 1000;
+  const PORTAL_FROM = { vw_portal: "aus dem VW-Portal", stellantis: "aus der Stellantis-Cloud" };
 
   async function portalCharge(vehicleId) {
     try {
@@ -435,7 +436,7 @@ window.joltTrips = (function () {
       const at = K.timestamp(snap && snap.captured_at);
       if (typeof soc !== "number" || !at
           || Date.now() - at.getTime() > PORTAL_MAX_AGE_MS) return null;
-      return { soc, at };
+      return { soc, at, source: snap.source };
     } catch (failure) {
       return null;
     }
@@ -451,7 +452,8 @@ window.joltTrips = (function () {
   function portalNote(portal) {
     const time = portal.at.toLocaleTimeString("de-DE",
       { hour: "2-digit", minute: "2-digit" });
-    return `Startladestand ${K.num(portal.soc)} % aus dem VW-Portal (Stand ${time}). `;
+    const from = PORTAL_FROM[portal.source] || "aus der Hersteller-Cloud";
+    return `Startladestand ${K.num(portal.soc)} % ${from} (Stand ${time}). `;
   }
 
   function enterLiveView(response, id) {
@@ -694,7 +696,7 @@ window.joltTrips = (function () {
 
   /* ---------- Logbook: drives and charges from VW data and jolt ---------- */
 
-  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", jolt: "jolt" };
+  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", stellantis: "Stellantis", jolt: "jolt" };
 
   function sourceBrand(sources) {
     const names = [...new Set((sources || []).map((s) => SOURCE_NAMES[s] || s))];
@@ -761,7 +763,7 @@ window.joltTrips = (function () {
         </div>
         <div class="fahrt-zahlen">
           <div class="stark">${num(c.energy_kwh, 1)}<small> kWh</small></div>
-          <div class="unter">max ${num(c.max_power_kw, 0)} kW</div>
+          <div class="unter">${has(c.max_power_kw) ? `max ${num(c.max_power_kw, 0)} kW` : "aus dem Ladestand"}</div>
         </div>
       </div>
       <div class="chips" style="margin-top:8px">${chips}</div>

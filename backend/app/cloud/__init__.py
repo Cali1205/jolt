@@ -46,6 +46,10 @@ class Config:
     # The catalog signals (app/signals.py) the source can deliver.
     provides: frozenset[str]
     connect: Callable[[], Client] = field(repr=False)
+    # True when a snapshot is a sample taken whenever jolt asks (Stellantis),
+    # not a report the car sent by itself (VW): drives then have to bridge
+    # the gap between two polls.
+    sampled: bool = False
 
 
 def _interval(text: str | None) -> int:
@@ -94,7 +98,8 @@ def _stellantis(env: Mapping[str, str]) -> Config | None:
                   vehicle=env.get("STELLANTIS_VEHICLE", "").strip() or None,
                   interval_min=_interval(env.get("STELLANTIS_INTERVAL_MIN")),
                   provides=PROVIDES,
-                  connect=lambda: Stellantis(brand, user, SessionLocal))
+                  connect=lambda: Stellantis(brand, user, SessionLocal),
+                  sampled=True)
 
 
 SOURCES: dict[str, Callable[[Mapping[str, str]], Config | None]] = {

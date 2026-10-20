@@ -606,7 +606,7 @@ def part_portal():
     logger = logging.getLogger("uvicorn.error")
     logger.addHandler(handler)
     original = logbook.store_from_snapshots
-    logbook.store_from_snapshots = lambda db, vehicle_id, source: 1 / 0
+    logbook.store_from_snapshots = lambda *args, **kwargs: 1 / 0
     config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None, vehicle=str(vid),
                           interval_min=15, provides=frozenset(), connect=lambda: None)
     poll = poller.Poll(config, SessionLocal)

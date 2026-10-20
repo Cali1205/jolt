@@ -10,9 +10,9 @@ changes, not one per round.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from .. import models
+from .. import models, signals
 from ..timestamp import utc_iso
 from . import Config, SourceError, active, logbook, mask
 from .snapshot import Snapshot
@@ -156,7 +156,11 @@ class Poll:
         its end, and a parked car may send nothing new for hours. A failure
         here must not count as a failed fetch."""
         try:
-            logbook.store_from_snapshots(db, self.status.vehicle_id, self.config.name)
+            logbook.store_from_snapshots(
+                db, self.status.vehicle_id, self.config.name,
+                powered="charge_power_kw" in self.config.provides,
+                stop_split=(timedelta(minutes=2 * self.config.interval_min)
+                            if self.config.sampled else None))
             error = None
         except Exception as failure:      # noqa: BLE001
             db.rollback()
@@ -200,7 +204,9 @@ def status_list() -> list[dict]:
     rows = []
     for config in active():
         status = STATUS.get(config.name) or Status(config.name)
-        rows.append({"name": status.name, "vehicle_id": status.vehicle_id,
+        rows.append({"name": status.name,
+                     "label": signals.SOURCE_LABELS.get(status.name, status.name),
+                     "vehicle_id": status.vehicle_id,
                      "last_ok": utc_iso(status.last_ok),
                      "last_error": status.last_error,
                      "failures": status.failures})

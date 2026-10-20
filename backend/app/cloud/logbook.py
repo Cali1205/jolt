@@ -374,8 +374,12 @@ def settled(records: list[dict], window_start: datetime,
             and _time(r["ended_at"]) <= now - SNAPSHOT_SETTLE]
 
 
-def store_from_snapshots(db, vehicle_id: int, source: str,
+def store_from_snapshots(db, vehicle_id: int, source: str, powered: bool = True,
+                         stop_split: timedelta | None = None,
                          now: datetime | None = None) -> dict:
+    """`powered` False for a source without charge power: its charges are
+    read from the charge state. `stop_split` for a source sampled less often
+    than a stop splits a drive (sessions.detect_drives)."""
     now = now or datetime.utcnow()
     window_start = now - SNAPSHOT_WINDOW
     rows = (db.query(models.VehicleSnapshot)
@@ -386,9 +390,10 @@ def store_from_snapshots(db, vehicle_id: int, source: str,
     obs = observations.from_snapshots(rows)
     vehicle = db.get(models.Vehicle, vehicle_id)
     drives = settled([drive_record(d) for d in
-                      sessions.detect_drives(obs, dense=False)], window_start, now)
+                      sessions.detect_drives(obs, dense=False, stop_split=stop_split)],
+                     window_start, now)
     charges = settled([charge_record(c) for c in
-                       sessions.detect_charges(obs, kwh_per_pct(vehicle))],
+                       sessions.detect_charges(obs, kwh_per_pct(vehicle), powered)],
                       window_start, now)
     result = {"drives": store_drives(db, vehicle_id, source, drives),
               "charges": store_charges(db, vehicle_id, source, charges)}
