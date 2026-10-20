@@ -340,7 +340,38 @@ def part_login():
            "ein Rückruf auf fremden Host wird nicht aufgerufen", error)
 
 
-PARTS = [part_snapshot, part_login]
+def part_storage():
+    verify.section("Speichern")
+    from app import models
+    from app.cloud import poller
+    from app.database import SessionLocal, migrate, seed_templates
+    migrate()
+    seed_templates()
+    db = SessionLocal()
+    try:
+        vehicle_id = db.query(models.Vehicle.id).first()[0]
+        snap = snapshot.from_points(snapshot.decode(DATASET["Data"]))
+        first = poller.store(db, vehicle_id, "vw_portal", snap)
+        second = poller.store(db, vehicle_id, "vw_portal", snap)
+        rows = db.query(models.VehicleSnapshot).filter_by(vehicle_id=vehicle_id).all()
+        verify(first and not second and len(rows) == 1,
+               "derselbe Bericht zweimal: eine Zeile", f"{first}, {second}, {len(rows)}")
+        verify(rows[0].captured_at == datetime(2026, 10, 20, 0, 17, 14)
+               and rows[0].values["soc_pct"] == 57,
+               "gespeichert als UTC ohne Zone, mit den Werten",
+               f"{rows[0].captured_at} {rows[0].values}")
+        newer = snapshot.Snapshot(
+            captured_at=datetime(2026, 10, 20, 2, 17, tzinfo=timezone.utc),
+            values={**snap.values, "soc_pct": 55})
+        verify(poller.store(db, vehicle_id, "vw_portal", newer)
+               and db.query(models.VehicleSnapshot).filter_by(
+                   vehicle_id=vehicle_id).count() == 2,
+               "ein neuerer Bericht: zweite Zeile")
+    finally:
+        db.close()
+
+
+PARTS = [part_snapshot, part_login, part_storage]
 
 
 def main() -> int:
