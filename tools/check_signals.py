@@ -184,7 +184,84 @@ def part_old_rows():
     _alembic("head")
 
 
-PARTS = [part_catalog, part_doc, part_sources, part_old_rows]
+def _vehicle(db, name: str) -> int:
+    from app import models
+    vehicle = models.Vehicle(name=name, battery_gross_kwh=50.0, battery_net_kwh=46.0)
+    db.add(vehicle)
+    db.flush()
+    return vehicle.id
+
+
+def part_api():
+    verify.section("GET /api/vehicles/{id}/signals")
+    from datetime import datetime, timedelta
+    from fastapi.testclient import TestClient
+    from app import models
+    from app.database import SessionLocal
+    from app.main import app
+    db = SessionLocal()
+    live, cloud, empty = (_vehicle(db, "Nur Dongle"), _vehicle(db, "Nur Cloud"),
+                          _vehicle(db, "Nichts"))
+    trip = models.Trip(vehicle_id=live, recording=True, start_lat=48.1, start_lon=11.5,
+                       target_lat=48.2, target_lon=11.6, start_soc=80, geometry=[],
+                       energy_profile=[])
+    db.add(trip)
+    db.flush()
+    session = models.LiveSession(trip_id=trip.id, running=False,
+                                 started_at=datetime(2026, 10, 19, 8))
+    db.add(session)
+    db.flush()
+    for i in range(3):
+        db.add(models.LivePoint(session_id=session.id, lat=48.1, lon=11.5 + i / 100,
+                                timestamp=datetime(2026, 10, 19, 8) + timedelta(minutes=i),
+                                soc=80 - i, speed_kmh=50,
+                                raw_values={"odometer_km": 1000 + i, "batterie_c": 21,
+                                            "soc_raw": 160 - 2 * i}))
+    db.add(models.VehicleSnapshot(vehicle_id=cloud, source="stellantis",
+                                  captured_at=datetime(2026, 10, 20, 7),
+                                  received_at=datetime(2026, 10, 20, 7),
+                                  values={"soc_pct": 59, "odometer_km": 3196.5,
+                                          "plugged": False, "lat": 47.274, "lon": -1.59},
+                                  raw=None))
+    db.commit()
+    db.close()
+    with TestClient(app) as client:
+        answers = {v: client.get(f"/api/vehicles/{v}/signals").json()
+                   for v in (live, cloud, empty)}
+        missing = client.get("/api/vehicles/99999/signals").status_code
+
+    def row(vehicle, name):
+        return next(s for s in answers[vehicle]["signals"] if s["name"] == name)
+
+    def sources(vehicle, name):
+        return [s["id"] for s in row(vehicle, name)["sources"]]
+
+    verify([s["name"] for s in answers[live]["signals"]] == [s.name for s in signals.SIGNALS],
+           "jedes Katalogsignal steht in der Antwort, in Katalogreihenfolge")
+    verify(sources(live, "soc_pct") == ["jolt"] and sources(live, "odometer_km") == ["jolt"]
+           and row(live, "soc_pct")["last_at"] == "2026-10-19T08:02:00Z",
+           "nur Dongle: Ladestand und Kilometerstand von jolt, zuletzt um 08:02",
+           str(row(live, "soc_pct")))
+    verify(sources(live, "batt_temp_c") == ["jolt"],
+           "batterie_c des Dongles zählt als batt_temp_c")
+    verify(not row(live, "charge_power_kw")["seen"] and not row(live, "plugged")["seen"]
+           and answers[live]["missing_required"] == [],
+           "nur Dongle: Ladeleistung und Stecker fehlen, Pflicht ist erfüllt",
+           str(answers[live]["missing_required"]))
+    verify(sources(cloud, "soc_pct") == ["stellantis"]
+           and sources(cloud, "lat") == ["stellantis"] and row(cloud, "plugged")["seen"]
+           and row(cloud, "soc_pct")["sources"][0]["label"] == "Stellantis",
+           "nur Cloud: Ladestand, Position und Stecker von Stellantis",
+           str(row(cloud, "soc_pct")))
+    verify(not row(cloud, "speed_kmh")["seen"] and not row(cloud, "batt_temp_c")["seen"],
+           "nur Cloud: Tempo und Batterietemperatur fehlen")
+    verify(answers[empty]["missing_required"] == ["soc_pct"]
+           and not any(s["seen"] for s in answers[empty]["signals"]),
+           "ohne Daten: der Ladestand fehlt als Pflicht", str(answers[empty]["missing_required"]))
+    verify(missing == 404, "unbekanntes Fahrzeug: 404", str(missing))
+
+
+PARTS = [part_catalog, part_doc, part_sources, part_old_rows, part_api]
 
 
 def main() -> int:
