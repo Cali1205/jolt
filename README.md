@@ -103,6 +103,7 @@ A typical first day:
 | [docs/obd.md](docs/obd.md) | Dongle, supported cars, adding a platform, in-car logger |
 | [docs/obd-meb.md](docs/obd-meb.md) | VW MEB data identifiers and where they come from |
 | [docs/vw-portal.md](docs/vw-portal.md) | Optional: the car's last values, drives and charges from the VW EU Data Act portal, and importing its history |
+| [docs/stellantis.md](docs/stellantis.md) | Optional: the same for Opel, Peugeot, Citroën and DS through the Stellantis cloud |
 | [docs/features.md](docs/features.md) | Every feature in detail |
 | [docs/ios-app.md](docs/ios-app.md) | Building the iPhone app (TestFlight, without a Mac) |
 | [docs/development.md](docs/development.md) | Local setup, checks, code structure, next steps |
@@ -125,6 +126,8 @@ All settings are environment variables, set in `.env` (see `.env.example`).
 | `VW_PORTAL_USER`, `VW_PORTAL_PASSWORD` | Optional: fetch the car's last values from the VW EU Data Act portal ([docs/vw-portal.md](docs/vw-portal.md)). Empty means off. |
 | `VW_PORTAL_VIN`, `VW_PORTAL_VEHICLE` | Which car in the VW account and which jolt vehicle; only needed when there is more than one. |
 | `VW_PORTAL_INTERVAL_MIN` | Minutes between portal fetches (default 15, at least 5). |
+| `STELLANTIS_BRAND`, `STELLANTIS_USER`, `STELLANTIS_COUNTRY` | Optional: Opel, Peugeot, Citroën or DS through the Stellantis cloud ([docs/stellantis.md](docs/stellantis.md)); on once `tools/stellantis_login.py` stored tokens. |
+| `STELLANTIS_VIN`, `STELLANTIS_VEHICLE`, `STELLANTIS_INTERVAL_MIN` | As for the VW portal. |
 | `JOLT_DATA` | Directory for database and backups (default `./data`). |
 | `JOLT_BIND`, `JOLT_PORT` | Where the app is published (default `127.0.0.1:8322`). |
 | `TRUSTED_PROXIES` | Addresses or networks of a reverse proxy or tunnel that may set `X-Forwarded-For`. |
@@ -154,6 +157,9 @@ All settings are environment variables, set in `.env` (see `.env.example`).
 - VW EU Data Act portal login and data points: ported from
   [evcc](https://github.com/evcc-io/evcc) (MIT, Copyright (c) evcc.io), with
   details from [ioBroker.vw-connect](https://github.com/TA2k/ioBroker.vw-connect).
+- Stellantis connected-car API and login: ported from
+  [evcc](https://github.com/evcc-io/evcc) (MIT, Copyright (c) evcc.io); status
+  fields after [psa_car_controller](https://github.com/flobz/psa_car_controller).
 
 Reading a car's diagnostics is at your own risk. jolt only sends read
 requests, but a dongle left in the socket can drain the 12 V battery, and

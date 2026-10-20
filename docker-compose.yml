@@ -68,6 +68,14 @@ services:
       VW_PORTAL_VEHICLE: ${VW_PORTAL_VEHICLE:-}
       VW_PORTAL_INTERVAL_MIN: ${VW_PORTAL_INTERVAL_MIN:-}
       VW_PORTAL_USER_AGENT: ${VW_PORTAL_USER_AGENT:-}
+      # Optional: Opel, Peugeot, Citroen, DS through the Stellantis cloud
+      # (docs/stellantis.md). Off until tools/stellantis_login.py stored tokens.
+      STELLANTIS_BRAND: ${STELLANTIS_BRAND:-}
+      STELLANTIS_USER: ${STELLANTIS_USER:-}
+      STELLANTIS_COUNTRY: ${STELLANTIS_COUNTRY:-}
+      STELLANTIS_VIN: ${STELLANTIS_VIN:-}
+      STELLANTIS_VEHICLE: ${STELLANTIS_VEHICLE:-}
+      STELLANTIS_INTERVAL_MIN: ${STELLANTIS_INTERVAL_MIN:-}
     # Only on this host by default. Docker publishes ports past the host
     # firewall, so 0.0.0.0 here would put jolt on the internet without HTTPS.
     # Set JOLT_BIND to a LAN or VPN address to reach it from other machines.
