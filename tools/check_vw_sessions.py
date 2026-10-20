@@ -698,6 +698,16 @@ def part_api():
                           params={"limit": 2, "before": first["next_before"]}).json()
         load = client.get(f"/api/vehicles/{vid}/charges").json()
         missing = client.get("/api/vehicles/99999/drives").status_code
+        long = client.get(f"/api/vehicles/{vid}/drives", params={"min_km": 7}).json()
+        short = client.get(f"/api/vehicles/{vid}/drives", params={"max_km": 7}).json()
+        mapped = client.get(f"/api/vehicles/{vid}/drives", params={"recorded": "true"}).json()
+        unmapped = client.get(f"/api/vehicles/{vid}/drives", params={"recorded": "false"}).json()
+        later = client.get(f"/api/vehicles/{vid}/drives",
+                           params={"since": "2030-01-01T00:00:00Z"}).json()
+        ac = client.get(f"/api/vehicles/{vid}/charges", params={"type": "AC"}).json()
+        dc = client.get(f"/api/vehicles/{vid}/charges", params={"type": "DC"}).json()
+        big = client.get(f"/api/vehicles/{vid}/charges", params={"min_kwh": 10000}).json()
+        bad = client.get(f"/api/vehicles/{vid}/charges", params={"type": "XX"}).status_code
     items = first["items"] + rest["items"]
     newest = items[0]
     verify(len(items) == 3 and rest["next_before"] is None
@@ -716,6 +726,23 @@ def part_api():
            and load["totals"]["by_type"]["AC"]["count"] == 1,
            "Ladevorgänge mit Summen nach AC/DC", str(load["totals"]))
     verify(missing == 404, "unbekanntes Fahrzeug: 404", str(missing))
+    verify(long["totals"]["count"] + short["totals"]["count"] == 3
+           and all(i["distance_km"] >= 7 for i in long["items"])
+           and all(i["distance_km"] < 7 for i in short["items"])
+           and short["totals"]["count"] >= 1 and long["totals"]["count"] >= 1,
+           "Filter nach Länge: ab und unter 7 km teilen die Fahrten auf, "
+           "die Summen gelten für die Auswahl",
+           f"{long['totals']} {short['totals']}")
+    verify(mapped["totals"]["count"] == 1 and mapped["items"][0]["trip_id"] == trip_id
+           and unmapped["totals"]["count"] == 2
+           and all(i["trip_id"] is None for i in unmapped["items"]),
+           "Filter mit/ohne Aufzeichnung", f"{mapped['totals']} {unmapped['totals']}")
+    verify(later["totals"]["count"] == 0 and later["items"] == [],
+           "Filter nach Zeitraum", str(later["totals"]))
+    verify(ac["totals"]["count"] == 1 and dc["totals"]["count"] == 0
+           and dc["items"] == [] and big["totals"]["count"] == 0 and bad == 422,
+           "Ladevorgänge nach AC/DC und Mindestenergie; unbekannte Art: 422",
+           f"{ac['totals']} {dc['totals']} {big['totals']} {bad}")
 
 
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,

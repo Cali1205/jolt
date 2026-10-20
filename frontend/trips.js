@@ -781,6 +781,87 @@ window.joltTrips = (function () {
     } },
   };
 
+  /* The choices above each list. Every option is the query it adds; a period
+   * is computed when asked, so "letzte 30 Tage" moves with the calendar. */
+  function startOfYear(offset) {
+    return new Date(new Date().getFullYear() + offset, 0, 1).toISOString();
+  }
+  const PERIOD = { label: "Zeitraum", options: [
+    ["alle", () => ({})],
+    ["letzte 30 Tage", () => ({ since: new Date(Date.now() - 30 * 864e5).toISOString() })],
+    ["dieses Jahr", () => ({ since: startOfYear(0) })],
+    ["letztes Jahr", () => ({ since: startOfYear(-1), until: startOfYear(0) })],
+  ] };
+  const LOGBOOK_FILTERS = {
+    drives: {
+      length: { label: "Länge", options: [
+        ["alle", () => ({})],
+        ["unter 10 km", () => ({ max_km: 10 })],
+        ["10–50 km", () => ({ min_km: 10, max_km: 50 })],
+        ["50–150 km", () => ({ min_km: 50, max_km: 150 })],
+        ["über 150 km", () => ({ min_km: 150 })],
+      ] },
+      period: PERIOD,
+      recorded: { label: "Karte", options: [
+        ["alle", () => ({})],
+        ["mit Aufzeichnung", () => ({ recorded: true })],
+        ["nur VW-Daten", () => ({ recorded: false })],
+      ] },
+    },
+    charges: {
+      type: { label: "Art", options: [
+        ["alle", () => ({})],
+        ["AC", () => ({ type: "AC" })],
+        ["DC", () => ({ type: "DC" })],
+      ] },
+      size: { label: "Menge", options: [
+        ["alle", () => ({})],
+        ["ab 1 kWh", () => ({ min_kwh: 1 })],
+        ["ab 10 kWh", () => ({ min_kwh: 10 })],
+        ["ab 30 kWh", () => ({ min_kwh: 30 })],
+      ] },
+      period: PERIOD,
+    },
+  };
+  const FILTER_KEY = "jolt-fahrtenbuch-filter";
+
+  function filterChoice() {
+    try { return JSON.parse(localStorage.getItem(FILTER_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+
+  function filterQuery(kind) {
+    const chosen = filterChoice()[kind] || {};
+    const params = new URLSearchParams();
+    for (const [name, filter] of Object.entries(LOGBOOK_FILTERS[kind])) {
+      const option = filter.options[chosen[name] || 0] || filter.options[0];
+      for (const [key, value] of Object.entries(option[1]())) params.set(key, value);
+    }
+    const text = params.toString();
+    return text ? "&" + text : "";
+  }
+
+  function renderFilters(kind) {
+    const box = document.getElementById(`logbook-${kind}-filter`);
+    if (!box || box.dataset.ready) return;
+    box.dataset.ready = "1";
+    const chosen = filterChoice()[kind] || {};
+    box.innerHTML = Object.entries(LOGBOOK_FILTERS[kind]).map(([name, filter]) =>
+      `<label>${filter.label}<select data-filter="${kind}" data-name="${name}">`
+      + filter.options.map(([text], i) =>
+        `<option value="${i}"${i === (chosen[name] || 0) ? " selected" : ""}>${text}</option>`).join("")
+      + `</select></label>`).join("");
+    box.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-filter]");
+      if (!select) return;
+      const all = filterChoice();
+      all[kind] = { ...(all[kind] || {}), [select.dataset.name]: Number(select.value) };
+      try { localStorage.setItem(FILTER_KEY, JSON.stringify(all)); } catch (e) { /* not remembered */ }
+      loadLogbookPart(kind).catch((failure) =>
+        K.report("Fahrtenbuch: " + failure.message, "fehler"));
+    });
+  }
+
   function logbookVehicle() {
     const vehicles = K.state.vehicles || [];
     return chosenVehicleId() || (vehicles.length === 1 ? vehicles[0].id : null);
@@ -790,11 +871,13 @@ window.joltTrips = (function () {
     const vehicleId = logbookVehicle();
     const list = document.getElementById("logbook-" + kind);
     if (!vehicleId || !list) return 0;
-    const query = before ? "&before=" + encodeURIComponent(before) : "";
+    renderFilters(kind);
+    const query = (before ? "&before=" + encodeURIComponent(before) : "") + filterQuery(kind);
     const page = await K.api(`/api/vehicles/${vehicleId}/${kind}?limit=30${query}`);
     const more = page.next_before
       ? `<button class="klein" data-more="${kind}" data-before="${page.next_before}">ältere</button>` : "";
-    const html = page.items.map(LOGBOOK[kind].row).join("") + more;
+    const html = (page.items.length || before ? page.items.map(LOGBOOK[kind].row).join("")
+      : '<p class="leer">Nichts für diese Auswahl.</p>') + more;
     // The first page replaces, so two loads that overlap (switching to the
     // tab while the vehicle choice changes) do not list everything twice.
     if (!before) {
@@ -813,7 +896,10 @@ window.joltTrips = (function () {
     if (!block) return;
     try {
       const counts = await Promise.all(Object.keys(LOGBOOK).map((k) => loadLogbookPart(k)));
-      block.hidden = !counts.some((n) => n > 0);
+      // Hidden only when there is nothing at all, not when a filter
+      // leaves a list empty: the filters must stay reachable.
+      block.hidden = !counts.some((n) => n > 0) && !Object.values(filterChoice())
+        .some((chosen) => Object.values(chosen || {}).some(Boolean));
     } catch (failure) {
       block.hidden = true;
       K.report("Fahrtenbuch: " + failure.message, "fehler");
