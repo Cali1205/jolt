@@ -370,6 +370,12 @@ window.joltVehicle = (function () {
     if (window.joltTrips && window.joltTrips.reportVehicle) {
       window.joltTrips.reportVehicle();
     }
+    // The logbook belongs to a vehicle. At startup the trips view asks for it
+    // before this list has arrived, finds no vehicle and stays hidden; now
+    // that the vehicles are known it can load.
+    if (window.joltTrips && window.joltTrips.loadLogbook) {
+      window.joltTrips.loadLogbook();
+    }
 
     const newOption = document.createElement("option");
     newOption.value = "neu";

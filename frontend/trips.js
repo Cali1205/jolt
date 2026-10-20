@@ -888,5 +888,5 @@ window.joltTrips = (function () {
   }
 
   return { set_up, load, show, startRecording,
-           carplayAction, reportVehicle };
+           carplayAction, reportVehicle, loadLogbook };
 })();
