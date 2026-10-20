@@ -101,7 +101,7 @@ A typical first day:
 | [docs/deploy.md](docs/deploy.md) | Running jolt on your own server |
 | [docs/obd.md](docs/obd.md) | Dongle, supported cars, adding a platform, in-car logger |
 | [docs/obd-meb.md](docs/obd-meb.md) | VW MEB data identifiers and where they come from |
-| [docs/vw-portal.md](docs/vw-portal.md) | Optional: the car's last values from the VW EU Data Act portal |
+| [docs/vw-portal.md](docs/vw-portal.md) | Optional: the car's last values, drives and charges from the VW EU Data Act portal, and importing its history |
 | [docs/features.md](docs/features.md) | Every feature in detail |
 | [docs/ios-app.md](docs/ios-app.md) | Building the iPhone app (TestFlight, without a Mac) |
 | [docs/development.md](docs/development.md) | Local setup, checks, code structure, next steps |
