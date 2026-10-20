@@ -744,6 +744,92 @@
     "overrides": []
    },
    "description": "Nach Strecke gewichtet. Kurze Fahrten im Winter kosten am meisten: Heizen und ein kalter Akku fallen auf wenige Kilometer."
+  },
+  {
+   "id": 14,
+   "type": "barchart",
+   "title": "Ladezeit 10–80 % je Säulenleistung (Minuten)",
+   "gridPos": {
+    "x": 0,
+    "y": 54,
+    "w": 12,
+    "h": 10
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap::text || ' kW' AS \"Klasse\", minutes AS \"Minuten 10-80 %\"\nFROM per_cap ORDER BY cap DESC",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "xField": "Klasse",
+    "orientation": "vertical",
+    "showValue": "never",
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    },
+    "barWidth": 0.8,
+    "groupWidth": 0.7
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 80
+     }
+    },
+    "overrides": []
+   },
+   "description": "Bester Fall mit warmem Akku: die Ladekurve ist die obere Kante aller DC-Ladevorgänge im Zeitraum, je Prozent Ladestand gekappt bei der Säulenleistung. Echte Ladevorgänge dauern etwa 10-15 % länger (Hochfahren der Leistung), mit kaltem Akku deutlich mehr."
+  },
+  {
+   "id": 15,
+   "type": "table",
+   "title": "Ladezeit 10–80 %: was eine schwächere Säule kostet",
+   "gridPos": {
+    "x": 12,
+    "y": 54,
+    "w": 12,
+    "h": 10
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "jolt-pg"
+   },
+   "targets": [
+    {
+     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap AS \"Säule kW\", minutes AS \"Min 10-80 %\",\n       round(minutes - min(minutes) OVER (), 1) AS \"+ Min\",\n       round(100 * (minutes / min(minutes) OVER () - 1)) AS \"+ %\",\n       avg_kw AS \"Ø kW\", limited AS \"% gedrosselt\", covered AS \"% mit Messdaten\"\nFROM per_cap ORDER BY cap DESC",
+     "format": "table",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "jolt-pg"
+     },
+     "refId": "A",
+     "editorMode": "code"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   },
+   "description": "% gedrosselt: Anteil der Prozentpunkte, bei denen die Säule weniger liefert als der Akku annehmen würde. % mit Messdaten: wie viele der 70 Prozentpunkte zwischen 10 und 80 % durch DC-Ladevorgänge belegt sind - fehlen welche, ist die Zeit zu kurz."
   }
  ],
  "links": [
