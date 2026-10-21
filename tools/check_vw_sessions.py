@@ -564,6 +564,11 @@ def part_jolt():
                and rows[0].energy_used_kwh == 1.08,
                "eine beendete Fahrt steht sofort im Fahrtenbuch, auch ohne VW-Daten",
                str(rows and columns(rows[0])))
+        ends = rows and (rows[0].start_lat, rows[0].start_lon, rows[0].end_lat, rows[0].end_lon)
+        verify(ends and ends[:2] == (48.1, 11.5) and close(ends[2], 48.154, 1e-6)
+               and ends[3] == 11.5,
+               "Start und Ziel aus dem ersten und letzten GPS-Punkt, Breite vor Länge",
+               str(ends))
         logbook.store_drives(db, vid, logbook.HISTORY, [drives[2]])
         rows = drives_of(db, vid)
         jolt_first = columns(rows[0])
@@ -594,6 +599,8 @@ def part_jolt():
                "eine Aufzeichnung über zwei VW-Fahrten: beide verweisen auf sie, keine "
                "wird verklebt, keine bekommt die Energie der ganzen Aufzeichnung",
                str([columns(r) for r in rows]))
+        verify(all(r.start_lat is None and r.end_lat is None for r in rows),
+               "und keine ihren Start und ihr Ziel", str([(r.start_lat, r.end_lat) for r in rows]))
 
         three = new_vehicle(db)
         planned = recorded(db, three, T(14, 9), 0, 5, 60, recording=False,

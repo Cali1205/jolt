@@ -89,6 +89,9 @@ def drives(vehicle_id: int, limit: int = Query(30, ge=1, le=200),
             "odo_end": r.odo_end, "distance_km": r.distance_km,
             "soc_start": r.soc_start, "soc_end": r.soc_end,
             "energy_used_kwh": r.energy_used_kwh,
+            # Only to the logged-in owner, like the recordings' tracks.
+            "start_lat": r.start_lat, "start_lon": r.start_lon,
+            "end_lat": r.end_lat, "end_lon": r.end_lon,
             "kwh_per_100km": (round(r.energy_used_kwh / r.distance_km * 100, 1)
                               if r.energy_used_kwh is not None and r.distance_km >= 1
                               else None),

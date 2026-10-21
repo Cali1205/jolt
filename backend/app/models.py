@@ -285,6 +285,11 @@ class VehicleDrive(Base):
     soc_start = Column(Float)
     soc_end = Column(Float)
     energy_used_kwh = Column(Float)
+    # WGS84; NULL where no source that saw the whole drive knows them.
+    start_lat = Column(Float)
+    start_lon = Column(Float)
+    end_lat = Column(Float)
+    end_lon = Column(Float)
     sources = Column(JSON, nullable=False)
     live_session_id = Column(Integer, ForeignKey("live_sessions.id",
                                                  ondelete="SET NULL"))
