@@ -21,20 +21,78 @@ license, Copyright (c) evcc.io), the field meanings follow
 | `charge_type` | AC or DC, while charging |
 | `charge_remaining_min` | Remaining charge time, while charging |
 | `battery_health_pct` | State of health, when the car reports it |
+| `battery_resistance_pct` | The pack's internal resistance relative to new |
+| `capacity_kwh`, `energy_kwh` | Usable capacity and the energy now in the battery (see below) |
 | `climate_state` | Preconditioning on or off |
 | `lat`, `lon`, `position_at` | The car's last position and when it was fixed |
+| `outside_temp_c` | Outside temperature |
+| `ignition` | `on` or `off`; a report with `on` is a switch-on report |
+| `alarm_active` | Alarm system armed |
+| `aux_battery_pct` | Charge level of the 12 V battery |
+| `maintenance_km`, `maintenance_days` | Distance and days to the next service |
 
 The names are jolt's signal catalog ([data-model.md](data-model.md)). The
-car reports no charge power, no battery temperature and no speed, so the
-card "Daten" in the tab "Fahrzeug" shows those as missing unless a dongle
-delivers them.
+car reports no charge power and no battery temperature, so the card "Daten"
+in the tab "Fahrzeug" shows those as missing unless a dongle delivers them.
+
+jolt reads these endpoints, all read-only:
+
+| Endpoint | When | What |
+|---|---|---|
+| `/user/vehicles/{id}/status` | Every poll | The values above. The whole answer is stored flattened in the snapshot's `raw`, also the fields jolt does not interpret yet. |
+| `/user/vehicles/{id}/maintenance` | Once a day | `maintenance_km`, `maintenance_days`; carried in every snapshot until the next fetch. |
+| `/user/vehicles/{id}/trips` | See [Trips](#trips) | The logbook source "Stellantis-Fahrten". |
+
+Some status fields need care:
+
+- **Stale measurements.** The car keeps reporting its last reading of a
+  sensor while it sleeps. A measurement (outside temperature, 12 V battery)
+  whose own time stamp lies more than 30 minutes before the report is
+  dropped. States (ignition, odometer) count however old their time stamp
+  is: it is when they last changed. `kinetic` (speed, moving) is not read;
+  on a Corsa-e it was months old.
+- **Energy unit.** Several cars report capacity, residual energy and trip
+  consumption in a unit 1.343 times smaller than a watt hour
+  ([Home Assistant integration, issue #272](https://github.com/andreadegiovine/homeassistant-stellantis-vehicles/issues/272)).
+  jolt decides per car from the vehicle profile: it takes the factor (1 or
+  1.343) that puts the reported capacity within 15 % of the profile's
+  usable capacity times the state of health. When neither does, jolt stores
+  no capacity, energy or trip consumption. The residual is also dropped
+  when it lies more than 10 points away from the charge level.
+- **Two arrays.** The answer carries `energies[]` and the older `energy[]`
+  with the same data; jolt reads `energies[]` and falls back to `energy[]`.
+
+## Trips
+
+The car keeps its own list of trips: start and stop time, start mileage and
+distance, charge level at both ends, the energy it used, average speed and
+the start and stop positions. jolt stores each finished trip of a kilometre
+or more as a logbook drive with the source "Stellantis-Fahrten".
+
+- **Backfill.** The first poll after the app starts reads every page of the
+  list (60 trips a page), following the `next` links. After that, each poll
+  reads only the last two pages, and only while the car has reported within
+  the last two hours. Storing is idempotent: a trip stored again changes
+  nothing.
+- **One row per drive.** A drive the status snapshots detected merges into
+  the trip; the row then takes the trip's times, mileage and positions, and
+  its start is no longer an estimate. A jolt recording of the same drive
+  merges too; its energy (from the dongle) wins over the car's figure.
+- **Map.** A drive with both positions and no recording shows a link
+  "Karte" in the logbook; it opens start and end on OpenStreetMap.
 
 ## Limits
 
 - **Not live.** jolt asks every `STELLANTIS_INTERVAL_MIN` minutes (default
   15), and once an hour while nothing changes. The values are as fresh as
   the car's last report.
-- **Read-only.** jolt starts neither charging nor preconditioning.
+- **Read-only, and jolt never wakes the car.** jolt starts neither charging
+  nor preconditioning, and sends no wake-up. It reads what the car last sent
+  to the cloud.
+- **The car switches its connectivity off.** Stellantis disables the
+  connection of a car that has not been used for more than 15 consecutive
+  minutes in the last 7 days (Home Assistant integration's README). The
+  values then stay where they were until the car is driven again.
 - **No charge power.** Charges in the logbook come from the charge state;
   their energy is the rise of the charge level times the usable capacity,
   and they have no power curve. A stop shorter than two polls (30 minutes by
@@ -112,9 +170,9 @@ asks less and less often. Run the login tool again and restart the app.
 - **Recording start:** without a dongle reading, jolt takes the charge level
   if the car reported it within the last 12 hours ("Startladestand 64 % aus
   der Stellantis-Cloud").
-- **Logbook:** drives (from the odometer) and charges (from the charge
-  state), with the source "Stellantis". A jolt recording of the same drive
-  merges with it.
+- **Logbook:** drives from the car's trip list ("Stellantis-Fahrten") and
+  from the odometer in the snapshots ("Stellantis"), charges from the charge
+  state. All sources of one drive merge into one row.
 - **Tab "Einstellungen":** the row "Stellantis" shows whether the last fetch
   worked.
 
@@ -125,8 +183,11 @@ asks less and less often. Run the login tool again and restart the app.
   through the API. The VIN appears only shortened.
 - jolt stores, per poll that brought a new report, the values above and the
   whole status answer, **including the car's position**. Over time that is a
-  record of where the car was parked, every quarter hour. It stays in your
-  database; delete the vehicle to remove it.
+  record of where the car was parked, every quarter hour. It also stores the
+  start and stop position of every trip in the car's list, back to the
+  oldest trip the cloud keeps. Both stay in your database and reach only
+  the logged-in browser; a click on "Karte" sends the two positions of that
+  drive to openstreetmap.org. Delete the vehicle to remove them.
 - jolt talks only to `idpcvs.<brand>.com` (`idpcvs.driveds.com` for DS) and
   `api.groupe-psa.com`.
 - To stop, remove `STELLANTIS_USER` and restart. To also drop the tokens:
