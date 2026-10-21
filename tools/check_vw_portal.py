@@ -499,7 +499,7 @@ def part_poller():
                          snap, snap])
     config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None,
                           vehicle=str(vehicle_id), interval_min=15,
-                          provides=snapshot.PROVIDES, connect=lambda: source)
+                          provides=snapshot.PROVIDES, connect=lambda _: source)
     poll = poller.Poll(config, SessionLocal)
 
     lines = []
@@ -562,7 +562,7 @@ def part_poller():
         bad = poller.Poll(cloud.Config(
             name="vw_portal", env="VW_PORTAL", vin=vin, vehicle=vehicle,
             interval_min=15, provides=snapshot.PROVIDES,
-            connect=lambda: type("S", (), {"vehicles": lambda self: vins})()),
+            connect=lambda _: type("S", (), {"vehicles": lambda self: vins})()),
             SessionLocal)
         try:
             bad.tick()

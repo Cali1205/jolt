@@ -710,7 +710,7 @@ def part_portal():
     original = logbook.store_from_snapshots
     logbook.store_from_snapshots = lambda *args, **kwargs: 1 / 0
     config = cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None, vehicle=str(vid),
-                          interval_min=15, provides=frozenset(), connect=lambda: None)
+                          interval_min=15, provides=frozenset(), connect=lambda _: None)
     poll = poller.Poll(config, SessionLocal)
     poll.status.vehicle_id = vid
     db = SessionLocal()

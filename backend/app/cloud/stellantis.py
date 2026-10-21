@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 
 import requests
 
+from .. import models
 from ..version import VERSION
 from . import SourceError, credentials, mask
 from .snapshot import Snapshot, parse_time
@@ -38,6 +39,7 @@ REFRESH_MARGIN = timedelta(minutes=2)
 USER_AGENT = f"jolt/{VERSION} (+https://github.com/cali1205/jolt)"
 LOGIN_AGAIN = ("log in again: docker compose run --rm --no-deps -it jolt-app "
                "python tools/stellantis_login.py")
+MAINTENANCE_EVERY = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,31 @@ BRANDS = {
 
 PROVIDES = frozenset({"soc_pct", "range_km", "odometer_km", "plugged", "charge_state",
                       "charge_type", "charge_remaining_min", "battery_health_pct",
-                      "climate_state", "lat", "lon", "position_at"})
+                      "climate_state", "lat", "lon", "position_at", "outside_temp_c",
+                      "ignition", "alarm_active", "aux_battery_pct",
+                      "battery_resistance_pct", "capacity_kwh", "energy_kwh",
+                      "maintenance_km", "maintenance_days"})
+
+# A measurement this much older than the report is the car's last reading
+# before it fell asleep: a Corsa-e parked since 13:27 still reported 15.5 °C
+# at five in the morning, and its `kinetic.speed` was five months old
+# (October 2026).
+STALE = timedelta(minutes=30)
+# Several cars report the battery's energy in a unit 1.343 times smaller than
+# a watt hour (Home Assistant integration, issue #272: e-208, Mokka-e, ë-C4
+# and Corsa-e against OBD readings; their KWH_CORRECTION). A Corsa-e with
+# 49 kWh usable reports a capacity of 36608, and its trips 381 per percent of
+# charge level over 650 km; times 1.343 that is 49.2 kWh and 512 Wh.
+KWH_CORRECTION = 1.343
+# Scaled, the capacity must lie this close to the profile's usable capacity
+# times the state of health; otherwise no energy figure is believed.
+SCALE_TOLERANCE = 0.15
+# The residual reads some points below the charge level (the capacity holds
+# energy below 0 %: 54.6 % of it at a displayed 60 %); further off it is not
+# the same battery state.
+RESIDUAL_TOLERANCE_PCT = 10.0
+IGNITION = {"startup": "on", "start": "on", "stop": "off"}
+ALARM = {"active": True, "inactive": False}
 
 
 class StellantisError(SourceError):
@@ -149,17 +175,119 @@ def _flatten(node, path: str, out: dict) -> None:
         out[path] = [path, node, None]
 
 
-def parse_status(doc: dict) -> Snapshot | None:
-    """One `/status` answer as a snapshot of catalog values, or None when
-    it holds nothing jolt knows."""
+def _dict(node) -> dict:
+    return node if isinstance(node, dict) else {}
+
+
+def _electric(doc: dict) -> tuple[dict, dict, dict]:
+    """The electric energy entry, its charging and its battery part.
+    `energies[]` is the newer shape and keeps both under `extension`;
+    `energy[]` carries the same data and is the fallback."""
+    for key in ("energies", "energy"):
+        entry = next((e for e in doc.get(key) or []
+                      if isinstance(e, dict) and e.get("type") == "Electric"), None)
+        if entry:
+            extension = _dict(_dict(entry.get("extension")).get("electric"))
+            return (entry, _dict(extension.get("charging") or entry.get("charging")),
+                    _dict(extension.get("battery") or entry.get("battery")))
+    return {}, {}, {}
+
+
+def _measured_recently(node: dict, captured_at: datetime) -> bool:
+    """False for a measurement taken long before the report (`STALE`)."""
+    taken = parse_time(node.get("createdAt") or node.get("updatedAt"))
+    return taken is None or taken >= captured_at - STALE
+
+
+def _captured_at(doc: dict) -> datetime | None:
+    entry, _, _ = _electric(doc)
+    return (parse_time(entry.get("updatedAt")) or parse_time(entry.get("createdAt"))
+            or parse_time(doc.get("updatedAt")) or parse_time(doc.get("createdAt")))
+
+
+def energy_scale(capacity, net_kwh: float | None,
+                 health_pct: float | None = None) -> float | None:
+    """The factor from the car's energy figures to watt hours: 1 or
+    `KWH_CORRECTION`, whichever puts the reported capacity next to the
+    profile's usable capacity aged by the state of health. None when neither
+    does, or without a profile to compare with."""
+    capacity = _number(capacity)
+    if not capacity or capacity <= 0 or not net_kwh:
+        return None
+    expected = net_kwh * 1000 * ((health_pct or 100) / 100)
+    scale = min((1.0, KWH_CORRECTION), key=lambda s: abs(capacity * s / expected - 1))
+    return scale if abs(capacity * scale / expected - 1) <= SCALE_TOLERANCE else None
+
+
+def status_scale(doc: dict, net_kwh: float | None) -> float | None:
+    """`energy_scale` for one status answer."""
+    _, _, battery = _electric(doc)
+    health = _number(_dict(battery.get("health")).get("capacity"))
+    return energy_scale(_dict(battery.get("load")).get("capacity"), net_kwh,
+                        health if health and 0 < health <= 110 else None)
+
+
+def _energy(battery: dict, scale: float | None, level) -> dict:
+    load = _dict(battery.get("load"))
+    capacity, residual = _number(load.get("capacity")), _number(load.get("residual"))
+    if not scale or not capacity or capacity <= 0:
+        return {}
+    values = {"capacity_kwh": round(capacity * scale / 1000, 2)}
+    if (residual is not None and 0 <= residual <= capacity and level is not None
+            and abs(residual / capacity * 100 - level) <= RESIDUAL_TOLERANCE_PCT):
+        values["energy_kwh"] = round(residual * scale / 1000, 2)
+    return values
+
+
+def _condition(doc: dict, captured_at: datetime) -> dict:
+    """Ignition, alarm, outside temperature and the 12 V battery."""
     values: dict = {}
-    electric = next((e for e in doc.get("energy") or []
-                     if isinstance(e, dict) and e.get("type") == "Electric"), None) or {}
+    ignition = IGNITION.get(str(_dict(doc.get("ignition")).get("type") or "").lower())
+    if ignition:
+        values["ignition"] = ignition
+    alarm = ALARM.get(str(_dict(_dict(doc.get("alarm")).get("status"))
+                          .get("activation") or "").lower())
+    if alarm is not None:
+        values["alarm_active"] = alarm
+    air = _dict(_dict(doc.get("environment")).get("air"))
+    temp = _number(air.get("temp"))
+    if temp is not None and -60 <= temp <= 70 and _measured_recently(air, captured_at):
+        values["outside_temp_c"] = temp
+    # `battery` at the top is the 12 V battery; its "voltage" is a charge
+    # level in percent (Home Assistant: service_battery_voltage, unit %).
+    service = _dict(doc.get("battery"))
+    level = _number(service.get("voltage"))
+    if level is not None and 0 <= level <= 100 and _measured_recently(service, captured_at):
+        values["aux_battery_pct"] = level
+    return values
+
+
+def parse_maintenance(doc: dict) -> dict:
+    """The `/maintenance` answer as catalog values; negative when overdue."""
+    values = {}
+    for name, key in (("maintenance_km", "mileageBeforeMaintenance"),
+                      ("maintenance_days", "daysBeforeMaintenance")):
+        if (number := _number(doc.get(key))) is not None:
+            values[name] = number
+    return values
+
+
+def parse_status(doc: dict, scale: float | None = None) -> Snapshot | None:
+    """One `/status` answer as a snapshot of catalog values, or None when
+    it holds nothing jolt knows. `scale` (`status_scale`) turns the battery's
+    energy figures into kWh; without it they are left out.
+
+    Measurements (outside temperature, 12 V battery) count only when taken
+    around the report (`STALE`). States count however old their time stamp:
+    the ignition's is when it last changed, the odometer's when the car last
+    moved. `kinetic` (speed, moving) is not read: it stops updating."""
+    values: dict = {}
+    electric, charging, battery = _electric(doc)
+    captured_at = _captured_at(doc)
     if (level := _number(electric.get("level"))) is not None and 0 <= level <= 100:
         values["soc_pct"] = level
     if (autonomy := _number(electric.get("autonomy"))) is not None and autonomy >= 0:
         values["range_km"] = autonomy
-    charging = electric.get("charging") or {}
     plugged = charging.get("plugged") if isinstance(charging.get("plugged"), bool) else None
     if plugged is not None:
         values["plugged"] = plugged
@@ -172,12 +300,12 @@ def parse_status(doc: dict) -> Snapshot | None:
     remaining = duration_min(charging.get("remainingTime"))
     if remaining is not None and state == "charging":
         values["charge_remaining_min"] = remaining
-    health = (((electric.get("battery") or {}).get("health") or {}).get("capacity")
-              if isinstance(electric.get("battery"), dict) else None)
-    if health is None:
-        health = ((doc.get("battery") or {}).get("health") or {}).get("capacity")
-    if (health := _number(health)) is not None and 0 < health <= 110:
-        values["battery_health_pct"] = health
+    health = _dict(battery.get("health"))
+    if (capacity := _number(health.get("capacity"))) is not None and 0 < capacity <= 110:
+        values["battery_health_pct"] = capacity
+    if (resistance := _number(health.get("resistance"))) is not None and 0 < resistance <= 300:
+        values["battery_resistance_pct"] = resistance
+    values.update(_energy(battery, scale, values.get("soc_pct")))
     mileage = _number((doc.get("odometer") or {}).get("mileage"))
     if mileage is not None and mileage > 0:
         values["odometer_km"] = mileage
@@ -192,15 +320,13 @@ def parse_status(doc: dict) -> Snapshot | None:
             fixed = parse_time(properties.get("updatedAt") or properties.get("createdAt"))
             if fixed:
                 values["position_at"] = _iso(fixed)
-    climate = ((doc.get("preconditionning") or {}).get("airConditioning") or {}).get("status")
+    preconditioning = _dict(doc.get("preconditioning") or doc.get("preconditionning"))
+    climate = _dict(preconditioning.get("airConditioning")).get("status")
     if isinstance(climate, str) and climate.strip():
         values["climate_state"] = climate.strip().lower()
-    if not values:
+    if not values or captured_at is None:
         return None
-    captured_at = (parse_time(electric.get("updatedAt")) or parse_time(doc.get("updatedAt"))
-                   or parse_time(doc.get("createdAt")))
-    if captured_at is None:
-        return None
+    values.update(_condition(doc, captured_at))
     raw: dict = {}
     _flatten(doc, "", raw)
     return Snapshot(captured_at=captured_at, values=values, raw=raw)
@@ -288,7 +414,10 @@ def _fresh(data: dict, now: datetime) -> bool:
 class Stellantis:
     """One account of one brand; tokens in `cloud_credentials`."""
 
-    def __init__(self, brand: str, user: str, db_factory, adapter=None):
+    def __init__(self, brand: str, user: str, db_factory, adapter=None,
+                 vehicle_id: int | None = None):
+        """`vehicle_id` is the jolt vehicle whose profile decides the unit of
+        the energy figures (`energy_scale`)."""
         if brand not in BRANDS:
             raise StellantisError(f"unknown brand {brand!r} (opel, peugeot, citroen, ds)")
         self.brand = BRANDS[brand]
@@ -296,7 +425,12 @@ class Stellantis:
         self.account = account_key(brand, user)
         self.db_factory = db_factory
         self.session = _session(adapter)
+        self.vehicle_id = vehicle_id
         self._ids: dict[str, str] = {}
+        # From the last status answer, for the trips fetched after it.
+        self.scale: float | None = None
+        self._maintenance: dict = {}
+        self._maintenance_at: datetime | None = None
 
     def _token(self, stale: str | None = None) -> str:
         """A valid access token. `stale` is one the API just refused: refresh
@@ -347,12 +481,47 @@ class Stellantis:
                      if isinstance(v, dict) and v.get("vin") and v.get("id")}
         return list(self._ids)
 
-    def latest(self, vin: str) -> Snapshot | None:
+    def _path(self, vin: str) -> str:
         if vin not in self._ids:
             self.vehicles()
         if vin not in self._ids:
             raise StellantisError(f"vehicle {mask(vin)} is not on the account")
-        return parse_status(self._get("status", f"/user/vehicles/{self._ids[vin]}/status"))
+        return f"/user/vehicles/{self._ids[vin]}"
+
+    def _net_kwh(self) -> float | None:
+        if self.vehicle_id is None:
+            return None
+        db = self.db_factory()
+        try:
+            vehicle = db.get(models.Vehicle, self.vehicle_id)
+            return vehicle.battery_net_kwh if vehicle else None
+        finally:
+            db.close()
+
+    def _maintenance_raw(self, vin: str) -> dict:
+        """The `/maintenance` answer, asked once a day; a failure keeps the
+        last one and does not fail the status."""
+        now = datetime.now(timezone.utc)
+        if self._maintenance_at is None or now - self._maintenance_at >= MAINTENANCE_EVERY:
+            self._maintenance_at = now
+            try:
+                self._maintenance = self._get("maintenance", self._path(vin) + "/maintenance")
+            except StellantisError:
+                pass
+        return self._maintenance if isinstance(self._maintenance, dict) else {}
+
+    def latest(self, vin: str) -> Snapshot | None:
+        doc = self._get("status", self._path(vin) + "/status")
+        self.scale = status_scale(doc, self._net_kwh())
+        snap = parse_status(doc, self.scale)
+        if snap is None:
+            return None
+        maintenance = self._maintenance_raw(vin)
+        raw: dict = {}
+        _flatten(maintenance, "maintenance", raw)
+        return Snapshot(captured_at=snap.captured_at,
+                        values={**snap.values, **parse_maintenance(maintenance)},
+                        raw={**snap.raw, **raw})
 
     def updates(self, vin: str) -> list[Snapshot]:
         """The current status; the poller stores it once per report time."""

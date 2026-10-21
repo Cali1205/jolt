@@ -137,7 +137,7 @@ class Poll:
                 self.status.vehicle_id = _vehicle_id(db, self.config.vehicle,
                                                      self.config.env)
             if self.client is None:
-                self.client = self.config.connect()
+                self.client = self.config.connect(self.status.vehicle_id)
             if self.vin is None:
                 self.vin = self.config.vin or _one_vin(self.client.vehicles(),
                                                        self.config.env)

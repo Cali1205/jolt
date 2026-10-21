@@ -55,6 +55,12 @@ the two differ.
 | `current_a` | A | number | optional | Strom | Pack current; positive means discharging. |
 | `climate_state` |  | text | optional | Klimatisierung | Climate control state in lower case, as the car says it. |
 | `locked` |  | bool | optional | Verriegelt | Doors locked. |
+| `ignition` |  | enum: `on`, `off` | optional | Zündung | Ignition on or off; a report with `on` is a switch-on report. |
+| `alarm_active` |  | bool | optional | Alarmanlage | Alarm system armed. |
+| `aux_battery_pct` | % | number | optional | 12-V-Batterie | Charge level of the 12 V battery. |
+| `battery_resistance_pct` | % | number | optional | Innenwiderstand | The pack's internal resistance relative to new, as the car reports it. |
+| `maintenance_km` | km | number | optional | Service in | Kilometres until the next service is due. |
+| `maintenance_days` | d | number | optional | Service in Tagen | Days until the next service is due. |
 <!-- signals:end -->
 
 ## Where the signals come from

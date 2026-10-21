@@ -89,6 +89,19 @@ SIGNALS: tuple[Signal, ...] = (
            "Climate control state in lower case, as the car says it."),
     Signal("locked", None, "bool", "optional", "Verriegelt",
            "Doors locked."),
+    Signal("ignition", None, "enum", "optional", "Zündung",
+           "Ignition on or off; a report with `on` is a switch-on report.",
+           ("on", "off")),
+    Signal("alarm_active", None, "bool", "optional", "Alarmanlage",
+           "Alarm system armed."),
+    Signal("aux_battery_pct", "%", "number", "optional", "12-V-Batterie",
+           "Charge level of the 12 V battery."),
+    Signal("battery_resistance_pct", "%", "number", "optional", "Innenwiderstand",
+           "The pack's internal resistance relative to new, as the car reports it."),
+    Signal("maintenance_km", "km", "number", "optional", "Service in",
+           "Kilometres until the next service is due."),
+    Signal("maintenance_days", "d", "number", "optional", "Service in Tagen",
+           "Days until the next service is due."),
 )
 
 BY_NAME: dict[str, Signal] = {s.name: s for s in SIGNALS}

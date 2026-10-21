@@ -49,6 +49,9 @@ OPEL = stellantis.BRANDS["opel"]
 TOKEN_URL = OPEL.token_url
 VEHICLES = stellantis.API + "/user/vehicles"
 STATUS_URL = stellantis.API + f"/user/vehicles/{VEHICLE_ID}/status"
+MAINTENANCE_URL = stellantis.API + f"/user/vehicles/{VEHICLE_ID}/maintenance"
+TRIPS_URL = stellantis.API + f"/user/vehicles/{VEHICLE_ID}/trips"
+TRIPS_PER_PAGE = 3
 ACCOUNT = stellantis.account_key("opel", USER)
 
 STATUS = {
@@ -75,6 +78,51 @@ STATUS = {
     "updatedAt": "2026-10-20T07:02:54Z"}
 
 
+# The shape a Corsa-e answered with in October 2026 (`energies[]` next to the
+# older `energy[]`), synthetic values. `energy[]` says 59 % so that reading
+# it instead of `energies[]` shows.
+REPORT = "2026-10-21T05:37:47Z"
+STATUS_FULL = {
+    "createdAt": REPORT, "updatedAt": REPORT,
+    "lastPosition": {"type": "Feature",
+                     "geometry": {"type": "Point", "coordinates": [9.18, 48.78, 250.0]},
+                     "properties": {"createdAt": "2026-10-21T05:24:11Z", "type": "Acquire",
+                                    "signalQuality": 9, "fixStatus": "3D"}},
+    "ignition": {"createdAt": "2026-10-21T04:10:00Z", "type": "Stop"},
+    "battery": {"voltage": 85.0, "createdAt": REPORT},
+    "environment": {"luminosity": {"createdAt": REPORT, "day": True},
+                    "air": {"createdAt": REPORT, "temp": 9.5}},
+    "odometer": {"createdAt": REPORT, "mileage": 7066.9},
+    "kinetic": {"createdAt": "2026-05-21T18:09:26Z", "speed": 42.0, "moving": True},
+    "alarm": {"status": {"createdAt": REPORT, "activation": "Active"}},
+    "preconditioning": {"airConditioning": {"createdAt": REPORT, "status": "Disabled"}},
+    "energies": [{"createdAt": REPORT, "type": "Electric", "subType": "ElectricEnergy",
+                  "level": 60.0, "autonomy": 192,
+                  "extension": {"electric": {
+                      "battery": {"load": {"createdAt": REPORT, "capacity": 36608,
+                                           "residual": 20000},
+                                  "health": {"createdAt": REPORT, "capacity": 100,
+                                             "resistance": 100}},
+                      "charging": {"plugged": False, "status": "Disconnected",
+                                   "chargingRate": 0, "chargingMode": "No",
+                                   "nextDelayedTime": "PT0S", "schedule": []}}}}],
+    "energy": [{"createdAt": REPORT, "updatedAt": REPORT, "type": "Electric", "level": 59.0,
+                "autonomy": 190,
+                "charging": {"plugged": False, "status": "Disconnected", "chargingMode": "No"},
+                "battery": {"load": {"capacity": 36608, "residual": 20000},
+                            "health": {"capacity": 100, "resistance": 100}}}],
+    "_links": {"self": {"href": "/connectedcar/v4/user/vehicles/x/status"}}}
+MAINTENANCE = {"createdAt": REPORT, "updatedAt": REPORT, "mileageBeforeMaintenance": 17920.0,
+               "daysBeforeMaintenance": 120}
+NET_KWH = 49.0
+
+
+def full_with(change) -> dict:
+    doc = json.loads(json.dumps(STATUS_FULL))
+    change(doc)
+    return doc
+
+
 def status_with(**charging) -> dict:
     doc = json.loads(json.dumps(STATUS))
     doc["energy"][1]["charging"].update(charging)
@@ -88,7 +136,8 @@ def part_parse():
                 "charge_state": "charging", "charge_type": "DC",
                 "charge_remaining_min": 90.0, "battery_health_pct": 96,
                 "lat": 48.49371, "lon": 9.20512, "position_at": "2026-10-20T06:58:02Z",
-                "climate_state": "disabled"}
+                "climate_state": "disabled", "aux_battery_pct": 83.5,
+                "battery_resistance_pct": 90}
     for name, value in expected.items():
         got = snap.values.get(name)
         verify(got == value and isinstance(got, bool) == isinstance(value, bool),
@@ -100,8 +149,7 @@ def part_parse():
     verify(snap.captured_at == datetime(2026, 10, 20, 7, 2, 54, tzinfo=timezone.utc),
            "Stand ist die Zeit des Ladestands (energy Electric updatedAt)",
            str(snap.captured_at))
-    verify(set(snap.values) == stellantis.PROVIDES and not signals.unknown(snap.values),
-           "PROVIDES ist genau, was ein voller Status liefert, alles Katalognamen")
+    verify(not signals.unknown(snap.values), "alles Katalognamen")
     verify(snap.raw.get("energy[1].charging.chargingRate") == ["energy[1].charging.chargingRate",
                                                                20, None]
            and not any(k.startswith("_links") for k in snap.raw),
@@ -144,6 +192,104 @@ def part_parse():
            "ohne Zeitstempel kein Schnappschuss")
 
 
+def part_full_status():
+    verify.section("Voller Status: Zündung, Alarm, Temperatur, 12 V, Energie, Wartung")
+    scale = stellantis.status_scale(STATUS_FULL, NET_KWH)
+    verify(scale == stellantis.KWH_CORRECTION,
+           "36608 bei 49 kWh nutzbar und 100 % Gesundheit: die Einheit ist 1,343-mal "
+           "kleiner als Wh (HA #272)", str(scale))
+    snap = stellantis.parse_status(STATUS_FULL, scale)
+    expected = {"soc_pct": 60.0, "range_km": 192, "odometer_km": 7066.9, "plugged": False,
+                "charge_state": "not_ready", "battery_health_pct": 100,
+                "battery_resistance_pct": 100, "capacity_kwh": 49.16, "energy_kwh": 26.86,
+                "lat": 48.78, "lon": 9.18, "position_at": "2026-10-21T05:24:11Z",
+                "climate_state": "disabled", "ignition": "off", "alarm_active": True,
+                "outside_temp_c": 9.5, "aux_battery_pct": 85.0}
+    got = {k: snap.values.get(k) for k in expected}
+    verify(got == expected and set(snap.values) == set(expected)
+           and all(isinstance(snap.values[k], bool) == isinstance(v, bool)
+                   for k, v in expected.items()),
+           "genau diese Werte, aus energies[] statt energy[] (60 %, nicht 59 %)",
+           str({k: v for k, v in snap.values.items() if expected.get(k) != v}))
+    verify("speed_kmh" not in snap.values, "kinetic ist Monate alt: kein Tempo")
+    verify(snap.captured_at == datetime(2026, 10, 21, 5, 37, 47, tzinfo=timezone.utc)
+           and snap.raw.get("environment.luminosity.day") == ["environment.luminosity.day",
+                                                              True, None]
+           and snap.raw.get("lastPosition.properties.fixStatus") is not None
+           and snap.raw.get("energy[0].level") is not None,
+           "der ganze Status steht flach in raw, beide Energie-Listen", str(len(snap.raw)))
+
+    def stale(doc):
+        doc["environment"]["air"]["createdAt"] = "2026-10-20T13:27:16Z"
+        doc["battery"]["createdAt"] = "2026-10-21T05:00:00Z"
+    old = stellantis.parse_status(full_with(stale), scale).values
+    verify("outside_temp_c" not in old and "aux_battery_pct" not in old
+           and old.get("ignition") == "off",
+           "Messwerte von lange vor der Meldung zählen nicht, der Zündzustand schon",
+           str(old))
+    edge = stellantis.parse_status(full_with(
+        lambda d: d["environment"]["air"].update(createdAt="2026-10-21T05:07:47Z")), scale)
+    verify(edge.values.get("outside_temp_c") == 9.5, "30 Minuten alt zählt noch")
+
+    def state(ignition, alarm):
+        def change(doc):
+            doc["ignition"]["type"] = ignition
+            doc["alarm"]["status"]["activation"] = alarm
+        values = stellantis.parse_status(full_with(change), scale).values
+        return values.get("ignition"), values.get("alarm_active")
+    got = [state("StartUp", "Inactive"), state("Start", "Active"), state("Free", "Weird")]
+    verify(got == [("on", False), ("on", True), (None, None)],
+           "StartUp und Start sind an, Stop aus; Alarm Active/Inactive; Unbekanntes fehlt",
+           str(got))
+
+    scales = [stellantis.energy_scale(45000, 49.0, 100),
+              stellantis.energy_scale(36750, 49.0, 75),
+              stellantis.energy_scale(36608, 49.0, None),
+              stellantis.energy_scale(20000, 49.0, 100),
+              stellantis.energy_scale(36608, None, 100),
+              stellantis.energy_scale(None, 49.0, 100)]
+    verify(scales == [1.0, 1.0, stellantis.KWH_CORRECTION, None, None, None],
+           "die Einheit nach dem Profil: Wh, wenn es passt (auch gealtert), 1,343 bei "
+           "zu kleiner Kapazität, keine bei unpassender oder ohne Profil", str(scales))
+    unscaled = stellantis.parse_status(STATUS_FULL, None).values
+    verify("capacity_kwh" not in unscaled and "energy_kwh" not in unscaled,
+           "ohne Einheit keine Energiewerte", str(unscaled))
+    far = stellantis.parse_status(full_with(
+        lambda d: d["energies"][0].update(level=90.0)), scale).values
+    above = stellantis.parse_status(full_with(
+        lambda d: d["energies"][0]["extension"]["electric"]["battery"]["load"]
+        .update(residual=40000)), scale).values
+    verify(far.get("capacity_kwh") == 49.16 and "energy_kwh" not in far
+           and "energy_kwh" not in above,
+           "Restenergie 55 % bei Ladestand 90 % oder über der Kapazität: keine "
+           "Energie, die Kapazität bleibt", f"{far} {above}")
+
+    _seed()
+    corsa = _vehicle("Corsa voll", net_kwh=NET_KWH)
+    fake = FakeStellantis(status=STATUS_FULL, maintenance=MAINTENANCE)
+    client = stellantis.Stellantis("opel", USER, SessionLocal, adapter=fake, vehicle_id=corsa)
+    first, second = client.latest(VIN), client.latest(VIN)
+    asked = [w for _, w in fake.requests].count(MAINTENANCE_URL)
+    verify(first.values.get("maintenance_km") == 17920.0
+           and first.values.get("maintenance_days") == 120
+           and first.raw.get("maintenance.mileageBeforeMaintenance")
+           == ["maintenance.mileageBeforeMaintenance", 17920.0, None]
+           and second.values.get("maintenance_km") == 17920.0 and asked == 1,
+           "Wartung einmal am Tag gefragt, in jedem Schnappschuss", f"{asked} {first.values}")
+    charging = stellantis.parse_status(full_with(
+        lambda d: d["energies"][0]["extension"]["electric"]["charging"].update(
+            plugged=True, status="InProgress", chargingMode="Quick", remainingTime="PT40M")),
+        scale).values
+    delivered = set(first.values) | set(charging)
+    verify(delivered == stellantis.PROVIDES and client.scale == stellantis.KWH_CORRECTION,
+           "PROVIDES ist genau, was ein voller Status mit Wartung liefert, beim Laden "
+           "Ladeart und Restzeit dazu", str(sorted(stellantis.PROVIDES ^ delivered)))
+    broken = stellantis.Stellantis("opel", USER, SessionLocal, adapter=FakeStellantis(
+        status=STATUS_FULL), vehicle_id=corsa).latest(VIN)
+    verify(broken is not None and "maintenance_km" not in broken.values,
+           "ohne Wartungsantwort trotzdem ein Schnappschuss")
+
+
 def _response(request, status, body=b"", headers=None):
     headers = headers or {}
     message = http.client.HTTPMessage()
@@ -164,9 +310,12 @@ class FakeStellantis(requests.adapters.BaseAdapter):
     """Opel's token endpoint and the connected-car API. Records every request
     and, for each API call, the refresh token stored at that moment."""
 
-    def __init__(self, status=STATUS):
+    def __init__(self, status=STATUS, maintenance=None, trips=None):
         super().__init__()
         self.status = status
+        self.maintenance = maintenance
+        # The trips the car made, oldest first; served `TRIPS_PER_PAGE` a page.
+        self.trips = trips or []
         self.issued = 0
         self.access = None
         self.refuse = None
@@ -221,7 +370,29 @@ class FakeStellantis(requests.adapters.BaseAdapter):
                     {"id": VEHICLE_ID, "vin": VIN, "label": "Corsa"}]}})
             if where == STATUS_URL:
                 return _json(request, 200, self.status)
+            if where == MAINTENANCE_URL and self.maintenance is not None:
+                return _json(request, 200, self.maintenance)
+            if where == TRIPS_URL:
+                return _json(request, 200, self.trips_page(parse_qs(parts.query)))
         return _response(request, 404)
+
+    def trips_page(self, query) -> dict:
+        """HAL paging as the real API does it: an opaque pageToken per page."""
+        pages = max(1, -(-len(self.trips) // TRIPS_PER_PAGE))
+        token = (query.get("pageToken") or [None])[0]
+        number = int(token.removeprefix("tok-")) if token else 1
+
+        def link(n):
+            return {"href": f"/connectedcar/v4/user/vehicles/{VEHICLE_ID}/trips"
+                            f"?client_id={OPEL.client_id}&pageToken=tok-{n}"}
+        links = {"self": link(number), "first": link(1), "last": link(pages)}
+        if number < pages:
+            links["next"] = link(number + 1)
+        if number > 1:
+            links["prev"] = link(number - 1)
+        chunk = self.trips[(number - 1) * TRIPS_PER_PAGE:number * TRIPS_PER_PAGE]
+        return {"total": len(self.trips), "currentPage": number, "totalPage": pages,
+                "_links": links, "_embedded": {"trips": chunk}}
 
     def close(self):
         pass
@@ -266,7 +437,7 @@ def part_tokens():
            "die API-Abfrage nennt den Client der Marke", str(fake.queries[1]))
     snap = client.latest(VIN)
     verify(snap is not None and snap.values.get("soc_pct") == 59
-           and fake.requests[-1] == ("GET", STATUS_URL) and len(fake.forms) == 1,
+           and ("GET", STATUS_URL) in fake.requests[-2:] and len(fake.forms) == 1,
            "gültiges Token: Status ohne erneute Erneuerung", str(fake.requests))
 
     fake.expire_next = 1
@@ -314,10 +485,10 @@ def part_tokens():
     verify("no tokens stored" in error, "ohne gespeicherte Tokens: anmelden", error)
 
 
-def _vehicle(name: str) -> int:
+def _vehicle(name: str, net_kwh: float = 46.3) -> int:
     from app import models
     db = SessionLocal()
-    vehicle = models.Vehicle(name=name, battery_gross_kwh=51.0, battery_net_kwh=46.3)
+    vehicle = models.Vehicle(name=name, battery_gross_kwh=51.0, battery_net_kwh=net_kwh)
     db.add(vehicle)
     db.commit()
     vehicle_id = vehicle.id
@@ -366,11 +537,11 @@ def part_poller():
     configs = [
         cloud.Config(name="vw_portal", env="VW_PORTAL", vin=None, vehicle=str(buzz),
                      interval_min=15, provides=snapshot.PROVIDES,
-                     connect=lambda: FakeVw(vw_snap)),
+                     connect=lambda _: FakeVw(vw_snap)),
         cloud.Config(name="stellantis", env="STELLANTIS", vin=None, vehicle=str(corsa),
                      interval_min=15, provides=stellantis.PROVIDES,
-                     connect=lambda: stellantis.Stellantis("opel", USER, SessionLocal,
-                                                           adapter=fake))]
+                     connect=lambda vehicle_id: stellantis.Stellantis(
+                         "opel", USER, SessionLocal, adapter=fake, vehicle_id=vehicle_id))]
     polls = [poller.Poll(c, SessionLocal) for c in configs]
     delays: dict[str, list] = {"vw_portal": [], "stellantis": []}
 
@@ -534,7 +705,7 @@ def part_logbook():
     db.commit()
     poll = poller.Poll(cloud.Config(name="stellantis", env="STELLANTIS", vin=None,
                                     vehicle=str(corsa), interval_min=15,
-                                    provides=stellantis.PROVIDES, connect=lambda: None,
+                                    provides=stellantis.PROVIDES, connect=lambda _: None,
                                     sampled=True),
                        SessionLocal)
     poll.status.vehicle_id = corsa
@@ -630,7 +801,7 @@ def part_corsa_night():
         db.close()
 
 
-PARTS = [part_parse, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
+PARTS = [part_parse, part_full_status, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
 
 
 def main() -> int:

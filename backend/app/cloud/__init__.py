@@ -45,7 +45,8 @@ class Config:
     interval_min: int
     # The catalog signals (app/signals.py) the source can deliver.
     provides: frozenset[str]
-    connect: Callable[[], Client] = field(repr=False)
+    # Called with the jolt vehicle id the source feeds.
+    connect: Callable[[int], Client] = field(repr=False)
     # True when a snapshot is a sample taken whenever jolt asks (Stellantis),
     # not a report the car sent by itself (VW): drives then have to bridge
     # the gap between two polls.
@@ -67,7 +68,7 @@ def _vw_portal(env: Mapping[str, str]) -> Config | None:
         return None
     from .snapshot import PROVIDES
 
-    def connect() -> Client:
+    def connect(vehicle_id: int) -> Client:
         from .vw_portal import VwPortal
         return VwPortal(user, password)
 
@@ -98,7 +99,8 @@ def _stellantis(env: Mapping[str, str]) -> Config | None:
                   vehicle=env.get("STELLANTIS_VEHICLE", "").strip() or None,
                   interval_min=_interval(env.get("STELLANTIS_INTERVAL_MIN")),
                   provides=PROVIDES,
-                  connect=lambda: Stellantis(brand, user, SessionLocal),
+                  connect=lambda vehicle_id: Stellantis(brand, user, SessionLocal,
+                                                       vehicle_id=vehicle_id),
                   sampled=True)
 
 
