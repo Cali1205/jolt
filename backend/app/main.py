@@ -20,7 +20,7 @@ from .cloud import logbook, poller as cloud_poller
 from .live import cleanup
 from .database import SessionLocal, migrate, seed_templates
 from .routers import ALL_ROUTER
-from .security import SecurityMiddleware
+from .security import SecurityMiddleware
 from .legacy_paths import LegacyPaths
 
 log = logging.getLogger("uvicorn.error")
