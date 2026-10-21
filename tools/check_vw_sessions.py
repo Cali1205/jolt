@@ -975,8 +975,39 @@ def part_api():
            f"{ac['totals']} {dc['totals']} {big['totals']} {bad}")
 
 
+def part_split_recording():
+    verify.section("Eine Fahrt in zwei Aufzeichnungen, die erste kommt zuletzt")
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        # 21 Oct 2026: the portal saw 62098 to 62104; recording 44 only the
+        # last 2 km, recording 43 (no odometer) the 4 km before, stored last.
+        vid = new_vehicle(db)
+        portal = {"started_at": _iso(T(21, 11, 57, 4)), "ended_at": _iso(T(21, 12, 9, 4)),
+                  "odo_start": 62098.0, "odo_end": 62104.0, "distance_km": 6.0,
+                  "soc_start": 44.0, "soc_end": 40.0, "energy_used_kwh": 2.2,
+                  "km_track": [], "soc_track": [], "live_session_id": None,
+                  "parked_at": _iso(T(21, 10, 28, 29))}
+        logbook.store_drives(db, vid, logbook.PORTAL, [portal])
+        second = recorded(db, vid, T(21, 12, 5, 30), 62102, 2, 40.6)
+        first = recorded(db, vid, T(21, 11, 59), 62098, 4, 44.0, odometer=False)
+        logbook.store_session(db, second)
+        logbook.store_session(db, first)
+        rows = drives_of(db, vid)
+        verify(len(rows) == 1 and rows[0].distance_km == 6
+               and rows[0].started_at == T(21, 11, 59).replace(tzinfo=None)
+               and rows[0].ended_at == T(21, 12, 8, 30).replace(tzinfo=None),
+               "eine Zeile mit 6 km von 11:59 bis 12:08: die zweite Aufzeichnung "
+               "verengt die Zeiten nicht, die erste findet die Fahrt",
+               str([columns(r) for r in rows]))
+        db.commit()
+    finally:
+        db.close()
+
+
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_silent_dongle, part_import, part_api]
+         part_silent_dongle, part_split_recording, part_import, part_api]
 
 
 def main() -> int:

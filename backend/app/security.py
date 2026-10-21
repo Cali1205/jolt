@@ -247,10 +247,6 @@ def websocket_allowed(websocket) -> bool:
     return _count(_ws_hit, client_ip(websocket), 60, WS_MAX)
 
 
-def count_report_error(request: Request) -> None:
-    """Kept for callers: a wrong token keeps the slot reserved by `report_locked`."""
-
-
 class SecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # The path the router sees, not `request.url.path`: Starlette rebuilds

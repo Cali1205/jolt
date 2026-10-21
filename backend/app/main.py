@@ -20,7 +20,7 @@ from .cloud import logbook, poller as cloud_poller
 from .live import cleanup
 from .database import SessionLocal, migrate, seed_templates
 from .routers import ALL_ROUTER
-from .security import SecurityMiddleware
+from .security import SecurityMiddleware
 from .legacy_paths import LegacyPaths
 
 log = logging.getLogger("uvicorn.error")
@@ -202,6 +202,11 @@ def index():
                             headers=WITHOUT_CACHE)
 
 
+OBD_FILES = ("ble-plugin.js", "obd-ble-native.js", "platforms/meb.js",
+             "platforms/obd2.js", "platforms/ecmp.js", "obd-decode.js",
+             "obd-core.js", "obd.js", "obd.css")
+
+
 @app.get("/obd")
 def obd_page():
     """The OBD2 diagnostics page - deliberately **not** reachable under /static.
@@ -220,15 +225,12 @@ def obd_page():
     the files themselves having to leave /static.
     """
     with open(os.path.join(FRONTEND, "obd.html"), encoding="utf-8") as file:
-        html = _with_version(file.read(), ("ble-plugin.js", "obd-ble-native.js",
-                                           "platforms/meb.js", "platforms/obd2.js", "platforms/ecmp.js", "obd-decode.js", "obd-core.js",
-                                           "obd.js", "obd.css"))
+        html = _with_version(file.read(), OBD_FILES)
     # The same mark visible on the page: twice "which version is this
     # actually" was the answer to a supposed Bluetooth error, and both times it
     # could only be established from outside with difficulty.
     newest = 0
-    for name in ("obd.html", "ble-plugin.js", "obd-ble-native.js",
-                 "platforms/meb.js", "platforms/obd2.js", "platforms/ecmp.js", "obd-decode.js", "obd-core.js", "obd.js", "obd.css"):
+    for name in ("obd.html",) + OBD_FILES:
         try:
             newest = max(newest,
                           int(os.path.getmtime(os.path.join(FRONTEND, name))))

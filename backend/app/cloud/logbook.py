@@ -190,6 +190,12 @@ def _whole(by_source: dict, order: tuple, main: dict) -> dict | None:
 
 
 def _saw_in_time(found: dict, main: dict) -> bool:
+    # Its own odometer starting later means it began mid-drive (21 Oct 2026:
+    # a second recording over the last 2 of 6 km); its start would hide the
+    # first recording from `_candidates`.
+    if (_has_odometer(found) and _has_odometer(main)
+            and found["odo_start"] > main["odo_start"] + ODOMETER_RESOLUTION_KM):
+        return False
     start, end = _span(found)
     # An estimated start is no bound; the parked report before it is.
     earliest = _time(main.get("parked_at") or main["started_at"])
