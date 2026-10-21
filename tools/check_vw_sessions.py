@@ -186,19 +186,29 @@ def case_pauses_and_spellings():
     a, end = charging(T(10, 14), 30, 7.0, 50)
     b, _ = charging(end + 8 * MIN, 20, 7.0, 0, spelling="lower",
                     soc_from=50 + 3.5 / 0.726)
-    short = sessions.detect_charges(obs(a + b))
+    short = sessions.detect_charges(
+        obs(a + [p(end + MIN, "plugConnectionState", "disconnected")] + b))
     a, end = charging(T(11, 14), 30, 7.0, 50)
     b, _ = charging(end + 20 * MIN, 20, 7.0, 0, spelling="lower",
                     soc_from=50 + 3.5 / 0.726)
-    long = sessions.detect_charges(obs(a + b))
+    unplugged = [p(end + MIN, "plugConnectionState", "disconnected")]
+    long = sessions.detect_charges(obs(a + unplugged + b))
+    held = sessions.detect_charges(obs(a + b))
+    parts = 7 * 0.5 + 7 * 20 / 60 + 2 * 7 * 15 / 3600
     blip = [p(T(12, 16), "chargePowerInKW", 1.0), p(T(12, 16, 0, 30), "chargePowerInKW", 1.0),
             p(T(12, 16, 1), "chargePowerInKW", 0.0), p(T(12, 15), "currentSOCInPct", 70),
             p(T(12, 16, 2), "currentSOCInPct", 70)]
     noise = sessions.detect_charges(obs(blip))
-    return [(len(short) == 1, "8 Minuten Pause: ein Ladevorgang", str(len(short))),
+    return [(len(short) == 1, "8 Minuten Pause, ab- und wieder angesteckt: ein Ladevorgang",
+             str(len(short))),
             (len(long) == 2 and [c.charge_type for c in long] == ["AC", "AC"],
-             "20 Minuten Pause: zwei; AC in beiden Schreibweisen",
+             "20 Minuten Pause mit Abstecken: zwei; AC in beiden Schreibweisen",
              str([(c.started_at, c.charge_type) for c in long])),
+            (len(held) == 1 and held[0].started_at == T(11, 14)
+             and close(held[0].energy_kwh, parts, 0.02),
+             "20 Minuten Pause am Kabel: ein Ladevorgang, die Energie der beiden Teile "
+             "zusammen, die Pause zählt nicht",
+             str([(c.started_at, c.ended_at, c.energy_kwh) for c in held])),
             (noise == [], "1 kW für eine halbe Minute ohne Anstieg ist Rauschen",
              str(noise))]
 
@@ -303,8 +313,34 @@ def case_estimated_start():
              str(b and (b.started_at, b.parked_at, b.ended_at)))]
 
 
+def case_charging_on_timer():
+    found = sessions.detect_charges(observations.from_snapshots(corsa_rows()),
+                                    kwh_per_pct=0.49, powered=False)
+    c = found[0] if len(found) == 1 else None
+
+    def charge(t):
+        return [observations.Observation(t + i * MIN, "charge_power_kw", 11.0 if i < 20 else 0.0)
+                for i in range(21)]
+    t = T(22, 8)
+    moved = sessions.detect_charges(
+        charge(t) + [observations.Observation(t - MIN, "odometer_km", 100.0),
+                     observations.Observation(t + 60 * MIN, "odometer_km", 110.0)]
+        + charge(t + 120 * MIN))
+    return [(len(moved) == 2,
+             "ohne Steckerstatus (Portal): zwei Ladungen mit einer Fahrt dazwischen "
+             "bleiben zwei", str([(x.started_at, x.ended_at) for x in moved])),
+            (c is not None and (c.started_at, c.ended_at) == (T(20, 21, 55, 43),
+                                                              T(21, 5, 24, 47))
+             and (c.soc_start, c.soc_end, c.energy_kwh) == (56, 62, 2.94),
+             "Corsa die ganze Nacht am Kabel, fünfmal geladen: ein Ladevorgang bis zum "
+             "Abstecken, 56 -> 62 %, 6 Punkte zu 0,49 kWh",
+             str([(x.started_at, x.ended_at, x.soc_start, x.soc_end, x.energy_kwh)
+                  for x in found]))]
+
+
 CASES = [case_session_36, case_stops, case_into_dc, case_overnight,
-         case_pauses_and_spellings, case_manoeuvre, case_portal, case_estimated_start]
+         case_pauses_and_spellings, case_manoeuvre, case_portal, case_estimated_start,
+         case_charging_on_timer]
 
 
 def run_cases() -> list:

@@ -64,6 +64,12 @@ charging (the export has such hours: 41 % before, 50 % after, 4 kW on both
 sides); the gap then counts for what that rise holds, at most for the whole
 gap at the mean power. A charge that moved less than 0.1 kWh and did not
 raise the charge level by a point was noise.
+
+A car on a timer or a smart wallbox charges in bursts: plugged in all night,
+charging for half an hour, waiting an hour, charging again. That is one
+charge, however long the waits: charges between which nothing says the car
+was unplugged or moved are joined, from the first start to the last end,
+their energies added.
 """
 from bisect import bisect_left, bisect_right
 from collections import Counter
@@ -383,6 +389,35 @@ def _charge_runs(stream: _Stream, powered: bool) -> list[list[Observation]]:
     return runs
 
 
+def _samples(run: list[Observation], powered: bool) -> Track:
+    positive = [o for o in run if _level(o, powered) > 0]
+    samples = [(o.t, float(_level(o, powered))) for o in run]
+    if (powered and samples[-1][1] == 0
+            and run[-1].t - positive[-1].t > POWER_GAP_CAP):
+        samples.pop()
+    return samples
+
+
+def _stayed_plugged(stream: _Stream, t0: datetime, t1: datetime) -> bool:
+    if any(o.value is False for o in stream.between("plugged", t0, t1)):
+        return False
+    parked = stream.last_at_or_before("odometer_km", t0)
+    readings = [o.value for o in stream.between("odometer_km", t0, t1)]
+    if parked is not None:
+        readings.append(parked.value)
+    return not readings or max(readings) == min(readings)
+
+
+def _plugged_through(stream: _Stream, parts: list[Track]) -> list[list[Track]]:
+    groups: list[list[Track]] = []
+    for samples in parts:
+        if groups and _stayed_plugged(stream, groups[-1][-1][-1][0], samples[0][0]):
+            groups[-1].append(samples)
+        else:
+            groups.append([samples])
+    return groups
+
+
 def detect_charges(obs, kwh_per_pct: float | None = None,
                    powered: bool = True) -> list[Charge]:
     """`kwh_per_pct`, the battery's usable capacity over 100, lets a gap in
@@ -396,12 +431,9 @@ def detect_charges(obs, kwh_per_pct: float | None = None,
     charge state is not read that way: it says "charging" at zero power."""
     stream = _Stream(obs)
     charges = []
-    for run in _charge_runs(stream, powered):
-        positive = [o for o in run if _level(o, powered) > 0]
-        samples = [(o.t, float(_level(o, powered))) for o in run]
-        if (powered and samples[-1][1] == 0
-                and run[-1].t - positive[-1].t > POWER_GAP_CAP):
-            samples.pop()
+    parts = [_samples(run, powered) for run in _charge_runs(stream, powered)]
+    for group in _plugged_through(stream, parts):
+        samples = [sample for part in group for sample in part]
         start, end = samples[0][0], samples[-1][0]
         soc_before = (stream.last_at_or_before("soc_pct", start)
                       or next(iter(stream.between("soc_pct", start, end)), None))
@@ -410,7 +442,7 @@ def detect_charges(obs, kwh_per_pct: float | None = None,
         soc_end = soc_after.value if soc_after else None
         rise = (soc_end - soc_start) if soc_start is not None and soc_end is not None else 0
         if powered:
-            energy = _integrate(stream, samples, kwh_per_pct)
+            energy = sum(_integrate(stream, part, kwh_per_pct) for part in group)
         else:
             energy = max(0.0, rise) * (kwh_per_pct or 0.0)
             samples = []
