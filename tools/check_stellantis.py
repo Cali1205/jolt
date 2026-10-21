@@ -506,6 +506,12 @@ def part_logbook():
     from app.cloud import poller
 
     corsa = _vehicle("Corsa Fahrtenbuch")
+    # Yesterday: the poller reads the last 48 hours of the real clock.
+    day = datetime.utcnow().date() - timedelta(days=1)
+
+    def at(clock):
+        return datetime.fromisoformat(f"{day}T{clock}:00")
+
     reports = [  # (time, odometer, soc, plugged, state, AC/DC)
         ("05:00", 3196.5, 60, False, "not_ready", None),
         ("07:00", 3196.5, 60, False, "not_ready", None),
@@ -518,13 +524,13 @@ def part_logbook():
         ("09:00", 3224.0, 64, True, "ready", None)]
     db = SessionLocal()
     for clock, odometer, soc, plugged, state, kind in reports:
-        at = datetime.fromisoformat(f"2026-10-19T{clock}:00")
+        moment = at(clock)
         values = {"odometer_km": odometer, "soc_pct": soc, "plugged": plugged,
                   "charge_state": state, "lat": 48.49, "lon": 9.2}
         if kind:
             values["charge_type"] = kind
-        db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis", captured_at=at,
-                                      received_at=at, values=values, raw=None))
+        db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis", captured_at=moment,
+                                      received_at=moment, values=values, raw=None))
     db.commit()
     poll = poller.Poll(cloud.Config(name="stellantis", env="STELLANTIS", vin=None,
                                     vehicle=str(corsa), interval_min=15,
@@ -540,22 +546,91 @@ def part_logbook():
     d = drives[0] if len(drives) == 1 else None
     verify(d is not None and (d.odo_start, d.odo_end, d.soc_start, d.soc_end)
            == (3196.5, 3224.0, 60, 50) and d.sources == ["stellantis"]
-           and d.started_at == datetime(2026, 10, 19, 7) and d.ended_at
-           == datetime(2026, 10, 19, 7, 30),
+           and d.started_at == at("07:00") and d.ended_at == at("07:30"),
            "eine Fahrt 3196,5 -> 3224 km, 60 -> 50 %, von Stellantis",
            str([(x.odo_start, x.odo_end, x.started_at, x.ended_at, x.sources) for x in drives]))
     c = charges[0] if len(charges) == 1 else None
     verify(c is not None and (c.soc_start, c.soc_end) == (50, 64)
            and c.energy_kwh == round(14 * 46.3 / 100, 2) and c.max_power_kw is None
            and c.charge_type == "AC" and c.sources == ["stellantis"]
-           and c.started_at == datetime(2026, 10, 19, 7, 45)
-           and c.ended_at == datetime(2026, 10, 19, 8, 30),
+           and c.started_at == at("07:45") and c.ended_at == at("08:30"),
            "eine AC-Ladung 50 -> 64 %, Energie aus dem Ladestand, ohne Leistung",
            str([(x.soc_start, x.soc_end, x.energy_kwh, x.max_power_kw, x.charge_type,
                  x.started_at, x.ended_at) for x in charges]))
 
 
-PARTS = [part_parse, part_tokens, part_poller, part_login, part_logbook]
+def part_corsa_night():
+    verify.section("Fahrtenbuch: die Nacht zum 21. Oktober 2026")
+    from app import models
+    from app.cloud import logbook
+    with open(os.path.join(TOOLS, "fixtures", "corsa_night.json"), encoding="utf-8") as f:
+        snapshots = json.load(f)["snapshots"]
+    corsa = _vehicle("Corsa Nacht")
+    db = SessionLocal()
+    try:
+        for s in snapshots:
+            moment = datetime.fromisoformat(s["captured_at"])
+            db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis",
+                                          captured_at=moment, received_at=moment,
+                                          values=s["values"], raw=None))
+        db.commit()
+
+        def detect():
+            return logbook.store_from_snapshots(db, corsa, logbook.STELLANTIS, powered=False,
+                                                stop_split=timedelta(minutes=30),
+                                                now=datetime(2026, 10, 21, 7, 0))
+
+        # What production stored before: four charges for one night at the
+        # cable, a fifth up to the departure, and the drive from 04:57.
+        logbook.store_charges(db, corsa, logbook.STELLANTIS, [
+            {"started_at": a, "ended_at": b, "soc_start": s0, "soc_end": s1,
+             "energy_kwh": kwh, "max_power_kw": None, "avg_power_kw": None,
+             "charge_type": "AC", "odometer_km": odo, "power_track": []}
+            for a, b, s0, s1, kwh, odo in (
+                ("2026-10-20T21:55:43", "2026-10-20T22:21:41", 56.0, 57.0, 0.49, 7059.6),
+                ("2026-10-21T00:31:44", "2026-10-21T01:14:43", 57.0, 59.0, 0.98, 7059.6),
+                ("2026-10-21T02:06:43", "2026-10-21T02:41:44", 59.0, 60.0, 0.49, 7059.6),
+                ("2026-10-21T03:36:53", "2026-10-21T03:59:41", 60.0, 61.0, 0.49, 7059.6),
+                ("2026-10-21T04:57:09", "2026-10-21T05:24:47", 61.0, 62.0, 0.49, 7060.2))])
+        logbook.store_drives(db, corsa, logbook.STELLANTIS, [
+            {"started_at": "2026-10-21T04:57:09", "ended_at": "2026-10-21T05:37:47",
+             "odo_start": 7059.6, "odo_end": 7066.9, "distance_km": 7.3, "soc_start": 61.0,
+             "soc_end": 60.0, "energy_used_kwh": None, "km_track": [], "soc_track": [],
+             "live_session_id": None}])
+        db.commit()
+        verify(db.query(models.VehicleCharge).filter_by(vehicle_id=corsa).count() == 5,
+               "vorher: fünf Ladevorgänge wie in der Datenbank")
+        first = detect()
+        drives = db.query(models.VehicleDrive).filter_by(vehicle_id=corsa).all()
+        d = drives[0] if len(drives) == 1 else None
+        verify(d is not None and d.started_at == datetime(2026, 10, 21, 5, 23, 35)
+               and d.start_estimated and d.ended_at == datetime(2026, 10, 21, 5, 37, 47)
+               and (d.odo_start, d.odo_end) == (7059.6, 7066.9),
+               "die Fahrt am Morgen: Start geschätzt 05:23:35 (0,6 km vor dem Bericht um "
+               "05:24:47, nicht 04:57 beim letzten Bericht am Kabel), Ende 05:37:47",
+               str([(x.started_at, x.start_estimated, x.ended_at, x.odo_start, x.odo_end)
+                    for x in drives]))
+        charges = db.query(models.VehicleCharge).filter_by(vehicle_id=corsa).all()
+        c = charges[0] if len(charges) == 1 else None
+        verify(c is not None and c.started_at == datetime(2026, 10, 20, 21, 55, 43)
+               and c.ended_at == datetime(2026, 10, 21, 5, 24, 47)
+               and (c.soc_start, c.soc_end) == (56, 62)
+               and c.energy_kwh == round(6 * 46.3 / 100, 2)
+               and len(c.details["by_source"]["stellantis"]) == 1,
+               "die Nacht am Kabel ist ein Ladevorgang: 21:55 bis zum Abstecken um 05:24, "
+               "56 -> 62 %, die fünf alten Zeilen sind in einer aufgegangen",
+               f"{first['charges']} " + str([(x.started_at, x.ended_at, x.soc_start, x.soc_end,
+                                              x.energy_kwh) for x in charges]))
+        again = detect()
+        verify(again["drives"] == {"new": 0, "updated": 0, "unchanged": 1}
+               and again["charges"] == {"new": 0, "updated": 0, "unchanged": 1}
+               and db.query(models.VehicleCharge).filter_by(vehicle_id=corsa).count() == 1,
+               "noch einmal erkannt: nichts ändert sich", str(again))
+    finally:
+        db.close()
+
+
+PARTS = [part_parse, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
 
 
 def main() -> int:
