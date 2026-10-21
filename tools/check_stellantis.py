@@ -506,6 +506,12 @@ def part_logbook():
     from app.cloud import poller
 
     corsa = _vehicle("Corsa Fahrtenbuch")
+    # Yesterday: the poller reads the last 48 hours of the real clock.
+    day = datetime.utcnow().date() - timedelta(days=1)
+
+    def at(clock):
+        return datetime.fromisoformat(f"{day}T{clock}:00")
+
     reports = [  # (time, odometer, soc, plugged, state, AC/DC)
         ("05:00", 3196.5, 60, False, "not_ready", None),
         ("07:00", 3196.5, 60, False, "not_ready", None),
@@ -518,13 +524,13 @@ def part_logbook():
         ("09:00", 3224.0, 64, True, "ready", None)]
     db = SessionLocal()
     for clock, odometer, soc, plugged, state, kind in reports:
-        at = datetime.fromisoformat(f"2026-10-19T{clock}:00")
+        moment = at(clock)
         values = {"odometer_km": odometer, "soc_pct": soc, "plugged": plugged,
                   "charge_state": state, "lat": 48.49, "lon": 9.2}
         if kind:
             values["charge_type"] = kind
-        db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis", captured_at=at,
-                                      received_at=at, values=values, raw=None))
+        db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis", captured_at=moment,
+                                      received_at=moment, values=values, raw=None))
     db.commit()
     poll = poller.Poll(cloud.Config(name="stellantis", env="STELLANTIS", vin=None,
                                     vehicle=str(corsa), interval_min=15,
@@ -540,16 +546,14 @@ def part_logbook():
     d = drives[0] if len(drives) == 1 else None
     verify(d is not None and (d.odo_start, d.odo_end, d.soc_start, d.soc_end)
            == (3196.5, 3224.0, 60, 50) and d.sources == ["stellantis"]
-           and d.started_at == datetime(2026, 10, 19, 7) and d.ended_at
-           == datetime(2026, 10, 19, 7, 30),
+           and d.started_at == at("07:00") and d.ended_at == at("07:30"),
            "eine Fahrt 3196,5 -> 3224 km, 60 -> 50 %, von Stellantis",
            str([(x.odo_start, x.odo_end, x.started_at, x.ended_at, x.sources) for x in drives]))
     c = charges[0] if len(charges) == 1 else None
     verify(c is not None and (c.soc_start, c.soc_end) == (50, 64)
            and c.energy_kwh == round(14 * 46.3 / 100, 2) and c.max_power_kw is None
            and c.charge_type == "AC" and c.sources == ["stellantis"]
-           and c.started_at == datetime(2026, 10, 19, 7, 45)
-           and c.ended_at == datetime(2026, 10, 19, 8, 30),
+           and c.started_at == at("07:45") and c.ended_at == at("08:30"),
            "eine AC-Ladung 50 -> 64 %, Energie aus dem Ladestand, ohne Leistung",
            str([(x.soc_start, x.soc_end, x.energy_kwh, x.max_power_kw, x.charge_type,
                  x.started_at, x.ended_at) for x in charges]))
