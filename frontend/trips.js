@@ -381,6 +381,53 @@ window.joltTrips = (function () {
     O.usePlatform(vehicle ? vehicle.platform : null);
   }
 
+  /* Is the dongle plugged into the chosen vehicle? On 21 Oct 2026 the
+   * Corsa was still chosen in the Buzz: 25 minutes of GPS only, booked on the
+   * wrong car, because the Corsa's requests found nobody on the Buzz's bus.
+   * The VIN settles it before the trip exists. Another known vehicle: switch
+   * to it. A different car than the chosen one: no recording. No VIN read
+   * (asleep, unsupported): carry on as before. Returns the verdict. */
+  async function checkVin(dongle, as_of) {
+    const D = window.joltObd;
+    const vehicles = K.state.vehicles || [];
+    if (!dongle.present || !D.readVin) return { kind: "unknown" };
+    as_of("Fahrzeug prüfen …");
+    let read = null;
+    try { read = await D.readVin(); } catch (failure) { /* unknown */ }
+    const verdict = window.joltObdDecode.vinVerdict(read, chosenVehicleId(), vehicles);
+    verdict.vin = read;
+    if (verdict.kind === "switch") {
+      const choice = document.getElementById("rec-vehicle");
+      choice.value = String(verdict.vehicle.id);
+      try { localStorage.setItem("jolt-aufz-fahrzeug", choice.value); } catch (e) { /* without memory */ }
+      reportVehicle();
+      if (D.usePlatform(verdict.vehicle.platform)) {
+        dongle.present = await window.joltLive.handshakeSafe();
+      }
+      K.report(`Der Dongle steckt in „${verdict.vehicle.name}“ – die Aufzeichnung `
+               + "läuft für dieses Fahrzeug.", "hinweis");
+    } else if (verdict.kind === "foreign") {
+      throw new Error(`Der Dongle steckt in einem anderen Auto (FIN …${read.slice(-4)}) `
+        + `als „${verdict.vehicle.name}“ (…${verdict.vehicle.vin.slice(-4)}). `
+        + "Fahrzeug wählen oder die FIN in den Fahrzeugdaten korrigieren.");
+    }
+    return verdict;
+  }
+
+  /* The VIN of a vehicle that had none, once the car has answered the
+   * chosen platform's charge-level request: that the platform fits is the
+   * proof the vehicle is the right one. Never a reason for the start to fail. */
+  async function learnVin(verdict, start) {
+    if (verdict.kind !== "learn" || !verdict.vehicle || start.soc === null || start.portal) return;
+    try {
+      const saved = await K.api(`/api/vehicles/${verdict.vehicle.id}/vin`,
+                                { method: "PUT", body: { vin: verdict.vin } });
+      verdict.vehicle.vin = saved.vin;
+    } catch (failure) {
+      console.log("[obd] FIN nicht gespeichert:", failure);
+    }
+  }
+
   function currentPosition() {
     return new Promise((fulfil, reject) => {
       if (!navigator.geolocation) {
@@ -512,16 +559,18 @@ window.joltTrips = (function () {
     try {
       usePlatformOfChoice();
       const dongle = await connectForStart(as_of);
-      const id = chosenVehicleId();
-      if (!id) {
+      if (!chosenVehicleId()) {
         K.report("Erst ein Fahrzeug wählen – ohne das gehört die "
                  + "Aufzeichnung niemandem.", "fehler");
         lastStartError = "Kein Fahrzeug gewählt – in jolt einmal auswählen.";
         return false;
       }
+      const verdict = await checkVin(dongle, as_of);
+      const id = chosenVehicleId();
       as_of("Standort holen …");
       const city = await currentPosition();
       const start = await startCharge(dongle, id);
+      learnVin(verdict, start);
 
       as_of("Fahrt anlegen …");
       // Without network the recording starts locally and is created on the

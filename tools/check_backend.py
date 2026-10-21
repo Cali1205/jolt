@@ -151,6 +151,28 @@ def main() -> int:
     verify(broken.status_code == 422,
            "eine Plattform mit unzulässigen Zeichen wird abgelehnt",
            f"HTTP {broken.status_code}")
+    # The VIN: invented ones, a real one has no place in a public repo.
+    vin_a, vin_b = "WVWZZZTESTXYZ0001", "VXKTESTXYZ0000002"
+    verify(fresh["vin"] is None, "ein neues Fahrzeug hat keine FIN", str(fresh.get("vin")))
+    set_vin = client.put(f"/api/vehicles/{fresh['id']}/vin", json={"vin": vin_a.lower()})
+    verify(set_vin.status_code == 200 and set_vin.json()["vin"] == vin_a,
+           "die FIN wird für sich gespeichert, in Grossbuchstaben",
+           f"HTTP {set_vin.status_code}: {set_vin.text[:150]}")
+    kept = client.put(f"/api/vehicles/{fresh['id']}", json=own)
+    verify(kept.json()["vin"] == vin_a,
+           "ein Speichern ohne FIN (älterer Client) lässt sie stehen", kept.json()["vin"])
+    taken = client.put(f"/api/vehicles/{vehicles[0]['id']}/vin", json={"vin": vin_a})
+    verify(taken.status_code == 409,
+           "dieselbe FIN an einem zweiten Fahrzeug wird abgelehnt", f"HTTP {taken.status_code}")
+    for wrong in ("WVWZZZTESTVIN000", "WVWZZZTESTVIN000I"):
+        refused = client.put(f"/api/vehicles/{fresh['id']}/vin", json={"vin": wrong})
+        verify(refused.status_code == 422, f"FIN {wrong} ist ungültig", f"HTTP {refused.status_code}")
+    other = client.put(f"/api/vehicles/{fresh['id']}", json={**own, "vin": vin_b})
+    cleared = client.put(f"/api/vehicles/{fresh['id']}", json={**own, "vin": ""})
+    verify(other.json()["vin"] == vin_b and cleared.json()["vin"] is None,
+           "über das Formular geändert und mit leerem Feld gelöscht",
+           f"{other.json().get('vin')} / {cleared.json().get('vin')}")
+
     templates = {t["name"]: t["platform"]
                  for t in client.get("/api/vehicles/templates").json()}
     verify(templates["VW ID.Buzz Pro (82 kWh)"] == "meb"

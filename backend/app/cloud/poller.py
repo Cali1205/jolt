@@ -117,6 +117,21 @@ def _vehicle_id(db, configured: str | None, env: str) -> int:
     return vehicle_id
 
 
+def remember_vin(db, vehicle_id: int, vin: str) -> None:
+    """The cloud knows which car it reports on; the app's dongle check needs
+    that VIN on the vehicle. Fills only an empty field, and only when no
+    other vehicle has it."""
+    vehicle = db.get(models.Vehicle, vehicle_id)
+    if vehicle is None or vehicle.vin or not vin or len(vin) != 17:
+        return
+    if db.query(models.Vehicle.id).filter(models.Vehicle.vin == vin).first():
+        log.warning("cloud: VIN %s belongs to another vehicle, not stored", mask(vin))
+        return
+    vehicle.vin = vin
+    db.commit()
+    log.info("cloud: VIN %s stored on vehicle %s", mask(vin), vehicle_id)
+
+
 class Poll:
     """One source: its client, the car it means, and its status."""
 
@@ -144,6 +159,7 @@ class Poll:
             if self.vin is None:
                 self.vin = self.config.vin or _one_vin(self.client.vehicles(),
                                                        self.config.env)
+                remember_vin(db, self.status.vehicle_id, self.vin)
             stored = sum(store(db, self.status.vehicle_id, self.config.name, snap)
                          for snap in self.client.updates(self.vin))
             if stored:

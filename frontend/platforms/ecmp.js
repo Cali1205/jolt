@@ -36,6 +36,10 @@
   ],
   protocol: "6",
 
+  // F190 is the UDS identifier for the VIN; which e-CMP control unit
+  // answers it is not confirmed. The standard 0902 follows.
+  vin: [{ address: "BMS", did: "22F190" }, { address: "VCU", did: "22F190" }],
+
   // 16 bit in 1/512 %. The calibrated value is the one the dashboard shows
   // (OBDb names it so), so there is no separate `hmi` conversion.
   soc: { bms: (raw) => raw / 512 },
