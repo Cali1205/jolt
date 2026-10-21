@@ -696,7 +696,8 @@ window.joltTrips = (function () {
 
   /* ---------- Logbook: drives and charges from VW data and jolt ---------- */
 
-  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", stellantis: "Stellantis", jolt: "jolt" };
+  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", stellantis: "Stellantis",
+                         stellantis_trips: "Stellantis", jolt: "jolt" };
 
   function sourceBrand(sources) {
     const names = [...new Set((sources || []).map((s) => SOURCE_NAMES[s] || s))];
@@ -728,14 +729,25 @@ window.joltTrips = (function () {
       ? chip(`${num(item.soc_start, 0)}→${num(item.soc_end, 0)} %`) : "";
   }
 
+  function osmRoute(d) {
+    const at = (lat, lon) => `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    return "https://www.openstreetmap.org/directions?route="
+      + encodeURIComponent(`${at(d.start_lat, d.start_lon)};${at(d.end_lat, d.end_lon)}`);
+  }
+
   function logbookDrive(d) {
     const chips = [chip(K.duration(minutes(d))), socChip(d),
       has(d.energy_used_kwh) ? chip(num(d.energy_used_kwh, 1) + " kWh") : "",
       has(d.odo_end) ? chip("km " + num(d.odo_end, 0)) : ""].join("");
-    // A map only for what jolt recorded: the VW data has no position.
+    // A recording opens in jolt. A drive the car's trip list knows the two
+    // ends of opens them on OpenStreetMap; the cloud gives no track between.
+    const ends = [d.start_lat, d.start_lon, d.end_lat, d.end_lon].every(has);
     const open = d.trip_id
       ? `<div class="fahrt-tat"><button class="klein" data-trip="${d.trip_id}"
-           data-session="${d.live_session_id}">Aufzeichnung</button></div>` : "";
+           data-session="${d.live_session_id}">Aufzeichnung</button></div>`
+      : ends
+        ? `<div class="fahrt-tat"><a class="klein" target="_blank" rel="noopener noreferrer"
+             href="${osmRoute(d)}">Karte</a></div>` : "";
     return `<div class="fahrt">
       <div class="fahrt-kopf">
         <div class="fahrt-text">
@@ -808,7 +820,7 @@ window.joltTrips = (function () {
       recorded: { label: "Karte", options: [
         ["alle", () => ({})],
         ["mit Aufzeichnung", () => ({ recorded: true })],
-        ["nur VW-Daten", () => ({ recorded: false })],
+        ["ohne Aufzeichnung", () => ({ recorded: false })],
       ] },
     },
     charges: {

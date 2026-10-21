@@ -1,10 +1,11 @@
 """The logbook: drives and charges, stored once however many sources saw them.
 
-Three sources can see the same drive: the VW history export, the portal's
-live reports and jolt's own recording. None depends on another. A drive the
-VW data shows is stored without the app having been running, a jolt
-recording is stored without VW credentials, and when both saw it, it is one
-row with both names in `sources`.
+Four sources can see the same drive: the VW history export, the portal's
+live reports, Stellantis (its status snapshots and the car's own trip list)
+and jolt's own recording. None depends on another. A drive the cloud data
+shows is stored without the app having been running, a jolt recording is
+stored without cloud credentials, and when both saw it, it is one row with
+both names in `sources`.
 
 What a row says is derived, never accumulated. `details.by_source` keeps what
 each source detected; the columns are computed from it with a fixed
@@ -27,23 +28,29 @@ log = logging.getLogger("uvicorn.error")
 HISTORY = "vw_history"
 PORTAL = "vw_portal"
 STELLANTIS = "stellantis"
+STELLANTIS_TRIPS = "stellantis_trips"
 JOLT = "jolt"
 
 # Times, odometer and charge level: the export reports every kilometre, the
-# portal only at ignition on and off, Stellantis whenever jolt asks (every
-# quarter hour), the dongle reads the same odometer. A car is on one cloud,
-# so the two cloud sources never compete for the same drive.
-TRACK_PREFERENCE = (HISTORY, PORTAL, STELLANTIS, JOLT)
-# Energy: the dongle reads the battery's own counters; VW only has the
-# charge level in whole percent and, from the portal, the energy content.
-ENERGY_PREFERENCE = (JOLT, PORTAL, HISTORY, STELLANTIS)
+# car's trip list (Stellantis) has each trip's start mileage and distance, the
+# portal reports only at ignition on and off, Stellantis' status whenever jolt
+# asks (every quarter hour), the dongle reads the same odometer. A car is on
+# one cloud, so the cloud sources of two brands never compete for a drive.
+TRACK_PREFERENCE = (HISTORY, STELLANTIS_TRIPS, PORTAL, STELLANTIS, JOLT)
+# Energy: the dongle reads the battery's own counters; the trip list has the
+# car's own figure for the trip; VW only has the charge level in whole
+# percent and, from the portal, the energy content.
+ENERGY_PREFERENCE = (JOLT, STELLANTIS_TRIPS, PORTAL, HISTORY, STELLANTIS)
 CHARGE_PREFERENCE = (HISTORY, PORTAL, STELLANTIS)
-# Who knows when a drive began and ended. The history stamps every kilometre
-# and a recording runs the whole way; the portal and Stellantis only know the
-# reports around it, and when the car sent none at switch-on their drive
-# spans from the last parked report hours earlier (20 Oct 2026: 15:00 instead
-# of 19:13).
-TIME_PREFERENCE = (HISTORY, JOLT, PORTAL, STELLANTIS)
+# Who knows when a drive began and ended. The history stamps every kilometre,
+# the trip list has the car's start and stop, and a recording runs the whole
+# way; the portal and Stellantis' status only know the reports around it,
+# and when the car sent none at switch-on their drive spans from the last
+# parked report hours earlier (20 Oct 2026: 15:00 instead of 19:13).
+TIME_PREFERENCE = (HISTORY, STELLANTIS_TRIPS, JOLT, PORTAL, STELLANTIS)
+# Where a drive began and ended, from a source that saw all of it.
+POSITION_PREFERENCE = (STELLANTIS_TRIPS, JOLT)
+POSITION_KEYS = ("start_lat", "start_lon", "end_lat", "end_lon")
 # A finer source knows the times even of a drive whose kilometres it saw only
 # in part - the dongle falls silent while the phone keeps recording (21 Oct
 # 2026: 4 of 6 km) - as long as it lies within the coarse span and ends
@@ -136,6 +143,9 @@ def _combine(records: list[dict]) -> dict:
     combined = dict(first)
     combined.update(ended_at=max(r["ended_at"] for r in records),
                     soc_end=last.get("soc_end"))
+    for key in ("end_lat", "end_lon"):
+        if key in first:
+            combined[key] = last.get(key)
     for key in ("distance_km", "energy_used_kwh", "energy_kwh"):
         if key in first:
             found = values(key)
@@ -213,6 +223,11 @@ def _apply_drive(row: models.VehicleDrive) -> None:
                    for s, records in by_source.items()}
     found = _whole(with_energy, ENERGY_PREFERENCE, main)
     row.energy_used_kwh = found["energy_used_kwh"] if found else None
+    placed = {s: [r for r in records if r.get("start_lat") is not None]
+              for s, records in by_source.items()}
+    found = _whole(placed, POSITION_PREFERENCE, main)
+    for key in POSITION_KEYS:
+        setattr(row, key, found.get(key) if found else None)
     jolt = by_source.get(JOLT) or []
     row.live_session_id = (max(jolt, key=lambda r: r["distance_km"])["live_session_id"]
                            if jolt else None)
@@ -267,7 +282,7 @@ def _counts() -> dict:
     return {"new": 0, "updated": 0, "unchanged": 0}
 
 
-def _upsert(db, model, apply, vehicle_id: int, source: str,
+def _upsert(db, model, apply, order: tuple, vehicle_id: int, source: str,
             records: list[dict]) -> dict:
     counts = _counts()
     for record in records:
@@ -278,26 +293,34 @@ def _upsert(db, model, apply, vehicle_id: int, source: str,
             apply(row)
             db.add(row)
             counts["new"] += 1
-        elif source == JOLT:
+            db.flush()
+            continue
+        # Rows whose main source tells drives apart more finely than this one.
+        finer = [r for r in rows if order.index(r.sources[0]) < order.index(source)]
+        if source == JOLT or len(finer) > 1:
             # A recording with a charging stop spans two drives the VW data
-            # tells apart. It belongs to each of them and glues none together.
-            changed = [_merge(db, apply, row, [], source, record) for row in rows]
-            counts["updated" if any(changed) else "unchanged"] += 1
+            # tells apart, a Stellantis status drive two trips with a stop
+            # shorter than two polls. It belongs to each of them and glues
+            # none together; coarser rows it overlaps go into the first.
+            keep = rows if source == JOLT else finer
+            rest = [r for r in rows if r not in keep]
+            changed = ([_merge(db, apply, keep[0], rest, source, record)]
+                       + [_merge(db, apply, row, [], source, record) for row in keep[1:]])
         else:
-            changed = _merge(db, apply, rows[0], rows[1:], source, record)
-            counts["updated" if changed else "unchanged"] += 1
+            changed = [_merge(db, apply, rows[0], rows[1:], source, record)]
+        counts["updated" if any(changed) else "unchanged"] += 1
         db.flush()
     return counts
 
 
 def store_drives(db, vehicle_id: int, source: str, records: list[dict]) -> dict:
-    return _upsert(db, models.VehicleDrive, _apply_drive, vehicle_id, source,
-                   records)
+    return _upsert(db, models.VehicleDrive, _apply_drive, TRACK_PREFERENCE,
+                   vehicle_id, source, records)
 
 
 def store_charges(db, vehicle_id: int, source: str, records: list[dict]) -> dict:
-    return _upsert(db, models.VehicleCharge, _apply_charge, vehicle_id, source,
-                   records)
+    return _upsert(db, models.VehicleCharge, _apply_charge, CHARGE_PREFERENCE,
+                   vehicle_id, source, records)
 
 
 def kwh_per_pct(vehicle: models.Vehicle | None) -> float | None:
@@ -353,6 +376,7 @@ def session_record(session: models.LiveSession) -> dict | None:
     if km < sessions.MIN_DRIVE_KM:
         return None
     used = net[-1][1] - net[0][1] if len(net) > 1 and whole else None
+    fixes = [p for p in points if p.lat is not None and p.lon is not None]
     return {"started_at": _iso(points[0].timestamp),
             "ended_at": _iso(points[-1].timestamp),
             "odo_start": odo_start, "odo_end": odo_end,
@@ -362,7 +386,11 @@ def session_record(session: models.LiveSession) -> dict | None:
             "energy_used_kwh": round(used, 2) if used is not None and used >= 0 else None,
             "km_track": _track(km_track),
             "soc_track": _track(sessions.thin(sessions.dedup(soc_track))),
-            "live_session_id": session.id}
+            "live_session_id": session.id,
+            "start_lat": fixes[0].lat if fixes else None,
+            "start_lon": fixes[0].lon if fixes else None,
+            "end_lat": fixes[-1].lat if fixes else None,
+            "end_lon": fixes[-1].lon if fixes else None}
 
 
 def store_session(db, session: models.LiveSession) -> dict:
