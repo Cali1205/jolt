@@ -44,6 +44,15 @@ CHARGE_PREFERENCE = (HISTORY, PORTAL, STELLANTIS)
 # spans from the last parked report hours earlier (20 Oct 2026: 15:00 instead
 # of 19:13).
 TIME_PREFERENCE = (HISTORY, JOLT, PORTAL, STELLANTIS)
+# A finer source knows the times even of a drive whose kilometres it saw only
+# in part - the dongle falls silent while the phone keeps recording (21 Oct
+# 2026: 4 of 6 km) - as long as it lies within the coarse span and ends
+# with it.
+TIME_SLACK = timedelta(minutes=2)
+END_MATCH = timedelta(minutes=5)
+# The dongle's odometer counts whole kilometres. A recorded track longer than
+# its span by more than that means the dongle missed part of the drive.
+ODOMETER_RESOLUTION_KM = 1.0
 
 # Cloud snapshots: what is detected over this window is stored, but only once
 # it is old enough. The VW switch-off reports arrive late and out of order,
@@ -169,10 +178,27 @@ def _whole(by_source: dict, order: tuple, main: dict) -> dict | None:
     return None
 
 
+def _saw_in_time(found: dict, main: dict) -> bool:
+    start, end = _span(found)
+    main_start, main_end = _span(main)
+    return start >= main_start - TIME_SLACK and abs(end - main_end) <= END_MATCH
+
+
+def _timed(by_source: dict, main: dict) -> dict:
+    """The record whose times the row takes: the first source in
+    `TIME_PREFERENCE` that saw the whole drive, or saw it in time."""
+    for source in TIME_PREFERENCE:
+        if by_source.get(source):
+            found = _combine(by_source[source])
+            if _same_distance(found, main) or _saw_in_time(found, main):
+                return found
+    return main
+
+
 def _apply_drive(row: models.VehicleDrive) -> None:
     by_source = row.details["by_source"]
     main = _preferred(by_source, TRACK_PREFERENCE)
-    row.started_at, row.ended_at = _span(_whole(by_source, TIME_PREFERENCE, main) or main)
+    row.started_at, row.ended_at = _span(_timed(by_source, main))
     row.odo_start, row.odo_end = main.get("odo_start"), main.get("odo_end")
     row.distance_km = main["distance_km"]
     row.soc_start, row.soc_end = main.get("soc_start"), main.get("soc_end")
@@ -292,7 +318,8 @@ def session_record(session: models.LiveSession) -> dict | None:
     its connection drops, so its gaps say nothing about the car standing.
     Without odometer readings a recording counts with its GPS distance; a
     planned trip without them is left out, since the simulator plays those
-    back with made-up times.
+    back with made-up times. With readings that stop short of the recorded
+    track, it counts with the track, and without energy.
     """
     points = list(session.points)
     if session.running or len(points) < 2:
@@ -303,10 +330,15 @@ def session_record(session: models.LiveSession) -> dict | None:
     km_track = sessions.thin(sessions.dedup(sorted(by_field.get("odometer_km", []))))
     soc_track = by_field.get("soc_pct", [])
     net = by_field.get("energy_net_kwh", [])
+    whole = True
     if km_track:
         odo_start = min(v for _, v in km_track)
         odo_end = max(v for _, v in km_track)
         km = odo_end - odo_start
+        track_km = _gps_km(points)
+        if track_km > km + ODOMETER_RESOLUTION_KM:
+            # Its energy counters fell silent with it.
+            km, whole = track_km, False
     else:
         trip = session.trip
         if trip is None or not trip.recording:
@@ -315,7 +347,7 @@ def session_record(session: models.LiveSession) -> dict | None:
         km = _gps_km(points)
     if km < sessions.MIN_DRIVE_KM:
         return None
-    used = net[-1][1] - net[0][1] if len(net) > 1 else None
+    used = net[-1][1] - net[0][1] if len(net) > 1 and whole else None
     return {"started_at": _iso(points[0].timestamp),
             "ended_at": _iso(points[-1].timestamp),
             "odo_start": odo_start, "odo_end": odo_end,

@@ -658,6 +658,113 @@ def part_portal():
            str(lines))
 
 
+def silent_dongle(db, vehicle_id):
+    """Live session 41 (21 Oct 2026): a point every 12 s over 5.93 km of
+    track, the dongle's odometer at the start, then silent after 05:22:39
+    except for one reading at 05:28:25."""
+    from app import models
+    trip = models.Trip(vehicle_id=vehicle_id, recording=True, start_lat=48.1,
+                       start_lon=11.5, target_lat=48.1, target_lon=11.5,
+                       start_soc=44.6, geometry=[], energy_profile=[])
+    db.add(trip)
+    db.flush()
+    start, end = T(21, 5, 18, 53.581), T(21, 5, 31, 34.993)
+    session = models.LiveSession(trip_id=trip.id, running=False,
+                                 started_at=start.replace(tzinfo=None))
+    db.add(session)
+    db.flush()
+    steps = int((end - start) / (12 * S))
+    for i in range(steps + 1):
+        t = end if i == steps else start + i * 12 * S
+        done = 5.93 * (t - start) / (end - start)
+        raw = {}
+        if t <= T(21, 5, 22, 39) or abs(t - T(21, 5, 28, 25)) < 6 * S:
+            raw = {"odometer_km": 62092 + int(done),
+                   "discharge_kwh": 18137.0 + 0.2 * done, "charged_kwh": 0.0}
+        db.add(models.LivePoint(session_id=session.id, lat=48.1 + 0.009 * done,
+                                lon=11.5, timestamp=t.replace(tzinfo=None),
+                                soc=44.6 if raw else None, raw_values=raw))
+    db.flush()
+    db.refresh(session)
+    return session
+
+
+def part_silent_dongle():
+    verify.section("Aufzeichnung, deren Dongle unterwegs verstummt")
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = silent_dongle(db, vid)
+        record = logbook.session_record(session)
+        verify(close(record["distance_km"], 5.9, 0.05)
+               and record["energy_used_kwh"] is None
+               and (record["odo_start"], record["odo_end"]) == (62092, 62096),
+               "Kilometerstand nur bis 62096: die Aufzeichnung zählt mit der GPS-Strecke "
+               "(5,9 km) und ohne Energie, die der Dongle nur zum Teil sah", str(record))
+        logbook.store_session(db, session)
+        for moment, odo, soc in ((datetime(2026, 10, 21, 1, 43, 58), 62092, 45),
+                                 (datetime(2026, 10, 21, 1, 44, 1), 62092, 45),
+                                 (datetime(2026, 10, 21, 5, 31, 6), 62098, 44)):
+            db.add(models.VehicleSnapshot(
+                vehicle_id=vid, source="vw_portal", captured_at=moment, received_at=moment,
+                values={"odometer_km": odo, "soc_pct": soc, "charge_state": "not_ready"},
+                raw=None))
+        db.commit()
+        logbook.store_from_snapshots(db, vid, logbook.PORTAL, now=datetime(2026, 10, 21, 6, 15))
+        rows = drives_of(db, vid)
+        r = rows[0] if len(rows) == 1 else None
+        verify(r is not None and r.sources == ["vw_portal", "jolt"]
+               and (r.started_at, r.ended_at) == (datetime(2026, 10, 21, 5, 18, 53, 581000),
+                                                  datetime(2026, 10, 21, 5, 31, 34, 993000))
+               and (r.odo_start, r.odo_end, r.distance_km) == (62092, 62098, 6)
+               and r.energy_used_kwh is None,
+               "Portal ohne Einschaltbericht (geparkt 01:44, aus 05:31) und die Aufzeichnung: "
+               "05:18:53-05:31:34, 62092 -> 62098, keine Teil-Energie",
+               str(rows and [columns(x) for x in rows]))
+    finally:
+        db.close()
+
+    # What production stored for that drive before: the recording's record
+    # with the dongle's 4 km and its partial energy, next to the portal's.
+    portal = {"started_at": "2026-10-21T01:44:01", "ended_at": "2026-10-21T05:31:06",
+              "odo_start": 62092.0, "odo_end": 62098.0, "distance_km": 6.0,
+              "soc_start": 45.0, "soc_end": 44.0, "energy_used_kwh": 1.25,
+              "km_track": [], "soc_track": [], "live_session_id": None}
+    jolt = {"started_at": "2026-10-21T05:18:53.581000",
+            "ended_at": "2026-10-21T05:31:34.993000", "odo_start": 62092.0,
+            "odo_end": 62096.0, "distance_km": 4.0, "soc_start": 44.6, "soc_end": 43.7,
+            "energy_used_kwh": 0.8, "km_track": [], "soc_track": [], "live_session_id": None}
+    half = dict(jolt, ended_at="2026-10-21T05:24:00", odo_end=62094.0, distance_km=2.0)
+    both = dict(jolt, started_at="2026-10-21T01:30:00", odo_start=62080.0,
+                distance_km=16.0)
+
+    def stored(*records):
+        row = models.VehicleDrive(vehicle_id=0, details={"by_source": {
+            source: [r] for source, r in records}})
+        logbook._apply_drive(row)
+        return row
+
+    row = stored(("vw_portal", portal), ("jolt", jolt))
+    verify((row.started_at, row.ended_at) == (datetime(2026, 10, 21, 5, 18, 53, 581000),
+                                              datetime(2026, 10, 21, 5, 31, 34, 993000))
+           and row.distance_km == 6 and row.energy_used_kwh == 1.25,
+           "die Aufzeichnung sah die Fahrt nur zu 4 von 6 km, aber von Anfang bis Ende: "
+           "ihre Zeiten; die Energie vom Portal, das die ganze Fahrt sah",
+           str(columns(row)))
+    row = stored(("vw_portal", portal), ("jolt", half))
+    verify((row.started_at, row.ended_at) == (datetime(2026, 10, 21, 1, 44, 1),
+                                              datetime(2026, 10, 21, 5, 31, 6)),
+           "eine Aufzeichnung, die sieben Minuten vor dem Abschalten endet, gibt der "
+           "Fahrt keine Zeiten", str(columns(row)))
+    row = stored(("vw_portal", portal), ("jolt", both))
+    verify(row.started_at == datetime(2026, 10, 21, 1, 44, 1),
+           "eine Aufzeichnung, die schon vor dem letzten Parkbericht lief (auch über die "
+           "Fahrt davor), gibt ihr keinen Start", str(columns(row)))
+
+
 def part_import():
     verify.section("Import des Verlaufs")
     import json
@@ -779,7 +886,7 @@ def part_api():
 
 
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_import, part_api]
+         part_silent_dongle, part_import, part_api]
 
 
 def main() -> int:
