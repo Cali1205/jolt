@@ -696,7 +696,8 @@ window.joltTrips = (function () {
 
   /* ---------- Logbook: drives and charges from VW data and jolt ---------- */
 
-  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", stellantis: "Stellantis", jolt: "jolt" };
+  const SOURCE_NAMES = { vw_history: "VW", vw_portal: "VW", stellantis: "Stellantis",
+                         stellantis_trips: "Stellantis", jolt: "jolt" };
 
   function sourceBrand(sources) {
     const names = [...new Set((sources || []).map((s) => SOURCE_NAMES[s] || s))];

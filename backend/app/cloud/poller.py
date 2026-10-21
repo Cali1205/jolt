@@ -127,6 +127,9 @@ class Poll:
         self.vin: str | None = None
         self.last_new: datetime | None = None
         self.logbook_error: str | None = None
+        # The whole trip list once per start; the upsert makes a repeat harmless.
+        self.trips_fetched = False
+        self.trips_error: str | None = None
         self.status = STATUS[config.name] = Status(config.name)
 
     def tick(self) -> int:
@@ -145,10 +148,37 @@ class Poll:
                          for snap in self.client.updates(self.vin))
             if stored:
                 self.last_new = datetime.utcnow()
+            self.update_trips(db)
             self.update_logbook(db)
             return stored
         finally:
             db.close()
+
+    def update_trips(self, db) -> None:
+        """The car's own trip list, for a client that has one (Stellantis):
+        every page on the first round, then the last pages while the car has
+        been reporting lately - a parked car makes no trips. Stored under
+        `<source>_trips`; a failure does not count as a failed fetch."""
+        drives = getattr(self.client, "drives", None)
+        if drives is None:
+            return
+        active = (self.last_new is not None
+                  and (datetime.utcnow() - self.last_new).total_seconds() < QUIET_AFTER_S)
+        if self.trips_fetched and not active:
+            return
+        try:
+            records = drives(self.vin, everything=not self.trips_fetched)
+            logbook.store_drives(db, self.status.vehicle_id, self.config.name + "_trips",
+                                 records)
+            db.commit()
+            self.trips_fetched = True
+            error = None
+        except Exception as failure:      # noqa: BLE001
+            db.rollback()
+            error = _describe(failure)
+        if error and error != self.trips_error:
+            log.warning("%s: trips: %s", self.config.name, error)
+        self.trips_error = error
 
     def update_logbook(self, db) -> None:
         """Drives and charges from the stored reports. Every round, not only

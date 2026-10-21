@@ -801,7 +801,240 @@ def part_corsa_night():
         db.close()
 
 
-PARTS = [part_parse, part_full_status, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
+def trip(n: int, start: str, minutes: int, odo: float, km: float, soc=(60.0, 58.0),
+         consumption=896.0, done=True, lon=9.18, lat=48.78) -> dict:
+    """One trip as `/trips` lists it, synthetic; it ends 0.01° north of its start."""
+    began = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+    ended = began + timedelta(minutes=minutes)
+    stamp = "%Y-%m-%dT%H:%M:%SZ"
+    return {"id": f"trip-{n:03d}", "startedAt": began.strftime(stamp),
+            "stoppedAt": ended.strftime(stamp), "duration": minutes * 60, "distance": km,
+            "createdAt": ended.strftime(stamp), "updatedAt": ended.strftime(stamp),
+            "done": done, "startMileage": odo,
+            "startPosition": {"type": "Feature", "geometry": {"type": "Point",
+                                                              "coordinates": [lon, lat]},
+                              "properties": {"type": "Acquire"}},
+            "stopPosition": {"type": "Feature", "geometry": {"type": "Point",
+                                                             "coordinates": [lon, round(lat + 0.01, 6)]},
+                             "properties": {"type": "Acquire"}},
+            "startEnergies": [{"type": "Electric", "level": soc[0], "autonomy": 200}],
+            "endEnergies": [{"type": "Electric", "level": soc[1], "autonomy": 195}],
+            "energyConsumptions": [{"type": "Electric", "consumption": consumption,
+                                    "avgConsumption": consumption / km * 100 if km else 0}],
+            "kinetic": {"avgSpeed": round(km * 1000 / (minutes * 60), 2), "maxSpeed": 0.0},
+            "_links": {"self": {"href": f"/connectedcar/v4/user/vehicles/x/trips/trip-{n:03d}"}}}
+
+
+def part_trips_parse():
+    verify.section("Fahrten der Stellantis-Cloud -> Fahrtenbuch-Einträge")
+    t = trip(1, "2026-10-21T05:24:09", 13, 7060.0, 6.9, soc=(62.0, 60.0), consumption=896.0)
+    record = stellantis.trip_record(t, stellantis.KWH_CORRECTION)
+    expected = {"started_at": "2026-10-21T05:24:09", "ended_at": "2026-10-21T05:37:09",
+                "odo_start": 7060.0, "odo_end": 7066.9, "distance_km": 6.9,
+                "soc_start": 62.0, "soc_end": 60.0, "energy_used_kwh": 1.2,
+                "trip_id": "trip-001", "avg_speed_kmh": 31.9, "max_speed_kmh": None,
+                "start_lat": 48.78, "start_lon": 9.18, "end_lat": 48.79, "end_lon": 9.18,
+                "live_session_id": None}
+    got = {k: record.get(k) for k in expected} if record else None
+    verify(got == expected, "Zeiten, Kilometer, Ladestand, 896 x 1,343 Wh = 1,2 kWh, "
+           "8,85 m/s = 31,9 km/h, Position als Breite/Länge", str(got))
+    verify(record["km_track"] == [["2026-10-21T05:24:09", 7060.0],
+                                  ["2026-10-21T05:37:09", 7066.9]]
+           and record["soc_track"][-1] == ["2026-10-21T05:37:09", 60.0],
+           "Kilometer- und Ladestandsverlauf aus Start und Ende")
+    plain = stellantis.trip_record(t, 1.0)
+    unscaled = stellantis.trip_record(t, None)
+    verify(plain["energy_used_kwh"] == 0.9 and unscaled["energy_used_kwh"] is None
+           and unscaled["distance_km"] == 6.9,
+           "Energie in der Einheit des Status: Wh bei 1, keine ohne Einheit",
+           f"{plain['energy_used_kwh']} {unscaled['energy_used_kwh']}")
+    rejected = [stellantis.trip_record(trip(2, "2026-10-21T06:00:00", 5, 7070.0, 3.0,
+                                            done=False), 1.0),
+                stellantis.trip_record(trip(3, "2026-10-21T06:00:00", 2, 7070.0, 0.8), 1.0),
+                stellantis.trip_record({**t, "startMileage": None}, 1.0)]
+    verify(rejected == [None, None, None],
+           "nicht fertig, unter einem Kilometer oder ohne Kilometerstand: kein Eintrag")
+    greedy = stellantis.trip_record(trip(4, "2026-10-21T06:00:00", 5, 7070.0, 2.0,
+                                         consumption=2000.0), stellantis.KWH_CORRECTION)
+    lost = stellantis.trip_record(trip(5, "2026-10-21T06:00:00", 10, 7070.0, 6.6,
+                                       consumption=0.0), stellantis.KWH_CORRECTION)
+    verify(greedy["energy_used_kwh"] is None and lost["energy_used_kwh"] is None
+           and lost["distance_km"] == 6.6,
+           "134 kWh/100 km oder 0 über 6,6 km: Energie unglaubwürdig, die Fahrt bleibt",
+           f"{greedy['energy_used_kwh']} {lost['energy_used_kwh']}")
+    nowhere = stellantis.trip_record({**t, "startPosition": None, "stopPosition": {}}, 1.0)
+    verify(nowhere["start_lat"] is None and nowhere["end_lon"] is None,
+           "ohne Positionen keine")
+
+
+def part_trips_paging():
+    verify.section("Fahrtenliste: Seiten nachladen")
+    _seed()
+    trips = [trip(n, f"2026-10-{1 + n:02d}T07:00:00", 15, 7000.0 + 10 * n, 8.0)
+             for n in range(8)]
+    fake = FakeStellantis(trips=trips)
+    client = stellantis.Stellantis("opel", USER, SessionLocal, adapter=fake)
+    client.vehicles()
+    count = len(fake.requests)
+    got = client.trips(VIN, everything=True)
+    pages = [q.get("pageToken", [None])[0] for (_, w), q in
+             zip(fake.requests[count:], fake.queries[count:]) if w == TRIPS_URL]
+    verify([t["id"] for t in got] == [t["id"] for t in trips] and pages == [None, "tok-2", "tok-3"],
+           "alles: erste Seite, dann `next` bis zur letzten", str(pages))
+    count = len(fake.requests)
+    got = client.trips(VIN, everything=False)
+    pages = [q.get("pageToken", [None])[0] for (_, w), q in
+             zip(fake.requests[count:], fake.queries[count:]) if w == TRIPS_URL]
+    verify([t["id"] for t in got] == [t["id"] for t in trips[3:]]
+           and pages == [None, "tok-3", "tok-2"],
+           "danach: über `last` die letzte Seite und die davor", str(pages))
+
+    class Looping(FakeStellantis):
+        def trips_page(self, query):
+            page = super().trips_page(query)
+            page["_links"]["next"] = {"href": "/x/trips?pageToken=tok-2"}
+            return page
+    looping = Looping(trips=trips)
+    client = stellantis.Stellantis("opel", USER, SessionLocal, adapter=looping)
+    client.vehicles()
+    count = len(looping.requests)
+    client.trips(VIN, everything=True)
+    verify([w for _, w in looping.requests[count:]].count(TRIPS_URL) == 2,
+           "eine Seite, die wieder auf sich zeigt, beendet das Nachladen")
+    capped, stellantis.MAX_TRIP_PAGES = stellantis.MAX_TRIP_PAGES, 2
+    try:
+        count = len(fake.requests)
+        client = stellantis.Stellantis("opel", USER, SessionLocal, adapter=fake)
+        got = client.trips(VIN, everything=True)
+    finally:
+        stellantis.MAX_TRIP_PAGES = capped
+    verify(len(got) == 6, "höchstens MAX_TRIP_PAGES Seiten", str(len(got)))
+
+
+def _drives(corsa):
+    from app import models
+    db = SessionLocal()
+    rows = (db.query(models.VehicleDrive).filter_by(vehicle_id=corsa)
+            .order_by(models.VehicleDrive.started_at).all())
+    db.close()
+    return rows
+
+
+def part_trips_poll():
+    verify.section("Abruf: Fahrtenliste ins Fahrtenbuch")
+    from app import cloud
+    from app.cloud import poller
+    _seed()
+    corsa = _vehicle("Corsa Fahrten", net_kwh=NET_KWH)
+    trips = [trip(n, f"2026-10-{1 + n:02d}T07:00:00", 15, 7000.0 + 10 * n, 8.0)
+             for n in range(8)]
+    fake = FakeStellantis(status=STATUS_FULL, trips=trips)
+    config = cloud.Config(name="stellantis", env="STELLANTIS", vin=None, vehicle=str(corsa),
+                          interval_min=15, provides=stellantis.PROVIDES, sampled=True,
+                          connect=lambda vehicle_id: stellantis.Stellantis(
+                              "opel", USER, SessionLocal, adapter=fake, vehicle_id=vehicle_id))
+    poll = poller.Poll(config, SessionLocal)
+
+    def trip_requests(since):
+        return [q.get("pageToken", [None])[0] for (_, w), q in
+                zip(fake.requests[since:], fake.queries[since:]) if w == TRIPS_URL]
+    poll.tick()
+    rows = _drives(corsa)
+    first = [(r.started_at, r.odo_start, r.energy_used_kwh, r.sources) for r in rows]
+    verify(len(rows) == 8 and all(r.sources == ["stellantis_trips"] for r in rows)
+           and rows[0].energy_used_kwh == 1.2 and poll.trips_error is None,
+           "erster Abruf: alle acht Fahrten, Energie mit der Einheit aus dem Status",
+           f"{poll.trips_error} {first[:2]}")
+    count = len(fake.requests)
+    fake.trips.append(trip(8, "2026-10-10T07:00:00", 15, 7080.0, 8.0))
+    poll.last_new = datetime.utcnow()
+    poll.tick()
+    verify(trip_requests(count) == [None, "tok-3", "tok-2"] and len(_drives(corsa)) == 9,
+           "danach nur die letzten Seiten, die neue Fahrt kommt dazu", str(trip_requests(count)))
+    verify([(r.started_at, r.odo_start, r.energy_used_kwh, r.sources)
+            for r in _drives(corsa)][:8] == first,
+           "nochmals abgerufen: die alten Zeilen bleiben, wie sie waren")
+    count = len(fake.requests)
+    poll.last_new = datetime.utcnow() - timedelta(hours=3)
+    poll.tick()
+    verify(trip_requests(count) == [], "ein Auto, das seit Stunden nichts meldet: keine Abfrage")
+
+
+def part_trips_merge():
+    verify.section("Fahrtenbuch: Fahrtenliste, Schnappschüsse und Aufzeichnung")
+    from app.cloud import logbook
+    record = stellantis.trip_record(
+        trip(1, "2026-10-21T05:24:09", 13, 7060.0, 6.9, soc=(62.0, 60.0)), stellantis.KWH_CORRECTION)
+    status_drive = {"started_at": "2026-10-21T05:23:35", "ended_at": "2026-10-21T05:37:47",
+                    "odo_start": 7059.6, "odo_end": 7066.9, "distance_km": 7.3,
+                    "soc_start": 61.0, "soc_end": 60.0, "energy_used_kwh": None,
+                    "km_track": [], "soc_track": [], "live_session_id": None,
+                    "parked_at": "2026-10-21T04:57:09"}
+    for order in ((logbook.STELLANTIS, status_drive), (logbook.STELLANTIS_TRIPS, record)), \
+                 ((logbook.STELLANTIS_TRIPS, record), (logbook.STELLANTIS, status_drive)):
+        corsa = _vehicle("Corsa Zusammenführung")
+        db = SessionLocal()
+        for source, item in order:
+            logbook.store_drives(db, corsa, source, [item])
+        db.commit()
+        db.close()
+        rows = _drives(corsa)
+        r = rows[0] if len(rows) == 1 else None
+        verify(r is not None and r.sources == ["stellantis_trips", "stellantis"]
+               and (r.started_at, r.ended_at) == (datetime(2026, 10, 21, 5, 24, 9),
+                                                  datetime(2026, 10, 21, 5, 37, 9))
+               and not r.start_estimated and (r.odo_start, r.odo_end) == (7060.0, 7066.9)
+               and r.energy_used_kwh == 1.2
+               and (r.start_lat, r.start_lon, r.end_lat, r.end_lon) == (48.78, 9.18, 48.79, 9.18),
+               f"Status-Fahrt und Fahrt der Liste ({order[0][0]} zuerst): eine Zeile, "
+               "Zeiten, Kilometer, Energie und Orte aus der Liste, kein geschätzter Start",
+               str([(x.sources, x.started_at, x.start_estimated, x.odo_start, x.start_lat)
+                    for x in rows]))
+
+    a = stellantis.trip_record(trip(2, "2026-10-21T08:00:00", 8, 7066.9, 3.1), 1.0)
+    b = stellantis.trip_record(trip(3, "2026-10-21T08:20:00", 9, 7070.0, 4.0), 1.0)
+    spanning = {**status_drive, "started_at": "2026-10-21T07:50:00",
+                "ended_at": "2026-10-21T08:30:00", "odo_start": 7066.9, "odo_end": 7074.0,
+                "distance_km": 7.1, "parked_at": None}
+    for order in ([(logbook.STELLANTIS_TRIPS, a), (logbook.STELLANTIS_TRIPS, b),
+                   (logbook.STELLANTIS, spanning)],
+                  [(logbook.STELLANTIS, spanning), (logbook.STELLANTIS_TRIPS, a),
+                   (logbook.STELLANTIS_TRIPS, b), (logbook.STELLANTIS, spanning)]):
+        corsa = _vehicle("Corsa zwei Fahrten")
+        db = SessionLocal()
+        for source, item in order:
+            logbook.store_drives(db, corsa, source, [item])
+        db.commit()
+        db.close()
+        rows = _drives(corsa)
+        verify([(r.odo_start, r.odo_end) for r in rows] == [(7066.9, 7070.0), (7070.0, 7074.0)],
+               f"zwei Fahrten der Liste mit kurzem Halt, die der Status als eine sah "
+               f"({order[0][0]} zuerst): zwei Zeilen, nichts verklebt",
+               str([(r.odo_start, r.odo_end, r.sources) for r in rows]))
+
+    jolt = {"started_at": "2026-10-21T05:23:50", "ended_at": "2026-10-21T05:37:30",
+            "odo_start": 7060, "odo_end": 7067, "distance_km": 7.0, "soc_start": 62.5,
+            "soc_end": 60.1, "energy_used_kwh": 1.08, "km_track": [], "soc_track": [],
+            "live_session_id": None, "start_lat": 48.7801, "start_lon": 9.1801,
+            "end_lat": 48.7899, "end_lon": 9.1799}
+    corsa = _vehicle("Corsa mit Dongle")
+    db = SessionLocal()
+    logbook.store_drives(db, corsa, logbook.JOLT, [jolt])
+    logbook.store_drives(db, corsa, logbook.STELLANTIS_TRIPS, [record])
+    db.commit()
+    db.close()
+    rows = _drives(corsa)
+    r = rows[0] if len(rows) == 1 else None
+    verify(r is not None and r.sources == ["stellantis_trips", "jolt"]
+           and r.energy_used_kwh == 1.08 and r.started_at == datetime(2026, 10, 21, 5, 24, 9)
+           and (r.odo_start, r.odo_end) == (7060.0, 7066.9) and r.start_lat == 48.78,
+           "Aufzeichnung und Fahrt der Liste: eine Zeile, Energie vom Dongle, Zeiten, "
+           "Kilometer und Orte aus der Liste",
+           str([(x.sources, x.energy_used_kwh, x.started_at, x.start_lat) for x in rows]))
+
+
+PARTS = [part_parse, part_full_status, part_trips_parse, part_trips_paging, part_trips_poll,
+         part_trips_merge, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
 
 
 def main() -> int:

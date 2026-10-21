@@ -22,13 +22,14 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import requests
 
 from .. import models
 from ..version import VERSION
 from . import SourceError, credentials, mask
+from .sessions import MIN_DRIVE_KM
 from .snapshot import Snapshot, parse_time
 
 SOURCE = "stellantis"
@@ -40,6 +41,10 @@ USER_AGENT = f"jolt/{VERSION} (+https://github.com/cali1205/jolt)"
 LOGIN_AGAIN = ("log in again: docker compose run --rm --no-deps -it jolt-app "
                "python tools/stellantis_login.py")
 MAINTENANCE_EVERY = timedelta(hours=24)
+# The backfill follows `next` this often at most: 60 trips a page, so years.
+MAX_TRIP_PAGES = 200
+# A trip's energy above this is not believed (a unit the scale did not catch).
+MAX_KWH_PER_100KM = 80.0
 
 
 @dataclass(frozen=True)
@@ -262,6 +267,19 @@ def _condition(doc: dict, captured_at: datetime) -> dict:
     return values
 
 
+def _point(feature: dict) -> tuple[float, float] | None:
+    """(latitude, longitude) of a GeoJSON point; its coordinates are
+    [longitude, latitude, altitude]."""
+    coordinates = _dict(feature.get("geometry")).get("coordinates") or []
+    if len(coordinates) < 2:
+        return None
+    lon, lat = _number(coordinates[0]), _number(coordinates[1])
+    if (lat is None or lon is None or not -90 <= lat <= 90 or not -180 <= lon <= 180
+            or (lat, lon) == (0, 0)):
+        return None
+    return lat, lon
+
+
 def parse_maintenance(doc: dict) -> dict:
     """The `/maintenance` answer as catalog values; negative when overdue."""
     values = {}
@@ -309,17 +327,13 @@ def parse_status(doc: dict, scale: float | None = None) -> Snapshot | None:
     mileage = _number((doc.get("odometer") or {}).get("mileage"))
     if mileage is not None and mileage > 0:
         values["odometer_km"] = mileage
-    position = doc.get("lastPosition") or {}
-    coordinates = (position.get("geometry") or {}).get("coordinates") or []
-    if len(coordinates) >= 2:
-        lon, lat = _number(coordinates[0]), _number(coordinates[1])
-        if (lat is not None and lon is not None and -90 <= lat <= 90
-                and -180 <= lon <= 180 and (lat, lon) != (0, 0)):
-            values["lat"], values["lon"] = lat, lon
-            properties = position.get("properties") or {}
-            fixed = parse_time(properties.get("updatedAt") or properties.get("createdAt"))
-            if fixed:
-                values["position_at"] = _iso(fixed)
+    position = _dict(doc.get("lastPosition"))
+    if point := _point(position):
+        values["lat"], values["lon"] = point
+        properties = _dict(position.get("properties"))
+        fixed = parse_time(properties.get("updatedAt") or properties.get("createdAt"))
+        if fixed:
+            values["position_at"] = _iso(fixed)
     preconditioning = _dict(doc.get("preconditioning") or doc.get("preconditionning"))
     climate = _dict(preconditioning.get("airConditioning")).get("status")
     if isinstance(climate, str) and climate.strip():
@@ -330,6 +344,82 @@ def parse_status(doc: dict, scale: float | None = None) -> Snapshot | None:
     raw: dict = {}
     _flatten(doc, "", raw)
     return Snapshot(captured_at=captured_at, values=values, raw=raw)
+
+
+# ---------------------------------------------------------------------------
+# Trips -> logbook drives (pure)
+# ---------------------------------------------------------------------------
+
+def _naive_iso(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+
+
+def _electric_of(entries) -> dict:
+    return next((e for e in entries or [] if isinstance(e, dict)
+                 and e.get("type") == "Electric"), {})
+
+
+def _level(entries) -> float | None:
+    level = _number(_electric_of(entries).get("level"))
+    return level if level is not None and 0 <= level <= 100 else None
+
+
+def trip_record(trip: dict, scale: float | None) -> dict | None:
+    """One finished trip of `/trips` as a logbook drive record
+    (cloud/logbook.py); None for one still running, one shorter than
+    `sessions.MIN_DRIVE_KM` or one without times or mileage.
+
+    `consumption` is the trip's energy and `avgConsumption` the same per
+    100 km (consumption / distance * 100 on all 161 trips of a Corsa-e that
+    have both), both in the unit of the status' energy figures, so `scale`
+    turns them into kWh. `avgSpeed` is in m/s (distance / duration * 3.6 on
+    the same trips, and Home Assistant converts it so); `maxSpeed` in km/h
+    and 0 when the car did not measure it."""
+    if trip.get("done") is not True or not trip.get("id"):
+        return None
+    start, end = parse_time(trip.get("startedAt")), parse_time(trip.get("stoppedAt"))
+    odo, km = _number(trip.get("startMileage")), _number(trip.get("distance"))
+    if start is None or end is None or end < start or odo is None or km is None:
+        return None
+    if km < MIN_DRIVE_KM:
+        return None
+    consumption = _number(_electric_of(trip.get("energyConsumptions")).get("consumption"))
+    # 0 over kilometres comes with a "DataLacking" fault: the car lost the count.
+    used = (round(consumption * scale / 1000, 2)
+            if scale and consumption is not None and consumption > 0 else None)
+    if used is not None and used / km * 100 > MAX_KWH_PER_100KM:
+        used = None
+    kinetic = _dict(trip.get("kinetic"))
+    avg, top = _number(kinetic.get("avgSpeed")), _number(kinetic.get("maxSpeed"))
+    soc_start = _level(trip.get("startEnergies"))
+    soc_end = _level(trip.get("endEnergies"))
+    started, ended = _naive_iso(start), _naive_iso(end)
+    odo_end = round(odo + km, 1)
+    begin = _point(_dict(trip.get("startPosition")))
+    finish = _point(_dict(trip.get("stopPosition")))
+    return {"started_at": started, "ended_at": ended,
+            "odo_start": odo, "odo_end": odo_end, "distance_km": round(km, 1),
+            "soc_start": soc_start, "soc_end": soc_end, "energy_used_kwh": used,
+            "km_track": [[started, odo], [ended, odo_end]],
+            "soc_track": ([[started, soc_start], [ended, soc_end]]
+                          if soc_start is not None and soc_end is not None else []),
+            "live_session_id": None,
+            "trip_id": str(trip["id"]),
+            "avg_speed_kmh": round(avg * 3.6, 1) if avg and avg > 0 else None,
+            "max_speed_kmh": top if top and top > 0 else None,
+            "start_lat": begin[0] if begin else None,
+            "start_lon": begin[1] if begin else None,
+            "end_lat": finish[0] if finish else None,
+            "end_lon": finish[1] if finish else None}
+
+
+def _page_token(page: dict, rel: str) -> str | None:
+    href = _dict(_dict(page.get("_links")).get(rel)).get("href") or ""
+    return (parse_qs(urlsplit(href).query).get("pageToken") or [None])[0]
+
+
+def _trips_of(page: dict) -> list[dict]:
+    return [t for t in _dict(page.get("_embedded")).get("trips") or [] if isinstance(t, dict)]
 
 
 # ---------------------------------------------------------------------------
@@ -450,12 +540,12 @@ class Stellantis:
         finally:
             db.close()
 
-    def _get(self, step: str, path: str) -> dict:
+    def _get(self, step: str, path: str, params: dict | None = None) -> dict:
         token = self._token()
         for attempt in (1, 2):
             try:
                 response = self.session.get(
-                    API + path, params={"client_id": self.brand.client_id},
+                    API + path, params={"client_id": self.brand.client_id, **(params or {})},
                     headers={"Authorization": f"Bearer {token}",
                              "Accept": "application/hal+json",
                              "X-Introspect-Realm": self.brand.realm},
@@ -527,3 +617,35 @@ class Stellantis:
         """The current status; the poller stores it once per report time."""
         snap = self.latest(vin)
         return [snap] if snap else []
+
+    def _trips_page(self, vin: str, token: str | None = None) -> dict:
+        return self._get("trips", self._path(vin) + "/trips",
+                         {"pageToken": token} if token else None)
+
+    def trips(self, vin: str, everything: bool) -> list[dict]:
+        """The car's trips, oldest first, as the API lists them: all pages
+        (`everything`, following `next`), or else the last two, where a new
+        trip appears and the one before it may have finished meanwhile."""
+        first = self._trips_page(vin)
+        if everything:
+            pages, seen, page = [first], {_page_token(first, "self")}, first
+            while ((token := _page_token(page, "next")) and token not in seen
+                   and len(pages) < MAX_TRIP_PAGES):
+                seen.add(token)
+                page = self._trips_page(vin, token)
+                pages.append(page)
+            return [t for p in pages for t in _trips_of(p)]
+        last_token = _page_token(first, "last")
+        if not last_token or last_token == _page_token(first, "self"):
+            return _trips_of(first)
+        last = self._trips_page(vin, last_token)
+        before = _page_token(last, "prev")
+        if before and before != _page_token(first, "self"):
+            first = self._trips_page(vin, before)
+        return _trips_of(first) + _trips_of(last)
+
+    def drives(self, vin: str, everything: bool) -> list[dict]:
+        """`trips` as logbook drive records, energy in the unit the last
+        status answer decided (`scale`)."""
+        return [r for t in self.trips(vin, everything)
+                if (r := trip_record(t, self.scale)) is not None]

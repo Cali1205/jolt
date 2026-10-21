@@ -113,6 +113,7 @@ SOURCE_LABELS = {
     "vw_portal": "VW-Portal",
     "vw_history": "VW-Export",
     "stellantis": "Stellantis",
+    "stellantis_trips": "Stellantis-Fahrten",
 }
 
 
