@@ -186,19 +186,29 @@ def case_pauses_and_spellings():
     a, end = charging(T(10, 14), 30, 7.0, 50)
     b, _ = charging(end + 8 * MIN, 20, 7.0, 0, spelling="lower",
                     soc_from=50 + 3.5 / 0.726)
-    short = sessions.detect_charges(obs(a + b))
+    short = sessions.detect_charges(
+        obs(a + [p(end + MIN, "plugConnectionState", "disconnected")] + b))
     a, end = charging(T(11, 14), 30, 7.0, 50)
     b, _ = charging(end + 20 * MIN, 20, 7.0, 0, spelling="lower",
                     soc_from=50 + 3.5 / 0.726)
-    long = sessions.detect_charges(obs(a + b))
+    unplugged = [p(end + MIN, "plugConnectionState", "disconnected")]
+    long = sessions.detect_charges(obs(a + unplugged + b))
+    held = sessions.detect_charges(obs(a + b))
+    parts = 7 * 0.5 + 7 * 20 / 60 + 2 * 7 * 15 / 3600
     blip = [p(T(12, 16), "chargePowerInKW", 1.0), p(T(12, 16, 0, 30), "chargePowerInKW", 1.0),
             p(T(12, 16, 1), "chargePowerInKW", 0.0), p(T(12, 15), "currentSOCInPct", 70),
             p(T(12, 16, 2), "currentSOCInPct", 70)]
     noise = sessions.detect_charges(obs(blip))
-    return [(len(short) == 1, "8 Minuten Pause: ein Ladevorgang", str(len(short))),
+    return [(len(short) == 1, "8 Minuten Pause, ab- und wieder angesteckt: ein Ladevorgang",
+             str(len(short))),
             (len(long) == 2 and [c.charge_type for c in long] == ["AC", "AC"],
-             "20 Minuten Pause: zwei; AC in beiden Schreibweisen",
+             "20 Minuten Pause mit Abstecken: zwei; AC in beiden Schreibweisen",
              str([(c.started_at, c.charge_type) for c in long])),
+            (len(held) == 1 and held[0].started_at == T(11, 14)
+             and close(held[0].energy_kwh, parts, 0.02),
+             "20 Minuten Pause am Kabel: ein Ladevorgang, die Energie der beiden Teile "
+             "zusammen, die Pause zählt nicht",
+             str([(c.started_at, c.ended_at, c.energy_kwh) for c in held])),
             (noise == [], "1 kW für eine halbe Minute ohne Anstieg ist Rauschen",
              str(noise))]
 
@@ -268,8 +278,69 @@ def case_portal():
              str(again))]
 
 
+def corsa_rows():
+    """20/21 Oct 2026, the Corsa: plugged in all night, then a drive."""
+    import json
+    with open(os.path.join(TOOLS, "fixtures", "corsa_night.json"), encoding="utf-8") as f:
+        snapshots = json.load(f)["snapshots"]
+    return [SimpleNamespace(source="stellantis", values=s["values"], raw=None,
+                            captured_at=datetime.fromisoformat(s["captured_at"]))
+            for s in snapshots]
+
+
+def case_estimated_start():
+    corsa = sessions.detect_drives(observations.from_snapshots(corsa_rows()),
+                                   dense=False, stop_split=30 * MIN)
+    c = corsa[0] if len(corsa) == 1 else None
+    buzz = [SimpleNamespace(source="vw_portal", raw=None,
+                            captured_at=T(21, *hms).replace(tzinfo=None),
+                            values={"odometer_km": odo, "soc_pct": soc,
+                                    "charge_state": "not_ready"})
+            for hms, odo, soc in (((1, 43, 58), 62092, 45), ((1, 44, 1), 62092, 45),
+                                  ((5, 31, 6), 62098, 44))]
+    found = sessions.detect_drives(observations.from_snapshots(buzz), dense=False)
+    b = found[0] if len(found) == 1 else None
+    return [(c is not None and c.started_at == T(21, 5, 23, 35)
+             and c.parked_at == T(21, 4, 57, 9) and c.ended_at == T(21, 5, 37, 47)
+             and (c.odo_start, c.odo_end) == (7059.6, 7066.9),
+             "Corsa: geparkt 04:57, 0,6 km weiter um 05:24:47; Start geschätzt "
+             "05:23:35 (30 km/h), Ende 05:37:47",
+             str(c and (c.started_at, c.parked_at, c.ended_at))),
+            (b is not None and b.started_at == T(21, 5, 19, 6)
+             and b.parked_at == T(21, 1, 44, 1) and b.ended_at == T(21, 5, 31, 6),
+             "Portal ohne Einschaltbericht: geparkt 01:44, 6 km mehr um 05:31; Start "
+             "geschätzt 05:19:06, nicht 01:44",
+             str(b and (b.started_at, b.parked_at, b.ended_at)))]
+
+
+def case_charging_on_timer():
+    found = sessions.detect_charges(observations.from_snapshots(corsa_rows()),
+                                    kwh_per_pct=0.49, powered=False)
+    c = found[0] if len(found) == 1 else None
+
+    def charge(t):
+        return [observations.Observation(t + i * MIN, "charge_power_kw", 11.0 if i < 20 else 0.0)
+                for i in range(21)]
+    t = T(22, 8)
+    moved = sessions.detect_charges(
+        charge(t) + [observations.Observation(t - MIN, "odometer_km", 100.0),
+                     observations.Observation(t + 60 * MIN, "odometer_km", 110.0)]
+        + charge(t + 120 * MIN))
+    return [(len(moved) == 2,
+             "ohne Steckerstatus (Portal): zwei Ladungen mit einer Fahrt dazwischen "
+             "bleiben zwei", str([(x.started_at, x.ended_at) for x in moved])),
+            (c is not None and (c.started_at, c.ended_at) == (T(20, 21, 55, 43),
+                                                              T(21, 5, 24, 47))
+             and (c.soc_start, c.soc_end, c.energy_kwh) == (56, 62, 2.94),
+             "Corsa die ganze Nacht am Kabel, fünfmal geladen: ein Ladevorgang bis zum "
+             "Abstecken, 56 -> 62 %, 6 Punkte zu 0,49 kWh",
+             str([(x.started_at, x.ended_at, x.soc_start, x.soc_end, x.energy_kwh)
+                  for x in found]))]
+
+
 CASES = [case_session_36, case_stops, case_into_dc, case_overnight,
-         case_pauses_and_spellings, case_manoeuvre, case_portal]
+         case_pauses_and_spellings, case_manoeuvre, case_portal, case_estimated_start,
+         case_charging_on_timer]
 
 
 def run_cases() -> list:
@@ -307,7 +378,8 @@ MUTATIONS = [("STOP_SPLIT", timedelta(minutes=5)), ("STOP_SPLIT", timedelta(minu
              ("BURST", timedelta(seconds=10)), ("MIN_DRIVE_KM", 0.5),
              ("CHARGE_PAUSE", timedelta(minutes=5)),
              ("CHARGE_PAUSE", timedelta(minutes=30)),
-             ("POWER_GAP_CAP", timedelta(hours=3)), ("MIN_CHARGE_KWH", 0.001)]
+             ("POWER_GAP_CAP", timedelta(hours=3)), ("MIN_CHARGE_KWH", 0.001),
+             ("ASSUMED_SPEED_KMH", 60.0)]
 
 
 def part_mutations():
@@ -324,7 +396,7 @@ def part_mutations():
         verify(failed, f"{name} = {value} fällt auf", "kein Fall schlägt fehl")
 
 
-COLUMNS = ("started_at", "ended_at", "odo_start", "odo_end", "distance_km",
+COLUMNS = ("started_at", "start_estimated", "ended_at", "odo_start", "odo_end", "distance_km",
            "soc_start", "soc_end", "energy_used_kwh", "sources", "live_session_id")
 
 
@@ -658,6 +730,123 @@ def part_portal():
            str(lines))
 
 
+def silent_dongle(db, vehicle_id):
+    """Live session 41 (21 Oct 2026): a point every 12 s over 5.93 km of
+    track, the dongle's odometer at the start, then silent after 05:22:39
+    except for one reading at 05:28:25."""
+    from app import models
+    trip = models.Trip(vehicle_id=vehicle_id, recording=True, start_lat=48.1,
+                       start_lon=11.5, target_lat=48.1, target_lon=11.5,
+                       start_soc=44.6, geometry=[], energy_profile=[])
+    db.add(trip)
+    db.flush()
+    start, end = T(21, 5, 18, 53.581), T(21, 5, 31, 34.993)
+    session = models.LiveSession(trip_id=trip.id, running=False,
+                                 started_at=start.replace(tzinfo=None))
+    db.add(session)
+    db.flush()
+    steps = int((end - start) / (12 * S))
+    for i in range(steps + 1):
+        t = end if i == steps else start + i * 12 * S
+        done = 5.93 * (t - start) / (end - start)
+        raw = {}
+        if t <= T(21, 5, 22, 39) or abs(t - T(21, 5, 28, 25)) < 6 * S:
+            raw = {"odometer_km": 62092 + int(done),
+                   "discharge_kwh": 18137.0 + 0.2 * done, "charged_kwh": 0.0}
+        db.add(models.LivePoint(session_id=session.id, lat=48.1 + 0.009 * done,
+                                lon=11.5, timestamp=t.replace(tzinfo=None),
+                                soc=44.6 if raw else None, raw_values=raw))
+    db.flush()
+    db.refresh(session)
+    return session
+
+
+def part_silent_dongle():
+    verify.section("Aufzeichnung, deren Dongle unterwegs verstummt")
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = silent_dongle(db, vid)
+        record = logbook.session_record(session)
+        verify(close(record["distance_km"], 5.9, 0.05)
+               and record["energy_used_kwh"] is None
+               and (record["odo_start"], record["odo_end"]) == (62092, 62096),
+               "Kilometerstand nur bis 62096: die Aufzeichnung zählt mit der GPS-Strecke "
+               "(5,9 km) und ohne Energie, die der Dongle nur zum Teil sah", str(record))
+        logbook.store_session(db, session)
+        for moment, odo, soc in ((datetime(2026, 10, 21, 1, 43, 58), 62092, 45),
+                                 (datetime(2026, 10, 21, 1, 44, 1), 62092, 45),
+                                 (datetime(2026, 10, 21, 5, 31, 6), 62098, 44)):
+            db.add(models.VehicleSnapshot(
+                vehicle_id=vid, source="vw_portal", captured_at=moment, received_at=moment,
+                values={"odometer_km": odo, "soc_pct": soc, "charge_state": "not_ready"},
+                raw=None))
+        db.commit()
+        logbook.store_from_snapshots(db, vid, logbook.PORTAL, now=datetime(2026, 10, 21, 6, 15))
+        rows = drives_of(db, vid)
+        r = rows[0] if len(rows) == 1 else None
+        verify(r is not None and r.sources == ["vw_portal", "jolt"]
+               and (r.started_at, r.ended_at) == (datetime(2026, 10, 21, 5, 18, 53, 581000),
+                                                  datetime(2026, 10, 21, 5, 31, 34, 993000))
+               and (r.odo_start, r.odo_end, r.distance_km) == (62092, 62098, 6)
+               and r.energy_used_kwh is None and r.start_estimated is False,
+               "Portal ohne Einschaltbericht (geparkt 01:44, aus 05:31) und die Aufzeichnung: "
+               "05:18:53-05:31:34, 62092 -> 62098, keine Teil-Energie",
+               str(rows and [columns(x) for x in rows]))
+    finally:
+        db.close()
+
+    # What production stored for that drive before: the recording's record
+    # with the dongle's 4 km and its partial energy, next to the portal's.
+    portal = {"started_at": "2026-10-21T01:44:01", "ended_at": "2026-10-21T05:31:06",
+              "odo_start": 62092.0, "odo_end": 62098.0, "distance_km": 6.0,
+              "soc_start": 45.0, "soc_end": 44.0, "energy_used_kwh": 1.25,
+              "km_track": [], "soc_track": [], "live_session_id": None}
+    jolt = {"started_at": "2026-10-21T05:18:53.581000",
+            "ended_at": "2026-10-21T05:31:34.993000", "odo_start": 62092.0,
+            "odo_end": 62096.0, "distance_km": 4.0, "soc_start": 44.6, "soc_end": 43.7,
+            "energy_used_kwh": 0.8, "km_track": [], "soc_track": [], "live_session_id": None}
+    half = dict(jolt, ended_at="2026-10-21T05:24:00", odo_end=62094.0, distance_km=2.0)
+    both = dict(jolt, started_at="2026-10-21T01:30:00", odo_start=62080.0,
+                distance_km=16.0)
+
+    def stored(*records):
+        row = models.VehicleDrive(vehicle_id=0, details={"by_source": {
+            source: [r] for source, r in records}})
+        logbook._apply_drive(row)
+        return row
+
+    row = stored(("vw_portal", portal), ("jolt", jolt))
+    verify((row.started_at, row.ended_at) == (datetime(2026, 10, 21, 5, 18, 53, 581000),
+                                              datetime(2026, 10, 21, 5, 31, 34, 993000))
+           and row.distance_km == 6 and row.energy_used_kwh == 1.25,
+           "die Aufzeichnung sah die Fahrt nur zu 4 von 6 km, aber von Anfang bis Ende: "
+           "ihre Zeiten; die Energie vom Portal, das die ganze Fahrt sah",
+           str(columns(row)))
+    row = stored(("vw_portal", portal), ("jolt", half))
+    verify((row.started_at, row.ended_at) == (datetime(2026, 10, 21, 1, 44, 1),
+                                              datetime(2026, 10, 21, 5, 31, 6)),
+           "eine Aufzeichnung, die sieben Minuten vor dem Abschalten endet, gibt der "
+           "Fahrt keine Zeiten", str(columns(row)))
+    estimated = dict(portal, started_at="2026-10-21T05:19:06",
+                     parked_at="2026-10-21T01:44:01")
+    row = stored(("vw_portal", estimated))
+    verify(row.started_at == datetime(2026, 10, 21, 5, 19, 6) and row.start_estimated,
+           "nur das Portal: der geschätzte Start, als geschätzt markiert", str(columns(row)))
+    slow = dict(jolt, started_at="2026-10-21T05:10:00")
+    row = stored(("vw_portal", estimated), ("jolt", slow))
+    verify(row.started_at == datetime(2026, 10, 21, 5, 10) and not row.start_estimated,
+           "langsamer gefahren als geschätzt: die Aufzeichnung beginnt vor dem geschätzten "
+           "Start, aber nach dem Parkbericht, und gibt die Zeiten", str(columns(row)))
+    row = stored(("vw_portal", portal), ("jolt", both))
+    verify(row.started_at == datetime(2026, 10, 21, 1, 44, 1),
+           "eine Aufzeichnung, die schon vor dem letzten Parkbericht lief (auch über die "
+           "Fahrt davor), gibt ihr keinen Start", str(columns(row)))
+
+
 def part_import():
     verify.section("Import des Verlaufs")
     import json
@@ -749,6 +938,7 @@ def part_api():
            "Fahrten, neueste zuerst, seitenweise über `before`",
            str([i["started_at"] for i in items]))
     verify(newest["sources"] == ["vw_history", "jolt"] and newest["trip_id"] == trip_id
+           and newest["start_estimated"] is False
            and newest["kwh_per_100km"] == 18.0 and newest["started_at"].endswith("Z"),
            "eine Fahrt aus VW und jolt: Verweis auf die Aufzeichnung, Verbrauch, "
            "Zeiten in UTC mit Z", str(newest))
@@ -779,7 +969,7 @@ def part_api():
 
 
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_import, part_api]
+         part_silent_dongle, part_import, part_api]
 
 
 def main() -> int:

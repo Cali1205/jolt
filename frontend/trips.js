@@ -704,7 +704,8 @@ window.joltTrips = (function () {
   }
 
   /* "Mo., 16.10.2026 · 15:44–15:55"; a charge over midnight gets the end
-   * day as well, otherwise 22:00–03:09 reads like a five-hour gap backwards. */
+   * day as well, otherwise 22:00–03:09 reads like a five-hour gap backwards.
+   * "ca. 07:23" when the start is reckoned back from the distance. */
   function period(item) {
     const a = K.timestamp(item.started_at), b = K.timestamp(item.ended_at);
     if (!a || !b) return "–";
@@ -713,7 +714,7 @@ window.joltTrips = (function () {
     const time = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     const end = day(a) === day(b) ? time(b)
       : b.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + time(b);
-    return `${day(a)} · ${time(a)}–${end}`;
+    return `${day(a)} · ${item.start_estimated ? "ca. " : ""}${time(a)}–${end}`;
   }
 
   function minutes(item) {
