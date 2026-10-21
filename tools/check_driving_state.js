@@ -89,7 +89,7 @@ let now_ts = Date.UTC(2026, 9, 5, 8, 0, 0);
 const realNow = Date.now;
 Date.now = () => now_ts;
 
-const LAT = 48.4770, LON = 9.1444;
+const LAT = 48.7750, LON = 9.1824;
 const M_PER_DEGREE_LAT = 111320;
 
 /* A fix `kmh` fast, `nordM` metres north of the starting point. */
