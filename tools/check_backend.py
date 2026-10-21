@@ -831,7 +831,7 @@ def main() -> int:
     # estimated. Without a measurement the live display stayed empty - until the car
     # answered for the first time, and it does not while parked (alarm system).
     start = client.post("/api/live/recording", json={
-        "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
+        "vehicle_id": vehicles[0]["id"], "lat": 48.7750, "lon": 9.1824,
         "soc": 79.6, "name": "Start"}).json()
     sid = start["session_id"]
     first_item = client.get(f"/api/live/{sid}/points").json()["points"]
@@ -839,19 +839,19 @@ def main() -> int:
            "der Startladestand ist der erste Messpunkt der Aufzeichnung",
            f"{len(first_item)} Punkte, erster: {first_item[:1]}")
     gps = client.post(f"/api/live/{sid}/point", json={
-        "lat": 48.4771, "lon": 9.1445}).json()
+        "lat": 48.7751, "lon": 9.1825}).json()
     verify(gps["actual_soc"] == 79.6 and gps["soc_reported"] is False
            and gps["soc_source"] == "zuletzt",
            "ein Punkt nur mit Position zeigt die letzte Messung - und sagt, dass "
            "sie es ist, statt leer zu bleiben",
            f"{gps['actual_soc']} / {gps['soc_reported']} / {gps['soc_source']}")
     measured = client.post(f"/api/live/{sid}/point", json={
-        "lat": 48.4772, "lon": 9.1446, "soc": 79.2}).json()
+        "lat": 48.7752, "lon": 9.1826, "soc": 79.2}).json()
     verify(measured["actual_soc"] == 79.2 and measured["soc_reported"] is True
            and measured["soc_source"] == "gemessen",
            "und ein gemessener Wert ersetzt sie", str(measured["soc_source"]))
     only_gps = client.post(f"/api/live/{sid}/point", json={
-        "lat": 48.4773, "lon": 9.1447}).json()
+        "lat": 48.7753, "lon": 9.1827}).json()
     verify(only_gps["actual_soc"] == 79.2 and only_gps["soc_source"] == "zuletzt",
            "danach gilt die neueste Messung, nicht die vom Start")
     client.post(f"/api/live/{sid}/end")
@@ -873,13 +873,13 @@ def main() -> int:
            f"{newest} gegen {now_utc}")
 
     without = client.post("/api/live/recording", json={
-        "vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
+        "vehicle_id": vehicles[0]["id"], "lat": 48.7750, "lon": 9.1824,
         "name": "Ohne Auto"}).json()
     verify(client.get(f"/api/live/{without['session_id']}/points").json()["points"] == [],
            "ohne gemeldeten Startladestand gibt es keinen Startpunkt - es wird "
            "nichts erfunden")
     empty = client.post(f"/api/live/{without['session_id']}/point", json={
-        "lat": 48.4771, "lon": 9.1445}).json()
+        "lat": 48.7751, "lon": 9.1825}).json()
     verify(empty["actual_soc"] is None,
            "und der Ladestand bleibt unbekannt, statt mit 100 % zu raten",
            str(empty["actual_soc"]))
@@ -889,7 +889,7 @@ def main() -> int:
     # repeated delivery (lost response) must not create a second recording.
     _delta = __import__("datetime").timedelta
     when = (_dz.now(_tzz.utc) - _delta(minutes=7)).isoformat()
-    body = {"vehicle_id": vehicles[0]["id"], "lat": 48.4770, "lon": 9.1444,
+    body = {"vehicle_id": vehicles[0]["id"], "lat": 48.7750, "lon": 9.1824,
             "soc": 71.0, "name": "Offline", "started_at": when}
     late = client.post("/api/live/recording", json=body).json()
     again = client.post("/api/live/recording", json=body).json()
