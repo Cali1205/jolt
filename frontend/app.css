@@ -391,11 +391,13 @@ table.fahrten tr:hover td { background: #0c1116; }
   color: var(--akzent); }
 .fahrt .stark small { font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--gedaempft); }
 .fahrt-tat { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
-.fahrt-tat button.klein { min-height: 36px; min-width: 44px; }
-button.klein { background: transparent; border: 1px solid var(--rand);
+.fahrt-tat button.klein, .fahrt-tat a.klein { min-height: 36px; min-width: 44px; }
+button.klein, a.klein { background: transparent; border: 1px solid var(--rand);
   color: var(--gedaempft); border-radius: 7px; padding: 4px 9px; font: inherit;
   font-size: 12px; cursor: pointer; width: auto; }
-button.klein:hover { color: var(--text); border-color: var(--gedaempft); }
+a.klein { display: inline-flex; align-items: center; justify-content: center;
+  text-decoration: none; box-sizing: border-box; }
+button.klein:hover, a.klein:hover { color: var(--text); border-color: var(--gedaempft); }
 table.fahrten .tat-spalte { white-space: nowrap; text-align: right; }
 /* On narrow screens the rear columns drop out - in the order of their value
    for comparing. What remains is date, route, kilometres and consumption. */

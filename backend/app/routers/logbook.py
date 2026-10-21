@@ -34,7 +34,7 @@ DRIVE_FILTERS = {
     **COMMON_FILTERS,
     "min_km": lambda M, v: M.distance_km >= v,
     "max_km": lambda M, v: M.distance_km < v,
-    # A recording is what brings the map; the VW data has no position.
+    # A recording is what brings the track; the clouds have none.
     "recorded": lambda M, v: (M.live_session_id.isnot(None) if v
                               else M.live_session_id.is_(None)),
 }
