@@ -7,7 +7,7 @@ import, live measurement points every second.
 from datetime import datetime
 
 from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey,
-                        Index, Integer, String, Text, UniqueConstraint)
+                        Index, Integer, String, Text, UniqueConstraint, false)
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -273,6 +273,10 @@ class VehicleDrive(Base):
                         nullable=False, index=True)
     started_at = Column(DateTime, nullable=False, index=True)
     ended_at = Column(DateTime, nullable=False)
+    # Only a sparse source saw the drive, and nothing between its last parked
+    # report and the drive: the start is reckoned back from the distance.
+    start_estimated = Column(Boolean, nullable=False, default=False,
+                             server_default=false())
     # NULL for a jolt recording without odometer readings; `distance_km`
     # then comes from the recorded track.
     odo_start = Column(Float)

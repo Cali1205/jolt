@@ -84,6 +84,7 @@ def drives(vehicle_id: int, limit: int = Query(30, ge=1, le=200),
     return {
         "items": [{
             "id": r.id, "started_at": utc_iso(r.started_at),
+            "start_estimated": r.start_estimated,
             "ended_at": utc_iso(r.ended_at), "odo_start": r.odo_start,
             "odo_end": r.odo_end, "distance_km": r.distance_km,
             "soc_start": r.soc_start, "soc_end": r.soc_end,

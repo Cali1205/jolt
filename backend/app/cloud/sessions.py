@@ -32,6 +32,14 @@ in the drive. When the car said nothing between parking and the first new
 kilometre, as with the portal's reports, the last report before it is the
 best lower bound there is.
 
+That bound can be hours early. Now and then the portal sends no report at
+switch-on, and Stellantis is asked every quarter hour, so a sparse source
+may know only "parked at 01:44 at 62092, at 62098 at 05:31". When the last
+thing it said before the first new kilometre was the parked reading itself,
+the start is estimated: the first new kilometre minus the distance so far
+at `ASSUMED_SPEED_KMH`, never before the parked report. Such a drive
+carries the parked report's time in `parked_at`.
+
 A kilometre that arrives after ten minutes of silence in a source that
 reports while the car moves (`dense`: the export, the dongle) was not driven
 then: the car woke up and reported a reading it had not sent before going to
@@ -71,6 +79,7 @@ CHARGE_PAUSE = timedelta(minutes=15)
 POWER_GAP_CAP = timedelta(minutes=10)
 MIN_CHARGE_KWH = 0.1
 MIN_CHARGE_SOC_RISE = 1.0
+ASSUMED_SPEED_KMH = 30.0
 TRACK_POINTS = 300
 
 Track = list[tuple[datetime, float]]
@@ -87,6 +96,7 @@ class Drive:
     energy_used_kwh: float | None
     km_track: Track
     soc_track: Track
+    parked_at: datetime | None = None    # set when `started_at` is an estimate
 
 
 @dataclass(frozen=True)
@@ -222,6 +232,17 @@ def _drive_start(stream: _Stream, run: list[_Step]) -> datetime:
     return max(start, first.before_seen)
 
 
+def _estimated_start(stream: _Stream, run: list[_Step],
+                     start: datetime) -> datetime | None:
+    first = run[0]
+    i = bisect_left(stream.times, first.t) - 1
+    if i < 0 or stream.times[i] != first.before_seen:
+        return None
+    hours = (first.value - first.before) / ASSUMED_SPEED_KMH
+    guess = first.t - timedelta(hours=hours)
+    return guess if guess > start else None
+
+
 def _drive_end(stream: _Stream, run: list[_Step]) -> datetime:
     last = run[-1]
     end = last.t
@@ -265,6 +286,9 @@ def detect_drives(obs, dense: bool = True,
         if odo_end - odo_start < MIN_DRIVE_KM:
             continue
         start = _drive_start(stream, run)
+        guess = None if dense else _estimated_start(stream, run, start)
+        parked_at = start if guess else None
+        start = guess or start
         if drives:
             start = max(start, drives[-1].ended_at)
         end = _drive_end(stream, run)
@@ -282,7 +306,8 @@ def detect_drives(obs, dense: bool = True,
             soc_start=soc_before.value if soc_before else None,
             soc_end=soc_after.value if soc_after else None,
             energy_used_kwh=_energy_used(stream, start, run[0].t, end),
-            km_track=thin(km_track), soc_track=thin(soc_track)))
+            km_track=thin(km_track), soc_track=thin(soc_track),
+            parked_at=parked_at))
     return drives
 
 

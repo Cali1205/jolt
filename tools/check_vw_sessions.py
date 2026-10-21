@@ -268,8 +268,43 @@ def case_portal():
              str(again))]
 
 
+def corsa_rows():
+    """20/21 Oct 2026, the Corsa: plugged in all night, then a drive."""
+    import json
+    with open(os.path.join(TOOLS, "fixtures", "corsa_night.json"), encoding="utf-8") as f:
+        snapshots = json.load(f)["snapshots"]
+    return [SimpleNamespace(source="stellantis", values=s["values"], raw=None,
+                            captured_at=datetime.fromisoformat(s["captured_at"]))
+            for s in snapshots]
+
+
+def case_estimated_start():
+    corsa = sessions.detect_drives(observations.from_snapshots(corsa_rows()),
+                                   dense=False, stop_split=30 * MIN)
+    c = corsa[0] if len(corsa) == 1 else None
+    buzz = [SimpleNamespace(source="vw_portal", raw=None,
+                            captured_at=T(21, *hms).replace(tzinfo=None),
+                            values={"odometer_km": odo, "soc_pct": soc,
+                                    "charge_state": "not_ready"})
+            for hms, odo, soc in (((1, 43, 58), 62092, 45), ((1, 44, 1), 62092, 45),
+                                  ((5, 31, 6), 62098, 44))]
+    found = sessions.detect_drives(observations.from_snapshots(buzz), dense=False)
+    b = found[0] if len(found) == 1 else None
+    return [(c is not None and c.started_at == T(21, 5, 23, 35)
+             and c.parked_at == T(21, 4, 57, 9) and c.ended_at == T(21, 5, 37, 47)
+             and (c.odo_start, c.odo_end) == (7059.6, 7066.9),
+             "Corsa: geparkt 04:57, 0,6 km weiter um 05:24:47; Start geschätzt "
+             "05:23:35 (30 km/h), Ende 05:37:47",
+             str(c and (c.started_at, c.parked_at, c.ended_at))),
+            (b is not None and b.started_at == T(21, 5, 19, 6)
+             and b.parked_at == T(21, 1, 44, 1) and b.ended_at == T(21, 5, 31, 6),
+             "Portal ohne Einschaltbericht: geparkt 01:44, 6 km mehr um 05:31; Start "
+             "geschätzt 05:19:06, nicht 01:44",
+             str(b and (b.started_at, b.parked_at, b.ended_at)))]
+
+
 CASES = [case_session_36, case_stops, case_into_dc, case_overnight,
-         case_pauses_and_spellings, case_manoeuvre, case_portal]
+         case_pauses_and_spellings, case_manoeuvre, case_portal, case_estimated_start]
 
 
 def run_cases() -> list:
@@ -307,7 +342,8 @@ MUTATIONS = [("STOP_SPLIT", timedelta(minutes=5)), ("STOP_SPLIT", timedelta(minu
              ("BURST", timedelta(seconds=10)), ("MIN_DRIVE_KM", 0.5),
              ("CHARGE_PAUSE", timedelta(minutes=5)),
              ("CHARGE_PAUSE", timedelta(minutes=30)),
-             ("POWER_GAP_CAP", timedelta(hours=3)), ("MIN_CHARGE_KWH", 0.001)]
+             ("POWER_GAP_CAP", timedelta(hours=3)), ("MIN_CHARGE_KWH", 0.001),
+             ("ASSUMED_SPEED_KMH", 60.0)]
 
 
 def part_mutations():
@@ -324,7 +360,7 @@ def part_mutations():
         verify(failed, f"{name} = {value} fällt auf", "kein Fall schlägt fehl")
 
 
-COLUMNS = ("started_at", "ended_at", "odo_start", "odo_end", "distance_km",
+COLUMNS = ("started_at", "start_estimated", "ended_at", "odo_start", "odo_end", "distance_km",
            "soc_start", "soc_end", "energy_used_kwh", "sources", "live_session_id")
 
 
@@ -720,7 +756,7 @@ def part_silent_dongle():
                and (r.started_at, r.ended_at) == (datetime(2026, 10, 21, 5, 18, 53, 581000),
                                                   datetime(2026, 10, 21, 5, 31, 34, 993000))
                and (r.odo_start, r.odo_end, r.distance_km) == (62092, 62098, 6)
-               and r.energy_used_kwh is None,
+               and r.energy_used_kwh is None and r.start_estimated is False,
                "Portal ohne Einschaltbericht (geparkt 01:44, aus 05:31) und die Aufzeichnung: "
                "05:18:53-05:31:34, 62092 -> 62098, keine Teil-Energie",
                str(rows and [columns(x) for x in rows]))
@@ -759,6 +795,16 @@ def part_silent_dongle():
                                               datetime(2026, 10, 21, 5, 31, 6)),
            "eine Aufzeichnung, die sieben Minuten vor dem Abschalten endet, gibt der "
            "Fahrt keine Zeiten", str(columns(row)))
+    estimated = dict(portal, started_at="2026-10-21T05:19:06",
+                     parked_at="2026-10-21T01:44:01")
+    row = stored(("vw_portal", estimated))
+    verify(row.started_at == datetime(2026, 10, 21, 5, 19, 6) and row.start_estimated,
+           "nur das Portal: der geschätzte Start, als geschätzt markiert", str(columns(row)))
+    slow = dict(jolt, started_at="2026-10-21T05:10:00")
+    row = stored(("vw_portal", estimated), ("jolt", slow))
+    verify(row.started_at == datetime(2026, 10, 21, 5, 10) and not row.start_estimated,
+           "langsamer gefahren als geschätzt: die Aufzeichnung beginnt vor dem geschätzten "
+           "Start, aber nach dem Parkbericht, und gibt die Zeiten", str(columns(row)))
     row = stored(("vw_portal", portal), ("jolt", both))
     verify(row.started_at == datetime(2026, 10, 21, 1, 44, 1),
            "eine Aufzeichnung, die schon vor dem letzten Parkbericht lief (auch über die "
@@ -856,6 +902,7 @@ def part_api():
            "Fahrten, neueste zuerst, seitenweise über `before`",
            str([i["started_at"] for i in items]))
     verify(newest["sources"] == ["vw_history", "jolt"] and newest["trip_id"] == trip_id
+           and newest["start_estimated"] is False
            and newest["kwh_per_100km"] == 18.0 and newest["started_at"].endswith("Z"),
            "eine Fahrt aus VW und jolt: Verweis auf die Aufzeichnung, Verbrauch, "
            "Zeiten in UTC mit Z", str(newest))

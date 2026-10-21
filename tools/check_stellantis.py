@@ -559,7 +559,42 @@ def part_logbook():
                  x.started_at, x.ended_at) for x in charges]))
 
 
-PARTS = [part_parse, part_tokens, part_poller, part_login, part_logbook]
+def part_corsa_night():
+    verify.section("Fahrtenbuch: die Nacht zum 21. Oktober 2026")
+    from app import models
+    from app.cloud import logbook
+    with open(os.path.join(TOOLS, "fixtures", "corsa_night.json"), encoding="utf-8") as f:
+        snapshots = json.load(f)["snapshots"]
+    corsa = _vehicle("Corsa Nacht")
+    db = SessionLocal()
+    try:
+        for s in snapshots:
+            moment = datetime.fromisoformat(s["captured_at"])
+            db.add(models.VehicleSnapshot(vehicle_id=corsa, source="stellantis",
+                                          captured_at=moment, received_at=moment,
+                                          values=s["values"], raw=None))
+        db.commit()
+
+        def detect():
+            return logbook.store_from_snapshots(db, corsa, logbook.STELLANTIS, powered=False,
+                                                stop_split=timedelta(minutes=30),
+                                                now=datetime(2026, 10, 21, 7, 0))
+
+        detect()
+        drives = db.query(models.VehicleDrive).filter_by(vehicle_id=corsa).all()
+        d = drives[0] if len(drives) == 1 else None
+        verify(d is not None and d.started_at == datetime(2026, 10, 21, 5, 23, 35)
+               and d.start_estimated and d.ended_at == datetime(2026, 10, 21, 5, 37, 47)
+               and (d.odo_start, d.odo_end) == (7059.6, 7066.9),
+               "die Fahrt am Morgen: Start geschätzt 05:23:35 (0,6 km vor dem Bericht um "
+               "05:24:47, nicht 04:57 beim letzten Bericht am Kabel), Ende 05:37:47",
+               str([(x.started_at, x.start_estimated, x.ended_at, x.odo_start, x.odo_end)
+                    for x in drives]))
+    finally:
+        db.close()
+
+
+PARTS = [part_parse, part_tokens, part_poller, part_login, part_logbook, part_corsa_night]
 
 
 def main() -> int:

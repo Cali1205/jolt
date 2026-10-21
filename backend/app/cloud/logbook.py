@@ -91,7 +91,8 @@ def drive_record(d: sessions.Drive, live_session_id: int | None = None) -> dict:
             "soc_start": d.soc_start, "soc_end": d.soc_end,
             "energy_used_kwh": d.energy_used_kwh,
             "km_track": _track(d.km_track), "soc_track": _track(d.soc_track),
-            "live_session_id": live_session_id}
+            "live_session_id": live_session_id,
+            "parked_at": _iso(d.parked_at) if d.parked_at else None}
 
 
 def charge_record(c: sessions.Charge) -> dict:
@@ -180,8 +181,10 @@ def _whole(by_source: dict, order: tuple, main: dict) -> dict | None:
 
 def _saw_in_time(found: dict, main: dict) -> bool:
     start, end = _span(found)
-    main_start, main_end = _span(main)
-    return start >= main_start - TIME_SLACK and abs(end - main_end) <= END_MATCH
+    # An estimated start is no bound; the parked report before it is.
+    earliest = _time(main.get("parked_at") or main["started_at"])
+    main_end = _time(main["ended_at"])
+    return start >= earliest - TIME_SLACK and abs(end - main_end) <= END_MATCH
 
 
 def _timed(by_source: dict, main: dict) -> dict:
@@ -198,7 +201,9 @@ def _timed(by_source: dict, main: dict) -> dict:
 def _apply_drive(row: models.VehicleDrive) -> None:
     by_source = row.details["by_source"]
     main = _preferred(by_source, TRACK_PREFERENCE)
-    row.started_at, row.ended_at = _span(_timed(by_source, main))
+    timed = _timed(by_source, main)
+    row.started_at, row.ended_at = _span(timed)
+    row.start_estimated = timed.get("parked_at") is not None
     row.odo_start, row.odo_end = main.get("odo_start"), main.get("odo_end")
     row.distance_km = main["distance_km"]
     row.soc_start, row.soc_end = main.get("soc_start"), main.get("soc_end")
