@@ -148,6 +148,39 @@ check(decodeEcmp("soh_pct", "694 06 62 D8 60 01 05 DC") === 93.75, "e-CMP soh_pc
 check(decodeEcmp("speed_kmh", "682 05 62 D4 02 0B B8") === null, "e-CMP 300 km/h verworfen");
 console.log(failure ? "  Abweichungen" : "  Antworten dekodiert");
 
+console.log("\nFIN:");
+/* An ISO-TP answer as the ELM327 prints it with headers on: `header`, then
+ * the first frame and as many consecutive frames as the payload needs. */
+function frames(header, payloadHex) {
+  const bytes = payloadHex.match(/../g);
+  const lines = [`${header} 10 ${bytes.length.toString(16).padStart(2, "0")} ${bytes.slice(0, 6).join(" ")}`];
+  for (let i = 6, n = 1; i < bytes.length; i += 7, n += 1) {
+    lines.push(`${header} 2${n % 16} ${bytes.slice(i, i + 7).join(" ")}`);
+  }
+  return lines.join("\n");
+}
+const ascii = (text) => Buffer.from(text, "ascii").toString("hex").toUpperCase();
+const BUZZ_VIN = "WVWZZZTESTXYZ0001", CORSA_VIN = "VXKTESTXYZ0000002";
+const BUZZ_F190 = frames("17FE007B", "62F190" + ascii(BUZZ_VIN));
+const CORSA_0902 = frames("7E8", "490201" + ascii(CORSA_VIN));
+check(Decode.vin(BUZZ_F190, "22F190") === BUZZ_VIN, `22F190: ${Decode.vin(BUZZ_F190, "22F190")}`);
+check(Decode.vin(CORSA_0902, "0902") === CORSA_VIN, `0902: ${Decode.vin(CORSA_0902, "0902")}`);
+check(Decode.vin("NO DATA", "0902") === null && Decode.vin(null, "0902") === null,
+      "ohne Antwort keine FIN");
+check(Decode.vin(frames("7E8", "490201" + ascii("WVWZZZTESTXYZ00")), "0902") === null,
+      "eine zu kurze FIN zählt nicht");
+
+const fleet = [{ id: 1, name: "Buzz", vin: BUZZ_VIN }, { id: 2, name: "Corsi", vin: null }];
+const verdict = (read, chosen) => Decode.vinVerdict(read, chosen, fleet);
+check(verdict(BUZZ_VIN, 1).kind === "match", "die eigene FIN passt");
+check(verdict(BUZZ_VIN, 2).kind === "switch" && verdict(BUZZ_VIN, 2).vehicle.id === 1,
+      "Corsi gewählt, Dongle im Buzz: Wechsel auf den Buzz");
+check(verdict(CORSA_VIN, 2).kind === "learn" && verdict(CORSA_VIN, 2).vehicle.id === 2,
+      "unbekannte FIN, gewähltes Fahrzeug ohne FIN: lernen");
+check(verdict(CORSA_VIN, 1).kind === "foreign", "Buzz gewählt, fremde FIN: anderes Auto");
+check(verdict(null, 1).kind === "unknown", "keine FIN gelesen: unbekannt");
+console.log(failure ? "  Abweichungen" : "  FIN gelesen und zugeordnet");
+
 console.log("\nPlattformwahl:");
 O.usePlatform("meb");
 check(O.usePlatform("obd2") === true && O.platform().id === "obd2", "wechsel auf obd2");
@@ -159,7 +192,8 @@ check(O.platforms().map((p) => p.id).sort().join() === Object.keys(registry).sor
       "platforms() listet nicht alle Profile");
 
 /* An ELM327 that answers what a car of the platform would answer and says
- * OK to every AT command. `sent` collects what the app put on the wire. */
+ * OK to every AT command. `sent` collects what the app put on the wire. An
+ * answer given as a function gets `sent`, so it can depend on the header. */
 function dongle(sent, responses) {
   const listener = [];
   const ch = {
@@ -171,7 +205,8 @@ function dongle(sent, responses) {
     async writeValueWithoutResponse(d) {
       const t = new TextDecoder().decode(d).trim();
       sent.push(t);
-      const a = responses[t] !== undefined ? responses[t]
+      const given = typeof responses[t] === "function" ? responses[t](sent) : responses[t];
+      const a = given !== undefined ? given
         : (t.startsWith("AT") ? "OK" : "NO DATA");
       setTimeout(() => {
         const val = new DataView(new TextEncoder().encode(a + "\r\r>").buffer);
@@ -248,6 +283,43 @@ async function main() {
   check(mebSoc && mebSoc.raw === 180 && mebSoc.bms === 72
         && Math.abs(mebSoc.hmi - 73.4) < 0.05,
         `meb: 0xB4 gibt 72,0 % brutto und 73,4 % Anzeige: ${JSON.stringify(mebSoc)}`);
+
+  // 21 Oct 2026: the Corsa chosen, the dongle in the Buzz. The Buzz answers
+  // only its own UDS request on 29 bit; the VIN has to come from there.
+  const buzzSent = [];
+  const header = (sent) => sent.filter((c) => c.startsWith("ATSH")).pop();
+  const buzz = load(dongle(buzzSent, {
+    "22F190": (sent) => (header(sent) === "ATSHFC007B" ? BUZZ_F190 : "NO DATA") }));
+  await buzz.joltObd.link();
+  buzz.joltObd.usePlatform("ecmp");
+  await buzz.joltObd.handshake();
+  buzzSent.length = 0;
+  const read = await buzz.joltObd.readVin();
+  check(read === BUZZ_VIN, `ecmp gewählt, Buzz am Dongle: FIN ${read}`);
+  const at = buzzSent.lastIndexOf("22F190");
+  check(same(buzzSent.slice(at - 7, at + 2),
+             ["ATSP7", "ATCP17", "ATSHFC007B", "ATFCSH17FC007B", "ATFCSD300000", "ATFCSM1",
+              "ATCRA17FE007B", "22F190", "ATSP6"]),
+        `die MEB-Anfrage läuft im MEB-Protokoll und zurück: ${buzzSent.join(",")}`);
+  buzzSent.length = 0;
+  check(await buzz.joltObd.readVin() === BUZZ_VIN && buzzSent.length === 0,
+        "einmal gelesen, fragt die Verbindung nicht nochmal");
+
+  const corsaSent = [];
+  const corsa = load(dongle(corsaSent, { "0902": CORSA_0902 }));
+  await corsa.joltObd.link();
+  corsa.joltObd.usePlatform("meb");
+  await corsa.joltObd.handshake();
+  corsaSent.length = 0;
+  check(await corsa.joltObd.readVin() === CORSA_VIN,
+        "meb gewählt, Corsa am Dongle: FIN über die Standardanfrage 0902");
+  check(corsaSent.includes("ATSH7DF") && corsaSent[corsaSent.length - 1] === "ATSP7",
+        `danach zurück im MEB-Protokoll: ${corsaSent.join(",")}`);
+
+  const silentSent = [];
+  const silent = load(dongle(silentSent, {}));
+  await silent.joltObd.link();
+  check(await silent.joltObd.readVin() === null, "ein Auto, das nichts sagt: keine FIN");
 }
 
 main().then(() => {

@@ -204,6 +204,8 @@ window.joltObd = (function () {
   async function connectionBuildUp(device) {
     const server = await device.gatt.connect();
     counter.connection.device = device.name || "";
+    // Unplugged and plugged into another car is a new connection.
+    vinRead = null;
 
       // Find the usable service: one that has a writable and a notifying
       // characteristic. On some dongles that is the same one.
@@ -651,8 +653,9 @@ function command(text, limit_ms = 15000, internal = false) {
     await command("ATFCSM1");
   }
 
-  async function readReading(entry) {
-    const destination = entry.address;
+  /* One request to one control unit; the raw answer, or null when the
+   * address is known not to work in this session. */
+  async function ask(destination, did) {
 
     /* Control units on an 11-bit identifier need a different protocol than
      * the rest (see CLIMATE). The switch lasts only for the duration of this
@@ -663,10 +666,14 @@ function command(text, limit_ms = 15000, internal = false) {
       if (changeFailed.has(destination.sh)) return null;
       try {
         await command(`ATSP${destination.trace_log}`);
+        // The priority bits only exist on 29-bit identifiers (ATSP 7 and 9).
+        if (destination.cp && /^[79]$/.test(destination.trace_log)) {
+          await command(`ATCP${destination.cp}`);
+        }
         await command(`ATSH${destination.sh}`);
         await flowControl(destination);
         await command(`ATCRA${destination.cra || ""}`);
-        return Decode.evaluate(await command(entry.did, 8000), entry);
+        return await command(did, 8000);
       } catch (failure) {
         report(`Protokollwechsel auf ATSP${destination.trace_log} fehlgeschlagen - `
               + `${destination.sh} wird in dieser Sitzung nicht mehr versucht.`);
@@ -695,7 +702,56 @@ function command(text, limit_ms = 15000, internal = false) {
       await command(`ATCRA${destination.cra || ""}`);
       latestAddress = destination;
     }
-    return Decode.evaluate(await command(entry.did, 8000), entry);
+    return command(did, 8000);
+  }
+
+  async function readReading(entry) {
+    const response = await ask(entry.address, entry.did);
+    return response === null ? null : Decode.evaluate(response, entry);
+  }
+
+  /* Which car the dongle is plugged into, by its VIN.
+   *
+   * The profile's own requests first (`vin` in a profile: address and
+   * request), then the standard one many cars answer (mode 09 PID 02,
+   * broadcast on 11-bit 0x7DF), then the other profiles' requests in their
+   * own protocol. The last two are for the case this exists for: the chosen
+   * platform is the wrong one, and its addresses find nobody.
+   * Kept for the connection once found; a car still asleep is asked again
+   * next time. Null when no request gave one. */
+  const STANDARD_VIN = { address: { sh: "7DF", trace_log: "6" }, did: "0902" };
+  let vinRead = null;
+
+  function vinRequests(p, ownProtocol) {
+    return (p.vin || [])
+      .filter((v) => p.addresses[v.address])
+      .map((v) => {
+        const address = p.addresses[v.address];
+        return { did: v.did, address: ownProtocol || address.trace_log
+          ? address : { ...address, trace_log: p.protocol } };
+      });
+  }
+
+  async function readVin() {
+    if (vinRead) return vinRead;
+    if (listenActive) throw new Error("der Dongle lauscht gerade");
+    const others = Object.values(PLATFORMS).filter((p) => p !== profile);
+    const tries = vinRequests(profile, true)
+      .concat([STANDARD_VIN])
+      .concat(...others.map((p) => vinRequests(p, false)));
+    for (const t of tries) {
+      try {
+        const found = Decode.vin(await ask(t.address, t.did), t.did);
+        if (found) {
+          report(`FIN gelesen (…${found.slice(-4)}) mit ${t.did}.`);
+          vinRead = found;
+          return found;
+        }
+      } catch (failure) {
+        report(`FIN mit ${t.did}: ${failure.message}`);
+      }
+    }
+    return null;
   }
 
   /* The charge level on its own, read through the normal reading path.
@@ -1104,6 +1160,7 @@ function command(text, limit_ms = 15000, internal = false) {
     voltage,
     socFromRaw,
     readSoc,
+    readVin,
     usePlatform,
     platform: () => ({ id: profile.id, title: profile.title }),
     platforms: () => Object.values(PLATFORMS).map((p) => ({ id: p.id, title: p.title })),

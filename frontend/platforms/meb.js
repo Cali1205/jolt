@@ -27,6 +27,9 @@
  *              optional and defaults to the `bms` value.
  *   addresses  The control units, see below.
  *   vals       The readings, see below.
+ *   vin        Optional: where the platform answers with the VIN, as
+ *              `[{ address, did }]`, tried in order before the standard
+ *              `0902` (`readVin` in `obd-core.js`).
  *
  * Names are the contract between a profile and the rest of the app
  * (`soc_raw`, `speed_kmh`, `outside_temp_c`, `odometer_km`, `aux12_v`, ...):
@@ -148,6 +151,10 @@
     "ATSHFC007B", "ATCRA17FE007B",
   ],
   protocol: "7",
+
+  // UDS identifier F190 is the VIN on every VW control unit. Not yet read
+  // at our car; the standard 0902 follows if it does not answer.
+  vin: [{ address: "BMS", did: "22F190" }],
 
   /* From the raw byte (`soc_raw`) to the two charge levels.
    *

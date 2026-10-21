@@ -39,6 +39,28 @@ The diagnostics page shows what arrives: tab "Einstellungen", section
 answers and failures. "Bericht kopieren" copies a report you can attach to an
 issue.
 
+## Which car the dongle is in
+
+With more than one vehicle, a recording can land on the wrong one: the
+dongle then asks for the chosen vehicle's values, the car does not answer,
+and the trip has GPS only. So at the start of a recording jolt reads the
+vehicle identification number (VIN) through the dongle and compares it with
+the VIN stored on the vehicle (field "FIN" in the tab "Fahrzeug"):
+
+| The VIN read belongs to | jolt |
+|---|---|
+| the chosen vehicle | records |
+| another vehicle | switches to it, with its platform, and records |
+| no vehicle, and the chosen one has a different VIN | does not start, and says why |
+| no vehicle, and the chosen one has none | records, and stores it once the car answered the chosen platform's charge-level request |
+| nothing read (car asleep, no answer) | records, as before |
+
+The VIN is asked for with the chosen platform's own request (`vin` in the
+profile), then the standard OBD2 request `0902`, then the other platforms'
+requests. That last step finds the car even when the chosen platform is the
+wrong one. A vehicle set up for the VW portal or the Stellantis cloud gets its
+VIN from there on the server's first fetch.
+
 ## Without a dongle
 
 Volkswagen group cars can send their last reported values (charge level,

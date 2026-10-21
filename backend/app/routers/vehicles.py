@@ -1,4 +1,5 @@
 import math
+import re
 import secrets
 from datetime import datetime
 from typing import Annotated, Literal
@@ -21,6 +22,20 @@ class ElectricityPrice(BaseModel):
     """A price for chargers whose name contains the pattern."""
     pattern: str = Field(max_length=80)
     eur_kwh: float = Field(ge=0, le=5, allow_inf_nan=False)
+
+
+# 17 characters, digits and capitals without I, O and Q (ISO 3779).
+VIN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+
+
+def _vin(value: str | None) -> str | None:
+    """Upper case without spaces; empty stays empty, the way to clear it."""
+    if value is None:
+        return None
+    value = value.replace(" ", "").upper()
+    if value and not VIN.match(value):
+        raise ValueError("Die FIN hat 17 Zeichen, Ziffern und Grossbuchstaben ohne I, O und Q.")
+    return value
 
 
 class VehicleInput(BaseModel):
@@ -63,6 +78,13 @@ class VehicleInput(BaseModel):
     # None leaves it unchanged: a client from before the setting must not
     # reset someone's "profile" to "auto" with every save.
     charge_curve_source: Literal["auto", "profile"] | None = None
+    # None leaves it unchanged, for the same reason; "" clears it.
+    vin: str | None = None
+
+    @field_validator("vin")
+    @classmethod
+    def _vin_valid(cls, vin):
+        return _vin(vin)
 
     @model_validator(mode="after")
     def _target_above_reserve(self):
@@ -101,6 +123,7 @@ def _as_dict(vehicle: models.Vehicle) -> dict:
             "max_charge_power_kw": vehicle.max_charge_power_kw,
             "connector_type": vehicle.connector_type,
             "platform": vehicle.platform,
+            "vin": vehicle.vin,
             "preferred_operators": vehicle.preferred_operators or [],
             "electricity_price_eur_kwh": vehicle.electricity_price_eur_kwh,
             "electricity_prices": vehicle.electricity_prices or [],
@@ -150,9 +173,22 @@ def _examine_curve(pairs: list[list[float]]) -> None:
 def _fields(user_input: VehicleInput) -> dict:
     """The input's columns, without the curve and without unset settings."""
     exclude = {"charge_curve"}
-    if user_input.charge_curve_source is None:
-        exclude.add("charge_curve_source")
-    return user_input.model_dump(exclude=exclude)
+    for optional in ("charge_curve_source", "vin"):
+        if getattr(user_input, optional) is None:
+            exclude.add(optional)
+    fields = user_input.model_dump(exclude=exclude)
+    if fields.get("vin") == "":
+        fields["vin"] = None
+    return fields
+
+
+def _vin_free(db: Session, vin: str | None, vehicle_id: int | None) -> None:
+    """One car, one vehicle: the dongle check could not tell two apart."""
+    if not vin:
+        return
+    other = db.query(models.Vehicle).filter(models.Vehicle.vin == vin).first()
+    if other is not None and other.id != vehicle_id:
+        raise HTTPException(409, f"Diese FIN gehört schon zu „{other.name}“.")
 
 
 def _set_curve(db: Session, vehicle: models.Vehicle,
@@ -197,6 +233,7 @@ def create(user_input: VehicleInput, db: Session = Depends(get_db)):
     if user_input.battery_net_kwh > user_input.battery_gross_kwh:
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
     _examine_curve(user_input.charge_curve)
+    _vin_free(db, user_input.vin, None)
     vehicle = models.Vehicle(**_fields(user_input))
     db.add(vehicle)
     db.flush()
@@ -216,10 +253,33 @@ def change(vehicle_id: int, user_input: VehicleInput,
         raise HTTPException(400, "Netto-Kapazität kann nicht über brutto liegen.")
     if user_input.charge_curve:
         _examine_curve(user_input.charge_curve)
+    _vin_free(db, user_input.vin, vehicle_id)
     for field, value in _fields(user_input).items():
         setattr(vehicle, field, value)
     if user_input.charge_curve:
         _set_curve(db, vehicle, user_input.charge_curve)
+    db.commit()
+    return _as_dict(vehicle)
+
+
+class VinInput(BaseModel):
+    vin: str
+
+    @field_validator("vin")
+    @classmethod
+    def _vin_valid(cls, vin):
+        return _vin(vin)
+
+
+@router.put("/{vehicle_id}/vin")
+def set_vin(vehicle_id: int, user_input: VinInput, db: Session = Depends(get_db)):
+    """The VIN alone: the app stores what the dongle read, without sending
+    (and possibly overwriting) the rest of the vehicle."""
+    vehicle = db.get(models.Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(404, "Fahrzeug nicht gefunden.")
+    _vin_free(db, user_input.vin, vehicle_id)
+    vehicle.vin = user_input.vin or None
     db.commit()
     return _as_dict(vehicle)
 

@@ -47,6 +47,11 @@ window.joltVehicle = (function () {
       hint: "Bestimmt, welche Steuergeräte-Adressen und PIDs der Dongle "
         + "abfragt. Unbekannte Fahrzeuge: Standard-OBD2 liefert nur, was der "
         + "Gesetzgeber vorschreibt." },
+    { name: "vin", title: "FIN", kind: "text",
+      hint: "Damit erkennt jolt beim Start einer Aufzeichnung, in welchem Auto "
+        + "der Dongle steckt, und wählt das Fahrzeug selbst. Füllt sich von "
+        + "allein aus VW-Portal oder Stellantis-Cloud, sonst beim ersten "
+        + "Auslesen über den Dongle." },
     { name: "preferred_operators", title: "Bevorzugte Ladeanbieter", kind: "liste",
       hint: "Namen oder Namensteile, durch Komma getrennt - z.B. "
         + "\"EnBW, Ionity\". Kein Ausschluss anderer Anbieter, nur ein "

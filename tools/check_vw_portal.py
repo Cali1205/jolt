@@ -531,10 +531,20 @@ def part_poller():
     verify(delays == [1800, 3600, 7200, 900, 900],
            "nach Fehlern wartet der Abruf doppelt so lang (max. 2 h), danach "
            "wieder 15 min", str(delays))
-    verify(lines == ["vw_portal: login rejected: x", "vw_portal: RuntimeError: portal down",
-                     "vw_portal: working again"],
-           "ins Log kommt nur der Wechsel: Fehler, anderer Fehler, wieder ok",
+    stored_vin = f"cloud: VIN {cloud.mask(VIN)} stored on vehicle {vehicle_id}"
+    verify(lines == [stored_vin, "vw_portal: login rejected: x",
+                     "vw_portal: RuntimeError: portal down", "vw_portal: working again"],
+           "ins Log kommt nur: FIN gemerkt, dann der Wechsel Fehler, anderer Fehler, wieder ok",
            str(lines))
+    db = SessionLocal()
+    try:
+        verify(db.get(models.Vehicle, vehicle_id).vin == VIN,
+               "die FIN aus dem Portal steht am Fahrzeug, für die Dongle-Prüfung der App")
+        poller.remember_vin(db, vehicle_id, "WVWZZZTESTVIN0009")
+        verify(db.get(models.Vehicle, vehicle_id).vin == VIN,
+               "eine schon gesetzte FIN überschreibt der Abruf nicht")
+    finally:
+        db.close()
     verify(poll.status.failures == 0 and poll.status.last_error is None
            and poll.status.last_ok is not None and poll.status.vehicle_id == vehicle_id,
            "der Status steht wieder auf ok", str(poll.status))

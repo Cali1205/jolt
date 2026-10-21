@@ -102,6 +102,8 @@ class Vehicle(Base):
     # live in frontend/platforms/). The backend only stores the id; which ids
     # exist is the frontend's knowledge.
     platform = Column(String(20), nullable=False, default="meb", server_default="meb")
+    # Lets the app check which car the dongle is plugged into.
+    vin = Column(String(17), unique=True, index=True)
     connector_type = Column(String(20), nullable=False, default="CCS")
     # "auto": plan with the curve measured in the logbook when there is
     # enough of it, "profile": always with `charge_curve`. See

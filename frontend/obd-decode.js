@@ -139,5 +139,34 @@ window.joltObdDecode = (function () {
     return { val, further };
   }
 
-  return { formula, evaluate, payload_bytes };
+  /* The vehicle identification number in an answer to `0902` (standard
+   * OBD2: one count byte, then 17 ASCII characters) or `22F190` (UDS: the 17
+   * characters right away). Searched rather than cut at a fixed place, so
+   * padding before or after it does not matter. Null without one. */
+  function vin(response, request) {
+    const bytes = response ? payload_bytes(response, request) : null;
+    if (!bytes) return null;
+    const text = String.fromCharCode(...bytes);
+    const hit = /[A-HJ-NPR-Z0-9]{17}/.exec(text);
+    return hit ? hit[0] : null;
+  }
+
+  /* What the VIN the dongle read says about the vehicle chosen for a
+   * recording (`vehicles`: the app's list, each with `id` and `vin`):
+   *
+   *   match    the chosen vehicle has this VIN
+   *   switch   another vehicle has it: `vehicle` is the one the dongle is in
+   *   foreign  the chosen vehicle has a different VIN and no other has this one
+   *   learn    nobody has it and the chosen vehicle has none yet
+   *   unknown  no VIN was read
+   */
+  function vinVerdict(read, chosenId, vehicles) {
+    const chosen = vehicles.find((v) => v.id === chosenId) || null;
+    if (!read) return { kind: "unknown", vehicle: chosen };
+    const owner = vehicles.find((v) => v.vin === read);
+    if (owner) return { kind: owner.id === chosenId ? "match" : "switch", vehicle: owner };
+    return { kind: chosen && chosen.vin ? "foreign" : "learn", vehicle: chosen };
+  }
+
+  return { formula, evaluate, payload_bytes, vin, vinVerdict };
 })();
