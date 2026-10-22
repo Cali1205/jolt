@@ -1180,6 +1180,10 @@ def main() -> int:
            "ein Punkt ohne Fahrzeugabfrage, nur mit der 12-V-Spannung, wird "
            "angenommen - ohne Zähler und ohne Ladestand",
            f"HTTP {only_voltage.status_code}: {only_voltage.text[:120]}")
+    running = client.delete(f"/api/trips/{trip_id}")
+    verify(running.status_code == 409,
+           "eine Fahrt mit laufender Aufzeichnung lässt sich nicht löschen",
+           f"HTTP {running.status_code}")
     client.post(f"/api/live/{buffer}/end")
     to = client.post(f"/api/live/{buffer}/points", json={"points": [
         {"lat": 52.0, "lon": 10.0, "soc": 50.0}]})
