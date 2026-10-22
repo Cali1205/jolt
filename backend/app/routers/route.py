@@ -785,6 +785,9 @@ def delete_trip(trip_id: int, db: Session = Depends(get_db)):
     trip = db.get(models.Trip, trip_id)
     if not trip:
         raise HTTPException(404, "Fahrt nicht gefunden.")
+    # The cascade would take the running recording's points with it.
+    if db.query(models.LiveSession).filter_by(trip_id=trip_id, running=True).first():
+        raise HTTPException(409, "Die Fahrt wird gerade aufgezeichnet.")
     db.delete(trip)
     db.commit()
     return {"ok": True}
