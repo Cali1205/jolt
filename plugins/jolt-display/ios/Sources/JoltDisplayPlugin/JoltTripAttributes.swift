@@ -76,6 +76,20 @@ public struct JoltDisplay: Codable, Hashable {
         public var batterieText: String?
     }
 
+    /// The state of charge over the distance for the CarPlay dashboard:
+    /// [km, soc] pairs, measured and (with a plan) planned. Without a plan
+    /// `km` and `total` are the distance driven so far.
+    public struct Course: Codable, Hashable {
+        public var km: Double
+        public var total: Double
+        public var actual: [[Double]]
+        public var plan: [[Double]]?
+        public var stops: [Double]?
+        public var reserve: Double?
+        /// Percentage points above (+) or below (-) the plan.
+        public var delta: Int?
+    }
+
     /// A charging stop of the trip, as the CarPlay list shows it. The Live
     /// Activity does not get it: it may carry 4 KB at most.
     public struct ListStop: Codable, Hashable {
@@ -104,6 +118,7 @@ public struct JoltDisplay: Codable, Hashable {
     public var short: String
     public var history: History?
     public var aux: Aux?
+    public var course: Course?
     public var stopList: [ListStop]?
     public var soc: Soc?
     public var stop: Stop?

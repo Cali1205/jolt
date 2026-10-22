@@ -498,5 +498,40 @@ console.log("\nKacheln fuer CarPlay: Stil und Bilder");
          "das Modell des Senders traegt keine Bilder: Der Vergleich 'hat sich etwas geaendert' haengt nicht an Pixeln");
 }
 
+console.log("\nVerlauf fuer das CarPlay-Dashboard");
+{
+  // 600 km planned, one charging stop at km 300 (18 -> 80 %), 2000 measured points.
+  const profile = [];
+  for (let k = 0; k <= 300; k += 1) profile.push({ km: k, soc: 92 - k * 0.246 });
+  for (let k = 300; k <= 600; k += 1) profile.push({ km: k, soc: 80 - (k - 300) * 0.2 });
+  const history = [];
+  for (let i = 0; i <= 2000; i++) history.push({ km: i * 0.05, driven_km: i * 0.05, soc: 92 - i * 0.01 });
+  const extras = { history, profile, plan: { stops: [{ km_on_route: 300 }] }, reserve: 10 };
+  const c = A.model(planned, NOW, extras).course;
+  verify(c && c.km === 100 && c.total === 600 && c.reserve === 10 && c.delta === -1,
+         "der Verlauf steht auf der Route: Position, Laenge bis zum Ziel, Reserve, Abstand zum Plan",
+         JSON.stringify(c && { km: c.km, total: c.total, reserve: c.reserve, delta: c.delta }));
+  const end = c.actual[c.actual.length - 1];
+  verify(c.actual.length <= 24 && c.actual[0][0] === 0 && end[0] === 100 && end[1] === 72,
+         "die gemessene Linie ist ausgeduennt und behaelt Anfang und Ende",
+         JSON.stringify([c.actual.length, c.actual[0], end]));
+  const jump = c.plan.findIndex((p, i) => i > 0 && p[1] > c.plan[i - 1][1] + 1);
+  verify(jump > 0 && c.plan[jump - 1][0] === 300 && c.plan[jump][0] === 300,
+         "der Sprung am Ladestopp bleibt ein Sprung und wird keine Schraege",
+         JSON.stringify(c.plan.slice(Math.max(0, jump - 1), jump + 1)));
+  verify(JSON.stringify(c.stops) === "[300]", "die Ladestopps stehen als Kilometer darin", JSON.stringify(c.stops));
+  const size = JSON.stringify(A.model(planned, NOW, extras)).length;
+  verify(size < 3000, "das ganze Modell bleibt deutlich unter den 4 KB der Live-Aktivitaet", size + " Byte");
+
+  const recording = { actual_soc: 61, soc_reported: true };
+  const r = A.model(recording, NOW, { history: [{ km: 0, driven_km: 0, soc: 64 }, { km: 0, driven_km: 12.34, soc: 61 }],
+                                      profile, plan: { stops: [{ km_on_route: 300 }] } }).course;
+  verify(r && r.plan === null && r.stops === null && r.delta === null && r.km === 12.3 && r.total === 12.3,
+         "ohne Plan: gefahrene Strecke als Achse, kein Plan, keine Stopps, kein Abstand",
+         JSON.stringify(r));
+  verify(A.model(recording, NOW, { history: [{ driven_km: 0, soc: 64 }] }).course === null,
+         "ein einzelner Punkt ist noch kein Verlauf");
+}
+
 console.log(failure ? `\n${failure} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
 process.exit(failure ? 1 : 0);
