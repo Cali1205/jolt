@@ -173,6 +173,19 @@ def main() -> int:
            "über das Formular geändert und mit leerem Feld gelöscht",
            f"{other.json().get('vin')} / {cleared.json().get('vin')}")
 
+    # A car known only from the cloud has no trips, but a logbook.
+    from datetime import datetime as _dtv
+    logged = client.post("/api/vehicles", json=own).json()
+    db = SessionLocal()
+    db.add(models.VehicleDrive(vehicle_id=logged["id"], started_at=_dtv(2026, 10, 1, 8),
+                               ended_at=_dtv(2026, 10, 1, 9), distance_km=10.0,
+                               sources=["vw_history"], details={"by_source": {}}))
+    db.commit()
+    db.close()
+    kept_logbook = client.delete(f"/api/vehicles/{logged['id']}")
+    verify(kept_logbook.status_code == 409,
+           "ein Fahrzeug mit Fahrtenbuch wird nicht gelöscht", f"HTTP {kept_logbook.status_code}")
+
     templates = {t["name"]: t["platform"]
                  for t in client.get("/api/vehicles/templates").json()}
     verify(templates["VW ID.Buzz Pro (82 kWh)"] == "meb"
