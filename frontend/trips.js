@@ -91,8 +91,8 @@ window.joltTrips = (function () {
     return `<div class="fahrt" data-id="${trip.id}">
       <div class="fahrt-kopf">
         <div class="fahrt-text">
-          <div class="titel">${distance(trip)}</div>
-          <div class="unter">${date(trip.created_at)} · ${trip.vehicle || ""} ${brands(trip)}</div>
+          <div class="titel">${K.esc(distance(trip))}</div>
+          <div class="unter">${date(trip.created_at)} · ${K.esc(trip.vehicle || "")} ${brands(trip)}</div>
         </div>
         <div class="fahrt-zahlen">
           <div class="stark">${has(trip.consumption_kwh_100km)
