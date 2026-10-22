@@ -262,8 +262,11 @@ window.joltLive = (function () {
   function reportToDisplay(z) {
     try {
       if (window.joltDisplay) {
+        const trip = K.state.trip;
         window.joltDisplay.report(z, { track: consumption_track, vals: valuesAsOf,
-                                       aux: aux_load, plan: z.plan || plan });
+                                       aux: aux_load, plan: z.plan || plan, history,
+                                       profile: trip && trip.profile,
+                                       reserve: trip && trip.vehicle && trip.vehicle.reserve_soc });
       }
     }
     catch (e) { console.log("[anzeige]", e && e.message); }

@@ -71,8 +71,18 @@ struct TripView: View {
         .opacity(stale ? 0.55 : 1)
     }
 
-    /// CarPlay and Watch: one large number and one line.
+    /// CarPlay and Watch: the course of the trip when there is one, otherwise
+    /// one large number and one line.
+    @ViewBuilder
     private var minor: some View {
+        if let course = state.course {
+            CourseTile(state: state, course: course, line: row)
+        } else {
+            minorText
+        }
+    }
+
+    private var minorText: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(state.soc?.text ?? "–")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -197,5 +207,142 @@ struct TripView: View {
         if let reserve = state.reserve { return "Reserve in \(reserve.text)" }
         if let arrival = state.arrival { return arrival.text }
         return "Fahrt läuft"
+    }
+}
+
+/// The CarPlay dashboard tile: the charge level, the state of charge over
+/// the distance (measured against the plan) and the auxiliary consumers.
+struct CourseTile: View {
+    let state: JoltDisplay
+    let course: JoltDisplay.Course
+    let line: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(state.soc?.text ?? "–")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .layoutPriority(1)
+                VStack(alignment: .leading, spacing: 0) {
+                    if let delta = course.delta {
+                        Text(delta == 0 ? "nach Plan" : "\(delta > 0 ? "+" : "−")\(abs(delta)) % zum Plan")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(delta >= 0 ? Tone.ok : Tone.warn)
+                    }
+                    Text(line)
+                        .font(.caption2)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let arrival = state.arrival {
+                    Text(arrival.text)
+                        .font(.caption2)
+                        .opacity(0.7)
+                }
+            }
+            CourseChart(course: course, soc: state.soc?.percent, stop: state.stop)
+                .frame(maxWidth: .infinity, minHeight: 22, maxHeight: .infinity)
+            if let aux = state.aux {
+                HStack(spacing: 0) {
+                    consumer("flame.fill", aux.heatingKw, Tone.heat)
+                    consumer("snowflake", aux.climateKw, Tone.climate)
+                    consumer("sum", aux.kw, .white)
+                }
+            }
+        }
+    }
+
+    /// Zero is "aus"; a value that was not read stays a dash, not "aus".
+    private func consumer(_ symbol: String, _ kw: Double?, _ tone: Color) -> some View {
+        let off = (kw ?? 0) <= 0
+        return HStack(spacing: 3) {
+            Image(systemName: symbol)
+                .foregroundStyle(tone)
+            Text(kw.map { $0 > 0 ? "\($0.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "de_DE")))) kW" : "aus" } ?? "–")
+        }
+        .font(.caption2.weight(.semibold))
+        .opacity(off ? 0.4 : 1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum Tone {
+    static let ok = Color(red: 0.24, green: 0.86, blue: 0.59)
+    static let warn = Color(red: 1.0, green: 0.79, blue: 0.24)
+    static let low = Color(red: 1.0, green: 0.42, blue: 0.37)
+    static let plan = Color(red: 0.42, green: 0.47, blue: 0.52)
+    static let volt = Color(red: 0.36, green: 0.78, blue: 1.0)
+    static let heat = Color(red: 1.0, green: 0.62, blue: 0.35)
+    static let climate = Color(red: 0.5, green: 0.83, blue: 1.0)
+
+    static func soc(_ percent: Double) -> Color {
+        percent >= 40 ? ok : (percent >= 20 ? warn : low)
+    }
+}
+
+/// State of charge over the distance: the plan dashed, the measured line
+/// strong with a fill below it, the next charging stop as a bolt.
+struct CourseChart: View {
+    let course: JoltDisplay.Course
+    let soc: Double?
+    let stop: JoltDisplay.Stop?
+
+    var body: some View {
+        Canvas { context, size in
+            // Without a plan the axis is the distance driven: leave room ahead
+            // so the dot does not sit on the edge.
+            let total = course.plan == nil ? max(course.km * 1.25, 10) : max(course.total, 1)
+            let inset: CGFloat = 4
+            let x = { (km: Double) in inset + (size.width - 2 * inset) * CGFloat(min(max(km / total, 0), 1)) }
+            let y = { (soc: Double) in inset + (size.height - 2 * inset) * CGFloat(1 - min(max(soc, 0), 100) / 100) }
+            let tone = Tone.soc(soc ?? course.actual.last?[1] ?? 50)
+            let polyline = { (points: [[Double]]) -> Path in
+                var path = Path()
+                for (i, p) in points.enumerated() where p.count == 2 {
+                    let at = CGPoint(x: x(p[0]), y: y(p[1]))
+                    if i == 0 { path.move(to: at) } else { path.addLine(to: at) }
+                }
+                return path
+            }
+
+            if let reserve = course.reserve {
+                var line = Path()
+                line.move(to: CGPoint(x: inset, y: y(reserve)))
+                line.addLine(to: CGPoint(x: size.width - inset, y: y(reserve)))
+                context.stroke(line, with: .color(Tone.low.opacity(0.4)),
+                               style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
+            }
+            for km in course.stops ?? [] {
+                var line = Path()
+                line.move(to: CGPoint(x: x(km), y: inset))
+                line.addLine(to: CGPoint(x: x(km), y: size.height - inset))
+                context.stroke(line, with: .color(Tone.volt.opacity(0.35)), lineWidth: 1)
+            }
+            if let plan = course.plan {
+                context.stroke(polyline(plan), with: .color(Tone.plan),
+                               style: StrokeStyle(lineWidth: 1.5, lineJoin: .round, dash: [4, 3]))
+            }
+            if let first = course.actual.first, let last = course.actual.last, course.actual.count > 1 {
+                var area = polyline(course.actual)
+                area.addLine(to: CGPoint(x: x(last[0]), y: size.height - inset))
+                area.addLine(to: CGPoint(x: x(first[0]), y: size.height - inset))
+                area.closeSubpath()
+                context.fill(area, with: .linearGradient(
+                    Gradient(colors: [tone.opacity(0.42), tone.opacity(0)]),
+                    startPoint: CGPoint(x: 0, y: inset), endPoint: CGPoint(x: 0, y: size.height)))
+                context.stroke(polyline(course.actual), with: .color(tone),
+                               style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            }
+            if let stop, let arrival = stop.arrivalSoc {
+                let at = CGPoint(x: x(course.km + stop.km), y: y(Double(arrival)))
+                context.fill(Path(ellipseIn: CGRect(x: at.x - 2.5, y: at.y - 2.5, width: 5, height: 5)),
+                             with: .color(Tone.volt))
+            }
+            let now = CGPoint(x: x(course.km), y: y(soc ?? course.actual.last?[1] ?? 0))
+            context.fill(Path(ellipseIn: CGRect(x: now.x - 6, y: now.y - 6, width: 12, height: 12)),
+                         with: .color(tone.opacity(0.3)))
+            context.fill(Path(ellipseIn: CGRect(x: now.x - 3.5, y: now.y - 3.5, width: 7, height: 7)),
+                         with: .color(.white))
+        }
     }
 }

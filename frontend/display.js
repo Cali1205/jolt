@@ -226,6 +226,55 @@ window.joltDisplay = (function () {
     return stops.length ? stops : null;
   }
 
+  /* The course of the trip for the CarPlay dashboard: the state of charge
+   * over the distance, measured and planned, as [km, soc] pairs.
+   *
+   * With a plan the axis is the route (`km` of the history points, the
+   * profile up to the destination); without one it is the distance driven so
+   * far. Each line is thinned to COURSE_POINTS, but a rise in the plan (a
+   * charging stop) keeps both of its points: evenly spaced ones would turn the
+   * jump into a slope. Small enough for the Live Activity's 4 KB. */
+  const COURSE_POINTS = 24;
+
+  function thin(points) {
+    if (points.length <= COURSE_POINTS) return points;
+    const keep = new Set();
+    for (let j = 0; j < COURSE_POINTS; j++) {
+      keep.add(Math.round(j * (points.length - 1) / (COURSE_POINTS - 1)));
+    }
+    for (let i = 1; i < points.length; i++) {
+      if (points[i][1] > points[i - 1][1] + 1) { keep.add(i - 1); keep.add(i); }
+    }
+    return [...keep].sort((a, b) => a - b).map((i) => points[i]);
+  }
+
+  const pair = (km, soc) => [Math.round(km * 10) / 10, Math.round(soc * 10) / 10];
+
+  function courseModel(history, profile, plan, reserve, km, deviation) {
+    const planned = Array.isArray(profile) && profile.length > 1;
+    const along = (v) => (planned ? v.km : v.driven_km);
+    const done = (Array.isArray(history) ? history : [])
+      .filter((v) => v && actual(along(v)) && actual(v.soc))
+      .map((v) => pair(along(v), v.soc));
+    const ahead = planned
+      ? profile.filter((p) => p && actual(p.km) && actual(p.soc)).map((p) => pair(p.km, p.soc))
+      : [];
+    if (done.length < 2 && ahead.length < 2) return null;
+    const last = done[done.length - 1];
+    const at = planned && km !== null ? km : (last ? last[0] : 0);
+    const total = ahead.length > 1 ? ahead[ahead.length - 1][0] : Math.max(1, at);
+    const stops = planned && plan && Array.isArray(plan.stops)
+      ? plan.stops.filter((s) => s && actual(s.km_on_route)).map((s) => Math.round(s.km_on_route * 10) / 10)
+      : [];
+    return {
+      km: Math.round(at * 10) / 10, total,
+      actual: thin(done), plan: ahead.length > 1 ? thin(ahead) : null,
+      stops: stops.length ? stops : null,
+      reserve: actual(reserve) ? reserve : null,
+      delta: planned && actual(deviation) ? Math.round(deviation) : null,
+    };
+  }
+
   /* The model for a state - or null if there is nothing to show.
    *
    * If something is missing, it is missing in the model: no charging stop for
@@ -298,6 +347,8 @@ window.joltDisplay = (function () {
     m.history = historyModel(extra.track, as_of);
     m.aux = auxModel(extra.vals, extra.aux, as_of);
     m.stopList = hasPlan ? stopListModel(extra.plan, km) : null;
+    m.course = courseModel(extra.history, hasPlan ? extra.profile : null,
+                           extra.plan, extra.reserve, km, z.deviation_pp);
     return m;
   }
 
