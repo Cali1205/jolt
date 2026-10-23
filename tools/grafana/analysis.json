@@ -15,6 +15,21 @@
  "templating": {
   "list": [
    {
+    "name": "vehicle",
+    "label": "Fahrzeug",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text FROM grafana_drives ORDER BY 1",
+    "definition": "grafana_drives",
+    "refresh": 1,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   },
+   {
     "name": "tx",
     "label": "Fahrt X",
     "type": "custom",
@@ -118,7 +133,7 @@
    },
    "targets": [
     {
-     "rawSql": "WITH d AS (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${tx:text}\", y AS \"${ty:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
+     "rawSql": "WITH d AS (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${tx:text}\", y AS \"${ty:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -189,7 +204,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT count(*) AS \"Punkte\", round(corr(y, x)::numeric, 2) AS \"r\", round(regr_r2(y, x)::numeric, 2) AS \"R²\", round(regr_slope(y, x)::numeric, 3) AS \"Steigung\" FROM (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL) t",
+     "rawSql": "SELECT count(*) AS \"Punkte\", round(corr(y, x)::numeric, 2) AS \"r\", round(regr_r2(y, x)::numeric, 2) AS \"R²\", round(regr_slope(y, x)::numeric, 3) AS \"Steigung\" FROM (SELECT ${tx} AS x, ${ty} AS y FROM grafana_trips WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND km >= ${minkm} AND ${tx} IS NOT NULL AND ${ty} IS NOT NULL) t",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -233,7 +248,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT id, time AS \"Start\", round(km::numeric) AS \"km\", round((${tx})::numeric, 2) AS \"${tx:text}\", round((${ty})::numeric, 2) AS \"${ty:text}\" FROM grafana_trips WHERE $__timeFilter(time) AND km >= ${minkm} ORDER BY time DESC LIMIT 200",
+     "rawSql": "SELECT id, time AS \"Start\", round(km::numeric) AS \"km\", round((${tx})::numeric, 2) AS \"${tx:text}\", round((${ty})::numeric, 2) AS \"${ty:text}\" FROM grafana_trips WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND km >= ${minkm} ORDER BY time DESC LIMIT 200",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -268,7 +283,7 @@
    },
    "targets": [
     {
-     "rawSql": "WITH d AS (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${wx:text}\", y AS \"${wy:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
+     "rawSql": "WITH d AS (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL), r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a, min(x) AS x0, max(x) AS x1 FROM d) SELECT x AS \"${wx:text}\", y AS \"${wy:text}\", NULL::float AS \"Trend\" FROM d UNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL UNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -339,7 +354,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT count(*) AS \"Punkte\", round(corr(y, x)::numeric, 2) AS \"r\", round(regr_r2(y, x)::numeric, 2) AS \"R²\", round(regr_slope(y, x)::numeric, 3) AS \"Steigung\" FROM (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL) t",
+     "rawSql": "SELECT count(*) AS \"Punkte\", round(corr(y, x)::numeric, 2) AS \"r\", round(regr_r2(y, x)::numeric, 2) AS \"R²\", round(regr_slope(y, x)::numeric, 3) AS \"Steigung\" FROM (SELECT ${wx} AS x, ${wy} AS y FROM grafana_windows WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND (slope_pct IS NULL OR abs(slope_pct) <= 15) AND ${wx} IS NOT NULL AND ${wy} IS NOT NULL) t",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -383,7 +398,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT count(*) AS \"Fenster\", count(DISTINCT session_id) AS \"Fahrten\", round(min(outside_c)::numeric, 1) AS \"Außen min °C\", round(max(outside_c)::numeric, 1) AS \"Außen max °C\" FROM grafana_windows WHERE $__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15)",
+     "rawSql": "SELECT count(*) AS \"Fenster\", count(DISTINCT session_id) AS \"Fahrten\", round(min(outside_c)::numeric, 1) AS \"Außen min °C\", round(max(outside_c)::numeric, 1) AS \"Außen max °C\" FROM grafana_windows WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND (slope_pct IS NULL OR abs(slope_pct) <= 15)",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -427,7 +442,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\",\n       round(avg(kwh100) FILTER (WHERE t = '<10 °C')::numeric, 1) AS \"<10 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '10-15 °C')::numeric, 1) AS \"10-15 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '15-20 °C')::numeric, 1) AS \"15-20 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '≥20 °C')::numeric, 1) AS \"≥20 °C\"\nFROM (SELECT CASE WHEN speed_kmh < 30 THEN '0-30' WHEN speed_kmh < 50 THEN '30-50' WHEN speed_kmh < 70 THEN '50-70' WHEN speed_kmh < 90 THEN '70-90' ELSE '90+' END AS cls, CASE WHEN outside_c < 10 THEN '<10 °C' WHEN outside_c < 15 THEN '10-15 °C' WHEN outside_c < 20 THEN '15-20 °C' ELSE '≥20 °C' END AS t, kwh100, speed_kmh FROM grafana_windows\n      WHERE $__timeFilter(time) AND kwh100 IS NOT NULL AND outside_c IS NOT NULL) q\nGROUP BY cls ORDER BY min(speed_kmh)",
+     "rawSql": "SELECT cls AS \"Klasse\",\n       round(avg(kwh100) FILTER (WHERE t = '<10 °C')::numeric, 1) AS \"<10 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '10-15 °C')::numeric, 1) AS \"10-15 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '15-20 °C')::numeric, 1) AS \"15-20 °C\",\n       round(avg(kwh100) FILTER (WHERE t = '≥20 °C')::numeric, 1) AS \"≥20 °C\"\nFROM (SELECT CASE WHEN speed_kmh < 30 THEN '0-30' WHEN speed_kmh < 50 THEN '30-50' WHEN speed_kmh < 70 THEN '50-70' WHEN speed_kmh < 90 THEN '70-90' ELSE '90+' END AS cls, CASE WHEN outside_c < 10 THEN '<10 °C' WHEN outside_c < 15 THEN '10-15 °C' WHEN outside_c < 20 THEN '15-20 °C' ELSE '≥20 °C' END AS t, kwh100, speed_kmh FROM grafana_windows\n      WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND kwh100 IS NOT NULL AND outside_c IS NOT NULL) q\nGROUP BY cls ORDER BY min(speed_kmh)",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -477,7 +492,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\", round(avg(drive_kwh100)::numeric, 1) AS \"Antrieb\",\n       round(avg(aux_kwh100)::numeric, 1) AS \"Nebenverbraucher\"\nFROM (SELECT CASE WHEN speed_kmh < 30 THEN '0-30' WHEN speed_kmh < 50 THEN '30-50' WHEN speed_kmh < 70 THEN '50-70' WHEN speed_kmh < 90 THEN '70-90' ELSE '90+' END AS cls, drive_kwh100, aux_kwh100, speed_kmh FROM grafana_windows\n      WHERE $__timeFilter(time) AND kwh100 IS NOT NULL) q\nGROUP BY cls ORDER BY min(speed_kmh)",
+     "rawSql": "SELECT cls AS \"Klasse\", round(avg(drive_kwh100)::numeric, 1) AS \"Antrieb\",\n       round(avg(aux_kwh100)::numeric, 1) AS \"Nebenverbraucher\"\nFROM (SELECT CASE WHEN speed_kmh < 30 THEN '0-30' WHEN speed_kmh < 50 THEN '30-50' WHEN speed_kmh < 70 THEN '50-70' WHEN speed_kmh < 90 THEN '70-90' ELSE '90+' END AS cls, drive_kwh100, aux_kwh100, speed_kmh FROM grafana_windows\n      WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND kwh100 IS NOT NULL) q\nGROUP BY cls ORDER BY min(speed_kmh)",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -528,7 +543,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\", round(avg(aux_kw)::numeric, 2) AS \"Ø Nebenverbraucher\",\n       round(max(aux_kw)::numeric, 2) AS \"Maximum\"\nFROM (SELECT CASE WHEN outside_c < 10 THEN '<10 °C' WHEN outside_c < 15 THEN '10-15 °C' WHEN outside_c < 20 THEN '15-20 °C' ELSE '≥20 °C' END AS cls, aux_kw, outside_c FROM grafana_windows\n      WHERE $__timeFilter(time) AND aux_kw IS NOT NULL AND outside_c IS NOT NULL) q\nGROUP BY cls ORDER BY min(outside_c)",
+     "rawSql": "SELECT cls AS \"Klasse\", round(avg(aux_kw)::numeric, 2) AS \"Ø Nebenverbraucher\",\n       round(max(aux_kw)::numeric, 2) AS \"Maximum\"\nFROM (SELECT CASE WHEN outside_c < 10 THEN '<10 °C' WHEN outside_c < 15 THEN '10-15 °C' WHEN outside_c < 20 THEN '15-20 °C' ELSE '≥20 °C' END AS cls, aux_kw, outside_c FROM grafana_windows\n      WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND aux_kw IS NOT NULL AND outside_c IS NOT NULL) q\nGROUP BY cls ORDER BY min(outside_c)",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -577,7 +592,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\", round(avg(kwh100)::numeric, 1) AS \"Verbrauch\",\n       count(*) AS \"Fenster\"\nFROM (SELECT CASE WHEN slope_pct < -4 THEN '1: <-4' WHEN slope_pct < -2 THEN '2: -4..-2' WHEN slope_pct < -0.5 THEN '3: -2..-0.5' WHEN slope_pct <= 0.5 THEN '4: flach' WHEN slope_pct <= 2 THEN '5: 0.5..2' WHEN slope_pct <= 4 THEN '6: 2..4' ELSE '7: >4' END AS cls, kwh100 FROM grafana_windows\n      WHERE $__timeFilter(time) AND speed_kmh >= 30 AND slope_pct IS NOT NULL\n        AND abs(slope_pct) <= 15 AND kwh100 IS NOT NULL) q\nGROUP BY cls ORDER BY cls",
+     "rawSql": "SELECT cls AS \"Klasse\", round(avg(kwh100)::numeric, 1) AS \"Verbrauch\",\n       count(*) AS \"Fenster\"\nFROM (SELECT CASE WHEN slope_pct < -4 THEN '1: <-4' WHEN slope_pct < -2 THEN '2: -4..-2' WHEN slope_pct < -0.5 THEN '3: -2..-0.5' WHEN slope_pct <= 0.5 THEN '4: flach' WHEN slope_pct <= 2 THEN '5: 0.5..2' WHEN slope_pct <= 4 THEN '6: 2..4' ELSE '7: >4' END AS cls, kwh100 FROM grafana_windows\n      WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND speed_kmh >= 30 AND slope_pct IS NOT NULL\n        AND abs(slope_pct) <= 15 AND kwh100 IS NOT NULL) q\nGROUP BY cls ORDER BY cls",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -640,7 +655,7 @@
    },
    "targets": [
     {
-     "rawSql": "WITH d AS (SELECT speed_avg AS x, kwh100_soc AS y FROM grafana_drives\n           WHERE $__timeFilter(time) AND kwh100_soc IS NOT NULL AND speed_avg BETWEEN 5 AND 160),\n     r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a,\n                  min(x) AS x0, max(x) AS x1 FROM d)\nSELECT x AS \"Ø km/h\", y AS \"kWh/100 km\", NULL::float AS \"Trend\" FROM d\nUNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL\nUNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
+     "rawSql": "WITH d AS (SELECT speed_avg AS x, kwh100_soc AS y FROM grafana_drives\n           WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND kwh100_soc IS NOT NULL AND speed_avg BETWEEN 5 AND 160),\n     r AS (SELECT regr_slope(y, x) AS b, regr_intercept(y, x) AS a,\n                  min(x) AS x0, max(x) AS x1 FROM d)\nSELECT x AS \"Ø km/h\", y AS \"kWh/100 km\", NULL::float AS \"Trend\" FROM d\nUNION ALL SELECT x0, NULL, a + b * x0 FROM r WHERE b IS NOT NULL\nUNION ALL SELECT x1, NULL, a + b * x1 FROM r WHERE b IS NOT NULL ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -711,7 +726,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\",\n       round((sum(kwh100_soc * km) FILTER (WHERE winter) / nullif(sum(km) FILTER (WHERE winter), 0))::numeric, 1) AS \"Okt-Mär\",\n       round((sum(kwh100_soc * km) FILTER (WHERE NOT winter) / nullif(sum(km) FILTER (WHERE NOT winter), 0))::numeric, 1) AS \"Apr-Sep\"\nFROM (SELECT km, kwh100_soc, extract(month FROM time) NOT BETWEEN 4 AND 9 AS winter,\n             CASE WHEN km < 30 THEN '1: 15-30 km' WHEN km < 60 THEN '2: 30-60 km'\n                  WHEN km < 150 THEN '3: 60-150 km' ELSE '4: 150+ km' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time) AND kwh100_soc IS NOT NULL) q\nGROUP BY cls ORDER BY cls",
+     "rawSql": "SELECT cls AS \"Klasse\",\n       round((sum(kwh100_soc * km) FILTER (WHERE winter) / nullif(sum(km) FILTER (WHERE winter), 0))::numeric, 1) AS \"Okt-Mär\",\n       round((sum(kwh100_soc * km) FILTER (WHERE NOT winter) / nullif(sum(km) FILTER (WHERE NOT winter), 0))::numeric, 1) AS \"Apr-Sep\"\nFROM (SELECT km, kwh100_soc, extract(month FROM time) NOT BETWEEN 4 AND 9 AS winter,\n             CASE WHEN km < 30 THEN '1: 15-30 km' WHEN km < 60 THEN '2: 30-60 km'\n                  WHEN km < 150 THEN '3: 60-150 km' ELSE '4: 150+ km' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND kwh100_soc IS NOT NULL) q\nGROUP BY cls ORDER BY cls",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -761,7 +776,7 @@
    },
    "targets": [
     {
-     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap::text || ' kW' AS \"Klasse\", minutes AS \"Minuten 10-80 %\"\nFROM per_cap ORDER BY cap DESC",
+     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND kw > 5\n      AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges\n         WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges\n         WHERE vehicle_id = ${vehicle} AND kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap::text || ' kW' AS \"Klasse\", minutes AS \"Minuten 10-80 %\"\nFROM per_cap ORDER BY cap DESC",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -811,7 +826,7 @@
    },
    "targets": [
     {
-     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap AS \"Säule kW\", minutes AS \"Min 10-80 %\",\n       round(minutes - min(minutes) OVER (), 1) AS \"+ Min\",\n       round(100 * (minutes / min(minutes) OVER () - 1)) AS \"+ %\",\n       avg_kw AS \"Ø kW\", limited AS \"% gedrosselt\", covered AS \"% mit Messdaten\"\nFROM per_cap ORDER BY cap DESC",
+     "rawSql": "WITH env AS (\n    SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw\n    FROM grafana_charge_curve\n    WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND kw > 5\n      AND $__timeFilter(time) GROUP BY 1),\nper_pct AS (\n    SELECT coalesce(\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges\n         WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND soc_gain >= 20),\n        (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)\n         FROM grafana_charges\n         WHERE vehicle_id = ${vehicle} AND kwh_per_pct IS NOT NULL)) AS kwh),\nper_cap AS (\n    SELECT c.cap,\n           round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,\n           round((sum(p.kwh) / sum(p.kwh / least(e.kw, c.cap)))::numeric) AS avg_kw,\n           round(100.0 * count(*) FILTER (WHERE e.kw > c.cap) / count(*)) AS limited,\n           round(100.0 * count(*) / 70) AS covered\n    FROM generate_series(185, 80, -5) AS c(cap)\n    CROSS JOIN per_pct p\n    JOIN env e ON e.pct BETWEEN 10 AND 79\n    GROUP BY c.cap)\nSELECT cap AS \"Säule kW\", minutes AS \"Min 10-80 %\",\n       round(minutes - min(minutes) OVER (), 1) AS \"+ Min\",\n       round(100 * (minutes / min(minutes) OVER () - 1)) AS \"+ %\",\n       avg_kw AS \"Ø kW\", limited AS \"% gedrosselt\", covered AS \"% mit Messdaten\"\nFROM per_cap ORDER BY cap DESC",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -837,13 +852,15 @@
    "title": "jolt Fahrten",
    "type": "link",
    "url": "/d/jolt-trips",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   },
   {
    "title": "jolt Fahrtenbuch",
    "type": "link",
    "url": "/d/jolt-logbook",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   }
  ]
 }

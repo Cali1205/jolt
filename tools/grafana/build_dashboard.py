@@ -15,6 +15,14 @@ import urllib.request
 from pathlib import Path
 
 DS = {"type": "grafana-postgresql-datasource", "uid": "jolt-pg"}
+# Same variable in all three dashboards; it queries a view because grafana_ro
+# sees no table.
+VEHICLE_VARIABLE = {
+    "name": "vehicle", "label": "Fahrzeug", "type": "query", "datasource": DS,
+    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text "
+             "FROM grafana_drives ORDER BY 1",
+    "definition": "grafana_drives", "refresh": 1, "sort": 0,
+    "includeAll": False, "multi": False}
 UID = "jolt-trips"
 OUT = Path(__file__).with_name("dashboard.json")
 
@@ -86,7 +94,7 @@ def build() -> dict:
     panels = []
 
     # --- All trips -------------------------------------------------------
-    link = ("/d/" + UID + "?orgId=1&var-session=${__data.fields.id}"
+    link = ("/d/" + UID + "?orgId=1&var-vehicle=${vehicle}&var-session=${__data.fields.id}"
             "&from=${__data.fields.von}&to=${__data.fields.bis}")
     panels.append(_panel(
         "table", "Fahrten (ID anklicken: Fahrt unten anzeigen)", 0, 0, 14, 10,
@@ -99,7 +107,7 @@ SELECT id, time AS "Start", round((extract(epoch FROM duration) / 60)::numeric) 
        round(aux_avg_kw::numeric, 2) AS "Neben kW", points AS "Punkte",
        (extract(epoch FROM time) * 1000)::bigint AS von,
        (extract(epoch FROM coalesce(last_point, time)) * 1000 + 60000)::bigint AS bis
-FROM grafana_sessions ORDER BY id DESC LIMIT 200""")],
+FROM grafana_sessions WHERE vehicle_id = ${vehicle} ORDER BY id DESC LIMIT 200""")],
         options={"showHeader": True, "cellHeight": "sm"},
         field_config={
             "defaults": {"custom": {"align": "auto"}},
@@ -125,7 +133,7 @@ SELECT count(*) AS "Fahrten", round(sum(km_odometer)::numeric) AS "km",
        round((100 * sum(net_kwh) FILTER (WHERE km_odometer >= 3)
               / nullif(sum(km_odometer) FILTER (WHERE km_odometer >= 3), 0))::numeric, 1)
          AS "Ø kWh/100 km"
-FROM grafana_sessions""")],
+FROM grafana_sessions WHERE vehicle_id = ${vehicle}""")],
         options={"colorMode": "none", "graphMode": "none", "textMode": "value_and_name",
                  "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}},
         description="Ø nur über Fahrten ab 3 km (der Kilometerzähler ist ganzzahlig)."))
@@ -135,7 +143,7 @@ FROM grafana_sessions""")],
         [sql("""
 SELECT '#' || id AS "Fahrt", round(kwh_per_100km::numeric, 1) AS "kWh/100 km",
        round(outside_c::numeric, 1) AS "Außen °C"
-FROM (SELECT * FROM grafana_sessions WHERE kwh_per_100km IS NOT NULL
+FROM (SELECT * FROM grafana_sessions WHERE kwh_per_100km IS NOT NULL AND vehicle_id = ${vehicle}
       ORDER BY id DESC LIMIT 40) t ORDER BY id""", "table")],
         options={"xField": "Fahrt", "orientation": "vertical", "showValue": "never",
                  "legend": {"displayMode": "list", "placement": "bottom"},
@@ -161,7 +169,7 @@ FROM grafana_sessions WHERE id = ${session}""")],
     # Grafana variables only live in the bar at the top; a row of links right
     # above the map sets the same variable and keeps trip and time range.
     choices = [c.split(" : ") for c in COLOUR_CHOICES.split(", ")]
-    base = "/d/" + UID + "?orgId=1&var-session=${session}&${__url_time_range}&var-colour="
+    base = "/d/" + UID + "?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour="
     bar = "**Farbe:** " + "  ·  ".join(f"[{label}]({base}{value})" for label, value in choices)
     panels.append(_panel(
         "text", "", 0, 14, 12, 2, [],
@@ -240,11 +248,11 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
         "uid": UID, "title": "jolt Fahrten", "tags": ["jolt"], "timezone": "browser",
         "schemaVersion": 41, "version": 1, "refresh": "",
         "time": {"from": "now-7d", "to": "now"},
-        "templating": {"list": [{
+        "templating": {"list": [VEHICLE_VARIABLE, {
             "name": "session", "label": "Fahrt", "type": "query", "datasource": DS,
             "query": ("SELECT id AS __value, '#' || id || '  ' || to_char(time, 'DD.MM. HH24:MI')"
                       " || '  ' || coalesce(round(km_odometer)::text, '?') || ' km' AS __text "
-                      "FROM grafana_sessions ORDER BY id DESC"),
+                      "FROM grafana_sessions WHERE vehicle_id = ${vehicle} ORDER BY id DESC"),
             "definition": "grafana_sessions", "refresh": 2, "sort": 0,
             "includeAll": False, "multi": False}, {
             "name": "colour", "label": "Farbe", "type": "custom", "hide": 2,
@@ -253,9 +261,9 @@ GROUP BY 1 HAVING avg(speed_kmh) > 15 ORDER BY 1""", "time_series")],
             "includeAll": False, "multi": False}]},
         "panels": panels,
         "links": [{"title": "jolt Fahrtenbuch", "type": "link", "url": "/d/jolt-logbook",
-                   "icon": "external link"},
+                   "icon": "external link", "includeVars": True},
                   {"title": "jolt Analyse", "type": "link", "url": "/d/jolt-analysis",
-                   "icon": "external link"}],
+                   "icon": "external link", "includeVars": True}],
     }
 
 
@@ -273,13 +281,13 @@ def push(url: str, token_file: str, dash: dict) -> None:
 
     latest = call("/api/ds/query", {"queries": [{
         "refId": "A", "datasource": DS, "format": "table",
-        "rawSql": "SELECT max(id) FROM grafana_sessions"}], "from": "now-1h", "to": "now"})
+        "rawSql": "SELECT max(id) FROM grafana_sessions WHERE vehicle_id = 1"}], "from": "now-1h", "to": "now"})
     session = latest["results"]["A"]["frames"][0]["data"]["values"][0][0]
 
     problems = 0
     for panel in dash["panels"]:
         for target in panel["targets"]:
-            query = target["rawSql"].replace("${session}", str(session)).replace(
+            query = target["rawSql"].replace("${session}", str(session)).replace("${vehicle}", "1").replace(
                 "${colour}", "speed_kmh").replace(
                 "$__timeFilter(time)", "time > now() - interval '90 days'")
             for key, value in EXTRA_SUBSTITUTIONS.items():

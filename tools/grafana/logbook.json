@@ -15,6 +15,21 @@
  "templating": {
   "list": [
    {
+    "name": "vehicle",
+    "label": "Fahrzeug",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text FROM grafana_drives ORDER BY 1",
+    "definition": "grafana_drives",
+    "refresh": 1,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   },
+   {
     "name": "charge",
     "label": "Ladevorgang",
     "type": "query",
@@ -22,7 +37,7 @@
      "type": "grafana-postgresql-datasource",
      "uid": "jolt-pg"
     },
-    "query": "SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' AS __text FROM grafana_charges WHERE energy_kwh >= 5 AND soc_end > soc_start ORDER BY time DESC",
+    "query": "SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' AS __text FROM grafana_charges WHERE vehicle_id = ${vehicle} AND energy_kwh >= 5 AND soc_end > soc_start ORDER BY time DESC",
     "definition": "grafana_charges",
     "refresh": 2,
     "sort": 0,
@@ -48,7 +63,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\",\n       round(avg(km)::numeric, 1) AS \"Ø km je Fahrt\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"Ø kWh/100 km\",\n       count(*) FILTER (WHERE recorded) AS \"aufgezeichnet\"\nFROM grafana_drives WHERE $__timeFilter(time)",
+     "rawSql": "SELECT count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\",\n       round(avg(km)::numeric, 1) AS \"Ø km je Fahrt\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"Ø kWh/100 km\",\n       count(*) FILTER (WHERE recorded) AS \"aufgezeichnet\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle}",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -92,7 +107,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT count(*) AS \"Ladevorgänge\", round(sum(energy_kwh)::numeric) AS \"kWh\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"davon DC kWh\",\n       round(sum(cost_eur)::numeric) AS \"€ (Hauspreis)\",\n       round(avg(kwh_per_pct)::numeric, 3) AS \"kWh je %\"\nFROM grafana_charges WHERE $__timeFilter(time)",
+     "rawSql": "SELECT count(*) AS \"Ladevorgänge\", round(sum(energy_kwh)::numeric) AS \"kWh\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"davon DC kWh\",\n       round(sum(cost_eur)::numeric) AS \"€ (Hauspreis)\",\n       round(avg(kwh_per_pct)::numeric, 3) AS \"kWh je %\"\nFROM grafana_charges WHERE $__timeFilter(time) AND vehicle_id = ${vehicle}",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -136,7 +151,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT date_trunc('week', time) AS time, round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "rawSql": "SELECT date_trunc('week', time) AS time, round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} GROUP BY 1 ORDER BY 1",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -188,7 +203,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'AC'))::numeric) AS \"AC\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'AC'))::numeric) AS \"AC\",\n       round((sum(energy_kwh) FILTER (WHERE charge_type = 'DC'))::numeric) AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} GROUP BY 1 ORDER BY 1",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -240,7 +255,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"aus Ladestand\",\n       round((100 * sum(kwh_dongle) / nullif(sum(km) FILTER (WHERE kwh_dongle IS NOT NULL AND km >= 1), 0))::numeric, 1) AS \"Dongle\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+     "rawSql": "SELECT date_trunc('month', time) AS time,\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"aus Ladestand\",\n       round((100 * sum(kwh_dongle) / nullif(sum(km) FILTER (WHERE kwh_dongle IS NOT NULL AND km >= 1), 0))::numeric, 1) AS \"Dongle\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} GROUP BY 1 ORDER BY 1",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -289,7 +304,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT ended_at AS time, odo_end AS \"Kilometerstand\"\nFROM grafana_drives WHERE $__timeFilter(time) AND odo_end IS NOT NULL ORDER BY 1",
+     "rawSql": "SELECT ended_at AS time, odo_end AS \"Kilometerstand\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND odo_end IS NOT NULL ORDER BY 1",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -338,7 +353,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT lpad(hour::int::text, 2, '0') AS \"Klasse\", count(*) AS \"Fahrten\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY hour ORDER BY hour",
+     "rawSql": "SELECT lpad(hour::int::text, 2, '0') AS \"Klasse\", count(*) AS \"Fahrten\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} GROUP BY hour ORDER BY hour",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -400,7 +415,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT cls AS \"Klasse\", count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\"\nFROM (SELECT km, CASE WHEN km < 5 THEN '1: <5' WHEN km < 10 THEN '2: 5-10'\n                      WHEN km < 20 THEN '3: 10-20' WHEN km < 50 THEN '4: 20-50'\n                      WHEN km < 150 THEN '5: 50-150' ELSE '6: 150+' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time)) q GROUP BY cls ORDER BY cls",
+     "rawSql": "SELECT cls AS \"Klasse\", count(*) AS \"Fahrten\", round(sum(km)::numeric) AS \"km\"\nFROM (SELECT km, CASE WHEN km < 5 THEN '1: <5' WHEN km < 10 THEN '2: 5-10'\n                      WHEN km < 20 THEN '3: 10-20' WHEN km < 50 THEN '4: 20-50'\n                      WHEN km < 150 THEN '5: 50-150' ELSE '6: 150+' END AS cls\n      FROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle}) q GROUP BY cls ORDER BY cls",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -463,7 +478,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT lpad((floor(soc_start / 10) * 10)::int::text, 3, ' ') || ' %' AS \"Klasse\",\n       count(*) FILTER (WHERE charge_type = 'AC') AS \"AC\",\n       count(*) FILTER (WHERE charge_type = 'DC') AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) AND soc_start IS NOT NULL AND energy_kwh >= 1\nGROUP BY 1 ORDER BY 1",
+     "rawSql": "SELECT lpad((floor(soc_start / 10) * 10)::int::text, 3, ' ') || ' %' AS \"Klasse\",\n       count(*) FILTER (WHERE charge_type = 'AC') AS \"AC\",\n       count(*) FILTER (WHERE charge_type = 'DC') AS \"DC\"\nFROM grafana_charges WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND soc_start IS NOT NULL AND energy_kwh >= 1\nGROUP BY 1 ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -514,7 +529,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT CASE weekday::int WHEN 1 THEN '1 Mo' WHEN 2 THEN '2 Di' WHEN 3 THEN '3 Mi'\n                   WHEN 4 THEN '4 Do' WHEN 5 THEN '5 Fr' WHEN 6 THEN '6 Sa' ELSE '7 So' END AS \"Klasse\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"kWh/100 km\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) GROUP BY weekday ORDER BY weekday",
+     "rawSql": "SELECT CASE weekday::int WHEN 1 THEN '1 Mo' WHEN 2 THEN '2 Di' WHEN 3 THEN '3 Mi'\n                   WHEN 4 THEN '4 Do' WHEN 5 THEN '5 Fr' WHEN 6 THEN '6 Sa' ELSE '7 So' END AS \"Klasse\",\n       round((sum(kwh100_soc * km) / nullif(sum(km) FILTER (WHERE kwh100_soc IS NOT NULL), 0))::numeric, 1) AS \"kWh/100 km\",\n       round(sum(km)::numeric) AS \"km\"\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} GROUP BY weekday ORDER BY weekday",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -576,7 +591,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT soc_gain AS \"Ladestand-Gewinn %\",\n       CASE WHEN charge_type = 'AC' THEN energy_kwh END AS \"AC kWh\",\n       CASE WHEN charge_type = 'DC' THEN energy_kwh END AS \"DC kWh\"\nFROM grafana_charges WHERE $__timeFilter(time) AND soc_gain > 0 ORDER BY 1",
+     "rawSql": "SELECT soc_gain AS \"Ladestand-Gewinn %\",\n       CASE WHEN charge_type = 'AC' THEN energy_kwh END AS \"AC kWh\",\n       CASE WHEN charge_type = 'DC' THEN energy_kwh END AS \"DC kWh\"\nFROM grafana_charges WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} AND soc_gain > 0 ORDER BY 1",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -626,7 +641,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT time AS \"Start\", round(duration_min::numeric) AS \"Min\",\n       round(km::numeric, 1) AS \"km\", soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh100_soc::numeric, 1) AS \"kWh/100 Ladestand\",\n       round(kwh100_dongle::numeric, 1) AS \"kWh/100 Dongle\",\n       round(speed_avg::numeric) AS \"Ø km/h\", odo_end AS \"Kilometerstand\",\n       replace(replace(replace(sources, 'vw_history', 'VW'), 'vw_portal', 'VW'), '\"', '') AS \"Quelle\",\n       live_session_id AS \"Aufzeichnung\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM ended_at) * 1000 + 60000)::bigint AS bis\nFROM grafana_drives WHERE $__timeFilter(time) ORDER BY time DESC LIMIT 500",
+     "rawSql": "SELECT time AS \"Start\", round(duration_min::numeric) AS \"Min\",\n       round(km::numeric, 1) AS \"km\", soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh100_soc::numeric, 1) AS \"kWh/100 Ladestand\",\n       round(kwh100_dongle::numeric, 1) AS \"kWh/100 Dongle\",\n       round(speed_avg::numeric) AS \"Ø km/h\", odo_end AS \"Kilometerstand\",\n       replace(replace(replace(sources, 'vw_history', 'VW'), 'vw_portal', 'VW'), '\"', '') AS \"Quelle\",\n       live_session_id AS \"Aufzeichnung\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM ended_at) * 1000 + 60000)::bigint AS bis\nFROM grafana_drives WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} ORDER BY time DESC LIMIT 500",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -658,7 +673,7 @@
         "value": [
          {
           "title": "Aufzeichnung in jolt Fahrten",
-          "url": "/d/jolt-trips?orgId=1&var-session=${__data.fields.Aufzeichnung}&from=${__data.fields.von}&to=${__data.fields.bis}"
+          "url": "/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${__data.fields.Aufzeichnung}&from=${__data.fields.von}&to=${__data.fields.bis}"
          }
         ]
        }
@@ -729,7 +744,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT time AS \"Start\", charge_type AS \"Art\", round(duration_min::numeric) AS \"Min\",\n       round(energy_kwh::numeric, 1) AS \"kWh\", round(max_power_kw::numeric) AS \"max kW\",\n       soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh_per_pct::numeric, 3) AS \"kWh je %\", odometer_km AS \"Kilometerstand\"\nFROM grafana_charges WHERE $__timeFilter(time) ORDER BY time DESC LIMIT 500",
+     "rawSql": "SELECT time AS \"Start\", charge_type AS \"Art\", round(duration_min::numeric) AS \"Min\",\n       round(energy_kwh::numeric, 1) AS \"kWh\", round(max_power_kw::numeric) AS \"max kW\",\n       soc_start AS \"SoC Start\", soc_end AS \"SoC Ende\",\n       round(kwh_per_pct::numeric, 3) AS \"kWh je %\", odometer_km AS \"Kilometerstand\"\nFROM grafana_charges WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} ORDER BY time DESC LIMIT 500",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -801,7 +816,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT time, soc_pct AS \"Ladestand %\", range_km AS \"Reichweite km\"\nFROM grafana_reports WHERE $__timeFilter(time) ORDER BY time",
+     "rawSql": "SELECT time, soc_pct AS \"Ladestand %\", range_km AS \"Reichweite km\"\nFROM grafana_reports WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} ORDER BY time",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -868,7 +883,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT time, batt_temp_min_c AS \"Akku min °C\", batt_temp_max_c AS \"Akku max °C\",\n       capacity_kwh AS \"nutzbar kWh\"\nFROM grafana_reports WHERE $__timeFilter(time) ORDER BY time",
+     "rawSql": "SELECT time, batt_temp_min_c AS \"Akku min °C\", batt_temp_max_c AS \"Akku max °C\",\n       capacity_kwh AS \"nutzbar kWh\"\nFROM grafana_reports WHERE $__timeFilter(time) AND vehicle_id = ${vehicle} ORDER BY time",
      "format": "time_series",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -1007,7 +1022,7 @@
    },
    "targets": [
     {
-     "rawSql": "SELECT soc AS \"Ladestand %\", kw AS \"kW\" FROM grafana_charge_curve\nWHERE charge_type = 'DC' AND $__timeFilter(time) ORDER BY charge_id, time",
+     "rawSql": "SELECT soc AS \"Ladestand %\", kw AS \"kW\" FROM grafana_charge_curve\nWHERE charge_type = 'DC' AND $__timeFilter(time) AND vehicle_id = ${vehicle} ORDER BY charge_id, time",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -1068,13 +1083,15 @@
    "title": "jolt Fahrten",
    "type": "link",
    "url": "/d/jolt-trips",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   },
   {
    "title": "jolt Analyse",
    "type": "link",
    "url": "/d/jolt-analysis",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   }
  ]
 }

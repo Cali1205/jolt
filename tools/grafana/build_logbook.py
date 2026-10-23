@@ -60,7 +60,7 @@ def lines(title, x, y, w, h, query, unit=None, right=None, description=None):
 
 def build() -> dict:
     panels = []
-    where = "$__timeFilter(time)"
+    where = "$__timeFilter(time) AND vehicle_id = ${vehicle}"
 
     panels.append(_panel(
         "stat", "Fahrten", 0, 0, 12, 4,
@@ -162,7 +162,7 @@ FROM grafana_charges WHERE {where} AND soc_gain > 0 ORDER BY 1""")],
                     "Ihre Steigung ist die Energie je Prozent, also etwa ein Hundertstel der "
                     "nutzbaren Kapazität plus Ladeverluste."))
 
-    drive_link = ("/d/" + base.UID + "?orgId=1&var-session=${__data.fields.Aufzeichnung}"
+    drive_link = ("/d/" + base.UID + "?orgId=1&var-vehicle=${vehicle}&var-session=${__data.fields.Aufzeichnung}"
                   "&from=${__data.fields.von}&to=${__data.fields.bis}")
     panels.append(_panel(
         "table", "Fahrten (Aufzeichnung anklicken: Details)", 0, 36, 14, 12,
@@ -254,20 +254,20 @@ WHERE charge_type = 'DC' AND {where} ORDER BY charge_id, time""")],
         "uid": UID, "title": "jolt Fahrtenbuch", "tags": ["jolt"], "timezone": "browser",
         "schemaVersion": 41, "version": 1, "refresh": "",
         "time": {"from": "now-1y", "to": "now"},
-        "templating": {"list": [{
+        "templating": {"list": [base.VEHICLE_VARIABLE, {
             "name": "charge", "label": "Ladevorgang", "type": "query", "datasource": base.DS,
             "query": ("SELECT id AS __value, to_char(time, 'DD.MM.YY HH24:MI') || '  ' || "
                       "charge_type || '  ' || round(energy_kwh::numeric) || ' kWh  ' || "
                       "round(soc_start::numeric) || '→' || round(soc_end::numeric) || ' %' "
-                      "AS __text FROM grafana_charges WHERE energy_kwh >= 5 "
+                      "AS __text FROM grafana_charges WHERE vehicle_id = ${vehicle} AND energy_kwh >= 5 "
                       "AND soc_end > soc_start ORDER BY time DESC"),
             "definition": "grafana_charges", "refresh": 2, "sort": 0,
             "includeAll": False, "multi": False}]},
         "panels": panels,
         "links": [{"title": "jolt Fahrten", "type": "link", "url": "/d/" + base.UID,
-                   "icon": "external link"},
+                   "icon": "external link", "includeVars": True},
                   {"title": "jolt Analyse", "type": "link", "url": "/d/" + ANALYSIS_UID,
-                   "icon": "external link"}],
+                   "icon": "external link", "includeVars": True}],
     }
 
 
@@ -277,6 +277,6 @@ if __name__ == "__main__":
     if "--push" in sys.argv:
         position = sys.argv.index("--push")
         base.EXTRA_SUBSTITUTIONS = {
-            "${charge}": "(SELECT max(id) FROM grafana_charges WHERE charge_type = 'DC')",
+            "${charge}": "(SELECT max(id) FROM grafana_charges WHERE charge_type = 'DC' AND vehicle_id = 1)",
             "${charge:text}": "x"}
         base.push(sys.argv[position + 1], sys.argv[position + 2], dashboard)
