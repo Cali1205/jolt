@@ -118,13 +118,16 @@ def bars(title, x, y, w, h, query, stacking=None, unit=None, description=None):
 CHARGE_TIME = """WITH env AS (
     SELECT floor(soc)::int AS pct, percentile_cont(0.9) WITHIN GROUP (ORDER BY kw) AS kw
     FROM grafana_charge_curve
-    WHERE charge_type = 'DC' AND kw > 5 AND $__timeFilter(time) GROUP BY 1),
+    WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND kw > 5
+      AND $__timeFilter(time) GROUP BY 1),
 per_pct AS (
     SELECT coalesce(
         (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)
-         FROM grafana_charges WHERE charge_type = 'DC' AND soc_gain >= 20),
+         FROM grafana_charges
+         WHERE vehicle_id = ${vehicle} AND charge_type = 'DC' AND soc_gain >= 20),
         (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY kwh_per_pct)
-         FROM grafana_charges WHERE kwh_per_pct IS NOT NULL)) AS kwh),
+         FROM grafana_charges
+         WHERE vehicle_id = ${vehicle} AND kwh_per_pct IS NOT NULL)) AS kwh),
 per_cap AS (
     SELECT c.cap,
            round(sum(p.kwh / least(e.kw, c.cap) * 60)::numeric, 1) AS minutes,
@@ -138,8 +141,8 @@ per_cap AS (
 
 
 def build() -> dict:
-    trips_where = "$__timeFilter(time) AND km >= ${minkm}"
-    windows_where = "$__timeFilter(time) AND (slope_pct IS NULL OR abs(slope_pct) <= 15)"
+    trips_where = "$__timeFilter(time) AND vehicle_id = ${vehicle} AND km >= ${minkm}"
+    windows_where = "$__timeFilter(time) AND vehicle_id = ${vehicle} AND (slope_pct IS NULL OR abs(slope_pct) <= 15)"
     panels = []
 
     panels.append(_panel(
@@ -183,7 +186,7 @@ def build() -> dict:
        round(avg(kwh100) FILTER (WHERE t = '15-20 °C')::numeric, 1) AS "15-20 °C",
        round(avg(kwh100) FILTER (WHERE t = '≥20 °C')::numeric, 1) AS "≥20 °C"
 FROM (SELECT {SPEED} AS cls, {TEMP} AS t, kwh100, speed_kmh FROM grafana_windows
-      WHERE $__timeFilter(time) AND kwh100 IS NOT NULL AND outside_c IS NOT NULL) q
+      WHERE $__timeFilter(time) AND vehicle_id = ${{vehicle}} AND kwh100 IS NOT NULL AND outside_c IS NOT NULL) q
 GROUP BY cls ORDER BY min(speed_kmh)""",
         description="Mittlerer Verbrauch je Tempoklasse (km/h), getrennt nach Außentemperatur. "
                     "Fehlen Balken, gibt es in der Klasse keine Fenster."))
@@ -192,7 +195,7 @@ GROUP BY cls ORDER BY min(speed_kmh)""",
         f"""SELECT cls AS "Klasse", round(avg(drive_kwh100)::numeric, 1) AS "Antrieb",
        round(avg(aux_kwh100)::numeric, 1) AS "Nebenverbraucher"
 FROM (SELECT {SPEED} AS cls, drive_kwh100, aux_kwh100, speed_kmh FROM grafana_windows
-      WHERE $__timeFilter(time) AND kwh100 IS NOT NULL) q
+      WHERE $__timeFilter(time) AND vehicle_id = ${{vehicle}} AND kwh100 IS NOT NULL) q
 GROUP BY cls ORDER BY min(speed_kmh)""", stacking="normal",
         description="Je langsamer die Fahrt, desto größer der Anteil der Nebenverbraucher am Verbrauch."))
     panels.append(bars(
@@ -200,14 +203,14 @@ GROUP BY cls ORDER BY min(speed_kmh)""", stacking="normal",
         f"""SELECT cls AS "Klasse", round(avg(aux_kw)::numeric, 2) AS "Ø Nebenverbraucher",
        round(max(aux_kw)::numeric, 2) AS "Maximum"
 FROM (SELECT {TEMP} AS cls, aux_kw, outside_c FROM grafana_windows
-      WHERE $__timeFilter(time) AND aux_kw IS NOT NULL AND outside_c IS NOT NULL) q
+      WHERE $__timeFilter(time) AND vehicle_id = ${{vehicle}} AND aux_kw IS NOT NULL AND outside_c IS NOT NULL) q
 GROUP BY cls ORDER BY min(outside_c)"""))
     panels.append(bars(
         "Verbrauch nach Steigung (kWh/100 km, ab 30 km/h)", 12, row + 10, 12, 8,
         f"""SELECT cls AS "Klasse", round(avg(kwh100)::numeric, 1) AS "Verbrauch",
        count(*) AS "Fenster"
 FROM (SELECT {SLOPE} AS cls, kwh100 FROM grafana_windows
-      WHERE $__timeFilter(time) AND speed_kmh >= 30 AND slope_pct IS NOT NULL
+      WHERE $__timeFilter(time) AND vehicle_id = ${{vehicle}} AND speed_kmh >= 30 AND slope_pct IS NOT NULL
         AND abs(slope_pct) <= 15 AND kwh100 IS NOT NULL) q
 GROUP BY cls ORDER BY cls""",
         description="Steigung aus dem Höhenunterschied im Fenster (Höhe in ganzen Metern: grob). "
@@ -221,7 +224,7 @@ GROUP BY cls ORDER BY cls""",
     # consumption from the drop of the charge level. Coarser than the dongle
     # (whole percent), so only drives from 15 km, but far more of them.
     row += 18
-    logbook_where = "$__timeFilter(time) AND kwh100_soc IS NOT NULL"
+    logbook_where = "$__timeFilter(time) AND vehicle_id = ${vehicle} AND kwh100_soc IS NOT NULL"
     panels.append(_panel(
         "xychart", "Fahrtenbuch: Verbrauch über Ø Tempo (alle Fahrten ab 15 km)",
         0, row, 12, 10,
@@ -287,6 +290,7 @@ FROM per_cap ORDER BY cap DESC""")],
         "schemaVersion": 41, "version": 1, "refresh": "",
         "time": {"from": "now-90d", "to": "now"},
         "templating": {"list": [
+            base.VEHICLE_VARIABLE,
             variable("tx", "Fahrt X", TRIP_KPIS, "outside_c"),
             variable("ty", "Fahrt Y", TRIP_KPIS, "kwh100"),
             variable("wx", "Fenster X", WINDOW_KPIS, "speed_kmh"),
@@ -296,9 +300,9 @@ FROM per_cap ORDER BY cap DESC""")],
              "current": {"text": "3", "value": "3"}}]},
         "panels": panels,
         "links": [{"title": "jolt Fahrten", "type": "link", "url": "/d/" + base.UID,
-                   "icon": "external link"},
+                   "icon": "external link", "includeVars": True},
                   {"title": "jolt Fahrtenbuch", "type": "link", "url": "/d/jolt-logbook",
-                   "icon": "external link"}],
+                   "icon": "external link", "includeVars": True}],
     }
 
 

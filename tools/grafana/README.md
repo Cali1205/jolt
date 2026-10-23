@@ -24,6 +24,10 @@ it replaces the views and grants and leaves the password of `grafana_ro`
 alone:
 `docker exec -i jolt-db psql -U jolt -d jolt < tools/grafana/setup.sql`
 
+Every dashboard has a "Fahrzeug" picker at the top and shows one car at a time.
+The views got a `vehicle_id` column for it, so run `setup.sql` again (without
+`-v pw`) after this update, before importing the dashboards.
+
 Click a trip ID in the table: the dashboard jumps to that trip and sets the time
 range to it. The panels of the selected trip use the dashboard time range, so
 choosing a trip in the drop-down alone leaves the time axis where it was.

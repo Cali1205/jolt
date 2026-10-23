@@ -61,7 +61,8 @@ SELECT s.id,
        lp.soc_start, lp.soc_end,
        lp.outside_c,
        lp.speed_max_kmh,
-       lp.aux_avg_kw
+       lp.aux_avg_kw,
+       t.vehicle_id
 FROM live_sessions s
 JOIN trips t ON t.id = s.trip_id
 LEFT JOIN vehicles v ON v.id = t.vehicle_id
@@ -97,7 +98,8 @@ SELECT s.id, s.time,
        m.stop_share_pct,
        m.regen_pct,
        m.ascent_per_km,
-       m.batt_temp_c
+       m.batt_temp_c,
+       s.vehicle_id
 FROM grafana_sessions s
 LEFT JOIN LATERAL (
     SELECT avg(speed_kmh) FILTER (WHERE speed_kmh > 3) AS speed_avg,
@@ -122,7 +124,8 @@ SELECT w.session_id, w.time, w.speed_kmh, w.power_kw, w.aux_kw, w.batt_temp_c,
        CASE WHEN w.speed_kmh > 10 THEN w.aux_kw / w.speed_kmh * 100 END AS aux_kwh100,
        CASE WHEN w.speed_kmh > 10 THEN (w.power_kw - w.aux_kw) / w.speed_kmh * 100 END AS drive_kwh100,
        CASE WHEN w.speed_kmh > 10 AND w.secs >= 20
-            THEN (w.elev_last - w.elev_first) / (w.speed_kmh / 3.6 * w.secs) * 100 END AS slope_pct
+            THEN (w.elev_last - w.elev_first) / (w.speed_kmh / 3.6 * w.secs) * 100 END AS slope_pct,
+       s.vehicle_id
 FROM (SELECT session_id,
              date_bin('60 seconds', time, TIMESTAMP '2000-01-01') AS time,
              avg(speed_kmh) AS speed_kmh, avg(power_kw) AS power_kw,

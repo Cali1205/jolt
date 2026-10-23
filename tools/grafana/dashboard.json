@@ -15,6 +15,21 @@
  "templating": {
   "list": [
    {
+    "name": "vehicle",
+    "label": "Fahrzeug",
+    "type": "query",
+    "datasource": {
+     "type": "grafana-postgresql-datasource",
+     "uid": "jolt-pg"
+    },
+    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text FROM grafana_drives ORDER BY 1",
+    "definition": "grafana_drives",
+    "refresh": 1,
+    "sort": 0,
+    "includeAll": false,
+    "multi": false
+   },
+   {
     "name": "session",
     "label": "Fahrt",
     "type": "query",
@@ -22,7 +37,7 @@
      "type": "grafana-postgresql-datasource",
      "uid": "jolt-pg"
     },
-    "query": "SELECT id AS __value, '#' || id || '  ' || to_char(time, 'DD.MM. HH24:MI') || '  ' || coalesce(round(km_odometer)::text, '?') || ' km' AS __text FROM grafana_sessions ORDER BY id DESC",
+    "query": "SELECT id AS __value, '#' || id || '  ' || to_char(time, 'DD.MM. HH24:MI') || '  ' || coalesce(round(km_odometer)::text, '?') || ' km' AS __text FROM grafana_sessions WHERE vehicle_id = ${vehicle} ORDER BY id DESC",
     "definition": "grafana_sessions",
     "refresh": 2,
     "sort": 0,
@@ -62,7 +77,7 @@
    },
    "targets": [
     {
-     "rawSql": "\nSELECT id, time AS \"Start\", round((extract(epoch FROM duration) / 60)::numeric) AS \"Min\",\n       round(km_odometer::numeric) AS \"km\", round(net_kwh::numeric, 2) AS \"kWh netto\",\n       round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(soc_start::numeric, 1) AS \"SoC Start\", round(soc_end::numeric, 1) AS \"SoC Ende\",\n       round(outside_c::numeric, 1) AS \"Außen °C\", round(speed_max_kmh::numeric) AS \"vmax\",\n       round(aux_avg_kw::numeric, 2) AS \"Neben kW\", points AS \"Punkte\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM coalesce(last_point, time)) * 1000 + 60000)::bigint AS bis\nFROM grafana_sessions ORDER BY id DESC LIMIT 200",
+     "rawSql": "\nSELECT id, time AS \"Start\", round((extract(epoch FROM duration) / 60)::numeric) AS \"Min\",\n       round(km_odometer::numeric) AS \"km\", round(net_kwh::numeric, 2) AS \"kWh netto\",\n       round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(soc_start::numeric, 1) AS \"SoC Start\", round(soc_end::numeric, 1) AS \"SoC Ende\",\n       round(outside_c::numeric, 1) AS \"Außen °C\", round(speed_max_kmh::numeric) AS \"vmax\",\n       round(aux_avg_kw::numeric, 2) AS \"Neben kW\", points AS \"Punkte\",\n       (extract(epoch FROM time) * 1000)::bigint AS von,\n       (extract(epoch FROM coalesce(last_point, time)) * 1000 + 60000)::bigint AS bis\nFROM grafana_sessions WHERE vehicle_id = ${vehicle} ORDER BY id DESC LIMIT 200",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -94,7 +109,7 @@
         "value": [
          {
           "title": "Fahrt anzeigen",
-          "url": "/d/jolt-trips?orgId=1&var-session=${__data.fields.id}&from=${__data.fields.von}&to=${__data.fields.bis}"
+          "url": "/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${__data.fields.id}&from=${__data.fields.von}&to=${__data.fields.bis}"
          }
         ]
        }
@@ -165,7 +180,7 @@
    },
    "targets": [
     {
-     "rawSql": "\nSELECT count(*) AS \"Fahrten\", round(sum(km_odometer)::numeric) AS \"km\",\n       round((100 * sum(net_kwh) FILTER (WHERE km_odometer >= 3)\n              / nullif(sum(km_odometer) FILTER (WHERE km_odometer >= 3), 0))::numeric, 1)\n         AS \"Ø kWh/100 km\"\nFROM grafana_sessions",
+     "rawSql": "\nSELECT count(*) AS \"Fahrten\", round(sum(km_odometer)::numeric) AS \"km\",\n       round((100 * sum(net_kwh) FILTER (WHERE km_odometer >= 3)\n              / nullif(sum(km_odometer) FILTER (WHERE km_odometer >= 3), 0))::numeric, 1)\n         AS \"Ø kWh/100 km\"\nFROM grafana_sessions WHERE vehicle_id = ${vehicle}",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -209,7 +224,7 @@
    },
    "targets": [
     {
-     "rawSql": "\nSELECT '#' || id AS \"Fahrt\", round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(outside_c::numeric, 1) AS \"Außen °C\"\nFROM (SELECT * FROM grafana_sessions WHERE kwh_per_100km IS NOT NULL\n      ORDER BY id DESC LIMIT 40) t ORDER BY id",
+     "rawSql": "\nSELECT '#' || id AS \"Fahrt\", round(kwh_per_100km::numeric, 1) AS \"kWh/100 km\",\n       round(outside_c::numeric, 1) AS \"Außen °C\"\nFROM (SELECT * FROM grafana_sessions WHERE kwh_per_100km IS NOT NULL AND vehicle_id = ${vehicle}\n      ORDER BY id DESC LIMIT 40) t ORDER BY id",
      "format": "table",
      "datasource": {
       "type": "grafana-postgresql-datasource",
@@ -314,7 +329,7 @@
    "targets": [],
    "options": {
     "mode": "markdown",
-    "content": "**Farbe:** [Tempo](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=speed_kmh)  ·  [Leistung](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=power_kw)  ·  [Ladestand](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=soc)  ·  [Abweichung vom Plan](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=(soc - plan_soc))  ·  [Nebenverbraucher](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=aux_load_kw)  ·  [Drehmoment](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=torque_rear_nm)  ·  [Höhe](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=elevation_m)  ·  [Akkutemperatur](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=batt_temp_max_c)  ·  [Zellspannung min](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=cell_min_v)  ·  [Außentemperatur](/d/jolt-trips?orgId=1&var-session=${session}&${__url_time_range}&var-colour=outside_temp_c)",
+    "content": "**Farbe:** [Tempo](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=speed_kmh)  ·  [Leistung](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=power_kw)  ·  [Ladestand](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=soc)  ·  [Abweichung vom Plan](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=(soc - plan_soc))  ·  [Nebenverbraucher](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=aux_load_kw)  ·  [Drehmoment](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=torque_rear_nm)  ·  [Höhe](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=elevation_m)  ·  [Akkutemperatur](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=batt_temp_max_c)  ·  [Zellspannung min](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=cell_min_v)  ·  [Außentemperatur](/d/jolt-trips?orgId=1&var-vehicle=${vehicle}&var-session=${session}&${__url_time_range}&var-colour=outside_temp_c)",
     "code": {
      "showLineNumbers": false,
      "wrap": true
@@ -820,13 +835,15 @@
    "title": "jolt Fahrtenbuch",
    "type": "link",
    "url": "/d/jolt-logbook",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   },
   {
    "title": "jolt Analyse",
    "type": "link",
    "url": "/d/jolt-analysis",
-   "icon": "external link"
+   "icon": "external link",
+   "includeVars": true
   }
  ]
 }
