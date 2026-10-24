@@ -22,7 +22,7 @@
      "type": "grafana-postgresql-datasource",
      "uid": "jolt-pg"
     },
-    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text FROM grafana_drives ORDER BY 1",
+    "query": "SELECT vehicle_id AS __value, vehicle AS __text FROM grafana_drives UNION SELECT vehicle_id, vehicle FROM grafana_sessions WHERE vehicle_id IS NOT NULL ORDER BY 1",
     "definition": "grafana_drives",
     "refresh": 1,
     "sort": 0,
