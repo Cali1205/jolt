@@ -395,8 +395,9 @@ def remove(vehicle_id: int, db: Session = Depends(get_db)):
     if not vehicle:
         raise HTTPException(404, "Fahrzeug nicht gefunden.")
     if (db.query(models.Trip).filter_by(vehicle_id=vehicle_id).first()
-            or db.query(models.VehicleDrive).filter_by(vehicle_id=vehicle_id).first()):
-        raise HTTPException(409, "Zu diesem Fahrzeug gibt es noch Fahrten.")
+            or db.query(models.VehicleDrive).filter_by(vehicle_id=vehicle_id).first()
+            or db.query(models.VehicleCharge).filter_by(vehicle_id=vehicle_id).first()):
+        raise HTTPException(409, "Zu diesem Fahrzeug gibt es noch Fahrten oder Ladungen.")
     db.delete(vehicle)
     db.commit()
     return {"ok": True}

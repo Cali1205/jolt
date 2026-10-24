@@ -185,6 +185,17 @@ def main() -> int:
     kept_logbook = client.delete(f"/api/vehicles/{logged['id']}")
     verify(kept_logbook.status_code == 409,
            "ein Fahrzeug mit Fahrtenbuch wird nicht gelöscht", f"HTTP {kept_logbook.status_code}")
+    charged = client.post("/api/vehicles", json=own).json()
+    db = SessionLocal()
+    db.add(models.VehicleCharge(vehicle_id=charged["id"], started_at=_dtv(2026, 10, 1, 22),
+                                ended_at=_dtv(2026, 10, 2, 6), energy_kwh=30.0,
+                                sources=["vw_history"], details={"by_source": {}}))
+    db.commit()
+    db.close()
+    kept_charges = client.delete(f"/api/vehicles/{charged['id']}")
+    verify(kept_charges.status_code == 409,
+           "ein Fahrzeug, das nur Ladungen hat, wird nicht gelöscht",
+           f"HTTP {kept_charges.status_code}")
 
     templates = {t["name"]: t["platform"]
                  for t in client.get("/api/vehicles/templates").json()}

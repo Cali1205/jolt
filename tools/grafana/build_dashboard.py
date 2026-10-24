@@ -19,8 +19,10 @@ DS = {"type": "grafana-postgresql-datasource", "uid": "jolt-pg"}
 # sees no table.
 VEHICLE_VARIABLE = {
     "name": "vehicle", "label": "Fahrzeug", "type": "query", "datasource": DS,
-    "query": "SELECT DISTINCT vehicle_id AS __value, vehicle AS __text "
-             "FROM grafana_drives ORDER BY 1",
+    # Recordings too: a car's first one reaches grafana_drives only when it ends.
+    "query": "SELECT vehicle_id AS __value, vehicle AS __text FROM grafana_drives "
+             "UNION SELECT vehicle_id, vehicle FROM grafana_sessions "
+             "WHERE vehicle_id IS NOT NULL ORDER BY 1",
     "definition": "grafana_drives", "refresh": 1, "sort": 0,
     "includeAll": False, "multi": False}
 UID = "jolt-trips"
