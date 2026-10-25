@@ -60,6 +60,9 @@ END_MATCH = timedelta(minutes=5)
 # The dongle's odometer counts whole kilometres. A recorded track longer than
 # its span by more than that means the dongle missed part of the drive.
 ODOMETER_RESOLUTION_KM = 1.0
+# A recording keeps running after the car is parked (23 Oct 2026: 18 minutes
+# past 06:37); the GPS wanders around the parking spot all that time.
+PARKED_RADIUS_M = 100
 
 # Cloud snapshots: what is detected over this window is stored, but only once
 # it is old enough. The VW switch-off reports arrive late and out of order,
@@ -222,6 +225,13 @@ def _apply_drive(row: models.VehicleDrive) -> None:
     row.start_estimated = timed.get("parked_at") is not None
     row.odo_start, row.odo_end = main.get("odo_start"), main.get("odo_end")
     row.distance_km = main["distance_km"]
+    # The odometers count whole kilometres; a recording over the same ones
+    # measured the drive with its track.
+    if by_source.get(JOLT) and _has_odometer(main):
+        recorded = _combine(by_source[JOLT])
+        if ((recorded.get("odo_start"), recorded.get("odo_end"))
+                == (main["odo_start"], main["odo_end"])):
+            row.distance_km = recorded["distance_km"]
     row.soc_start, row.soc_end = main.get("soc_start"), main.get("soc_end")
     # Energy only from a source that saw the whole drive: a recording that
     # covers two drives, or half of one, has the wrong kilowatt hours for it.
@@ -344,6 +354,16 @@ def _gps_km(points) -> float:
     return km
 
 
+def _until_parked(points) -> list:
+    """The points up to the arrival at the spot the recording ends at."""
+    last = points[-1]
+    i = len(points) - 1
+    while i > 0 and haversine_m(points[i - 1].lat, points[i - 1].lon,
+                                last.lat, last.lon) <= PARKED_RADIUS_M:
+        i -= 1
+    return points[:i + 1]
+
+
 def session_record(session: models.LiveSession) -> dict | None:
     """A finished live session as one drive - the trip as its driver
     recorded it, even when it had a charging stop the VW data splits at.
@@ -353,11 +373,13 @@ def session_record(session: models.LiveSession) -> dict | None:
     Without odometer readings a recording counts with its GPS distance; a
     planned trip without them is left out, since the simulator plays those
     back with made-up times. With readings that stop short of the recorded
-    track, it counts with the track, and without energy.
+    track, it counts with the track, and without energy; with readings that
+    cover it, with the track too, which is finer than whole kilometres. A
+    recording that went on after parking ends at the arrival.
     """
-    points = list(session.points)
-    if session.running or len(points) < 2:
+    if session.running or len(session.points) < 2:
         return None
+    points = _until_parked(list(session.points))
     by_field: dict[str, list] = {}
     for o in observations.from_live_points(points):
         by_field.setdefault(o.field, []).append((o.t, o.value))
@@ -373,6 +395,8 @@ def session_record(session: models.LiveSession) -> dict | None:
         if track_km > km + ODOMETER_RESOLUTION_KM:
             # Its energy counters fell silent with it.
             km, whole = track_km, False
+        elif track_km >= km - ODOMETER_RESOLUTION_KM:
+            km = track_km
     else:
         trip = session.trip
         if trip is None or not trip.recording:
