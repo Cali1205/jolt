@@ -416,7 +416,7 @@ window.joltVehicle = (function () {
     } catch (e) { return null; }
   }
 
-  async function load() {
+  async function load(pick) {
     try {
       K.state.vehicles = await K.api("/api/vehicles", { timeout: 8000 });
       try { localStorage.setItem(CACHE_KEY, JSON.stringify(K.state.vehicles)); }
@@ -435,9 +435,13 @@ window.joltVehicle = (function () {
     for (const id of ["vehicle-choice", "vehicle-list", "rec-vehicle"]) {
       const selection = document.getElementById(id);
       if (!selection) continue;
-      const earlier = selection.value;
+      const earlier = (id === "vehicle-list" && pick) || selection.value;
       selection.innerHTML = K.state.vehicles
         .map((f) => `<option value="${f.id}">${K.esc(f.name)}</option>`).join("");
+      // Before restoring the choice: an unknown value would fall back to the first car.
+      if (id === "vehicle-list") {
+        selection.insertAdjacentHTML("beforeend", '<option value="neu">+ neues Fahrzeug</option>');
+      }
       if (earlier) selection.value = earlier;
       // The choice for recording survives the restart: whoever sits in the
       // car wants to make it once and never again. Same consideration as on
@@ -469,11 +473,6 @@ window.joltVehicle = (function () {
     if (window.joltTrips && window.joltTrips.loadLogbook) {
       window.joltTrips.loadLogbook();
     }
-
-    const newOption = document.createElement("option");
-    newOption.value = "neu";
-    newOption.textContent = "+ neues Fahrzeug";
-    document.getElementById("vehicle-list").appendChild(newOption);
 
     showCurrent();
   }
@@ -593,12 +592,14 @@ window.joltVehicle = (function () {
     }
 
     try {
+      let made = null;
       if (choice === "neu") {
-        await K.api("/api/vehicles", { method: "POST", body: payload });
+        made = await K.api("/api/vehicles", { method: "POST", body: payload });
       } else {
         await K.api("/api/vehicles/" + choice, { method: "PUT", body: payload });
       }
-      await load();
+      // A new car stays selected, so the next save or logger token is its own.
+      await load(made && String(made.id));
       K.report("Fahrzeug gespeichert.", "hinweis");
     } catch (failure) {
       K.report("Speichern: " + failure.message, "fehler");

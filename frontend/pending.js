@@ -28,6 +28,12 @@ window.joltPending = (function () {
   const BATCH = 100;
 
   const isLocal = (id) => typeof id === "string" && id.startsWith(PREFIX);
+  /* A real rejection by the server. A 5xx (tunnel down, deploy), a timeout,
+   * a rate limit or a lapsed login is not final: keep the data and retry. */
+  const final = (failure) => {
+    const status = failure && failure.status;
+    return status >= 400 && status < 500 && ![401, 408, 429].includes(status);
+  };
 
   function store() {
     try { return window.localStorage; } catch (e) { return null; }
@@ -64,7 +70,7 @@ window.joltPending = (function () {
         { method: "POST", body: full, timeout: START_TIMEOUT_MS });
       return Object.assign({ pending: false }, reply);
     } catch (failure) {
-      if (failure && failure.status) throw failure;
+      if (final(failure)) throw failure;
       const rec = { id: PREFIX + Date.now(), body: full, end_requested: false,
                     session_id: null };
       write(rec);
@@ -90,7 +96,7 @@ window.joltPending = (function () {
         write(rec);
         return { session_id: reply.session_id };
       } catch (failure) {
-        if (failure && failure.status) { clear(); throw failure; }
+        if (final(failure)) { clear(); throw failure; }
         return null;
       }
     })().finally(() => { materializing = null; });
@@ -167,7 +173,7 @@ window.joltPending = (function () {
     }
     try { await api(`/api/live/${id}/end`, { method: "POST", timeout: SYNC_TIMEOUT_MS }); }
     catch (failure) {
-      if (!(failure && failure.status)) return false;   // network: try again later
+      if (!final(failure)) return false;   // network or server: try again later
     }
     clear();
     return true;

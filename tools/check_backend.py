@@ -481,7 +481,7 @@ def main() -> int:
            "im Demo-Modus ist die mautfreie Route dieselbe - sie wird "
            "zusammengelegt statt doppelt angeboten",
            f"{len(with_old)} Varianten")
-    verify("toll_free" in with_old[0]["labels"],
+    verify("mautfrei" in with_old[0]["labels"],
            "und das Etikett sagt es", str(with_old[0]["labels"]))
     verify(route["demo"] is True, "und ist als Demo gekennzeichnet")
     verify(500 < route["distance_km"] < 900, "Strecke plausibel",

@@ -166,6 +166,7 @@ class FakePortal(requests.adapters.BaseAdapter):
         self.headers: dict[str, dict] = {}
         self.expire_next = 0
         self.downloaded: list[str] = []
+        self.failing: set[str] = set()
         self.datasets = [
             {"name": "a_no_content_found.zip", "createdOn": "2026-10-20T00:30:00Z"},
             {"name": "ds2.zip", "createdOn": "2026-10-20T00:17:30Z"},
@@ -222,7 +223,10 @@ class FakePortal(requests.adapters.BaseAdapter):
                 body = json.dumps(self.datasets).encode()
             elif where == DELIVERY + "/download":
                 self.downloaded.append(request.headers["filename"])
-                body = self.files[request.headers["filename"]]
+                if request.headers["filename"] in self.failing:
+                    status, body = 500, b'{"error": "unavailable"}'
+                else:
+                    body = self.files[request.headers["filename"]]
             else:
                 status = 404
         return _response(request, status, headers, body)
@@ -319,6 +323,21 @@ def part_login():
     verify(fake.downloaded == ["ds1.zip", "ds2.zip"],
            "geladen wird ältester zuerst, Platzhalter ohne Inhalt gar nicht",
            str(fake.downloaded))
+
+    fake.datasets[:0] = [{"name": "ds4.zip", "createdOn": "2026-10-20T10:00:00Z"},
+                         {"name": "ds3.zip", "createdOn": "2026-10-20T09:00:00Z"}]
+    fake.files.update({"ds3.zip": _zip(DATASET), "ds4.zip": _zip(DATASET)})
+    fake.failing = {"ds4.zip"}
+    try:
+        kept = len(portal.updates(VIN))
+    except vw_portal.PortalError as failure:
+        kept = str(failure)
+    fake.failing = set()
+    later = len(portal.updates(VIN))
+    verify(kept == 1 and later == 1 and fake.downloaded[-3:]
+           == ["ds3.zip", "ds4.zip", "ds4.zip"],
+           "scheitert ein Download (HTTP 500), kommt das schon Geladene an "
+           "und der Rest beim nächsten Abruf", f"{kept}, {later}, {fake.downloaded}")
 
     fake.expire_next = 1
     count = len(fake.requests)
