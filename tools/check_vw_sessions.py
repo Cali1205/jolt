@@ -1071,8 +1071,53 @@ def part_parked_recording():
         db.close()
 
 
+def part_recording_with_charge_stop():
+    verify.section("Aufzeichnung mit Ladestopp")
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        trip = models.Trip(vehicle_id=vid, recording=True, start_lat=48.1,
+                           start_lon=11.5, target_lat=51.7, target_lon=11.5,
+                           start_soc=90.0, geometry=[], energy_profile=[])
+        db.add(trip)
+        db.flush()
+        session = models.LiveSession(trip_id=trip.id, running=False,
+                                     started_at=T(24, 8, 0).replace(tzinfo=None))
+        db.add(session)
+        db.flush()
+        # 2 x 200 km at 20 kWh/100 km, one point a minute at 120 km/h, and
+        # between them 30 minutes at a charger that puts in 40 kWh.
+        km, charged, t = 0.0, 1000.0, T(24, 8, 0)
+        for minute in range(100 + 30 + 100 + 1):
+            stop = 100 < minute <= 130
+            if stop:
+                charged += 40.0 / 30
+            elif minute:
+                km += 2.0
+            db.add(models.LivePoint(
+                session_id=session.id, timestamp=(t + minute * 60 * S).replace(tzinfo=None),
+                lat=48.1 + km / 111.195 + (0.00005 * (minute % 2) if stop else 0.0), lon=11.5,
+                soc=50.0, raw_values={"odometer_km": 10000 + int(km),
+                                      "discharge_kwh": 5000.0 + 0.2 * km,
+                                      "charged_kwh": charged}))
+        db.flush()
+        db.refresh(session)
+        record = logbook.session_record(session)
+        verify(close(record["distance_km"], 400.0, 1.0)
+               and close(record["energy_used_kwh"], 80.0, 0.01),
+               "400 km mit 80 kWh: was der Ladestopp nachlädt, zählt nicht als "
+               "weniger Verbrauch", str(record and (record["distance_km"],
+                                                  record["energy_used_kwh"])))
+        db.rollback()
+    finally:
+        db.close()
+
+
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_silent_dongle, part_parked_recording, part_split_recording, part_import, part_api]
+         part_silent_dongle, part_parked_recording, part_recording_with_charge_stop, part_split_recording, part_import, part_api]
 
 
 def main() -> int:

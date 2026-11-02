@@ -364,6 +364,36 @@ def _until_parked(points) -> list:
     return points[:i + 1]
 
 
+def _standing(a, b) -> bool:
+    """Did the car stand between two points? By its speed when both have one,
+    else by the GPS, which wanders up to `PARKED_RADIUS_M` around a spot."""
+    if a.speed_kmh is not None and b.speed_kmh is not None:
+        return max(a.speed_kmh, b.speed_kmh) < 5
+    return haversine_m(a.lat, a.lon, b.lat, b.lon) <= PARKED_RADIUS_M
+
+
+def _driving_kwh(points) -> float | None:
+    """Discharged minus charged, like the net counter, but without what a
+    charging stop put in: a recording runs on through the stop."""
+    used, before, pairs = 0.0, None, 0
+    for p in points:
+        raw = p.raw_values if isinstance(p.raw_values, dict) else {}
+        discharged = raw.get("discharge_kwh")
+        if not isinstance(discharged, (int, float)):
+            continue
+        charged = raw.get("charged_kwh")
+        charged = charged if isinstance(charged, (int, float)) else 0.0
+        if before is not None:
+            a, d0, c0 = before
+            regen = charged - c0
+            if regen > 0 and _standing(a, p):
+                regen = 0.0
+            used += (discharged - d0) - regen
+            pairs += 1
+        before = (p, discharged, charged)
+    return used if pairs else None
+
+
 def session_record(session: models.LiveSession) -> dict | None:
     """A finished live session as one drive - the trip as its driver
     recorded it, even when it had a charging stop the VW data splits at.
@@ -385,7 +415,6 @@ def session_record(session: models.LiveSession) -> dict | None:
         by_field.setdefault(o.field, []).append((o.t, o.value))
     km_track = sessions.thin(sessions.dedup(sorted(by_field.get("odometer_km", []))))
     soc_track = by_field.get("soc_pct", [])
-    net = by_field.get("energy_net_kwh", [])
     whole = True
     if km_track:
         odo_start = min(v for _, v in km_track)
@@ -405,7 +434,7 @@ def session_record(session: models.LiveSession) -> dict | None:
         km = _gps_km(points)
     if km < sessions.MIN_DRIVE_KM:
         return None
-    used = net[-1][1] - net[0][1] if len(net) > 1 and whole else None
+    used = _driving_kwh(points) if whole else None
     fixes = [p for p in points if p.lat is not None and p.lon is not None]
     return {"started_at": _iso(points[0].timestamp),
             "ended_at": _iso(points[-1].timestamp),
