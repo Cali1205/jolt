@@ -1006,8 +1006,118 @@ def part_split_recording():
         db.close()
 
 
+def parked_recording(db, vehicle_id):
+    """Live session 48 (23 Oct 2026): 5.4 km of track while the dongle's
+    odometer counts 62128 to 62134, parked at 06:37 and recorded on for 18
+    minutes, the GPS wandering up to 60 m around the spot."""
+    from app import models
+    trip = models.Trip(vehicle_id=vehicle_id, recording=True, start_lat=48.1,
+                       start_lon=11.5, target_lat=48.1, target_lon=11.5,
+                       start_soc=34.0, geometry=[], energy_profile=[])
+    db.add(trip)
+    db.flush()
+    start, arrival = T(23, 6, 27), T(23, 6, 37)
+    session = models.LiveSession(trip_id=trip.id, running=False,
+                                 started_at=start.replace(tzinfo=None))
+    db.add(session)
+    db.flush()
+    rng = random.Random(48)
+    for i in range(int((T(23, 6, 55) - start) / (12 * S)) + 1):
+        t = start + i * 12 * S
+        done = min(5.4, 5.4 * (t - start) / (arrival - start))
+        raw, lat, lon = None, 48.1 + 0.009 * done, 11.5
+        if t <= arrival:
+            raw = {"odometer_km": 62128 + int(done + 0.7),
+                   "discharge_kwh": 18149.0 + 0.18 * done, "charged_kwh": 18681.0}
+        else:
+            lat += rng.uniform(-0.0004, 0.0004)
+            lon += rng.uniform(-0.0005, 0.0005)
+        db.add(models.LivePoint(session_id=session.id, lat=lat, lon=lon,
+                                timestamp=t.replace(tzinfo=None),
+                                soc=34.0 if raw else None, raw_values=raw))
+    db.flush()
+    db.refresh(session)
+    return session
+
+
+def part_parked_recording():
+    verify.section("Aufzeichnung, die nach dem Parken weiterläuft")
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        session = parked_recording(db, vid)
+        record = logbook.session_record(session)
+        verify(record["ended_at"] == "2026-10-23T06:37:00"
+               and close(record["distance_km"], 5.4, 0.05)
+               and close(record["energy_used_kwh"], 0.97, 0.01)
+               and (record["odo_start"], record["odo_end"]) == (62128, 62134),
+               "endet mit der Ankunft um 06:37, nicht mit dem Zittern danach: 5,4 km "
+               "der Strecke statt 6 ganzer Kilometer, mit Energie", str(record))
+        portal = {"started_at": "2026-10-23T06:26:00", "ended_at": "2026-10-23T06:38:00",
+                  "odo_start": 62128.0, "odo_end": 62134.0, "distance_km": 6.0,
+                  "soc_start": 35.0, "soc_end": 34.0, "energy_used_kwh": 1.2,
+                  "km_track": [], "soc_track": [], "live_session_id": None}
+        logbook.store_drives(db, vid, logbook.PORTAL, [portal])
+        logbook.store_session(db, session)
+        rows = drives_of(db, vid)
+        verify(len(rows) == 1 and rows[0].sources == ["vw_portal", "jolt"]
+               and rows[0].distance_km == 5.4 and rows[0].energy_used_kwh == 0.97,
+               "mit dem Portal: eine Zeile mit der Strecke und der Energie der Aufzeichnung",
+               str(rows and [columns(r) for r in rows]))
+        db.commit()
+    finally:
+        db.close()
+
+
+def part_recording_with_charge_stop():
+    verify.section("Aufzeichnung mit Ladestopp")
+    from app import models
+    from app.cloud import logbook
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        vid = new_vehicle(db)
+        trip = models.Trip(vehicle_id=vid, recording=True, start_lat=48.1,
+                           start_lon=11.5, target_lat=51.7, target_lon=11.5,
+                           start_soc=90.0, geometry=[], energy_profile=[])
+        db.add(trip)
+        db.flush()
+        session = models.LiveSession(trip_id=trip.id, running=False,
+                                     started_at=T(24, 8, 0).replace(tzinfo=None))
+        db.add(session)
+        db.flush()
+        # 2 x 200 km at 20 kWh/100 km, one point a minute at 120 km/h, and
+        # between them 30 minutes at a charger that puts in 40 kWh.
+        km, charged, t = 0.0, 1000.0, T(24, 8, 0)
+        for minute in range(100 + 30 + 100 + 1):
+            stop = 100 < minute <= 130
+            if stop:
+                charged += 40.0 / 30
+            elif minute:
+                km += 2.0
+            db.add(models.LivePoint(
+                session_id=session.id, timestamp=(t + minute * 60 * S).replace(tzinfo=None),
+                lat=48.1 + km / 111.195 + (0.00005 * (minute % 2) if stop else 0.0), lon=11.5,
+                soc=50.0, raw_values={"odometer_km": 10000 + int(km),
+                                      "discharge_kwh": 5000.0 + 0.2 * km,
+                                      "charged_kwh": charged}))
+        db.flush()
+        db.refresh(session)
+        record = logbook.session_record(session)
+        verify(close(record["distance_km"], 400.0, 1.0)
+               and close(record["energy_used_kwh"], 80.0, 0.01),
+               "400 km mit 80 kWh: was der Ladestopp nachlädt, zählt nicht als "
+               "weniger Verbrauch", str(record and (record["distance_km"],
+                                                  record["energy_used_kwh"])))
+        db.rollback()
+    finally:
+        db.close()
+
+
 PARTS = [part_detection, part_mutations, part_storage, part_jolt, part_portal,
-         part_silent_dongle, part_split_recording, part_import, part_api]
+         part_silent_dongle, part_parked_recording, part_recording_with_charge_stop, part_split_recording, part_import, part_api]
 
 
 def main() -> int:
