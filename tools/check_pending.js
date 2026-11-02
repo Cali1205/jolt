@@ -80,7 +80,10 @@ function world() {
   r = await w.P.start(w.api, { vehicle_id: 1, lat: 1, lon: 2, soc: 50 });
   verify((await w.P.materialize(w.api)) === null && w.data["jolt-aufz-offen"],
          "ohne Netz bleibt die lokale Aufzeichnung stehen");
-  w.state.grid = true;
+  w.state.grid = true; w.state.status = 502;
+  verify((await w.P.materialize(w.api)) === null && w.data["jolt-aufz-offen"],
+         "ein 502 (Tunnel, Deploy) ist keine Absage: die Aufzeichnung bleibt liegen");
+  w.state.status = null;
   const made = await w.P.materialize(w.api);
   const sent = w.calls[w.calls.length - 1];
   verify(made && made.session_id === 41 && sent.body.started_at === JSON.parse(w.data["jolt-aufz-offen"]).body.started_at,

@@ -656,11 +656,13 @@ def _examine_replanning(*, vehicle, deviation, spacing_m, detour_since, now_ts,
             name = upcoming.get("name") or "Der nächste Ladepunkt"
             return True, f"{name} ist als belegt gemeldet - Ausweichen.", True
 
-    # 2. It will not last until the destination.
-    if reserve_at is not None and reserve_at < total_km:
+    # 2. It will not last until the next stop or the destination. The
+    #    profile has no charging in it, so past the next stop it says nothing.
+    limit = upcoming["km_on_route"] if upcoming else total_km
+    if reserve_at is not None and reserve_at < limit:
         return True, (f"Reserve wird bei km {reserve_at:.0f} erreicht - "
                       f"vorher laden."), True
-    if forecast is not None and forecast < vehicle.reserve_soc:
+    if not upcoming and forecast is not None and forecast < vehicle.reserve_soc:
         return True, (f"Ankunft mit {forecast:.0f} % prognostiziert, "
                       f"unter der Reserve von {vehicle.reserve_soc:.0f} %."), True
 

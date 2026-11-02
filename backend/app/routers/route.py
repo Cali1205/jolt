@@ -363,7 +363,7 @@ def _plan_routes(request: Routenanfrage, start: tuple, destination: tuple,
     """
     routes = [{"between": [], "toll_free": False, "label": LABEL["fastest"]}]
     if request.alternative:
-        routes.append({"between": [], "toll_free": True, "label": "toll_free"})
+        routes.append({"between": [], "toll_free": True, "label": "mautfrei"})
     if request.examine_detours:
         routes += [{"between": [k["point"]], "toll_free": False,
                   "label": k["label"]}
@@ -428,7 +428,9 @@ def _collect_distances(request: Routenanfrage, db: Session | None = None,
                 fitting["labels"].append(path["label"])
             continue
 
-        if distance is not basis and variants.actual_dominated(
+        # The toll-free route is wanted for the money jolt does not price, so
+        # it is compared on the plan even when it is longer and slower.
+        if distance is not basis and not path["toll_free"] and variants.actual_dominated(
                 distance.distance_m, distance.drive_time_s,
                 basis.distance_m, basis.drive_time_s):
             # Longer *and* slower than the fastest route: the candidate cannot

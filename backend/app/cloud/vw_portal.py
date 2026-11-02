@@ -489,8 +489,15 @@ class VwPortal:
             state.identifier = self._identifier(vin)
         found = []
         for dataset in pending(self._datasets(vin, state.identifier), state.after):
-            points = parse_dataset(self._download(vin, state.identifier,
-                                                  dataset.name))
+            try:
+                points = parse_dataset(self._download(vin, state.identifier,
+                                                      dataset.name))
+            except PortalError:
+                # `after` has moved past what is in `found`: hand that over,
+                # the failed dataset stays pending for the next round.
+                if found:
+                    break
+                raise
             if state.after is None or dataset.created > state.after:
                 state.after = dataset.created
             state.seq += 1

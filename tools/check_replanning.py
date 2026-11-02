@@ -24,6 +24,8 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from examine import Check, application_provide  # noqa: E402
 
+# The chains post hundreds of points within a minute; the limit is checked elsewhere.
+os.environ["RATE_LIMIT_PER_MIN"] = "100000"
 application_provide("umplan")
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -105,6 +107,18 @@ def part_trigger():
     required, reason, _ = trigger(upcoming=stop, arrival_soc=15.0)
     verify(not required,
            "nach der Freigabe greift derselbe Stopp nicht mehr", reason)
+
+    # The profile has no charging in it, so past the next stop it runs below
+    # the reserve on every trip that needs a charge. That is the plan.
+    required, reason, _ = trigger(upcoming=stop, arrival_soc=15.0,
+                                  reserve_at=250.0, forecast=-140.0)
+    verify(not required,
+           "Reserve und Prognose hinter dem nächsten Stopp lösen nichts aus",
+           reason)
+    required, reason, urgent = trigger(upcoming=stop, arrival_soc=15.0,
+                                       reserve_at=150.0)
+    verify(required and urgent,
+           "Reserve vor dem nächsten Stopp dagegen sofort", reason)
 
     # Arrival SoC at the next stop: the threshold is 5 percentage points.
     required, reason, _ = trigger(upcoming=stop, arrival_soc=9.0)
@@ -523,6 +537,25 @@ def part_chain():
            "aber mindestens einmal - sonst wäre die Sperre eine Blockade",
            f"{changes} Änderungen")
     client.post(f"/api/live/{sitzung4}/end")
+
+    print("\nWer nach Plan fährt, löst keine Neuplanung aus")
+    start5 = client.post(f"/api/live/start/{trip_id}",
+                         params={"min_kw": 100, "radius_km": 10}).json()
+    calls = []
+    original = replanning.schedule
+    replanning.schedule = lambda *a, **k: calls.append(1) or original(*a, **k)
+    try:
+        last = _replay(client, start5["session_id"], trip_id,
+                       extra_consumption=1.0, time_factor=1.0,
+                       until_km=79.0, step_km=1.0)
+    finally:
+        replanning.schedule = original
+    verify(len(calls) <= 10,
+           "80 Messungen genau nach Plan: höchstens alle 10 km neu gerechnet",
+           f"{len(calls)} Neuplanungen")
+    verify("Reserve" not in (last.get("reason") or ""),
+           "und keine falsche Reserve-Warnung", str(last.get("reason")))
+    client.post(f"/api/live/{start5['session_id']}/end")
 
 
 def _start_without_point(client, content):
