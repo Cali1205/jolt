@@ -33,7 +33,6 @@ from .. import models, routing
 from ..energy import model, weather
 from ..energy.model import VehicleValues, Environment
 from ..geo import haversine_m
-from ..routing.corridor import point_on_route
 
 log = logging.getLogger("uvicorn.error")
 
@@ -341,8 +340,17 @@ def complete(db, trip: models.Trip, session: models.LiveSession) -> dict:
     # So far the samples carry neither odometer reading nor target value - on
     # arrival there was no route to put them on. Without this the calibration
     # finds nothing usable.
+    #
+    # By walking the track, not by the nearest vertex: on a loop that would
+    # put the arrival back at km 0.
+    km_at = {}
+    km = 0.0
+    for before, after in zip(chosen, chosen[1:]):
+        km += haversine_m(before.lat, before.lon, after.lat, after.lon) / 1000.0 * factor
+        km_at[id(after)] = km
+    km = 0.0
     for point in session.points:
-        km, _ = point_on_route(geometry, point.lat, point.lon)
+        km = km_at.get(id(point), km)
         point.km_on_route = km
         point.plan_soc = _plan_at(trip.energy_profile, km)
 

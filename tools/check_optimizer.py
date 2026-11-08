@@ -674,7 +674,26 @@ def case_runtime():
           f"{plan.total_minutes:.0f} min gesamt)")
 
 
+def case_start_below_reserve():
+    section("Start schon an der Reserve - der nächste Lader bleibt erreichbar")
+    fz = VehicleValues(battery_net_kwh=77.0, reserve_soc=10.0)
+    profile = profile_build(200)
+    for soc in (10.5, 9.0, 5.0):
+        plan = optimizer.schedule(profile, chargers([4, 60]), fz, CURVE,
+                                 start_soc=soc, target_soc=10.0,
+                                 max_vehicle_kw=150.0)
+        verify(plan.feasible and plan.stops[0].option.km_on_route == 4.0,
+               f"Start mit {soc} %: Stopp am Lader bei km 4", str(plan.reason))
+    plan = optimizer.schedule(profile, chargers([4, 30]), fz, CURVE,
+                             start_soc=11.0, target_soc=10.0,
+                             max_vehicle_kw=150.0)
+    verify(plan.feasible and plan.stops[0].option.km_on_route == 4.0,
+           "ein weiterer Lader wird nicht unter der Reserve angefahren",
+           str([s.option.km_on_route for s in plan.stops]))
+
+
 def main() -> int:
+    case_start_below_reserve()
     case_short_distance()
     case_long_distance()
     case_strong_charger_wins()

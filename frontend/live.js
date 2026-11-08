@@ -124,6 +124,10 @@ window.joltLive = (function () {
         + (function () {
             const p = document.getElementById("charge-park");
             return p ? `&charge_park_bonus_min=${p.value}` : "";
+          })()
+        + (function () {
+            const v = document.getElementById("time-value");
+            return v ? `&time_value_eur_h=${v.value}` : "";
           })(),
         { method: "POST" });
       K.state.sessionId = response.session_id;

@@ -9,6 +9,9 @@ window.joltRoute = (function () {
   // one would delete the markers of the other.
   let latestChargers = [];
   let lastPlan = null;
+  // Answers can overtake each other: only the latest request may draw.
+  let chargersSeq = 0;
+  let planSeq = 0;
   // The variants of the last computation (fastest/shortest/recommended,
   // merged where identical) - for the switch cards and to know, when a card
   // is tapped, which trip_id it corresponds to.
@@ -387,14 +390,18 @@ window.joltRoute = (function () {
     if (!trip || !chargerList) return;
 
     chargerList.innerHTML = '<li class="leer">sucht …</li>';
+    const seq = ++chargersSeq;
+    const stale = () => seq !== chargersSeq || K.state.trip !== trip;
     try {
       const response = await K.api(`/api/chargers/along/${trip.trip_id}`
         + `?min_kw=${document.getElementById("min-kw").value}`
         + `&radius_km=${document.getElementById("radius").value}`);
+      if (stale()) return;
       drawChargers(response, chargerList);
       latestChargers = response.candidates || [];
       setMarker();
     } catch (failure) {
+      if (stale()) return;
       chargerList.innerHTML = "";
       K.report("Ladepunkte: " + failure.message, "fehler");
     }
@@ -420,6 +427,8 @@ window.joltRoute = (function () {
 
     planList.innerHTML = '<li class="leer">plant …</li>';
     vals.innerHTML = "";
+    const seq = ++planSeq;
+    const stale = () => seq !== planSeq || K.state.trip !== trip;
     try {
       const plan = await K.api(`/api/trips/${trip.trip_id}/charge-plan`
         + `?min_kw=${document.getElementById("min-kw").value}`
@@ -428,10 +437,12 @@ window.joltRoute = (function () {
         + `&charge_park_bonus_min=${slider("charge-park", 4)}`
         + `&time_value_eur_h=${slider("time-value", 30)}`,
         { method: "POST" });
+      if (stale()) return;
       lastPlan = plan;
       drawPlan(plan, planList, vals);
       setMarker();
     } catch (failure) {
+      if (stale()) return;
       planList.innerHTML = "";
       lastPlan = null;
       K.report("Ladeplan: " + failure.message, "fehler");

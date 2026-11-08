@@ -386,7 +386,9 @@ def _driving_kwh(points) -> float | None:
         if before is not None:
             a, d0, c0 = before
             regen = charged - c0
-            if regen > 0 and _standing(a, p):
+            # More charged than discharged is no braking: the dongle slept
+            # through a stop, and the next reading is already on the road.
+            if regen > 0 and (_standing(a, p) or regen > discharged - d0):
                 regen = 0.0
             used += (discharged - d0) - regen
             pairs += 1
