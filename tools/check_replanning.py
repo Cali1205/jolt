@@ -1345,6 +1345,41 @@ def part_recording():
            "die Aufzeichnung da", str(end.get("learned")))
 
 
+def part_recording_closed_loop():
+    print("Eine Rundfahrt endet nicht bei km 0")
+    client = TestClient(app)
+    vehicle = client.get("/api/vehicles").json()[0]
+    start = _start_without_point(client, {
+        "vehicle_id": vehicle["id"], "lat": 48.0, "lon": 11.0,
+        "soc": 80.0, "name": "Runde"}).json()
+    db = SessionLocal()
+    try:
+        session = db.get(models.LiveSession, start["session_id"])
+        onset = datetime(2026, 1, 1, 8, 0)
+        for i in range(42):
+            # Out and back, arriving 20 m short of the start; the car then
+            # parks 3 m from it, too close to the last vertex to become one.
+            live_session.record_sample(
+                db, session, 48.0 + max(0, min(i, 40 - i)) * 0.009
+                + {40: 1.8e-4, 41: 3e-5}.get(i, 0.0),
+                11.0, soc=80.0 - i * 0.2, outside_temp_c=7.0,
+                timestamp=onset + timedelta(minutes=i),
+                raw_values={"elevation_m": 500.0})
+    finally:
+        db.close()
+    end = client.post(f"/api/live/{start['session_id']}/end").json()
+    db = SessionLocal()
+    try:
+        last = db.get(models.LiveSession, start["session_id"]).points[-1]
+        verify(last.km_on_route > 35,
+               "der letzte Punkt liegt am Ende der Strecke, nicht am Anfang",
+               f"km {last.km_on_route}")
+    finally:
+        db.close()
+    verify(end.get("learned") is not None,
+           "und aus der Runde wird gelernt", str(end.get("learned")))
+
+
 def part_chain_with_charge_stop():
     """The whole chain, but this time charging actually happens along the way.
 
@@ -1662,6 +1697,7 @@ def main() -> int:
     part_state_coordinate()
     part_import_lengths()
     part_recording()
+    part_recording_closed_loop()
     part_position_without_charge_level()
     part_speed_in_the_chain()
 

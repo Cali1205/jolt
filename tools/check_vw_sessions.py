@@ -1073,6 +1073,11 @@ def part_parked_recording():
 
 def part_recording_with_charge_stop():
     verify.section("Aufzeichnung mit Ladestopp")
+    for dongle_sleeps in (False, True):
+        check_charge_stop(dongle_sleeps)
+
+
+def check_charge_stop(dongle_sleeps):
     from app import models
     from app.cloud import logbook
     from app.database import SessionLocal
@@ -1100,16 +1105,19 @@ def part_recording_with_charge_stop():
             db.add(models.LivePoint(
                 session_id=session.id, timestamp=(t + minute * 60 * S).replace(tzinfo=None),
                 lat=48.1 + km / 111.195 + (0.00005 * (minute % 2) if stop else 0.0), lon=11.5,
-                soc=50.0, raw_values={"odometer_km": 10000 + int(km),
-                                      "discharge_kwh": 5000.0 + 0.2 * km,
-                                      "charged_kwh": charged}))
+                soc=50.0, speed_kmh=120.0 if dongle_sleeps and not stop else None,
+                raw_values=None if stop and dongle_sleeps else {
+                    "odometer_km": 10000 + int(km),
+                    "discharge_kwh": 5000.0 + 0.2 * km,
+                    "charged_kwh": charged}))
         db.flush()
         db.refresh(session)
         record = logbook.session_record(session)
         verify(close(record["distance_km"], 400.0, 1.0)
                and close(record["energy_used_kwh"], 80.0, 0.01),
                "400 km mit 80 kWh: was der Ladestopp nachlädt, zählt nicht als "
-               "weniger Verbrauch", str(record and (record["distance_km"],
+               f"weniger Verbrauch (Dongle schläft beim Laden: {dongle_sleeps})",
+               str(record and (record["distance_km"],
                                                   record["energy_used_kwh"])))
         db.rollback()
     finally:

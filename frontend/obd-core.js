@@ -174,6 +174,7 @@ window.joltObd = (function () {
       report(`Gerät gewählt: ${device.name || "(ohne Namen)"}`);
       device.addEventListener("gattserverdisconnected", () => {
         report("Verbindung getrennt.");
+        abandon();
         counter.connection.dropouts += 1;
         counter.connection.since = null;
         // Without this, `isConnected()` would take a dropout for an existing
@@ -331,11 +332,22 @@ window.joltObd = (function () {
     }
     writeChar = null;
     latestAddress = null;
-    waitOn = null;
+    abandon();
     buffer = "";
     culpritResponses = 0;
     counter.connection.since = null;
     report("Verbindung absichtlich getrennt.");
+  }
+
+  /* The connection is gone, and with it any answer to the running command.
+   * Its timer must not survive: firing after a reconnect, it would orphan the
+   * next command and count a late answer that never comes. */
+  function abandon() {
+    if (!waitOn) return;
+    const { clock, reject } = waitOn;
+    clearTimeout(clock);
+    waitOn = null;
+    reject(new Error("Verbindung getrennt"));
   }
 
   /* ---------- Commands ---------- */
@@ -403,6 +415,7 @@ function command(text, limit_ms = 15000, internal = false) {
       buffer = "";
       waitOn = {
         fulfil,
+        reject,
         sent: Date.now(),
         clock: setTimeout(() => {
           waitOn = null;
@@ -916,6 +929,7 @@ function command(text, limit_ms = 15000, internal = false) {
       deviceRemembered = device;
       device.addEventListener("gattserverdisconnected", () => {
         report("Verbindung getrennt.");
+        abandon();
         writeChar = null;   // see the reasoning at the other listener above
         if (atDropout) atDropout();
       });

@@ -531,6 +531,15 @@ class _Graph:
                 self.temperature_factor)
         return self._tables[kw]
 
+    def floor(self, i: int, j: int) -> float:
+        """The lowest charge level allowed on a leg: the reserve.
+
+        Except on the way to the nearest charger. If that one is only reached
+        below the reserve, every other is too, and it is the way out: a car
+        that is already low must still be told where to charge.
+        """
+        return min(self.reserve, START_FLOOR) if i == 0 and j == 1 else self.reserve
+
     def min_charge(self, i: int, j: int, target_soc: float) -> float:
         """With what percentage must one set off at node i to make it to j?
 
@@ -539,13 +548,14 @@ class _Graph:
         end of the leg (reserve for an intermediate stop, the target SoC at
         the destination).
         """
-        demand_at_end = target_soc if j == self.target_index else self.reserve
-        return max(self.reserve + self.peak_soc(i, j),
+        floor = self.floor(i, j)
+        demand_at_end = target_soc if j == self.target_index else floor
+        return max(floor + self.peak_soc(i, j),
                    demand_at_end + self.net_soc(i, j))
 
     def reachable_at_all(self, i: int, j: int) -> bool:
         """Is the leg drivable on a full battery? Monotonic in j."""
-        return self.reserve + self.peak_soc(i, j) <= 100.0 + _EPS
+        return self.floor(i, j) + self.peak_soc(i, j) <= 100.0 + _EPS
 
     # ---------- Step 3: Pareto-Dijkstra ----------
 
@@ -741,7 +751,7 @@ class _Graph:
         levels: list[dict[float, tuple[float, float | None]]] = []
 
         arrival = start_soc - self.net_soc(0, node_sequence[1])
-        if arrival + _EPS < self.reserve:
+        if arrival + _EPS < self.floor(0, node_sequence[1]):
             return []
         level = self._fill_level(node_sequence[1], node_sequence[2], target_soc,
                                     cells, [(arrival, 0.0, None)])
@@ -788,8 +798,6 @@ class _Graph:
         min_target = self.min_charge(node, next_node, target_soc)
         level: dict[float, tuple[float, float | None]] = {}
         for arrival, time_prior, origin in inputs:
-            if arrival + _EPS < self.reserve:
-                continue
             # The minimum charge swing applies here too. Without it the
             # post-optimization grinds the charge swings down to the bare
             # minimum and produces stops of one minute - Dijkstra had
@@ -948,7 +956,7 @@ class _Graph:
                     break
                 if j in reached:
                     continue
-                if soc - self.peak_soc(i, j) + _EPS < self.reserve:
+                if soc - self.peak_soc(i, j) + _EPS < self.floor(i, j):
                     continue
                 reached.add(j)
                 if j != self.target_index:
@@ -971,6 +979,10 @@ class _Graph:
 # ---------------------------------------------------------------------------
 # Odds and ends
 # ---------------------------------------------------------------------------
+
+# A car already at its reserve still has to reach the nearest charger.
+START_FLOOR = 2.0
+
 
 def _round_down(soc: float) -> float:
     """**Round down** the arrival SoC to the label grid.

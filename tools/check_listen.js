@@ -69,6 +69,7 @@ function dongle(sent, options) {
         }, 20);
         return;
       }
+      if ((o.silent || []).includes(t)) return;
       const response = (o.unknown || []).includes(t) ? "?"
         : (t === "ATZ" ? "ELM327 v2.3" : (t.startsWith("AT") ? "OK" : "NO DATA"));
       setTimeout(() => output(response + "\r\r>"), 1);
@@ -197,6 +198,19 @@ async function main() {
          "ein Dongle, der ATCSM1 nicht kennt, wird gemeldet - das Ergebnis ist dann "
          + "mit Vorsicht zu lesen", JSON.stringify(laut.hints));
   verify(sent.includes("ATSP7"), "Protokoll 7 laesst sich waehlen");
+
+  console.log("\nTrennen waehrend ein Befehl laeuft");
+  sent = [];
+  f = environment(dongle(sent, { silent: ["ATRV"] }));
+  O = f.joltObd;
+  await O.link();
+  const running = O.cli("ATRV").then(() => "beantwortet", (x) => x.message);
+  await new Promise((w) => setTimeout(w, 20));
+  O.detach();
+  const dropped = await Promise.race([running,
+    new Promise((w) => setTimeout(() => w("haengt"), 200))]);
+  verify(/getrennt/.test(dropped), "der Befehl scheitert sofort, nicht erst nach dem Timeout", dropped);
+  verify(O.diagnose().commandRunning === false, "und kein Befehl gilt mehr als laufend");
 
   console.log("\nOhne Verbindung");
   f = environment(dongle([]));
