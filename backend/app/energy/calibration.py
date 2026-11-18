@@ -40,8 +40,12 @@ def factor_from_trip(forecast_kwh: float, actual_kwh: float,
 
 
 def carry_on(so_far: float, new_raw_factor: float) -> float:
-    """Carry the stored factor forward with a new measurement."""
-    return round(so_far * (1 - SMOOTHING) + new_raw_factor * SMOOTHING, 4)
+    """Carry the stored factor forward with a new measurement.
+
+    The raw factor is relative: the forecast it was measured against already
+    carries `so_far`. Blended as is, the factor would settle at the square
+    root of the true one."""
+    return round(so_far * (1 - SMOOTHING + new_raw_factor * SMOOTHING), 4)
 
 
 def from_live_session(session, battery_net_kwh: float) -> float | None:

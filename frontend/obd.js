@@ -404,6 +404,14 @@
       body: JSON.stringify(payload),
     });
     const records = await response.json().catch(() => ({}));
+    if (!records.reason && typeof records.detail === "string") records.reason = records.detail;
+    // jolt ended the trip after the car stood silent: the next drive is a new one.
+    if (sessionId && (response.status === 409 || response.status === 404)) {
+      log(`Fahrt ${sessionId} ist in jolt beendet - die nächste wird neu angelegt.`);
+      sessionId = null;
+      moved = 0;
+      return { soc, raw, waits: true, records: { reason: "Fahrt beendet, wartet auf die nächste" } };
+    }
     // The session route answers with the state and knows no "aufgenommen" -
     // if it gives 200, the point is in.
     if (sessionId && response.ok) records.recorded = true;

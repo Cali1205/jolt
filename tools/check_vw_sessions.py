@@ -1075,6 +1075,26 @@ def part_recording_with_charge_stop():
     verify.section("Aufzeichnung mit Ladestopp")
     for dongle_sleeps in (False, True):
         check_charge_stop(dongle_sleeps)
+    check_descent_keeps_regen()
+
+
+def check_descent_keeps_regen():
+    from types import SimpleNamespace
+    from app.cloud import logbook
+    # 50 pairs up (0.1 kWh each), 50 down recovering more than they use
+    # (0.005 out, 0.04 back), a reading every 12 s at 80 km/h.
+    points, d, c = [], 0.0, 0.0
+    for i in range(101):
+        if i:
+            d += 0.1 if i <= 50 else 0.005
+            c += 0.0 if i <= 50 else 0.04
+        points.append(SimpleNamespace(
+            timestamp=T(24, 8, 0) + i * 12 * S, lat=48.1 + i * 0.0024, lon=11.5,
+            speed_kmh=80.0, raw_values={"discharge_kwh": d, "charged_kwh": c}))
+    used = logbook._driving_kwh(points)
+    verify(close(used, 3.25, 0.01),
+           "eine Abfahrt behält ihre Rekuperation, auch wenn sie mehr lädt als verbraucht",
+           str(used))
 
 
 def check_charge_stop(dongle_sleeps):

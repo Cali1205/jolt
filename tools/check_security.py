@@ -475,6 +475,10 @@ def part_122() -> None:
     verify(response.status_code == 411,
            "ein Body ohne Längenangabe (chunked) wird abgewiesen",
            f"HTTP {response.status_code}")
+    response = client.request("DELETE", "/api/push/subscription", content=iter([b"{}"]))
+    verify(response.status_code == 411,
+           "auch bei DELETE, das ebenfalls einen Body liest",
+           f"HTTP {response.status_code}")
 
     security._ws_hit.clear()
     old = security.WS_MAX

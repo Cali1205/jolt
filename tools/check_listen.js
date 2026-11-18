@@ -44,7 +44,7 @@ function dongle(sent, options) {
     uuid: "fff1",
     properties: { write: true, writeWithoutResponse: true, notify: true },
     addEventListener(t, f) { listener.push(f); },
-    removeEventListener() {},
+    removeEventListener(t, f) { const i = listener.indexOf(f); if (i >= 0) listener.splice(i, 1); },
     async startNotifications() {},
     async writeValueWithoutResponse(d) {
       const raw = new TextDecoder().decode(d);
@@ -82,10 +82,13 @@ function dongle(sent, options) {
       async connect() { return { async getPrimaryServices() { return [service]; } }; },
       disconnect() { this.connected = false; } },
   };
-  return { requestDevice: async () => device, getDevices: async () => [device] };
+  const dropped = [];
+  device.addEventListener = (t, f) => { if (t === "gattserverdisconnected") dropped.push(f); };
+  return { requestDevice: async () => device, getDevices: async () => [device],
+           drop: () => dropped.forEach((f) => f()) };
 }
 
-function environment(bluetooth) {
+function environment(bluetooth, quick) {
   const storage = {};
   const timeframe = {
     localStorage: {
@@ -95,7 +98,9 @@ function environment(bluetooth) {
     },
     navigator: { bluetooth },
     TextEncoder, TextDecoder, DataView, Uint8Array,
-    setTimeout, clearTimeout, setInterval, clearInterval, console,
+    // `quick`: command timeouts fire after 50 ms instead of seconds.
+    setTimeout: quick ? (f, ms) => setTimeout(f, ms >= 1000 ? 50 : ms) : setTimeout,
+    clearTimeout, setInterval, clearInterval, console,
   };
   timeframe.window = timeframe;
   const context = vm.createContext(timeframe);
@@ -211,6 +216,26 @@ async function main() {
     new Promise((w) => setTimeout(() => w("haengt"), 200))]);
   verify(/getrennt/.test(dropped), "der Befehl scheitert sofort, nicht erst nach dem Timeout", dropped);
   verify(O.diagnose().commandRunning === false, "und kein Befehl gilt mehr als laufend");
+
+  console.log("\nNeu verbinden nach Timeout und Abbruch");
+  const silent = [];
+  const bt = dongle([], { silent });
+  f = environment(bt, true);
+  O = f.joltObd;
+  await O.link();
+  silent.push("ATRV");
+  const late = await O.cli("ATRV").then(() => "beantwortet", (x) => x.message);
+  verify(/Zeit/.test(late), "der stumme Befehl läuft in den Timeout", late);
+  bt.drop();
+  silent.length = 0;
+  await O.attach();
+  const answers = [];
+  for (let i = 0; i < 3; i += 1) {
+    answers.push(await O.cli("ATI").then(() => "ok", (x) => x.message));
+  }
+  verify(answers.every((x) => x === "ok"),
+         "auf der neuen Verbindung zählt keine alte Antwort mehr als verspätet",
+         answers.join(" / "));
 
   console.log("\nOhne Verbindung");
   f = environment(dongle([]));

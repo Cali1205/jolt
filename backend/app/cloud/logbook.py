@@ -364,6 +364,10 @@ def _until_parked(points) -> list:
     return points[:i + 1]
 
 
+# Readings come every ~12 s while driving; a gap this long is a dongle asleep.
+SLEPT_S = 120
+
+
 def _standing(a, b) -> bool:
     """Did the car stand between two points? By its speed when both have one,
     else by the GPS, which wanders up to `PARKED_RADIUS_M` around a spot."""
@@ -386,9 +390,11 @@ def _driving_kwh(points) -> float | None:
         if before is not None:
             a, d0, c0 = before
             regen = charged - c0
-            # More charged than discharged is no braking: the dongle slept
-            # through a stop, and the next reading is already on the road.
-            if regen > 0 and (_standing(a, p) or regen > discharged - d0):
+            # More charged than discharged over minutes is no braking: the
+            # dongle slept through a stop. A descent does it too, but in seconds.
+            slept = (regen > discharged - d0
+                     and (p.timestamp - a.timestamp).total_seconds() > SLEPT_S)
+            if regen > 0 and (_standing(a, p) or slept):
                 regen = 0.0
             used += (discharged - d0) - regen
             pairs += 1

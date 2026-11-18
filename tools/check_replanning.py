@@ -1677,7 +1677,21 @@ def _examine_plan(plan, route, name):
            f"{name}: an jedem Stopp wird tatsächlich geladen")
 
 
+def part_calibration_converges():
+    verify.section("Kalibrierung findet den wahren Faktor")
+    from app.energy import calibration
+    factor = 1.0
+    for _ in range(40):
+        # The forecast already carries the stored factor; the car uses 1.3x the model.
+        raw = calibration.factor_from_trip(30.0 * factor, 30.0 * 1.3, 100.0)
+        factor = calibration.carry_on(factor, raw)
+    verify(abs(factor - 1.3) < 0.01,
+           "ein Auto mit 1,3-fachem Verbrauch lernt 1,3, nicht dessen Wurzel 1,14",
+           f"{factor:.3f}")
+
+
 def main() -> int:
+    part_calibration_converges()
     part_trigger()
     part_charge_pauses()
     recompute_part_speed()
