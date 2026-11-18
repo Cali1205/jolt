@@ -278,8 +278,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         an unreadable one the limit could not be enforced before parsing."""
         declared = request.headers.get("content-length")
         if declared is None:
-            if (request.method in ("POST", "PUT", "PATCH")
-                    and "chunked" in request.headers.get("transfer-encoding", "").lower()):
+            if "chunked" in request.headers.get("transfer-encoding", "").lower():
                 return JSONResponse({"detail": "Content-Length fehlt."}, status_code=411)
             return None
         try:

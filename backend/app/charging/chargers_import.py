@@ -287,7 +287,7 @@ def _process_ocm_entry(db, entry: dict, min_kw: float) -> str:
     address = entry.get("AddressInfo") or {}
     lat, lon = address.get("Latitude"), address.get("Longitude")
     if lat is None or lon is None:
-        return "uebersprungen"
+        return "skipped"
 
     connectors, types = [], []
     for connection in (entry.get("Connections") or []):
@@ -302,7 +302,7 @@ def _process_ocm_entry(db, entry: dict, min_kw: float) -> str:
 
     max_kw = max([a["kw"] for a in connectors] + [0.0])
     if max_kw < min_kw:
-        return "uebersprungen"
+        return "skipped"
 
     # What is stated in words - and used to be thrown away. This is exactly
     # where it says why a charge point is useless for a specific trip:

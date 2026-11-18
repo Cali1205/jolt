@@ -332,6 +332,11 @@ def main() -> int:
                f"ist {entry.country!r}")
         verify(entry.operator == "EnBW mobility+",
                "und der Betreiber ebenso", f"ist {entry.operator!r}")
+        counter = chargers_import_module.from_ocm(db, "test-schluessel", countries=["AT"],
+                                                  max_results=1, min_kw=200)
+        verify(counter["skipped"] == 1,
+               "ein Eintrag unter min_kw wird gezählt, statt den Import abzubrechen",
+               str(counter))
     finally:
         chargers_import_module.requests.get = ocm_get_original
         db.close()

@@ -204,6 +204,10 @@ window.joltObd = (function () {
    * as the device is remembered. */
   async function connectionBuildUp(device) {
     const server = await device.gatt.connect();
+    // Whatever was in flight on the old link will not arrive on this one.
+    latestAddress = null;
+    culpritResponses = 0;
+    buffer = "";
     counter.connection.device = device.name || "";
     // Unplugged and plugged into another car is a new connection.
     vinRead = null;
@@ -285,10 +289,6 @@ window.joltObd = (function () {
       counter.connection.retries += 1;
       await locked(async () => {
         await connectionBuildUp(device);
-        latestAddress = null;        // address and filters are gone
-        // Whatever was in flight before the dropout will no longer arrive.
-        culpritResponses = 0;
-        buffer = "";
         changeFailed.clear();
         await series(profile.handshake);
       });
