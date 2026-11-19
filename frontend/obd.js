@@ -286,6 +286,7 @@
   let round = 0;
   let wake_lock = null;   // WakeLockSentinel
   let sessionId = null;    // set when this page created the trip
+  let restart = false;     // jolt ended our trip: the next drive gets a new one, auto or not
 
   /* Keep the screen awake. Without it iOS switches it off after a minute,
    * and with the screen the page content sleeps - the connection survives
@@ -344,7 +345,7 @@
      *
      * Two rounds in a row, so that a single outlier does not create a trip -
      * and no trip comes into being while the car shunts in the yard. */
-    if (!sessionId && el("auto").checked && !el("token").value.trim()) {
+    if (!sessionId && (el("auto").checked || restart) && !el("token").value.trim()) {
       const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh
         : (typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
            ? place.speed_kmh : null);
@@ -363,6 +364,7 @@
           + " - Fahrt wird angelegt.");
       try {
         await createTrip(soc);
+        restart = false;
       } catch (failure) {
         // Do not give up: the next round tries again. A dead spot when driving
         // off is the normal case, not the exception.
@@ -409,6 +411,7 @@
     if (sessionId && (response.status === 409 || response.status === 404)) {
       log(`Fahrt ${sessionId} ist in jolt beendet - die nächste wird neu angelegt.`);
       sessionId = null;
+      restart = true;
       moved = 0;
       return { soc, raw, waits: true, records: { reason: "Fahrt beendet, wartet auf die nächste" } };
     }
