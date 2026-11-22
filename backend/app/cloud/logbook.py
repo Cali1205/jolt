@@ -226,11 +226,14 @@ def _apply_drive(row: models.VehicleDrive) -> None:
     row.odo_start, row.odo_end = main.get("odo_start"), main.get("odo_end")
     row.distance_km = main["distance_km"]
     # The odometers count whole kilometres; a recording over the same ones
-    # measured the drive with its track.
+    # measured the drive with its track - unless recordings left a gap.
     if by_source.get(JOLT) and _has_odometer(main):
-        recorded = _combine(by_source[JOLT])
-        if ((recorded.get("odo_start"), recorded.get("odo_end"))
-                == (main["odo_start"], main["odo_end"])):
+        parts = sorted(by_source[JOLT], key=lambda r: r["started_at"])
+        recorded = _combine(parts)
+        gapless = all(_has_odometer(a) and _has_odometer(b) and b["odo_start"] <= a["odo_end"]
+                      for a, b in zip(parts, parts[1:]))
+        if gapless and ((recorded.get("odo_start"), recorded.get("odo_end"))
+                        == (main["odo_start"], main["odo_end"])):
             row.distance_km = recorded["distance_km"]
     row.soc_start, row.soc_end = main.get("soc_start"), main.get("soc_end")
     # Energy only from a source that saw the whole drive: a recording that

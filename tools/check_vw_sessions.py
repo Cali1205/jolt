@@ -848,6 +848,19 @@ def part_silent_dongle():
     verify(row.started_at == datetime(2026, 10, 21, 5, 10) and not row.start_estimated,
            "langsamer gefahren als geschätzt: die Aufzeichnung beginnt vor dem geschätzten "
            "Start, aber nach dem Parkbericht, und gibt die Zeiten", str(columns(row)))
+    def two_recordings(second_start):
+        a = dict(jolt, odo_end=62094.0, distance_km=2.1, ended_at="2026-10-21T05:24:00")
+        b = dict(jolt, started_at="2026-10-21T05:26:00", odo_start=second_start,
+                 odo_end=62098.0, distance_km=2.0)
+        row = models.VehicleDrive(vehicle_id=0, details={"by_source": {
+            "vw_portal": [portal], "jolt": [a, b]}})
+        logbook._apply_drive(row)
+        return row.distance_km
+    km = two_recordings(62096.0)
+    verify(km == 6.0, "zwei Aufzeichnungen mit einer Lücke dazwischen: die Strecke "
+           "bleibt die des Portals, nicht die Summe der Spuren", str(km))
+    km = two_recordings(62094.0)
+    verify(km == 4.1, "zwei lückenlose Aufzeichnungen: ihre Spuren zusammen", str(km))
     row = stored(("vw_portal", portal), ("jolt", both))
     verify(row.started_at == datetime(2026, 10, 21, 1, 44, 1),
            "eine Aufzeichnung, die schon vor dem letzten Parkbericht lief (auch über die "

@@ -345,7 +345,8 @@
      *
      * Two rounds in a row, so that a single outlier does not create a trip -
      * and no trip comes into being while the car shunts in the yard. */
-    if (!sessionId && (el("auto").checked || restart) && !el("token").value.trim()) {
+    // A trip this page created is recreated by this page, logger token or not.
+    if (!sessionId && (restart || (el("auto").checked && !el("token").value.trim()))) {
       const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh
         : (typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
            ? place.speed_kmh : null);
@@ -421,8 +422,12 @@
     return { soc, raw, records, status: response.status };
   }
 
+  // Each start bumps it: an older loop still asleep in its tick ends instead of running twice.
+  let loopGen = 0;
+
   async function tripLoop() {
-    while (running) {
+    const gen = ++loopGen;
+    while (running && gen === loopGen) {
       const startedAt = Date.now();
       try {
         const result = await aRound();
