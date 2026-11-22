@@ -2,7 +2,7 @@
 
 Volkswagen group cars report their state to VW. Under the EU Data Act, VW
 gives owners access to that data through a web portal:
-<https://eu-data-act.drivesomethinggreater.com>. jolt can log in there, fetch
+<https://eu-data-act.vwgroup-datahub.com>. jolt can log in there, fetch
 the car's last reported values and use them where no dongle reading exists.
 This module is optional and off unless you configure it.
 
@@ -27,7 +27,7 @@ the way that still works. The login code is ported from
 
 Do this once, in a normal browser, with the VW ID you use in the VW app.
 
-1. Open <https://eu-data-act.drivesomethinggreater.com> and log in with your
+1. Open <https://eu-data-act.vwgroup-datahub.com> and log in with your
    VW ID.
 2. Accept the terms and the consent the portal asks for.
 3. Link your vehicle, if the portal does not list it yet. The vehicle must be
@@ -177,7 +177,7 @@ shortened and stores neither.
   ones jolt does not interpret yet. That depends on which data categories
   you released in the portal.
 - jolt talks only to `identity.vwgroup.io` and
-  `eu-data-act.drivesomethinggreater.com`, and refuses redirects to any other
+  `eu-data-act.vwgroup-datahub.com`, and refuses redirects to any other
   host during the login.
 - To stop, remove the two variables and restart. Stored reports, drives and
   charges stay until you delete the vehicle.
