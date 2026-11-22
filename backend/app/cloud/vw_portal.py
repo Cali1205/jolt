@@ -36,8 +36,8 @@ import requests
 from ..version import VERSION
 from . import SourceError, mask, snapshot
 
-PORTAL = "https://eu-data-act.drivesomethinggreater.com"
-PORTAL_HOST = "eu-data-act.drivesomethinggreater.com"
+PORTAL = "https://eu-data-act.vwgroup-datahub.com"
+PORTAL_HOST = "eu-data-act.vwgroup-datahub.com"
 IDENTITY = "https://identity.vwgroup.io"
 IDENTITY_HOST = "identity.vwgroup.io"
 AUTHORIZE_URL = IDENTITY + "/oidc/v1/authorize"
