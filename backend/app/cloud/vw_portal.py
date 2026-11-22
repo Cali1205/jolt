@@ -46,8 +46,9 @@ SCOPE = "openid cars profile"
 
 TIMEOUT_S = 15
 MAX_REDIRECTS = 10
-# Datasets downloaded on the first poll to seed the merged state.
-MAX_BACKFILL = 8
+# Datasets downloaded on the first poll to seed the merged state. The portal
+# keeps about 30 (a quarter hour each); take them all so a restart loses no drive.
+MAX_BACKFILL = 48
 # A dataset is a few kilobytes; anything far larger is not one.
 MAX_DATASET_BYTES = 20 * 1024 * 1024
 # VW's firewall in front of the portal decides by headers we cannot test
