@@ -601,6 +601,27 @@ def part_poller():
         verify(needle in error and VIN not in error,
                f"Einrichtungsfehler wird benannt, VIN nur gekürzt: {needle}", error)
 
+    fail_poll = poller.Poll(cloud.Config(
+        name="vw_portal", env="VW_PORTAL", vin=VIN, vehicle=str(vehicle_id),
+        interval_min=15, provides=snapshot.PROVIDES,
+        connect=lambda _: FakeSource([snap])), SessionLocal)
+    real_store = poller.store
+
+    def _fail_store(*_args):
+        raise RuntimeError("db gone")
+
+    poller.store = _fail_store
+    try:
+        try:
+            fail_poll.tick()
+        except RuntimeError:
+            pass
+    finally:
+        poller.store = real_store
+    verify(fail_poll.client is None,
+           "schlägt store() fehl, wird der Client verworfen, damit der nächste "
+           "Abruf neu verbindet und nachholt")
+
 
 PARTS = [part_snapshot, part_login, part_disabled, part_storage, part_poller]
 

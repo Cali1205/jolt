@@ -160,8 +160,15 @@ class Poll:
                 self.vin = self.config.vin or _one_vin(self.client.vehicles(),
                                                        self.config.env)
                 remember_vin(db, self.status.vehicle_id, self.vin)
-            stored = sum(store(db, self.status.vehicle_id, self.config.name, snap)
-                         for snap in self.client.updates(self.vin))
+            snaps = self.client.updates(self.vin)
+            try:
+                stored = sum(store(db, self.status.vehicle_id, self.config.name, snap)
+                             for snap in snaps)
+            except Exception:
+                # updates() already moved state.after past this batch; drop the client
+                # so the next tick reconnects and backfills instead of losing reports.
+                self.client = None
+                raise
             if stored:
                 self.last_new = datetime.utcnow()
             self.update_trips(db)
