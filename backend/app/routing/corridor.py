@@ -26,6 +26,8 @@ ACCESS_ROAD_KMH = 45.0
 # Fixed cost of every stop regardless of distance: leaving the road,
 # searching, parking, fetching the cable, merging back at the end.
 FIXED_MINUTES = 4.0
+# Bucket width when thinning an oversized corridor evenly along the route.
+BUCKET_KM = 10.0
 
 
 @dataclass
@@ -78,6 +80,47 @@ def _anchor(points: list, km_list: list[float],
     return anchor
 
 
+def _thin_out(candidates: list[Candidate], at_most: int) -> list[Candidate]:
+    """Keep at most `at_most` candidates spread evenly along the route."""
+    if at_most <= 0:
+        return []
+    candidates.sort(key=lambda k: k.km_on_route)
+    if len(candidates) <= at_most:
+        return candidates
+
+    first_km = candidates[0].km_on_route
+    span_km = candidates[-1].km_on_route - first_km
+    # Widen buckets on very long routes or tight budgets so every stretch gets a slot.
+    bucket_km = max(BUCKET_KM, span_km / at_most)
+
+    buckets: dict[int, list[Candidate]] = {}
+    for candidate in candidates:
+        idx = min(at_most - 1, int((candidate.km_on_route - first_km) // bucket_km))
+        buckets.setdefault(idx, []).append(candidate)
+
+    ordered = [buckets[i] for i in sorted(buckets)]
+    for bucket in ordered:
+        bucket.sort(key=lambda k: (-(k.charge_point.max_kw or 0.0), k.detour_minutes))
+
+    # Pick round-robin across buckets so dense areas cannot starve the rest of the route.
+    selected: list[Candidate] = []
+    round_idx = 0
+    while len(selected) < at_most:
+        added = False
+        for bucket in ordered:
+            if round_idx < len(bucket):
+                selected.append(bucket[round_idx])
+                added = True
+                if len(selected) == at_most:
+                    break
+        if not added:
+            break
+        round_idx += 1
+
+    selected.sort(key=lambda k: k.km_on_route)
+    return selected
+
+
 def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
            connector_type: str = "CCS", at_most: int = 400) -> list[Candidate]:
     """All matching charge points along the route, ordered by progress.
@@ -113,7 +156,8 @@ def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
     lookup = lookup.filter(models.ChargePoint.operational.isnot(False))
 
     candidates: list[Candidate] = []
-    for lp in lookup.limit(at_most * 5).all():
+    # Load all corridor rows instead of an unordered SQL LIMIT that drops whole stretches.
+    for lp in lookup.all():
         # Measure precisely, and at the real vertices - not at the nearest
         # anchor. With a 25 km radius the anchors are about 19 km apart; a
         # charger right next to the road could be up to 9 km from an anchor
@@ -140,8 +184,7 @@ def seek(db, points: list, radius_km: float = 8.0, min_kw: float = 50.0,
         detour = FIXED_MINUTES + (2 * spacing / 1000.0) / ACCESS_ROAD_KMH * 60.0
         candidates.append(Candidate(lp, km_on_route, spacing, detour))
 
-    candidates.sort(key=lambda k: k.km_on_route)
-    return candidates[:at_most]
+    return _thin_out(candidates, at_most)
 
 
 def point_on_route(points: list, lat: float, lon: float) -> tuple[float, float]:

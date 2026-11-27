@@ -981,6 +981,44 @@ def main() -> int:
            "eine Belegt-Meldung schlägt in der Korridor-Antwort durch")
     client.delete(f"/api/chargers/{first['id']}/occupied")
 
+    # Long dense corridor (>400 sites along 800 km): thinning must keep chargers
+    # all the way to the destination instead of truncating the end of the route.
+    from app.routing import corridor as corridor_module
+    long_route = [[2.0, 44.0 + i / 111.195, 0.0] for i in range(801)]
+    db = SessionLocal()
+    try:
+        for i in range(534):
+            db.add(models.ChargePoint(
+                source="corridor-test", foreign_id=f"lang-{i}",
+                name=f"Lader {i}", operator="Prüfbetrieb",
+                lat=44.0 + (i * 1.5) / 111.195, lon=2.005,
+                city="Test", country="DE", connectors=[],
+                max_kw=300.0 if i % 3 == 0 else 150.0, point_count=4,
+                connector_types="CCS"))
+        db.commit()
+        found = corridor_module.seek(db, long_route, radius_km=8.0,
+                                     min_kw=50.0, connector_type="CCS")
+        narrow = corridor_module.seek(db, long_route, radius_km=8.0,
+                                      min_kw=50.0, connector_type="CCS",
+                                      at_most=50)
+    finally:
+        db.query(models.ChargePoint).filter_by(source="corridor-test").delete()
+        db.commit()
+        db.close()
+    found_km = [k.km_on_route for k in found]
+    verify(len(found) <= 400 and len(found) == 400,
+           "ein dichter 800-km-Korridor wird auf höchstens 400 Kandidaten ausgedünnt",
+           f"sind {len(found)}")
+    verify(found_km == sorted(found_km),
+           "und bleibt nach Streckenkilometer sortiert")
+    verify(bool(found_km) and found_km[-1] > 780.0 and found_km[0] < 20.0,
+           "Ausdünnen erhält Lader bis ans Ende der 800-km-Strecke statt abzuschneiden",
+           f"Bereich {found_km[0]:.1f}..{found_km[-1]:.1f} km" if found_km else "leer")
+    narrow_km = [k.km_on_route for k in narrow]
+    verify(len(narrow) <= 50 and bool(narrow_km) and narrow_km[-1] > 780.0,
+           "auch ein engeres Limit kappt nicht das Streckenende",
+           f"{len(narrow)} bis {narrow_km[-1]:.1f} km" if narrow_km else "leer")
+
     print("\nLadeplan")
     # The demo route is the straight line, the charging points of the sample sit on
     # the A7. That puts them further off the route than they would be beside a
