@@ -261,9 +261,13 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
 
   // Vehicle GPS chosen and present: lat/lon come from the car, elevation/speed keep their source.
   storage["jolt-position-source"] = "vehicle";
-  vp.callback({ latitude: 48.77, longitude: 9.17, altitude: 255, speed: 20, time: Date.now() });
+  const staleFix = Date.now() - 12000;
+  vp.callback({ latitude: 48.77, longitude: 9.17, altitude: 255, speed: 20, time: staleFix });
   await wait(30);
   lastPt = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
+  verify(new Date(lastPt.timestamp).getTime() > staleFix,
+         "Fahrzeug-GPS: Zeitstempel vom Auslesen, nicht vom aelteren Handy-Fix",
+         String(lastPt.timestamp));
   verify(lastPt.lat === 48.776 && lastPt.lon === 9.180611
          && lastPt.raw_values.elevation_m === 255 && Math.abs(lastPt.speed_kmh - 72) < 0.01,
          "Fahrzeug-GPS gewaehlt: lat/lon vom Auto, Hoehe und Tempo unveraendert",

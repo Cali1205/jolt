@@ -1411,6 +1411,8 @@ window.joltLive = (function () {
           if (vLat !== null && vLon !== null) {
             payload.lat = vLat;
             payload.lon = vLon;
+            // The car's fix is as of the read, which can end a round after the phone fix.
+            payload.timestamp = new Date(Date.now()).toISOString();
           }
         }
       } catch (failure) {
