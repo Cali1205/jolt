@@ -526,11 +526,17 @@ function command(text, limit_ms = 15000, internal = false) {
   function examineRow(row, addresses, actualExtra) {
     const rowName = row.name || "(ohne Namen)";
     if (!row.name) TABLE_ERROR.push("Eintrag ohne `name`.");
-    if (typeof row.len_total !== "number" || row.len_total < 1) {
-      TABLE_ERROR.push(`${rowName}: 'laenge' fehlt oder ist kleiner als 1.`);
-    }
-    if (typeof row.downhill !== "number" || row.downhill < 0) {
-      TABLE_ERROR.push(`${rowName}: 'ab' fehlt oder ist negativ.`);
+    if (row.decode !== undefined) {
+      const known = typeof row.decode === "function"
+        || (typeof row.decode === "string" && Decode.DECODERS && Decode.DECODERS[row.decode]);
+      if (!known) TABLE_ERROR.push(`${rowName}: unbekannter Decoder "${row.decode}".`);
+    } else {
+      if (typeof row.len_total !== "number" || row.len_total < 1) {
+        TABLE_ERROR.push(`${rowName}: 'laenge' fehlt oder ist kleiner als 1.`);
+      }
+      if (typeof row.downhill !== "number" || row.downhill < 0) {
+        TABLE_ERROR.push(`${rowName}: 'ab' fehlt oder ist negativ.`);
+      }
     }
     if (actualExtra) return;
     if (!row.did) TABLE_ERROR.push(`${rowName}: 'did' fehlt.`);
@@ -851,7 +857,8 @@ function command(text, limit_ms = 15000, internal = false) {
           val = val.val;
         }
         if (val !== null) {
-          raw[entry.name] = Math.round(val * 1000) / 1000;
+          const scale = Math.pow(10, Math.max(3, entry.put || 0));
+          raw[entry.name] = Math.round(val * scale) / scale;
           z.val = raw[entry.name];
           complete("ok");
         } else if (entry.required) {
@@ -1080,11 +1087,30 @@ function command(text, limit_ms = 15000, internal = false) {
     return result;
   }
 
+  const POSITION_SOURCE_KEY = "jolt-position-source";
+
+  function positionSource() {
+    try {
+      return localStorage.getItem(POSITION_SOURCE_KEY) === "vehicle" ? "vehicle" : "phone";
+    } catch (failure) {
+      return "phone";
+    }
+  }
+
+  function setPositionSource(source) {
+    const val = source === "vehicle" ? "vehicle" : "phone";
+    try { localStorage.setItem(POSITION_SOURCE_KEY, val); }
+    catch (failure) { /* private mode */ }
+    return val;
+  }
+
   /* ---------- Outward ---------- */
 
   return {
     obtainable: () => !!bt(),
     linked: () => !!writeChar,
+    positionSource,
+    setPositionSource,
 
     /* ---------- Observing (for the settings) ---------- */
 

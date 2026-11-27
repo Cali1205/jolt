@@ -243,6 +243,10 @@
 
     // The on-board AC charger, on the 11-bit side like the climate unit.
     CHARGER: { cp: "00", sh: "744", cra: "7AE", fcsh: "744", trace_log: "6" },
+
+    // Telematics / OCU: vehicle GPS (DID 222430). Stays on the base 29-bit
+    // ATSP7 protocol (avoids the ATSP6 protocol switch of 11-bit 767).
+    OCU: { cp: "17", sh: "FC00BA", cra: "17FE00BA", fcsh: "17FC00BA" },
   },
 
   /* ===================================================================
@@ -550,6 +554,17 @@
     { name: "torque_rear_nm", title: "Drehmoment hinten", unit: "Nm", put: 0,
       did: "22033B", address: "VEHICLE",
       downhill: 0, len_total: 2, sign: true, min: -1500, max: 1500 },
+
+    /* Vehicle's own GPS position from the OCU (two 14-byte null-padded
+     * ISO-8859-1 DMS strings plus two trailing bytes, e.g. 9°10'50.2"E and
+     * 48°46'33.6"N). Read every round so vehicle-GPS mode gets a fresh fix
+     * on every measurement point. */
+    { name: "gps_lat", title: "Breitengrad (Auto)", unit: "°", put: 6,
+      did: "222430", address: "OCU", decode: "gps_lat",
+      also: [
+        { name: "gps_lon", title: "Längengrad (Auto)", unit: "°", put: 6,
+          decode: "gps_lon" },
+      ] },
 
     /* The charging state the BMS side reports (codingABI): 01 precondition
      * met, 02 none, 03 error, 05 end, 16 AC, 18 trickle. Stored raw; the

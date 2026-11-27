@@ -192,9 +192,9 @@
   /* Create the trip in jolt. Separate from connecting, because with the
    * automatic mode switched on it only comes into being once the car
    * drives off. */
-  async function createTrip(soc) {
+  async function createTrip(soc, pos) {
     goAsOf("Fahrt anlegen …");
-    const place = await getPosition();
+    const place = pos || await getPosition();
     const response = await fetch("/api/live/recording", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Token": joltToken() },
@@ -229,6 +229,8 @@
 
   function showPlatform() {
     el("platform-obd").textContent = "Plattform: " + (O.platform().title || O.platform().id);
+    const row = el("position-source-row");
+    if (row) row.hidden = !O.FIELDS.some((f) => f.name === "gps_lat");
   }
 
   /* The platform of the chosen vehicle decides which readings the tables
@@ -322,6 +324,15 @@
       + `<div class="name">${name}</div></div>`).join("");
   }
 
+  function vehicleCoords(raw) {
+    if (O.positionSource() !== "vehicle") return null;
+    if (typeof raw.gps_lat !== "number" || !Number.isFinite(raw.gps_lat)
+        || Math.abs(raw.gps_lat) > 90) return null;
+    if (typeof raw.gps_lon !== "number" || !Number.isFinite(raw.gps_lon)
+        || Math.abs(raw.gps_lon) > 180) return null;
+    return { lat: raw.gps_lat, lon: raw.gps_lon };
+  }
+
   async function aRound() {
     const raw = await O.readRecord(round);
     round += 1;
@@ -331,9 +342,11 @@
       log("Standort: " + f.message);
       return null;
     });
-    if (!place) return null;
+    // Use vehicle GPS when chosen and available, otherwise fall back to phone GPS.
+    const pos = vehicleCoords(raw) || place;
+    if (!pos) return null;
 
-    if (typeof place.elevation_m === "number") raw.elevation_m = Math.round(place.elevation_m);
+    if (place && typeof place.elevation_m === "number") raw.elevation_m = Math.round(place.elevation_m);
 
     /* Automatic: wait until the car is really driving.
      *
@@ -348,7 +361,7 @@
     // A trip this page created is recreated by this page, logger token or not.
     if (!sessionId && (restart || (el("auto").checked && !el("token").value.trim()))) {
       const speed = typeof raw.speed_kmh === "number" ? raw.speed_kmh
-        : (typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
+        : (place && typeof place.speed_kmh === "number" && !Number.isNaN(place.speed_kmh)
            ? place.speed_kmh : null);
       if (speed !== null && speed < DRIVES_FROM_KMH) {
         moved = 0;
@@ -364,7 +377,7 @@
                                             : ` (${Math.round(speed)} km/h)`}`
           + " - Fahrt wird angelegt.");
       try {
-        await createTrip(soc);
+        await createTrip(soc, pos);
         restart = false;
       } catch (failure) {
         // Do not give up: the next round tries again. A dead spot when driving
@@ -377,7 +390,7 @@
     }
 
     const payload = {
-      lat: place.lat, lon: place.lon,
+      lat: pos.lat, lon: pos.lon,
       soc: Math.round(soc.hmi * 10) / 10,
       raw_values: raw,
     };
@@ -570,6 +583,8 @@
      * 20 kWh/100 km. */
     discharge_kwh: [100, 100000, "Lebensdauerzähler"],
     charged_kwh: [100, 100000, "Lebensdauerzähler"],
+    gps_lat: [-90, 90],
+    gps_lon: [-180, 180],
   };
 
   function check_row(title, value, verdict, note) {
@@ -608,7 +623,8 @@
           continue;
         }
         const b = RANGES[f.name];
-        const text = `${Math.round(w * 100) / 100}${f.unit ? " " + f.unit : ""}`;
+        const formatted = f.put > 2 ? w.toFixed(f.put) : String(Math.round(w * 100) / 100);
+        const text = `${formatted}${f.unit ? " " + f.unit : ""}`;
         if (!b) { rows.push(check_row(f.title, text, "ok", "")); good += 1; continue; }
         const inside = w >= b[0] && w <= b[1];
         if (inside) good += 1; else bad += 1;
@@ -805,6 +821,13 @@
   }
   showTableError();
   showPlatform();
+  const positionChoice = el("position-source");
+  if (positionChoice) {
+    positionChoice.value = O.positionSource();
+    positionChoice.addEventListener("change", () => {
+      O.setPositionSource(positionChoice.value);
+    });
+  }
   // The module reports everything here, and a dropout during a recording
   // is a reason to reconnect - otherwise not.
   O.set_up(log, () => { if (running) O.reconnect(1, () => running); });

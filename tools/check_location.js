@@ -234,6 +234,54 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
          "älter sein kann als sie", `${old.created_at.length} / ${webAwakeCreatedAt}`);
   await live.finish();
 
+  console.log("\nPositionsquelle (Handy-GPS vs. Fahrzeug-GPS)");
+  let nextRaw = { soc_raw: 180, gps_lat: 48.776, gps_lon: 9.180611 };
+  timeframe.joltObd = {
+    linked: () => true,
+    set_up() {},
+    readRecord: async () => Object.assign({}, nextRaw),
+    socFromRaw: (r) => ({ raw: r, bms: r / 2.5, hmi: 73.4 }),
+  };
+  const vp = plugin();
+  timeframe.joltBlePlugin = vp;
+  K0.state.sessionId = 11;
+  live.drivingStateStart("faehrt");
+  live.dongleUse();
+  live.positionTrace();
+  await wait(10);
+
+  // Default: phone GPS wins even when the vehicle delivered gps_lat/gps_lon.
+  delete storage["jolt-position-source"];
+  vp.callback({ latitude: 48.77, longitude: 9.17, altitude: 255, speed: 20, time: Date.now() });
+  await wait(30);
+  let lastPt = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
+  verify(lastPt.lat === 48.77 && lastPt.lon === 9.17 && lastPt.raw_values.gps_lat === 48.776,
+         "Standard Handy-GPS: Telefonposition gilt, Fahrzeug-GPS bleibt in raw_values",
+         JSON.stringify(lastPt));
+
+  // Vehicle GPS chosen and present: lat/lon come from the car, elevation/speed keep their source.
+  storage["jolt-position-source"] = "vehicle";
+  vp.callback({ latitude: 48.77, longitude: 9.17, altitude: 255, speed: 20, time: Date.now() });
+  await wait(30);
+  lastPt = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
+  verify(lastPt.lat === 48.776 && lastPt.lon === 9.180611
+         && lastPt.raw_values.elevation_m === 255 && Math.abs(lastPt.speed_kmh - 72) < 0.01,
+         "Fahrzeug-GPS gewaehlt: lat/lon vom Auto, Hoehe und Tempo unveraendert",
+         JSON.stringify(lastPt));
+
+  // Vehicle GPS chosen, but missing in this round: falls back to phone GPS.
+  nextRaw = { soc_raw: 180 };
+  vp.callback({ latitude: 48.78, longitude: 9.19, altitude: 260, speed: 15, time: Date.now() });
+  await wait(30);
+  lastPt = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
+  verify(lastPt.lat === 48.78 && lastPt.lon === 9.19,
+         "Fahrzeug-GPS fehlt in der Runde: Rueckfall auf Handy-GPS",
+         JSON.stringify(lastPt));
+
+  delete storage["jolt-position-source"];
+  timeframe.joltObd = undefined;
+  await live.finish();
+
   Date.now = realNow;
   console.log(failure ? `\n${failure} Prüfung(en) fehlgeschlagen.`
                      : "\nAlle Prüfungen bestanden.");

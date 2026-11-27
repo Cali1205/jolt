@@ -22,7 +22,48 @@ window.joltObdDecode = (function () {
    * `pre_offset` and `offset` are two fields because both orders occur:
    * the battery current is `(raw - 150000) / 100`, the battery temperature
    * `raw / 2 - 40`. */
+  /* Parse vehicle GPS coordinates from DID 22 24 30: two 14-byte null-padded
+   * ISO-8859-1 DMS strings (degree sign 0xB0) followed by two trailing bytes.
+   * Assigns by hemisphere letter rather than field position; returns null
+   * unless both N/S and E/W are present and plausible. */
+  function gpsDms(bytes) {
+    if (!bytes || !bytes.length) return null;
+    // Unicode code points U+0000..U+00FF match ISO-8859-1 one-to-one (0xB0 -> °).
+    const parts = String.fromCharCode(...bytes).split("\0");
+    let lat = null, lon = null;
+    for (const part of parts) {
+      const m = /(\d+)°(\d+)'([\d.]+)"([NSEW])/.exec(part);
+      if (!m) continue;
+      const deg = Number(m[1]), min = Number(m[2]), sec = Number(m[3]);
+      if (!Number.isFinite(sec) || min >= 60 || sec >= 60) continue;
+      const val = (deg + min / 60 + sec / 3600)
+        * (m[4] === "S" || m[4] === "W" ? -1 : 1);
+      if ((m[4] === "N" || m[4] === "S") && Math.abs(val) <= 90) lat = val;
+      else if ((m[4] === "E" || m[4] === "W") && Math.abs(val) <= 180) lon = val;
+    }
+    if (lat === null || lon === null || (lat === 0 && lon === 0)) return null;
+    return { lat, lon };
+  }
+
+  const DECODERS = {
+    gps_lat: (bytes) => { const g = gpsDms(bytes); return g ? g.lat : null; },
+    gps_lon: (bytes) => { const g = gpsDms(bytes); return g ? g.lon : null; },
+  };
+
+  function withPut(fn, row) {
+    if (typeof row.put === "number" && row.put > 3) {
+      const wrapped = (bytes) => fn(bytes);
+      wrapped.put = row.put;
+      return wrapped;
+    }
+    return fn;
+  }
+
   function formula(row) {
+    if (typeof row.decode === "function") return withPut(row.decode, row);
+    if (typeof row.decode === "string") {
+      return withPut(DECODERS[row.decode] || (() => null), row);
+    }
     const downhill = row.downhill | 0;
     const len_total = row.len_total || 1;
     const divider = typeof row.divider === "number" ? row.divider : 1;
@@ -30,7 +71,7 @@ window.joltObdDecode = (function () {
     const offset = row.offset || 0;
     const pre_offset = row.pre_offset || 0;
 
-    return (bytes) => {
+    return withPut((bytes) => {
       // If the bytes do not suffice, the row stays empty - a response that is
       // too short is a finding, not a number.
       if (!bytes || bytes.length < downhill + len_total) return null;
@@ -52,7 +93,7 @@ window.joltObdDecode = (function () {
       if (typeof row.min === "number" && val < row.min) return null;
       if (typeof row.max === "number" && val > row.max) return null;
       return val;
-    };
+    }, row);
   }
 
   /* The acknowledgement of a request: the service byte plus 0x40, then the
@@ -134,7 +175,10 @@ window.joltObdDecode = (function () {
     const further = {};
     for (const [name, readFn] of Object.entries(entry.further)) {
       const w = orNull(readFn(bytes));
-      if (w !== null) further[name] = Math.round(w * 1000) / 1000;
+      if (w !== null) {
+        const scale = Math.pow(10, Math.max(3, readFn.put || 0));
+        further[name] = Math.round(w * scale) / scale;
+      }
     }
     return { val, further };
   }
@@ -168,5 +212,5 @@ window.joltObdDecode = (function () {
     return { kind: chosen && chosen.vin ? "foreign" : "learn", vehicle: chosen };
   }
 
-  return { formula, evaluate, payload_bytes, vin, vinVerdict };
+  return { formula, evaluate, payload_bytes, vin, vinVerdict, gpsDms, DECODERS };
 })();

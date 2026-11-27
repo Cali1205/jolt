@@ -60,14 +60,18 @@ console.log("MEB gegen die Vorgabe:");
 const base = JSON.parse(fs.readFileSync(BASELINE, "utf8"));
 const meb = registry.meb;
 check(meb && meb.id === "meb", "Profil meb fehlt");
-check(same(meb.addresses, base.addresses), "Adressen weichen ab");
-check(meb.vals.length === base.rows.length,
-      `${meb.vals.length} Zeilen statt ${base.rows.length}`);
-meb.vals.forEach((row, order) => {
-  const ref = base.rows[order];
-  if (!ref) return;
-  check(row.name === ref.name && ref.order === order,
-        `Reihenfolge: Platz ${order} ist ${row.name}, vorher ${ref.name}`);
+for (const [key, def] of Object.entries(base.addresses)) {
+  check(same(meb.addresses[key], def), `Adresse ${key} weicht ab`);
+}
+const mebIndex = new Map(meb.vals.map((row, i) => [row.name, { row, i }]));
+let lastOrder = -1;
+base.rows.forEach((ref) => {
+  const hit = mebIndex.get(ref.name);
+  check(!!hit, `${ref.name}: fehlt in meb.vals`);
+  if (!hit) return;
+  const { row, i } = hit;
+  check(i > lastOrder, `Reihenfolge: ${ref.name} ist nach vorn gerutscht`);
+  lastOrder = i;
   check(row.did === ref.did, `${row.name}: did ${row.did} statt ${ref.did}`);
   check(row.address === ref.address, `${row.name}: Adresse ${row.address}`);
   check((row.rarely || 0) === ref.rarely, `${row.name}: selten abweichend`);
@@ -78,12 +82,12 @@ meb.vals.forEach((row, order) => {
   const further = extra.length
     ? Object.fromEntries(extra.map((e) => [e.name, Decode.formula(e)])) : null;
   const entry = { did: row.did, load: Decode.formula(row), further };
-  ref.decoded.forEach((d, i) => {
+  ref.decoded.forEach((d, idx) => {
     check(same(Decode.evaluate(d.response, entry), d.value),
-          `${row.name}: Antwort ${i} dekodiert anders`);
+          `${row.name}: Antwort ${idx} dekodiert anders`);
   });
 });
-console.log(failure ? "  Abweichungen" : `  ${base.rows.length} Zeilen identisch`);
+console.log(failure ? "  Abweichungen" : `  ${base.rows.length} Vorgabe-Zeilen identisch`);
 
 console.log("\nJedes Profil:");
 for (const [id, profile] of Object.entries(registry)) {
@@ -181,8 +185,62 @@ check(verdict(CORSA_VIN, 1).kind === "foreign", "Buzz gewählt, fremde FIN: ande
 check(verdict(null, 1).kind === "unknown", "keine FIN gelesen: unbekannt");
 console.log(failure ? "  Abweichungen" : "  FIN gelesen und zugeordnet");
 
+console.log("\nMEB Fahrzeug-GPS (222430):");
+function gpsPayload(field1, field2, tail = [0x12, 0x34]) {
+  const pad14 = (s) => {
+    const b = Buffer.alloc(14, 0);
+    Buffer.from(s, "latin1").copy(b, 0, 0, Math.min(14, s.length));
+    return b;
+  };
+  return Buffer.concat([pad14(field1), pad14(field2), Buffer.from(tail)]);
+}
+const gpsHex = (a, b, tail) => "622430" + gpsPayload(a, b, tail).toString("hex").toUpperCase();
+const gpsRow = meb.vals.find((v) => v.name === "gps_lat");
+const gpsEntry = {
+  did: gpsRow.did,
+  load: Decode.formula(gpsRow),
+  further: Object.fromEntries(gpsRow.also.map((e) => [e.name, Decode.formula(e)])),
+};
+// Stuttgart city centre: 48°46'33.6"N 9°10'50.2"E
+const STUTTGART_FRAMES = frames("17FE00BA", gpsHex(`9°10'50.2"E`, `48°46'33.6"N`));
+const stuttgart = Decode.evaluate(STUTTGART_FRAMES, gpsEntry);
+check(stuttgart && Math.abs(stuttgart.val - 48.776) < 1e-6
+      && Math.abs(stuttgart.further.gps_lon - 9.180611) < 1e-6,
+      `Stuttgart 222430: ${JSON.stringify(stuttgart)}`);
+// Zero-padded minutes vs omitted leading zero (padding shifts from 3 to 4 null bytes)
+const padded = Decode.gpsDms(Array.from(gpsPayload(`9°08'50.2"E`, `48°06'33.6"N`)));
+const unpadded = Decode.gpsDms(Array.from(gpsPayload(`9°8'50.2"E`, `48°6'33.6"N`)));
+check(padded && unpadded
+      && Math.abs(padded.lat - unpadded.lat) < 1e-9
+      && Math.abs(padded.lon - unpadded.lon) < 1e-9
+      && Math.abs(padded.lat - (48 + 6 / 60 + 33.6 / 3600)) < 1e-9
+      && Math.abs(padded.lon - (9 + 8 / 60 + 50.2 / 3600)) < 1e-9,
+      `fuehrende Null optional: ${JSON.stringify(padded)} / ${JSON.stringify(unpadded)}`);
+// Hemisphere letter decides lat/lon and sign, not field order
+const sw = Decode.gpsDms(Array.from(gpsPayload(`48°46'33.6"S`, `9°10'50.2"W`)));
+check(sw && Math.abs(sw.lat + 48.776) < 1e-6 && Math.abs(sw.lon + 9.1806111) < 1e-6,
+      `S/W negativ und Reihenfolge egal: ${JSON.stringify(sw)}`);
+// Unusable payloads return null
+check(Decode.gpsDms([]) === null, "leere Bytes -> null");
+check(Decode.gpsDms(new Array(30).fill(0)) === null, "nur Nullen -> null");
+check(Decode.gpsDms(Array.from(Buffer.from("nonsense data here", "latin1"))) === null,
+      "Muell -> null");
+check(Decode.gpsDms(Array.from(gpsPayload(`48°46'33.6"N`, ""))) === null,
+      "nur Breite ohne Laenge -> null");
+check(Decode.gpsDms(Array.from(gpsPayload(`0°00'00.0"E`, `0°00'00.0"N`))) === null,
+      "Null-Koordinate (kein Fix) -> null");
+check(Decode.evaluate("17FE00BA 04 62 24 30 00", gpsEntry).val === null,
+      "kurze/leere Antwort -> val null");
+console.log(failure ? "  Abweichungen" : "  GPS-Antworten dekodiert");
+
 console.log("\nPlattformwahl:");
 O.usePlatform("meb");
+check(O.positionSource() === "phone", "Standard-Positionsquelle ist Handy-GPS");
+O.setPositionSource("vehicle");
+check(O.positionSource() === "vehicle" && f.storage["jolt-position-source"] === "vehicle",
+      "Fahrzeug-GPS wird gemerkt");
+O.setPositionSource("quatsch");
+check(O.positionSource() === "phone", "unbekannte Quelle faellt auf Handy-GPS zurueck");
 check(O.usePlatform("obd2") === true && O.platform().id === "obd2", "wechsel auf obd2");
 check(f.storage["jolt-platform"] === "obd2", "Wahl wird nicht gemerkt");
 check(O.usePlatform("obd2") === false, "gleiche Plattform meldet Wechsel");
@@ -232,6 +290,7 @@ async function main() {
     "0146": "7E8 03 41 46 5A", "01A6": "7E8 06 41 A6 00 00 30 39",
     "0142": "7E8 04 41 42 38 A4",
     "22028C": "17FE007B 04 62028C B4",
+    "222430": STUTTGART_FRAMES,
     "22D410": "694 05 62 D4 10 A0 00", "22D815": "694 05 62 D8 15 15 E0",
     "22D816": "694 07 62 D8 16 00 01 38 80", "22D49C": "694 07 62 D4 9C 00 BC 61 4E",
     "22D402": "682 05 62 D4 02 01 F4", "22D434": "682 04 62 D4 34 F6",
@@ -283,6 +342,9 @@ async function main() {
   check(mebSoc && mebSoc.raw === 180 && mebSoc.bms === 72
         && Math.abs(mebSoc.hmi - 73.4) < 0.05,
         `meb: 0xB4 gibt 72,0 % brutto und 73,4 % Anzeige: ${JSON.stringify(mebSoc)}`);
+  const mebRecord = await D.readRecord(1);
+  check(mebRecord.gps_lat === 48.776 && mebRecord.gps_lon === 9.180611,
+        `meb: Satz enthaelt Fahrzeug-GPS in voller Genauigkeit: ${JSON.stringify({ lat: mebRecord.gps_lat, lon: mebRecord.gps_lon })}`);
 
   // 21 Oct 2026: the Corsa chosen, the dongle in the Buzz. The Buzz answers
   // only its own UDS request on 29 bit; the VIN has to come from there.

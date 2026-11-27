@@ -28,11 +28,15 @@ function verify(ok, text, extra) {
 function build(options) {
   const o = options || {};
   const elemente = {};
+  const storage = {};
   const element = (id) => {
     if (!elemente[id]) {
       elemente[id] = { id, hidden: false, disabled: false, textContent: "", value: "",
-                       checked: false, innerHTML: "", style: {}, tap: null,
-                       addEventListener(n, f) { if (n === "click") this.tap = f; },
+                       checked: false, innerHTML: "", style: {}, tap: null, onChange: null,
+                       addEventListener(n, f) {
+                         if (n === "click") this.tap = f;
+                         if (n === "change") this.onChange = f;
+                       },
                        dispatchEvent() {}, click() {} };
     }
     return elemente[id];
@@ -84,13 +88,16 @@ function build(options) {
     },
     setInterval: () => 1, clearInterval() {}, setTimeout, clearTimeout, console, Date, JSON, Math,
     Number, String, Array, Object, Promise, Set, Map, Event: function () {},
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in storage ? storage[k] : null),
+      setItem: (k, v) => { storage[k] = String(v); },
+    },
   };
   timeframe.window = timeframe;
   vm.createContext(timeframe);
   vm.runInContext(source, timeframe);
   timeframe.joltSettings.set_up();
-  return { element, reports, calls, f: timeframe, setConnected: (v) => { linked = v; } };
+  return { element, reports, calls, storage, f: timeframe, setConnected: (v) => { linked = v; } };
 }
 
 async function main() {
@@ -155,6 +162,14 @@ async function main() {
   await t.element("settings-connect").tap();
   verify(/Nicht verbunden: kein Gerät gewählt/.test(t.element("settings-connect-status").textContent),
          "scheitert es, steht der Grund neben dem Knopf");
+
+  console.log("\nPositionsquelle in den Einstellungen");
+  t = build({});
+  t.element("settings-position-source").value = "vehicle";
+  t.element("settings-position-source").onChange();
+  verify(t.storage["jolt-position-source"] === "vehicle",
+         "Auswahl Fahrzeug-GPS wird im gemeinsamen localStorage-Schluessel gespeichert",
+         JSON.stringify(t.storage));
 
   console.log(failure ? `\n${failure} Pruefung(en) fehlgeschlagen.` : "\nAlle Pruefungen bestanden.");
   process.exit(failure ? 1 : 0);
