@@ -78,6 +78,9 @@ class SampleBatch(BaseModel):
 # error of the phone, backward a long trip without network.
 TIME_AHEAD = timedelta(minutes=5)
 TIME_BACK = timedelta(hours=48)
+# How old a batch's last point may be and still count as the present: a
+# dead-zone buffer arrives in chunks, and only the final one may replan.
+PRESENT_S = 180
 
 
 def _examine_time(timestamp: datetime | None) -> datetime | None:
@@ -134,6 +137,11 @@ def _fetch_active_session(db: Session, session_id: int) -> models.LiveSession:
     if not session.running:
         raise HTTPException(409, "Diese Live-Sitzung ist beendet.")
     return session
+
+
+def _latest_point_time(db: Session, session_id: int) -> datetime | None:
+    return (db.query(func.max(models.LivePoint.timestamp))
+            .filter_by(session_id=session_id).scalar())
 
 
 def _vehicle_to_token(db: Session, token: str):
@@ -295,10 +303,10 @@ async def report_points(session_id: int, batch: SampleBatch,
     """Several measurement points at once - the way for a dead-zone buffer.
 
     The points are sorted by measurement time and recorded in order; the
-    order in the request does not matter. Re-planning happens only for the
-    **last** one (see `record_sample`), and only it is sent as state
-    to the viewers. The response is the state after the last point - the
-    same shape as for `/point`, so the UI treats both alike.
+    order in the request does not matter. Re-planning and viewer updates
+    happen only for the **last** point and only when it reaches the present
+    (see `record_sample`). The response is the state after the last point -
+    the same shape as for `/point`, so the UI treats both alike.
 
     All or nothing: an invalid timestamp rejects the whole batch before
     anything has been written.
@@ -310,10 +318,17 @@ async def report_points(session_id: int, batch: SampleBatch,
     checked.sort(key=lambda t: (t[0], t[1]))
     message = None
     for nr, (timestamp, _, p) in enumerate(checked):
+        # Catching-up chunks from a dead zone end in the past and must not
+        # replan or push stale state to viewers.
+        replan = False
+        if (nr == len(checked) - 1
+                and (datetime.utcnow() - timestamp) <= timedelta(seconds=PRESENT_S)):
+            newest = await run_in_threadpool(_latest_point_time, db, session_id)
+            replan = newest is None or timestamp >= newest
         message = await _process_point(db, session, sources.RawPoint(
             lat=p.lat, lon=p.lon, soc=p.soc, speed_kmh=p.speed_kmh,
             outside_temp_c=p.outside_temp_c, timestamp=timestamp, raw_values=p.raw_values),
-            new_plan=nr == len(checked) - 1)
+            new_plan=replan)
     return message
 
 

@@ -19,7 +19,7 @@ No network, no Postgres, no API keys:
 import os
 import sys
 from types import SimpleNamespace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from examine import Check, application_provide  # noqa: E402
@@ -1690,6 +1690,105 @@ def part_calibration_converges():
            f"{factor:.3f}")
 
 
+def part_batch_from_past():
+    """A catching-up batch from a dead zone must not replan from the past.
+
+    The client splits a long dead-zone buffer into several `/points` requests.
+    The first chunk ends twenty minutes ago: its points are stored and update
+    the consumption factor, but it must neither call `replanning.schedule` nor
+    replace the plan with a reading from back then. Only a batch whose last
+    point reaches the present - and is not older than what is already stored -
+    may replan.
+    """
+    client = TestClient(app)
+    route = prepare_trip(client)
+    trip_id = route["trip_id"]
+    trip = client.get(f"/api/trips/{trip_id}").json()
+    profile = trip["profile"]
+    start_soc = trip["start_soc"]
+
+    verify.section("Nachreichender Stapel plant nicht aus der Vergangenheit um")
+    start = client.post(f"/api/live/start/{trip_id}",
+                        params={"min_kw": 100, "radius_km": 10}).json()
+    session_id = start["session_id"]
+    start_plan = start.get("plan")
+
+    def sample(km: float, ts: datetime, extra_consumption: float = 1.3) -> dict:
+        entry = _profile_at(profile, km)
+        consumed = start_soc - (entry.get("soc") or start_soc)
+        soc = max(0.0, round(start_soc - consumed * extra_consumption, 2))
+        return {"lat": entry["lat"], "lon": entry["lon"], "soc": soc,
+                "timestamp": ts.isoformat().replace("+00:00", "Z")}
+
+    now = datetime.now(timezone.utc)
+    end_100 = _profile_at(profile, 100.0).get("mins") or 60.0
+    past_batch = []
+    for km in range(0, 101, 10):
+        mins = _profile_at(profile, float(km)).get("mins") or 0.0
+        ts = now - timedelta(minutes=20) - timedelta(minutes=end_100 - mins)
+        past_batch.append(sample(float(km), ts))
+
+    calls = []
+    original = replanning.schedule
+    replanning.schedule = lambda *a, **k: calls.append(1) or original(*a, **k)
+    try:
+        past_resp = client.post(f"/api/live/{session_id}/points",
+                                json={"points": past_batch})
+        verify(past_resp.status_code == 200,
+               "der nachreichende Stapel wird angenommen",
+               f"HTTP {past_resp.status_code}")
+        verify(past_resp.json().get("replanning_required") is True,
+               "der Mehrverbrauch hätte eine Neuplanung ausgelöst",
+               str(past_resp.json().get("reason")))
+        verify(len(calls) == 0,
+               "aber ein Stapel von vor zwanzig Minuten ruft keine Neuplanung auf",
+               f"{len(calls)} Aufrufe")
+        after_past = client.get(f"/api/live/{session_id}").json()
+        verify(after_past.get("plan") == start_plan,
+               "der Plan bleibt unverändert auf dem Startstand",
+               f"reading_km={(after_past.get('plan') or {}).get('reading_km')}")
+        verify(after_past["consumption_factor"] > 1.15,
+               "die Punkte sind trotzdem aufgenommen und der Faktor aktualisiert",
+               f"×{after_past['consumption_factor']}")
+
+        # The next chunk catches up to the present: now replanning runs.
+        present_batch = [
+            sample(110.0, now - timedelta(minutes=6)),
+            sample(120.0, now),
+        ]
+        now_resp = client.post(f"/api/live/{session_id}/points",
+                               json={"points": present_batch})
+        verify(now_resp.status_code == 200,
+               "der Stapel bis in die Gegenwart wird angenommen",
+               f"HTTP {now_resp.status_code}")
+        verify(len(calls) == 1,
+               "und ruft für den letzten Punkt in der Gegenwart genau einmal "
+               "die Neuplanung auf", f"{len(calls)} Aufrufe")
+        after_now = client.get(f"/api/live/{session_id}").json()
+        verify((after_now.get("plan") or {}).get("reading_km", 0) > 100,
+               "der Plan steht danach am gegenwärtigen Kilometer",
+               f"reading_km={(after_now.get('plan') or {}).get('reading_km')}")
+
+        # A late batch that is still within PRESENT_S, yet older than the
+        # newest already-stored point, must not replan either.
+        calls.clear()
+        late_resp = client.post(f"/api/live/{session_id}/points", json={"points": [
+            sample(105.0, now - timedelta(seconds=60), extra_consumption=1.6),
+        ]})
+        after_late = client.get(f"/api/live/{session_id}").json()
+        verify(late_resp.status_code == 200 and len(calls) == 0,
+               "auch ein noch junger Stapel vor dem neuesten gespeicherten Punkt "
+               "plant nicht zurück",
+               f"HTTP {late_resp.status_code}, {len(calls)} Aufrufe")
+        verify(after_late.get("plan") == after_now.get("plan"),
+               "der Plan bleibt dabei auf dem neueren Stand",
+               f"reading_km={(after_late.get('plan') or {}).get('reading_km')}")
+    finally:
+        replanning.schedule = original
+
+    client.post(f"/api/live/{session_id}/end")
+
+
 def main() -> int:
     part_calibration_converges()
     part_trigger()
@@ -1714,6 +1813,7 @@ def main() -> int:
     part_recording_closed_loop()
     part_position_without_charge_level()
     part_speed_in_the_chain()
+    part_batch_from_past()
 
     return verify.balance()
 
