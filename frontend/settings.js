@@ -192,9 +192,31 @@ window.joltSettings = (function () {
     live.dispatchEvent(new Event("change"));
   }
 
+  function positionSource() {
+    if (O && O.positionSource) return O.positionSource();
+    try {
+      return localStorage.getItem("jolt-position-source") === "vehicle" ? "vehicle" : "phone";
+    } catch (e) {
+      return "phone";
+    }
+  }
+
+  function setPositionSource(source) {
+    if (O && O.setPositionSource) return O.setPositionSource(source);
+    const val = source === "vehicle" ? "vehicle" : "phone";
+    try { localStorage.setItem("jolt-position-source", val); } catch (e) { /* private mode */ }
+    return val;
+  }
+
   function showDongleSettings() {
     const live = el("dongle-car");
     if (live) el("settings-car").checked = live.checked;
+    const pos = el("settings-position-source");
+    if (pos) pos.value = positionSource();
+    const posRow = el("settings-position-row");
+    if (posRow && O.FIELDS && O.FIELDS.length) {
+      posRow.hidden = !O.FIELDS.some((f) => f.name === "gps_lat");
+    }
     el("settings-disconnect").disabled = !O.linked();
   }
 
@@ -649,6 +671,9 @@ window.joltSettings = (function () {
     K.at("settings-push-off", "click", signOutPush);
     K.at("settings-push-probe", "click", pushProbe);
     K.at("settings-car", "change", autoAdopt);
+    K.at("settings-position-source", "change", () => {
+      setPositionSource(el("settings-position-source").value);
+    });
     K.at("settings-connect", "click", connectButton);
     K.at("settings-disconnect", "click", detach);
     K.at("settings-forget", "click", forget);

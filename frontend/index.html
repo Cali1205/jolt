@@ -712,6 +712,17 @@
         <p class="hilfe" id="help-settings-car" hidden>
           und trennt den Dongle – ein abgeschlossenes Auto löst sonst die
           Alarmanlage aus. Dieselbe Einstellung wie in der Live-Ansicht.</p>
+        <div id="settings-position-row">
+          <label for="settings-position-source">Position <button type="button" class="info" data-info="help-position-source" aria-expanded="false" aria-label="Erklärung">i</button></label>
+          <select id="settings-position-source">
+            <option value="phone">Handy-GPS</option>
+            <option value="vehicle">Fahrzeug-GPS</option>
+          </select>
+          <p class="hilfe" id="help-position-source" hidden>Woher die
+            Koordinaten der Messpunkte kommen. Bei „Fahrzeug-GPS“ liest jolt
+            die Position aus dem Auto (VW MEB) und fällt auf das Handy-GPS
+            zurück, wenn kein Fahrzeugwert ankommt.</p>
+        </div>
         <button class="tat neben" id="settings-connect">Dongle verbinden</button>
         <button class="tat neben" id="settings-disconnect">Dongle trennen</button>
         <button class="tat neben" id="settings-forget">Gemerktes Gerät vergessen</button>

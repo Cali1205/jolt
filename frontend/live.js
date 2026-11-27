@@ -1347,6 +1347,22 @@ window.joltLive = (function () {
             && val >= -80 && val <= 70) ? val : null;
   }
 
+  function coordOrNull(val, limit) {
+    return (typeof val === "number" && Number.isFinite(val)
+            && val >= -limit && val <= limit) ? val : null;
+  }
+
+  function positionSource() {
+    if (window.joltObd && window.joltObd.positionSource) {
+      return window.joltObd.positionSource();
+    }
+    try {
+      return localStorage.getItem("jolt-position-source") === "vehicle" ? "vehicle" : "phone";
+    } catch (e) {
+      return "phone";
+    }
+  }
+
   async function reportPosition(coords, timeMs) {
     if (!K.state.sessionId) return;
     const payload = {
@@ -1388,6 +1404,15 @@ window.joltLive = (function () {
         if (autoSpeed !== null) payload.speed_kmh = autoSpeed;
         const autoTemp = temperatureOrNull(raw.outside_temp_c);
         if (autoTemp !== null) payload.outside_temp_c = autoTemp;
+        // Use vehicle GPS when selected and present; otherwise keep the phone fix.
+        if (positionSource() === "vehicle") {
+          const vLat = coordOrNull(raw.gps_lat, 90);
+          const vLon = coordOrNull(raw.gps_lon, 180);
+          if (vLat !== null && vLon !== null) {
+            payload.lat = vLat;
+            payload.lon = vLon;
+          }
+        }
       } catch (failure) {
         // A round without state of charge is still a position report -
         // and that carries the time factor and arrival forecast onward.

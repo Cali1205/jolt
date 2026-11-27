@@ -49,7 +49,7 @@ button.tat:disabled { opacity: .4; cursor: default; }
 button.tat.neben { background: transparent; color: var(--text);
   border: 1px solid var(--rand); font-weight: 400; }
 
-input, textarea {
+input, select, textarea {
   width: 100%;
   background: #0c1116;
   border: 1px solid var(--rand);
