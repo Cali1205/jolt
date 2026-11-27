@@ -171,6 +171,7 @@
         // Without resetting, the second trip of a session continues counting
         // where the first one stopped.
         round = 0;
+        restart = false;
         el("trip-start").hidden = true;
         el("trip-stop").hidden = false;
         await screenAwakeHold();
@@ -489,6 +490,7 @@
     }
     running = true;
     round = 0;
+    restart = false;
     el("trip-start").hidden = true;
     el("trip-stop").hidden = false;
     await screenAwakeHold();
@@ -498,6 +500,7 @@
 
   async function endTrip() {
     running = false;
+    restart = false;
     // Finish the trip in jolt if this page created it. Without it the
     // recording stays open, and the measurement points never turn into a
     // route - the whole purpose would be missed.
