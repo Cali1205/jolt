@@ -244,7 +244,7 @@ def part_live() -> None:
            and 'message.kind === "bereit"' in live,
            "die Live-Ansicht schickt den Token als erste WebSocket-Nachricht "
            "und gilt erst nach 'bereit' als verbunden")
-    verify('"X-Token": joltToken() },\n      body: JSON.stringify(payload)' in obd,
+    verify('"X-Token": joltToken() },\n        body: JSON.stringify(pt)' in obd,
            "die Diagnoseseite meldet Punkte mit Anmeldung")
 
 
