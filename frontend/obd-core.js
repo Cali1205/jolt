@@ -1104,6 +1104,67 @@ function command(text, limit_ms = 15000, internal = false) {
     return val;
   }
 
+  const POSITION_FALLBACK_KEY = "jolt-position-fallback";
+
+  // Whether a round without car GPS may use the phone position (default: no).
+  function phoneFallback() {
+    try { return localStorage.getItem(POSITION_FALLBACK_KEY) === "1"; }
+    catch (failure) { return false; }
+  }
+
+  function setPhoneFallback(on) {
+    try { localStorage.setItem(POSITION_FALLBACK_KEY, on ? "1" : "0"); }
+    catch (failure) { /* private mode */ }
+    return !!on;
+  }
+
+  /* Holds points whose car position is missing until the next car fix
+   * arrives, then interpolates them between the two fixes. After maxHoldMs
+   * they go out with the last known car position, so nothing is lost. */
+  function createPositionHold({ maxHoldMs = 120000 } = {}) {
+    let held = [];
+    let prev = null;   // last car fix: { lat, lon, t }
+    const when = (p) => Date.parse(p.timestamp);
+    const mark = (p, src) => {
+      p.raw_values = p.raw_values || {};
+      p.raw_values.pos_src = src;
+      return p;
+    };
+    function giveUp() {
+      const out = held.map((p) => {
+        if (prev) { p.lat = prev.lat; p.lon = prev.lon; }
+        return mark(p, prev ? "held" : "phone");
+      });
+      held = [];
+      return out;
+    }
+    return {
+      push(point, carPos, nowMs) {
+        if (!carPos) {
+          held.push(point);
+          return when(held[0]) < nowMs - maxHoldMs ? giveUp() : [];
+        }
+        const t1 = when(point);
+        const out = held.map((p) => {
+          const span = t1 - (prev ? prev.t : t1);
+          const f = prev && span > 0
+            ? Math.min(1, Math.max(0, (when(p) - prev.t) / span)) : 1;
+          const a = prev || carPos;
+          p.lat = a.lat + (carPos.lat - a.lat) * f;
+          p.lon = a.lon + (carPos.lon - a.lon) * f;
+          return mark(p, "interpolated");
+        });
+        held = [];
+        point.lat = carPos.lat;
+        point.lon = carPos.lon;
+        prev = { lat: carPos.lat, lon: carPos.lon, t: t1 };
+        out.push(mark(point, "vehicle"));
+        return out;
+      },
+      flush: giveUp,
+    };
+  }
+
   /* ---------- Outward ---------- */
 
   return {
@@ -1111,6 +1172,9 @@ function command(text, limit_ms = 15000, internal = false) {
     linked: () => !!writeChar,
     positionSource,
     setPositionSource,
+    phoneFallback,
+    setPhoneFallback,
+    createPositionHold,
 
     /* ---------- Observing (for the settings) ---------- */
 

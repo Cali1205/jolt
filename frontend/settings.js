@@ -208,11 +208,31 @@ window.joltSettings = (function () {
     return val;
   }
 
+  function phoneFallback() {
+    if (O && O.phoneFallback) return O.phoneFallback();
+    try { return localStorage.getItem("jolt-position-fallback") === "1"; } catch (e) { return false; }
+  }
+
+  function setPhoneFallback(on) {
+    if (O && O.setPhoneFallback) return O.setPhoneFallback(on);
+    try { localStorage.setItem("jolt-position-fallback", on ? "1" : "0"); } catch (e) { /* private mode */ }
+    return !!on;
+  }
+
+  function fallbackShow() {
+    const row = el("settings-fallback-row");
+    const off = positionSource() !== "vehicle";
+    if (row) row.hidden = off;
+    if (el("help-position-fallback")) el("help-position-fallback").hidden = off;
+  }
+
   function showDongleSettings() {
     const live = el("dongle-car");
     if (live) el("settings-car").checked = live.checked;
     const pos = el("settings-position-source");
     if (pos) pos.value = positionSource();
+    if (el("settings-position-fallback")) el("settings-position-fallback").checked = phoneFallback();
+    fallbackShow();
     const posRow = el("settings-position-row");
     if (posRow && O.FIELDS && O.FIELDS.length) {
       posRow.hidden = !O.FIELDS.some((f) => f.name === "gps_lat");
@@ -673,6 +693,10 @@ window.joltSettings = (function () {
     K.at("settings-car", "change", autoAdopt);
     K.at("settings-position-source", "change", () => {
       setPositionSource(el("settings-position-source").value);
+      fallbackShow();
+    });
+    K.at("settings-position-fallback", "change", () => {
+      setPhoneFallback(el("settings-position-fallback").checked);
     });
     K.at("settings-connect", "click", connectButton);
     K.at("settings-disconnect", "click", detach);

@@ -242,6 +242,16 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
     readRecord: async () => Object.assign({}, nextRaw),
     socFromRaw: (r) => ({ raw: r, bms: r / 2.5, hmi: 73.4 }),
   };
+  // The real hold helper from obd-core.js, loaded in its own minimal context.
+  const coreWin = { console, TextEncoder, TextDecoder, DataView, Uint8Array, setTimeout,
+                    clearTimeout, navigator: {}, localStorage: context.localStorage };
+  coreWin.window = coreWin;
+  vm.createContext(coreWin);
+  for (const f of ["obd-ble-native.js", "obd-decode.js", "obd-core.js"]) {
+    vm.runInContext(fs.readFileSync(
+      path.join(__dirname, "..", "frontend", f), "utf8"), coreWin);
+  }
+  timeframe.joltObd.createPositionHold = coreWin.joltObd.createPositionHold;
   const vp = plugin();
   timeframe.joltBlePlugin = vp;
   K0.state.sessionId = 11;
@@ -274,6 +284,7 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
          JSON.stringify(lastPt));
 
   // Vehicle GPS chosen, but missing in this round: falls back to phone GPS.
+  storage["jolt-position-fallback"] = "1";
   nextRaw = { soc_raw: 180 };
   vp.callback({ latitude: 48.78, longitude: 9.19, altitude: 260, speed: 15, time: Date.now() });
   await wait(30);
@@ -281,6 +292,23 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
   verify(lastPt.lat === 48.78 && lastPt.lon === 9.19,
          "Fahrzeug-GPS fehlt in der Runde: Rueckfall auf Handy-GPS",
          JSON.stringify(lastPt));
+
+  // Fallback off: no car GPS holds the point back, the next car fix releases both.
+  delete storage["jolt-position-fallback"];
+  const sent = () => posts.filter((x) => /\/points$/.test(x.fs_path)).length;
+  const before = sent();
+  vp.callback({ latitude: 48.78, longitude: 9.19, altitude: 260, speed: 15, time: Date.now() - 4000 });
+  await wait(30);
+  verify(sent() === before, "Ersatz aus, Fahrzeug-GPS fehlt: nichts wird gesendet");
+  nextRaw = { soc_raw: 180, gps_lat: 48.776, gps_lon: 9.180611 };
+  vp.callback({ latitude: 48.78, longitude: 9.19, altitude: 260, speed: 15, time: Date.now() });
+  await wait(30);
+  const burst = posts.filter((x) => /\/points$/.test(x.fs_path)).slice(before)
+    .reduce((a, x) => a.concat(x.body.points), []);
+  verify(burst.length === 2 && burst[0].raw_values.pos_src === "interpolated"
+         && burst[1].raw_values.pos_src === "vehicle" && burst[0].lat === 48.776,
+         "naechste Runde mit Fahrzeug-GPS: zwei Punkte, der erste interpoliert",
+         JSON.stringify(burst));
 
   delete storage["jolt-position-source"];
   timeframe.joltObd = undefined;

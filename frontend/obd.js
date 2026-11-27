@@ -334,6 +334,9 @@
     return { lat: raw.gps_lat, lon: raw.gps_lon };
   }
 
+  // Points waiting for a car fix (vehicle mode without phone fallback).
+  let hold = null;
+
   async function aRound() {
     const raw = await O.readRecord(round);
     round += 1;
@@ -344,7 +347,10 @@
       return null;
     });
     // Use vehicle GPS when chosen and available, otherwise fall back to phone GPS.
-    const pos = vehicleCoords(raw) || place;
+    const car = vehicleCoords(raw);
+    const useHold = O.positionSource() === "vehicle" && !O.phoneFallback()
+      && !!O.createPositionHold;
+    const pos = car || place;
     if (!pos) return null;
 
     if (place && typeof place.elevation_m === "number") raw.elevation_m = Math.round(place.elevation_m);
@@ -412,20 +418,36 @@
       : "/api/live/report";
     if (!sessionId) payload.token = el("token").value.trim();
 
+    let points = [payload];
+    if (useHold) {
+      payload.timestamp = new Date().toISOString();
+      hold = hold || O.createPositionHold();
+      points = hold.push(payload, car, Date.now());
+      if (!points.length) {
+        return { soc, raw, waits: true, records: { reason: "wartet auf Fahrzeug-GPS" } };
+      }
+    }
     // `/point` requires login; `/report` identifies itself with the logger
     // token in the body and does not need the header, but it does no harm
-    // either.
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Token": joltToken() },
-      body: JSON.stringify(payload),
-    });
-    const records = await response.json().catch(() => ({}));
+    // either. With several released points the last answer counts.
+    let response;
+    let records;
+    for (const pt of points) {
+      if (!sessionId) pt.token = el("token").value.trim();
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Token": joltToken() },
+        body: JSON.stringify(pt),
+      });
+      records = await response.json().catch(() => ({}));
+      if (sessionId && (response.status === 409 || response.status === 404)) break;
+    }
     if (!records.reason && typeof records.detail === "string") records.reason = records.detail;
     // jolt ended the trip after the car stood silent: the next drive is a new one.
     if (sessionId && (response.status === 409 || response.status === 404)) {
       log(`Fahrt ${sessionId} ist in jolt beendet - die nächste wird neu angelegt.`);
       sessionId = null;
+      hold = null;
       restart = true;
       moved = 0;
       return { soc, raw, waits: true, records: { reason: "Fahrt beendet, wartet auf die nächste" } };
@@ -519,6 +541,14 @@
     // route - the whole purpose would be missed.
     if (sessionId) {
       try {
+        // Points still waiting for a car fix go out before the trip closes.
+        for (const pt of hold ? hold.flush() : []) {
+          await fetch(`/api/live/${sessionId}/point`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Token": joltToken() },
+            body: JSON.stringify(pt),
+          });
+        }
         const response = await fetch(`/api/live/${sessionId}/end`, {
           method: "POST", headers: { "X-Token": joltToken() } });
         const data = await response.json().catch(() => ({}));
@@ -541,6 +571,7 @@
       }
       sessionId = null;
     }
+    hold = null;
     el("trip-start").hidden = false;
     el("trip-stop").hidden = true;
     stand2("beendet");
@@ -829,7 +860,17 @@
     positionChoice.value = O.positionSource();
     positionChoice.addEventListener("change", () => {
       O.setPositionSource(positionChoice.value);
+      fallbackShow();
     });
+  }
+  const fallbackBox = el("position-fallback");
+  function fallbackShow() {
+    if (fallbackBox) el("position-fallback-row").hidden = O.positionSource() !== "vehicle";
+  }
+  if (fallbackBox) {
+    fallbackBox.checked = O.phoneFallback();
+    fallbackBox.addEventListener("change", () => O.setPhoneFallback(fallbackBox.checked));
+    fallbackShow();
   }
   // The module reports everything here, and a dropout during a recording
   // is a reason to reconnect - otherwise not.

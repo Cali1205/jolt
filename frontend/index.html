@@ -720,8 +720,14 @@
           </select>
           <p class="hilfe" id="help-position-source" hidden>Woher die
             Koordinaten der Messpunkte kommen. Bei „Fahrzeug-GPS“ liest jolt
-            die Position aus dem Auto (VW MEB) und fällt auf das Handy-GPS
-            zurück, wenn kein Fahrzeugwert ankommt.</p>
+            die Position aus dem Auto (VW MEB).</p>
+          <div id="settings-fallback-row" class="schalter-zeile" hidden>
+            <label for="settings-position-fallback">Handy-GPS als Ersatz, wenn das Auto keine Position liefert</label>
+            <input type="checkbox" id="settings-position-fallback" class="schalter">
+          </div>
+          <p class="hilfe" id="help-position-fallback" hidden>Aus: Punkte ohne
+            Fahrzeugposition warten (bis zu 2 Minuten) und werden zwischen den
+            nächsten Fahrzeugpositionen interpoliert.</p>
         </div>
         <button class="tat neben" id="settings-connect">Dongle verbinden</button>
         <button class="tat neben" id="settings-disconnect">Dongle trennen</button>
