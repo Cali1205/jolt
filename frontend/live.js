@@ -1363,6 +1363,23 @@ window.joltLive = (function () {
     }
   }
 
+  function phoneFallback() {
+    if (window.joltObd && window.joltObd.phoneFallback) {
+      return window.joltObd.phoneFallback();
+    }
+    try { return localStorage.getItem("jolt-position-fallback") === "1"; }
+    catch (e) { return false; }
+  }
+
+  // Points waiting for a car fix (vehicle mode without phone fallback).
+  let positionHold = null;
+  function holdGet() {
+    if (!positionHold && window.joltObd && window.joltObd.createPositionHold) {
+      positionHold = window.joltObd.createPositionHold();
+    }
+    return positionHold;
+  }
+
   async function reportPosition(coords, timeMs) {
     if (!K.state.sessionId) return;
     const payload = {
@@ -1375,6 +1392,9 @@ window.joltLive = (function () {
       timestamp: new Date(timeMs || Date.now()).toISOString(),
     };
 
+    let carPos = null;
+    // Also rounds without a read wait for the car: phone points in between make the track zigzag.
+    const useHold = positionSource() === "vehicle" && !phoneFallback() && !!holdGet();
     if (dongle && readAllowed() && window.joltObd
         && window.joltObd.linked()) {
       try {
@@ -1409,8 +1429,11 @@ window.joltLive = (function () {
           const vLat = coordOrNull(raw.gps_lat, 90);
           const vLon = coordOrNull(raw.gps_lon, 180);
           if (vLat !== null && vLon !== null) {
+            carPos = { lat: vLat, lon: vLon };
             payload.lat = vLat;
             payload.lon = vLon;
+            // The car's fix is as of the read, which can end a round after the phone fix.
+            payload.timestamp = new Date(Date.now()).toISOString();
           }
         }
       } catch (failure) {
@@ -1429,7 +1452,10 @@ window.joltLive = (function () {
     if (!payload.raw_values && freshVolt !== null) {
       payload.raw_values = { batt_v: freshVolt };
     }
-    queue.append(payload);
+    // Without phone fallback a point lacking the car position waits for the next fix.
+    for (const pt of useHold ? positionHold.push(payload, carPos, Date.now()) : [payload]) {
+      queue.append(pt);
+    }
     queue.process();
   }
 
@@ -1564,6 +1590,11 @@ window.joltLive = (function () {
 
   async function finish() {
     if (!K.state.sessionId) return;
+    // Points still waiting for a car fix must not get lost.
+    if (positionHold) {
+      for (const pt of positionHold.flush()) queue.append(pt);
+      positionHold = null;
+    }
     // What is still in the queue belongs to the trip - and after
     // ending the server accepts nothing more.
     queue.forSession(K.state.sessionId);

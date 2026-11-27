@@ -382,6 +382,41 @@ async function main() {
   const silent = load(dongle(silentSent, {}));
   await silent.joltObd.link();
   check(await silent.joltObd.readVin() === null, "ein Auto, das nichts sagt: keine FIN");
+
+  console.log("Positions-Halter:");
+  const T = (s) => new Date(Date.UTC(2026, 0, 1, 12, 0, s)).toISOString();
+  const pt = (s) => ({ lat: 48.7, lon: 9.1, timestamp: T(s) });
+  const cp = (lat, lon) => ({ lat, lon });
+  let h = O.createPositionHold();
+  check(same(h.push(pt(0), cp(48.77, 9.18), 0).map((p) => p.raw_values.pos_src), ["vehicle"]),
+        "mit Fahrzeugposition geht der Punkt sofort raus, pos_src vehicle");
+  check(h.push(pt(10), null, 10000).length === 0, "ohne Fahrzeugposition wartet der Punkt");
+  let out = h.push(pt(20), cp(48.79, 9.2), Date.parse(T(20)));
+  check(out.length === 2 && out[0].raw_values.pos_src === "interpolated"
+        && out[1].raw_values.pos_src === "vehicle", "danach zwei Punkte, der erste interpoliert");
+  check(Math.abs(out[0].lat - 48.78) < 1e-9 && Math.abs(out[0].lon - 9.19) < 1e-9,
+        "Mitte zwischen beiden Fixes");
+  h = O.createPositionHold();
+  h.push(pt(0), null, Date.parse(T(0)));
+  out = h.push(pt(5), cp(48.77, 9.18), Date.parse(T(5)));
+  check(out[0].lat === 48.77 && out[0].raw_values.pos_src === "interpolated",
+        "ohne frueheren Fix bekommt der gehaltene Punkt die neue Position");
+  h = O.createPositionHold({ maxHoldMs: 60000 });
+  h.push(pt(0), cp(48.77, 9.18), Date.parse(T(0)));
+  h.push(pt(10), null, Date.parse(T(10)));
+  out = h.push(pt(80), null, Date.parse(T(80)));
+  check(out.length === 2 && out.every((p) => p.lat === 48.77 && p.raw_values.pos_src === "held"),
+        "nach Ablauf gehen alle Punkte mit der letzten Fahrzeugposition raus (held)");
+  h = O.createPositionHold();
+  h.push(pt(0), null, Date.parse(T(0)));
+  out = h.flush();
+  check(out.length === 1 && out[0].lat === 48.7 && out[0].raw_values.pos_src === "phone",
+        "flush ohne je einen Fix: Handyposition bleibt, pos_src phone");
+  check(h.flush().length === 0, "flush leert den Halter");
+  O.setPhoneFallback(true);
+  check(O.phoneFallback() === true, "Ersatz-Schalter wird gemerkt");
+  O.setPhoneFallback(false);
+  check(O.phoneFallback() === false, "Ersatz-Schalter ist standardmaessig aus");
 }
 
 main().then(() => {
