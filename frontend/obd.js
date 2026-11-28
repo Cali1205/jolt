@@ -326,7 +326,7 @@
   }
 
   function vehicleCoords(raw) {
-    if (O.positionSource() !== "vehicle") return null;
+    if (!O.vehicleGps()) return null;
     if (typeof raw.gps_lat !== "number" || !Number.isFinite(raw.gps_lat)
         || Math.abs(raw.gps_lat) > 90) return null;
     if (typeof raw.gps_lon !== "number" || !Number.isFinite(raw.gps_lon)
@@ -348,7 +348,7 @@
     });
     // Use vehicle GPS when chosen and available, otherwise fall back to phone GPS.
     const car = vehicleCoords(raw);
-    const useHold = O.positionSource() === "vehicle" && !O.phoneFallback()
+    const useHold = O.vehicleGps() && !O.phoneFallback()
       && !!O.createPositionHold;
     const pos = car || place;
     if (!pos) return null;

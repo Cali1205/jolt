@@ -1097,6 +1097,11 @@ function command(text, limit_ms = 15000, internal = false) {
     }
   }
 
+  // Vehicle GPS only counts when the active platform reads it at all.
+  function vehicleGps() {
+    return positionSource() === "vehicle" && READINGS.some((m) => m.name === "gps_lat");
+  }
+
   function setPositionSource(source) {
     const val = source === "vehicle" ? "vehicle" : "phone";
     try { localStorage.setItem(POSITION_SOURCE_KEY, val); }
@@ -1132,8 +1137,10 @@ function command(text, limit_ms = 15000, internal = false) {
     };
     function giveUp() {
       const out = held.map((p) => {
-        if (prev) { p.lat = prev.lat; p.lon = prev.lon; }
-        return mark(p, prev ? "held" : "phone");
+        // An old car fix would freeze the track; then the phone position is the better guess.
+        const recent = prev && when(p) - prev.t <= maxHoldMs;
+        if (recent) { p.lat = prev.lat; p.lon = prev.lon; }
+        return mark(p, recent ? "held" : "phone");
       });
       held = [];
       return out;
@@ -1172,6 +1179,7 @@ function command(text, limit_ms = 15000, internal = false) {
     linked: () => !!writeChar,
     positionSource,
     setPositionSource,
+    vehicleGps,
     phoneFallback,
     setPhoneFallback,
     createPositionHold,
