@@ -236,8 +236,10 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
 
   console.log("\nPositionsquelle (Handy-GPS vs. Fahrzeug-GPS)");
   let nextRaw = { soc_raw: 180, gps_lat: 48.776, gps_lon: 9.180611 };
+  let linked = true;
   timeframe.joltObd = {
-    linked: () => true,
+    linked: () => linked,
+    vehicleGps: () => storage["jolt-position-source"] === "vehicle",
     set_up() {},
     readRecord: async () => Object.assign({}, nextRaw),
     socFromRaw: (r) => ({ raw: r, bms: r / 2.5, hmi: 73.4 }),
@@ -309,6 +311,17 @@ function plugin({ delayMs = 0, reject = false, obtainable = true } = {}) {
          && burst[1].raw_values.pos_src === "vehicle" && burst[0].lat === 48.776,
          "naechste Runde mit Fahrzeug-GPS: zwei Punkte, der erste interpoliert",
          JSON.stringify(burst));
+
+  // Dongle gone: no car fix can come, so the phone point goes out at once.
+  linked = false;
+  const before2 = sent();
+  vp.callback({ latitude: 48.79, longitude: 9.2, altitude: 260, speed: 15, time: Date.now() });
+  await wait(30);
+  lastPt = posts.filter((x) => /\/points$/.test(x.fs_path)).pop().body.points.pop();
+  verify(sent() > before2 && lastPt.lat === 48.79 && lastPt.lon === 9.2,
+         "ohne Dongle wird nicht gehalten: Handyposition sofort gesendet",
+         JSON.stringify(lastPt));
+  linked = true;
 
   delete storage["jolt-position-source"];
   timeframe.joltObd = undefined;

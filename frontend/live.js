@@ -1352,15 +1352,8 @@ window.joltLive = (function () {
             && val >= -limit && val <= limit) ? val : null;
   }
 
-  function positionSource() {
-    if (window.joltObd && window.joltObd.positionSource) {
-      return window.joltObd.positionSource();
-    }
-    try {
-      return localStorage.getItem("jolt-position-source") === "vehicle" ? "vehicle" : "phone";
-    } catch (e) {
-      return "phone";
-    }
+  function vehicleGps() {
+    return !!(window.joltObd && window.joltObd.vehicleGps && window.joltObd.vehicleGps());
   }
 
   function phoneFallback() {
@@ -1393,10 +1386,10 @@ window.joltLive = (function () {
     };
 
     let carPos = null;
-    // Also rounds without a read wait for the car: phone points in between make the track zigzag.
-    const useHold = positionSource() === "vehicle" && !phoneFallback() && !!holdGet();
-    if (dongle && readAllowed() && window.joltObd
-        && window.joltObd.linked()) {
+    const reads = !!(dongle && readAllowed() && window.joltObd && window.joltObd.linked());
+    // Hold only when the car is asked this round - without a read no car fix can come.
+    const useHold = reads && vehicleGps() && !phoneFallback() && !!holdGet();
+    if (reads) {
       try {
         const raw = await window.joltObd.readRecord(readRound++);
         // Record the 12 V voltage along, as long as it is fresh: that way
@@ -1425,7 +1418,7 @@ window.joltLive = (function () {
         const autoTemp = temperatureOrNull(raw.outside_temp_c);
         if (autoTemp !== null) payload.outside_temp_c = autoTemp;
         // Use vehicle GPS when selected and present; otherwise keep the phone fix.
-        if (positionSource() === "vehicle") {
+        if (vehicleGps()) {
           const vLat = coordOrNull(raw.gps_lat, 90);
           const vLon = coordOrNull(raw.gps_lon, 180);
           if (vLat !== null && vLon !== null) {
@@ -1453,7 +1446,9 @@ window.joltLive = (function () {
       payload.raw_values = { batt_v: freshVolt };
     }
     // Without phone fallback a point lacking the car position waits for the next fix.
-    for (const pt of useHold ? positionHold.push(payload, carPos, Date.now()) : [payload]) {
+    const out = useHold ? positionHold.push(payload, carPos, Date.now())
+      : (positionHold ? positionHold.flush() : []).concat([payload]);
+    for (const pt of out) {
       queue.append(pt);
     }
     queue.process();

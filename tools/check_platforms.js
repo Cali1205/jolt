@@ -343,6 +343,12 @@ async function main() {
         && Math.abs(mebSoc.hmi - 73.4) < 0.05,
         `meb: 0xB4 gibt 72,0 % brutto und 73,4 % Anzeige: ${JSON.stringify(mebSoc)}`);
   const mebRecord = await D.readRecord(1);
+  D.setPositionSource("vehicle");
+  check(D.vehicleGps() === true, "meb liest gps_lat: Fahrzeug-GPS gilt");
+  D.usePlatform("obd2");
+  check(D.vehicleGps() === false, "obd2 ohne gps_lat: gespeichertes Fahrzeug-GPS gilt nicht");
+  D.usePlatform("meb");
+  D.setPositionSource("phone");
   check(mebRecord.gps_lat === 48.776 && mebRecord.gps_lon === 9.180611,
         `meb: Satz enthaelt Fahrzeug-GPS in voller Genauigkeit: ${JSON.stringify({ lat: mebRecord.gps_lat, lon: mebRecord.gps_lon })}`);
 
@@ -405,8 +411,9 @@ async function main() {
   h.push(pt(0), cp(48.77, 9.18), Date.parse(T(0)));
   h.push(pt(10), null, Date.parse(T(10)));
   out = h.push(pt(80), null, Date.parse(T(80)));
-  check(out.length === 2 && out.every((p) => p.lat === 48.77 && p.raw_values.pos_src === "held"),
-        "nach Ablauf gehen alle Punkte mit der letzten Fahrzeugposition raus (held)");
+  check(out.length === 2 && out[0].lat === 48.77 && out[0].raw_values.pos_src === "held"
+        && out[1].lat === 48.7 && out[1].raw_values.pos_src === "phone",
+        "nach Ablauf: frische Fahrzeugposition (held), zu alte nicht - Handyposition bleibt (phone)");
   h = O.createPositionHold();
   h.push(pt(0), null, Date.parse(T(0)));
   out = h.flush();
